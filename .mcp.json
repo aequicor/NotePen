@@ -1,13 +1,15 @@
 {
   "mcpServers": {
-    "knowledge-my-app": {
-      "type": "http",
-      "url": "http://localhost:8081/mcp"
-    },
-    "serena": {
-      "type": "stdio",
-      "command": "serena",
-      "args": ["start-mcp-server"]
-    }
+  "knowledge-my-app": {
+    "type": "http",
+    "url": "http://localhost:8081/mcp"
+  },
+  "serena": {
+    "type": "stdio",
+    "command": "serena",
+    "args": [
+      "start-mcp-server"
+    ]
   }
+}
 }

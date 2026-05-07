@@ -1,102 +1,113 @@
 ---
 name: bug-retro
-description: Post-bug retrospective — root cause analysis, prevention measures, and guideline updates. Mandatory for CRITICAL/HIGH defects (auto-trigger; no PO request needed). Produces at least one regression test or guideline update before closing.
+description: Post-bug retrospective — root cause analysis, prevention measures, and guideline updates. Mandatory for CRITICAL/HIGH defects; auto-trigger fired by @Main at BUG pipeline step 6.
 ---
 
 # Bug Retro Skill
 
-Post-bug retrospective focused on preventing recurrence through systemic improvements.
+Skill for running a retrospective after a bug fix. Goal — not just close the bug, but **prevent recurrence** through systemic changes.
 
 ## When to use
 
-**Auto-trigger (no PO request needed):**
-- Defect severity is CRITICAL or HIGH (from the Defects log in test-cases.md).
-- `@BugFixer` detects a systemic gap (same root cause appeared in a previous fix).
+The retrospective is **mandatory** for any defect classified `CRITICAL` or `HIGH` in the Defects log of `test-cases.md`. `@Main` dispatches it automatically at BUG pipeline step 6 — PO action is **not** required for those severities. PO can also request it explicitly for lower severities.
 
-**On PO request:**
-- Any severity.
+**Auto-trigger criteria (any one fires the skill):**
 
-**Skip when:**
-- The fix was a trivial typo / copy error with no underlying cause.
-- Known external regression that was simply reverted with no code change.
+- The fixed defect's severity in the Defects log is `CRITICAL` or `HIGH` (read at fix time).
+- A systemic problem was identified by `@BugFixer` or `@Reviewer` during the fix (recurrence pattern, architectural smell, missing guideline).
+- The same TC has been re-opened ≥ 2 times in the retry counter (bug returns after a "fix").
+- Bug is linked to an architectural decision, missing tests, or a guideline gap.
+- PO explicitly requests it.
 
-## Process
+**Skip only if:**
 
-### Step 1 — Root cause analysis (5 Whys)
+- Severity is `MEDIUM` or `LOW` AND the fix is purely a copy/typo correction with no underlying systemic cause.
+- The defect was created by a known external regression (library upgrade rolled back, infrastructure outage) and the fix was a revert.
 
-Ask "Why?" five times, starting from the symptom:
-1. Why did the test fail? (observable symptom)
-2. Why did the code behave that way? (code-level cause)
-3. Why was that code written that way? (design decision)
-4. Why wasn't it caught earlier? (process / test gap)
-5. Why did the process gap exist? (systemic cause)
+If both auto-trigger and skip criteria apply, **trigger wins** — the retrospective runs.
 
-The answer to Why #5 is the actionable systemic cause.
+## Retrospective Process
 
-### Step 2 — Classification
+### Step 1 — Root Cause Analysis (5 Whys)
 
-Classify the root cause:
-- `missing-test` — a scenario was never covered by tests.
-- `guideline-gap` — the forbidden pattern isn't in CLAUDE.md or the module guideline.
-- `architectural-issue` — the design made this class of bug likely (layering violation, shared mutable state, etc.).
-- `external-regression` — upstream dependency changed behavior.
-- `other` — none of the above.
+Ask the **5 Whys**:
 
-### Step 3 — Action items
+| Question | Example answer |
+|----------|---------------|
+| What broke? | `NullPointerException` in `EmployeeRepository` |
+| Why? | Field `fullName` was `null` for a new employee |
+| Why? | Parser did not handle a row without a photo |
+| Why? | No validation of external input |
+| Why? | Guidelines have no rule for external data validation |
+| Why? | Nobody documented this requirement |
 
-Define specific corrective measures:
+**Result:** Write the root cause — not the symptom, but the systemic gap.
 
-| Priority | Action | Type | Owner |
-|----------|--------|------|-------|
-| 1 | Write regression test for TC-NN | test | @CodeWriter |
-| 2 | Add pattern to CLAUDE.md | guideline | @Main |
-| 3 | Refactor X to Y | code | @CodeWriter |
+### Step 2 — Bug Classification
 
-At least one action must be Type=test OR Type=guideline. This is non-negotiable.
+| Category | Signs | Measures |
+|----------|-------|---------|
+| **Missing tests** | Bug not caught by tests | Write unit/integration test, add to regression suite |
+| **Guideline gap** | Code "correctly" written but wrong for this project | Update/create guideline |
+| **Architectural problem** | Wrong structure | Create refactor task, update spec |
+| **External dependency** | Library API change | Add contract tests, update guidelines |
+| **Human error** | Typo, copy-paste, inattention | Add linter rule, code review checklist |
+| **Race condition / Concurrency** | Flaky bug, timing-dependent | Update concurrency guidelines, add stress test |
+| **Data issue** | Bug on specific data | Add edge-case tests, data validation |
 
-### Step 4 — Implementation
+### Step 3 — Action Items
 
-Execute prioritized actions:
+For each root cause, define a specific action:
 
-- **test** → dispatch `@CodeWriter` to write the regression test. Must be committed and green before retro closes.
-- **guideline** → append to the relevant guideline file (`vault/guidelines/<module>/` or CLAUDE.md).
-- **code** → create a tech-debt entry via `tech-debt-record` skill (do not refactor now unless trivial).
+| Action type | What to do | Where to save |
+|------------|------------|--------------|
+| **New test** | Write unit or integration test | Mirror of src/ in test/ |
+| **Update guideline** | Add rule, pattern, anti-pattern | `vault/guidelines/<module>/` |
+| **New guideline** | Create document on the bug topic | `vault/guidelines/<module>/` |
+| **Update feature spec** | Clarify Edge Cases or How it works — escalate to PO; spec.md is FROZEN, amendments go through @Analyst as a fresh DRAFT cycle | `vault/features/<module>/<feature>/spec.md` (read-only after CONFIRM) |
+| **Refactor task** | Describe TECH task | Return to PO |
 
-### Step 5 — Documentation
+### Step 4 — Implement Actions (priority order)
 
-Append to `vault/features/<module>/<feature>/retro.md` (create if absent):
+1. **CRITICAL** — Write regression test (prevents recurrence directly).
+2. **HIGH** — Update/create guideline (prevents recurrence by others).
+3. **MEDIUM** — Update feature doc (clarifies the contract).
+4. **LOW** — Refactor task (long-term improvement).
+
+> **Rule:** At least one "test" or "guideline" action must be completed before closing the retro.
+
+### Step 5 — Append to retro.md
+
+Append a `## Retrospective` section to the per-feature retro.md (`vault/features/<module>/<feature>/retro.md`). v4 wrote each retro to a separate file in `guidelines/<module>/reports/`; v5 keeps the history per-feature.
 
 ```markdown
-## Retro — TC-NN — <ISO timestamp>
+## Retrospective — TC-NN, DEF-NN — YYYY-MM-DD
 
-**Defect:** <one-line summary>
-**Severity:** CRITICAL / HIGH / MEDIUM / LOW
-**Root cause:** <result of 5 Whys>
-**Classification:** <missing-test / guideline-gap / architectural-issue / ...>
+**Root cause:** <description of systemic gap>
+**Category:** <category from table above>
 
-### Fix applied
+### Actions
 
-| File | Change |
-|------|--------|
-
-### Regression test
-
-TC-NN → `<test file path>:<line>`
-
-### Actions taken
-
-| Action | Type | Done? |
-|--------|------|-------|
+| # | Action | Status | File |
+|---|--------|--------|------|
+| 1 | <what was done> | ✅ Done | <path> |
+| 2 | <what is planned> | ⏳ Backlog | — |
 
 ### Lesson
 
-<one sentence: what this teaches about the codebase>
+<one concrete takeaway that can be applied to other parts of the code>
 ```
 
-Call `knowledge-my-app_update_doc` on retro.md after writing.
+### Step 6 — Index
 
-## Critical rules
+Call `knowledge-my-app_write_guideline` (new doc) or `knowledge-my-app_update_doc` (update) for all created/updated documents.
 
-- At least one `test` or `guideline` action must be **completed** before closing the retro. Not just listed — done.
-- Focus on systemic improvement, not blame.
-- Actions must be concrete and specific. "Be more careful" is not an action.
+## Rules
+
+1. **Minimum one action.** Cannot close retro without a test or updated guideline.
+2. **Systemize, don't blame.** Improve process, not find scapegoats.
+3. **Specific over vague.** "Add null-check in Client.parseRow()" beats "Improve validation".
+4. **Link to guidelines.** Every lesson must be in a document, not just the retro.
+5. **Tests first.** Regression test is the first action. Guidelines second.
+6. **Don't inflate.** For trivial bugs (typo in a string), regression test alone is enough — no need for 5 Whys.
+7. **Escalate.** If root cause requires architectural changes — create task and notify PO.

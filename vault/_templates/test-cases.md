@@ -8,14 +8,14 @@ triggers:
   - "manual testing"
 confidence: high
 source: human
-updated: 2026-05-07T00:00:00Z
+updated: 2026-05-07T17:37:42Z
 ---
 
 # Test cases — <feature>
 
 **Module:** <module>
 **Feature:** <feature-slug>
-**Source:** `vault/features/<module>/<feature>/feature.md` § Test plan
+**Source:** [[features/<module>/<feature>/spec]] § Test plan
 
 ---
 
@@ -23,7 +23,7 @@ updated: 2026-05-07T00:00:00Z
 
 Live document owned by `@TestKeeper` end-to-end:
 
-- `MODE=GENERATE` creates this file from `feature.md § Test plan`.
+- `MODE=GENERATE` creates this file from `spec.md § Test plan`.
 - `MODE=DRAFT` appends impl-level TCs (unit-edge, integration, error) once the implementation plan is written.
 - `MODE=EXECUTE` runs the test suite after `@CodeWriter` and updates `Status` per TC.
 - `MODE=RECONCILE` (after the last step) attaches `Test impl` references and reruns the full suite.
@@ -54,7 +54,7 @@ The PO can edit the file directly — change a Status to FAIL, add a row, append
 | TC-2 | PEND | integration | ... | AC-2 | (pending) | |
 
 **Type:** `unit` | `unit-edge` | `integration` | `error` | `e2e` | `manual`.
-**Verifies:** comma-separated AC/EC ids from `feature.md`.
+**Verifies:** comma-separated AC/EC ids from `spec.md`.
 **Test impl:** filled by `@TestKeeper RECONCILE` — `tests/path/to/file.kt:line`.
 
 ---

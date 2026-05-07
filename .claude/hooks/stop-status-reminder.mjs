@@ -1,42 +1,31 @@
 #!/usr/bin/env node
-/**
- * Stop hook — reminds the user of the active task when a session ends.
- * ai-agent-kit v5 — Claude Code hooks.
- * Non-blocking: never forces the agent to keep working.
- * Fails open on any error.
- */
+// ai-agent-kit — Claude Code hook: Stop
+// On session stop, if an active task remains, prints a one-line reminder to stderr.
+// Non-blocking: never forces the agent to keep working.
+// Cross-platform: Node.js only.
 
-import { readFileSync } from 'fs';
+import fs from "node:fs";
+import path from "node:path";
 
-function safeRead(path) {
-  try {
-    return readFileSync(path, 'utf8');
-  } catch {
-    return '';
-  }
+function safeRead(p) {
+  try { return fs.readFileSync(p, "utf8"); } catch { return ""; }
 }
 
-try {
-  const currentMd = safeRead('.planning/CURRENT.md');
-  const activeTaskMatch = currentMd.match(/active_task:\s*(.+)/);
-  const activeTask = activeTaskMatch ? activeTaskMatch[1].trim() : '';
+const cwd = process.cwd();
+const currentMd = safeRead(path.join(cwd, ".planning", "CURRENT.md"));
+const taskMatch = currentMd.match(/active_task:\s*([^\n\r]+)/);
+const activeTask = taskMatch ? taskMatch[1].trim() : "";
 
-  if (!activeTask || activeTask === '(none)') {
-    process.exit(0);
-  }
-
-  // Check if task is blocked
-  const taskMd = safeRead(`.planning/tasks/${activeTask}.md`);
-  if (taskMd.includes('BLOCKED:') || taskMd.includes('ЗАБЛОКИРОВАНО:')) {
-    process.exit(0);
-  }
-
-  process.stderr.write(
-    `\n[kit] Active task: ${activeTask}\n` +
-    `      Run /kit-status to see progress or /kit-resume to continue.\n\n`
-  );
-} catch {
-  // Fail open — no output
+if (!activeTask || activeTask === "(none)" || activeTask.startsWith("(")) {
+  process.exit(0);
 }
 
+const taskFile = path.join(cwd, ".planning", "tasks", `${activeTask}.md`);
+const body = safeRead(taskFile);
+const blocked = /^- BLOCKED:/m.test(body);
+const flag = blocked ? " [BLOCKED]" : "";
+
+process.stderr.write(
+  `[ai-agent-kit] Session stopped with active_task=${activeTask}${flag}. Run /kit-status to inspect or /kit-resume to continue.\n`
+);
 process.exit(0);

@@ -1,4 +1,4 @@
-kit_version: 5.2.0
+kit_version: 6.1.0
 language_code: ru
 hosts: [claude-code]
 
@@ -9,6 +9,29 @@ project:
 vault_path: vault
 
 auto_approve: false  # NEW in v5.0.0: when true, @Main skips CONFIRM in FEATURE/TECH. Replaces v4 AUTO_APPROVE=true magic string.
+
+# NEW in v6.0.0: P1 — hard caps on plan size and per-step changeset
+slice_caps:
+  max_steps: 6
+  max_files_per_step: 5
+  max_lines_per_step: 400
+
+# NEW in v6.0.0: P8 — tdd_first | test_after | mixed (or object with default + allow_per_step_override)
+test_strategy: tdd_first
+
+# NEW in v6.0.0: P10 — set to 'github' if ci-github capability profile is selected
+ci_host: none
+
+# NEW in v6.1.0: P15 per-step clean-session automation: when to nudge PO toward /clear (per_step | per_milestone | overflow_only) and through which channel (silent additionalContext | stderr reminder | both).
+session_isolation:
+  mode: per_step
+  prompt_style: both
+
+# NEW in v6.1.0: P12 commit after every @Reviewer CLEAN at step 5.4b. Required for /kit-step-resume per-step anchors. Set false only if external commit policy conflicts.
+auto_commit_per_step: true
+
+# NEW in v6.1.0: P13 controls runnable-slice gate at 3a. False (default) requires every plan step to declare a user-visible Runnable: line. True allows `Runnable: internal — <reason>` for pure-backend modules.
+allow_internal_steps: false
 
 stack:
   language: kotlin

@@ -1,114 +1,100 @@
 ---
-genre: reference
-title: Spec Template
-topic: planning
+genre: feature-spec
+title: Feature Spec Template (frozen at CONFIRM)
+topic: feature
 triggers:
+  - "feature spec"
+  - "feature design"
   - "spec"
-  - "api contract"
-  - "data model"
+  - "requirements"
 confidence: high
 source: human
-updated: 2026-05-07T00:00:00Z
+updated: 2026-05-07T17:37:42Z
 ---
 
-# Spec: [Feature Name]
+# <Feature title — plain English, no jargon>
 
-**Module:** [module-name]
-**Status:** Draft | Review | Approved
-**Date:** DD.MM.YYYY
-**Author:** @Main / @CodeWriter
-**Requirements:** [[concepts/<module>/requirements/<feature>]]
+> Status: DRAFT | APPROVED | DONE
+> Module: <module>
+> Owner: <PO>
 
----
+<!--
+  ⚠ FROZEN at CONFIRM. v6.0+ rule: once @Main step 4 (CONFIRM) passes, this file
+  is read-only for the rest of the FEATURE pipeline. EXECUTE-phase agents
+  (@CodeWriter, @Reviewer, @TestKeeper, @TraceabilityChecker, @DoDGate,
+  replan-on-discovery) MUST NOT edit this file. Mutable state — implementation
+  steps, DoD verdict, replan markers — lives in the sibling plan.md.
 
-## Overview
+  If a structural discovery requires changing AC / EC / How-it-works,
+  @Main escalates to PO and re-dispatches @Analyst with TYPE=FEATURE
+  EXISTING_DOCS=<this spec.md>. The amendment is a new DRAFT cycle, not
+  an in-place edit. Spec rot is the failure mode this split prevents.
+-->
 
-High-level description of what will be built and why.
+## Why
 
----
+2–3 sentences. The user-visible problem this solves. Plain language.
+Skip if the feature is TECH (refactor / dependency update / no behaviour change).
 
-## Data Models
+## Acceptance Criteria
 
-### [ModelName]
+| ID | Given | When | Then |
+|----|-------|------|------|
+| AC-1 | <preconditions> | <action> | <observable outcome> |
+| AC-2 | ... | ... | ... |
+
+Skip if TECH.
+
+## Edge Cases
+
+| ID | Severity | Scenario | Expected behaviour |
+|----|----------|----------|---------------------|
+| EC-1 | Critical | <scenario> | <expected> |
+| EC-2 | High | ... | ... |
+| EC-3 | Medium | ... | ... |
+
+**Severity ladder:**
+
+- **Critical** — data loss, security hole, or system crash if mishandled.
+- **High** — wrong result silently, or recovery requires manual intervention.
+- **Medium** — visible but recoverable bug.
+- **Low** — cosmetic.
+
+Every Critical EC must have at least one PASS TC in the Test plan section.
+
+## How it works
+
+Technical specification: data models, API contracts, internal interfaces, error handling, security considerations. Sub-section as needed.
+
+Reference public signatures (one line each, no method bodies). For example:
 
 ```
-FieldName   Type        Required  Description
----------   ----        --------  -----------
-id          UUID        yes       Primary key
-name        String      yes       Display name
-createdAt   Timestamp   yes       ISO-8601
+fun createOrder(req: CreateOrderRequest): Result<Order, OrderError>
+class OrderRepository(private val db: Database) { fun save(o: Order): Long }
 ```
 
----
+Endpoints (if any):
 
-## API Contracts
-
-### [POST /api/v1/resource]
-
-**Request:**
-```json
-{
-  "field": "value"
-}
+```
+POST /api/v1/orders   → createOrderHandler
+GET  /api/v1/orders/:id → getOrderHandler
 ```
 
-**Response 200:**
-```json
-{
-  "id": "uuid",
-  "field": "value"
-}
-```
+## Test plan
 
-**Errors:**
-| Code | Condition |
-|------|-----------|
-| 400 | Invalid input |
-| 401 | Not authenticated |
-| 404 | Resource not found |
+| TC ID | Type | Description | Verifies |
+|-------|------|-------------|----------|
+| TC-1 | unit | <what + how> | AC-1, EC-1 |
+| TC-2 | integration | ... | AC-2 |
+| TC-3 | unit | ... | EC-1 |
 
----
+**Type values:** `unit` | `integration` | `e2e` | `manual`.
+**Verifies** lists AC/EC ids covered by this TC. Every Critical EC must appear at least once.
 
-## Business Logic
+## UI / UX
 
-Step-by-step description of the main flow:
+(Filled by `@Designer` for UI features only. Otherwise omit this section. UI/UX is part of the spec — frozen at CONFIRM along with everything else.)
 
-1. ...
-2. ...
-3. ...
+## Open questions
 
-### Edge Cases
-
-| Case | Behavior |
-|------|----------|
-| [edge case] | [expected behavior] |
-
----
-
-## Error Handling
-
-| Error scenario | How handled | User-visible message |
-|----------------|-------------|---------------------|
-| DB unavailable | Return 503 + retry hint | "Service temporarily unavailable" |
-
----
-
-## Security Considerations
-
-- Authentication required: yes/no
-- Authorization rules: [who can access what]
-- Sensitive data handling: [PII, tokens, etc.]
-
----
-
-## Dependencies
-
-- External services / APIs used
-- Internal modules / libraries required
-- Infrastructure requirements
-
----
-
-## Implementation Notes
-
-Technical notes, constraints, or gotchas relevant to implementation.
+(Delete this section before APPROVED. Items here block CONFIRM.)

@@ -2,7 +2,7 @@
 
 > Central path reference. Before creating any new file — check this table.
 > All agents read this file instead of guessing paths.
-> ai-agent-kit v5.
+> ai-agent-kit v6 — spec.md (FROZEN at CONFIRM) + plan.md (mutable).
 
 ---
 
@@ -19,42 +19,52 @@
 
 ## Knowledge Vault (vault/)
 
-> Indexed by KnowledgeOS.
-> v5 uses a flat layout — one folder per feature with two or three files.
+> Indexed by [KnowledgeOS](https://github.com/aequicor/KnowledgeOS).
+> v6 splits the v5 single feature.md into spec.md (FROZEN at CONFIRM) and plan.md (mutable). v4's Diátaxis subtrees remain gone.
 
 ### Per-feature structure
 
 ```
 vault/
-  _INDEX.md                     — vault map, entry point for agents
-  _templates/feature.md         — canonical feature doc skeleton
+  _INDEX.md                     ← vault map — entry point for agents
+  _templates/spec.md            ← canonical spec.md skeleton (frozen-at-CONFIRM portion)
+  _templates/plan.md            ← canonical plan.md skeleton (mutable-during-EXECUTE portion)
 
   features/<module>/<feature>/
-    feature.md                  — single design doc: Why / ACs / Edge cases / How it works /
-                                  Test plan / Implementation plan / Definition of Done
-    test-cases.md               — live state: TC table + Defects log
-    retro.md                    — optional: accumulates bug-fix retros
+    spec.md                     ← FROZEN at CONFIRM — Why / ACs / Edge cases / How it works /
+                                  Test plan / UI section
+                                  (@Analyst writes core; @Designer appends UI section
+                                   BEFORE CONFIRM; nothing edits this after CONFIRM)
+    plan.md                     ← MUTABLE — Slice budget / Implementation plan / Replan log /
+                                  Step-level diff stats / Diff-review / Definition of Done
+                                  (@Analyst writes skeleton; @Main fills steps + diff stats +
+                                   diff-review; @DoDGate fills DoD verdict; replan-on-discovery
+                                   skill appends REPLAN-N markers)
+    test-cases.md               ← live state — TC table + Defects log (@TestKeeper)
+    retro.md                    ← optional — accumulates bug-fix retros (@BugFixer, bug-retro skill)
 
-  guidelines/<module>/<topic>.md    — coding patterns / conventions (optional)
-  guidelines/libs/<lib>-<version>.md — cached external API docs
+  guidelines/<module>/<topic>.md   ← coding patterns / conventions (optional)
+  guidelines/libs/<lib>-<version>.md  ← cached external API docs (@CodeWriter, @BugFixer)
 
-  tech-debt/<module>/<slug>.md      — open / in-progress entries
-  tech-debt/<module>/done/<slug>.md — archived after /kit-techdebt closes them
+  tech-debt/<module>/<slug>.md     ← open / in-progress entries (@CodeWriter, @BugFixer, @Reviewer)
+  tech-debt/<module>/done/<slug>.md  ← archived after `/kit-techdebt` closes them
 ```
 
 ### Modules
 
 | Module | Gradle task | Source root |
 |--------|-------------|-------------|
-| `common` | `:app:byCompose:common` | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/` |
-| `shared` | `:shared` | `shared/src/commonMain/kotlin/` |
+| common | `:app:byCompose:common` | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/` |
+| shared | `:shared` | `shared/src/commonMain/kotlin/` |
 
 ### System paths
 
 | Path | Owner | Purpose |
 |------|-------|---------|
-| `vault/_templates/feature.md` | (template) | Canonical feature.md skeleton — copy and fill |
-| `vault/features/<module>/<feature>/feature.md` | @Analyst, @Designer, @Main, @DoDGate | The single feature design doc |
+| `vault/_templates/spec.md` | (template) | Canonical spec.md skeleton — frozen portion |
+| `vault/_templates/plan.md` | (template) | Canonical plan.md skeleton — mutable portion |
+| `vault/features/<module>/<feature>/spec.md` (FROZEN at CONFIRM) | @Analyst (write), @Designer (UI section before CONFIRM only) | Frozen contract: Why / ACs / ECs / How / Test plan / UI |
+| `vault/features/<module>/<feature>/plan.md` | @Analyst (skeleton), @Main (steps, diff stats, diff-review), @DoDGate (DoD verdict), replan-on-discovery (REPLAN markers) | Mutable plan / replan log / DoD verdict |
 | `vault/features/<module>/<feature>/test-cases.md` | @TestKeeper, @BugFixer (Status flips on fix) | Live test state |
 | `vault/features/<module>/<feature>/retro.md` | @BugFixer | Accumulating bug retros for this feature |
 | `vault/guidelines/libs/<lib>-<version>.md` | @CodeWriter, @BugFixer | External library documentation cache |
@@ -71,7 +81,7 @@ vault/
 | `.claude/FILE_STRUCTURE.md` | human (PO) | This file — path reference |
 | `.claude/agents/[Name].md` | human (PO) | Individual agent prompt |
 | `.claude/skills/[name]/SKILL.md` | human (PO) | Skill definition |
-| `.claude/settings.json` | human (PO) | Runtime config for Claude Code |
+| `.claude/settings.json` | human (PO) | Runtime config for this host (Claude Code) |
 
 There is no `@PromptEngineer` agent in v5 — edit agent / skill files directly.
 
@@ -83,8 +93,8 @@ There is no `@PromptEngineer` agent in v5 — edit agent / skill files directly.
 
 | Module | Gradle task | Source root |
 |--------|-------------|-------------|
-| `common` | `:app:byCompose:common` | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/` |
-| `shared` | `:shared` | `shared/src/commonMain/kotlin/` |
+| common | `:app:byCompose:common` | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/` |
+| shared | `:shared` | `shared/src/commonMain/kotlin/` |
 
 ### Test roots
 
@@ -98,7 +108,7 @@ There is no `@PromptEngineer` agent in v5 — edit agent / skill files directly.
 ## Build and Verification
 
 | Command | What it does |
-|---------|--------------|
+|---------|-------------|
 | `./gradlew [module]:build` | Full module build |
 | `./gradlew compileKotlin` | Quick compile check |
 | `./gradlew :[module]:test` | Module tests |

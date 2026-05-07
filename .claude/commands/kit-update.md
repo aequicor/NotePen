@@ -24,6 +24,7 @@ Where `aequicor/ai-agent-kit` is the GitHub `<user>/<repo>` slug of the ai-agent
 - **PHASE 4** — bump `kit_version` in the manifest, append any newly-added manifest fields with their documented defaults and a `# NEW in vX.Y.Z` comment.
 - **PHASE 5** — verify per host listed in `hosts:`: mandatory agents present in `<template_dir>/agents/`, host config file (`opencode.json` or `.claude/settings.json`) valid JSON with no literal API keys, host instruction file (`AGENTS.md` or `CLAUDE.md`) present, no unresolved `{{...}}` placeholders anywhere.
 - **PHASE 6** — print summary: old → new version, new capabilities, breaking changes applied, next steps (`git diff`, `git commit`).
+- **PHASE 7** (v6.1+) — invoke `/kit-map --refresh` to regenerate `.planning/REPO_MAP.md` against the new structure. Skip silently if `/kit-map` command is unavailable in this host (e.g. if the user just upgraded across the v6.1 boundary and the new command file hasn't rendered yet — the next session will pick it up).
 
 ## Safety rules (enforced inside the prompt — listed here for visibility)
 

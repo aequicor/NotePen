@@ -1,7 +1,7 @@
-# CLAUDE.md — common / NotePen
+# AGENTS.md — common / NotePen
 
 > Nested module-level agent instructions for `common`.
-> This file is closest to the source root — it takes precedence over the root `CLAUDE.md` for module-specific rules.
+> This file is closest to `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/` — it takes precedence over the root `AGENTS.md`.
 
 ---
 
@@ -40,8 +40,6 @@
 
 Docs path: `vault/common/features/`
 
-- One folder per feature: `<feature>/feature.md`, `<feature>/test-cases.md`, optional `<feature>/retro.md`.
+- One folder per feature: `<feature>/spec.md` (FROZEN), `<feature>/plan.md` (mutable), `<feature>/test-cases.md`, optional `<feature>/retro.md`.
 - Coding patterns / conventions for this module: `vault/common/guidelines/<topic>.md` (optional).
-- Tech-debt entries: `vault/tech-debt/common/`.
-
----
+- Tech-debt entries: `vault/common/../tech-debt/common/`.
