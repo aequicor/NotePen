@@ -22,6 +22,7 @@ kotlin {
         desktopMain.dependencies {
             implementation(projects.shared)
             implementation(projects.app.byCompose.common)
+            implementation(libs.kotlinx.serialization.json)
 
             //decompose
             implementation(libs.decompose)

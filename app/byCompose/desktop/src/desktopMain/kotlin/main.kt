@@ -11,18 +11,46 @@ import notepen.app.bycompose.desktop.generated.resources.app_icon
 import ru.kyamshanov.notepen.App
 import ru.kyamshanov.notepen.DefaultRootComponent
 import ru.kyamshanov.notepen.RootComponent
+import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
+import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
+import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
+import ru.kyamshanov.notepen.mainscreen.infrastructure.FileAvailabilityCheckerDesktop
+import ru.kyamshanov.notepen.mainscreen.infrastructure.FileHistoryRepositoryDesktop
+import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryDesktop
+import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesktop
+import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
+import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 
 
 fun main() {
-    //init DI
-
     val lifecycle = LifecycleRegistry()
+
+    val historyRepo = FileHistoryRepositoryDesktop()
+    val folderRepo = FolderRepositoryDesktop()
+    val availabilityChecker = FileAvailabilityCheckerDesktop()
+    val thumbnailRepo = ThumbnailRepositoryDesktop()
+    val thumbnailGenerator = PdfThumbnailGeneratorDesktop()
 
     // Always create the root component outside Compose on the UI thread
     val root: RootComponent =
         runOnUiThread {
             DefaultRootComponent(
                 componentContext = DefaultComponentContext(lifecycle = lifecycle),
+                historyRepository = historyRepo,
+                mainComponentFactory = { componentContext, onOpenEditor ->
+                    MainScreenComponent(
+                        componentContext = componentContext,
+                        historyRepository = historyRepo,
+                        folderRepository = folderRepo,
+                        addToHistory = AddToHistoryUseCase(historyRepo),
+                        checkAvailability = CheckAvailabilityUseCase(availabilityChecker, historyRepo),
+                        openRecentFileUseCase = OpenRecentFileUseCase(availabilityChecker),
+                        thumbnailRepository = thumbnailRepo,
+                        thumbnailGenerator = thumbnailGenerator,
+                        onOpenEditor = onOpenEditor,
+                        onOpenFilePicker = {},
+                    )
+                },
             )
         }
 

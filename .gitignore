@@ -48,3 +48,4 @@ bin/
 
 # ai-agent-kit: local session pointer — not shared, each developer has their own
 .planning/CURRENT.md
+/local.properties

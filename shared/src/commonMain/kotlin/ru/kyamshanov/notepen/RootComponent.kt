@@ -12,7 +12,7 @@ interface RootComponent {
 
     // Defines all possible child components
     sealed class Child {
-        class ListChild(val component: ListComponent) : Child()
+        class MainChild(val component: MainComponent) : Child()
         class DetailsChild(val component: DetailsComponent) : Child()
     }
 }

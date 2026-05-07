@@ -12,6 +12,9 @@ plugins {
 kotlin {
     applyDefaultHierarchyTemplate()
     jvm()
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
     androidTarget {
         @OptIn(ExperimentalKotlinGradlePluginApi::class)
         compilerOptions {
@@ -28,11 +31,14 @@ kotlin {
             //decompose
             implementation(libs.decompose)
             implementation(libs.decompose.compose)
+            implementation(libs.lifecycle.coroutines)
 
             //compose
             implementation(compose.runtime)
             implementation(compose.foundation)
-            implementation(compose.material)
+            implementation(compose.material3)
+            @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+            implementation(compose.materialIconsExtended)
             implementation(compose.ui)
             implementation(compose.components.resources)
             implementation(compose.components.uiToolingPreview)
@@ -43,12 +49,18 @@ kotlin {
             implementation(libs.kotlin.logging.common)
         }
 
+        commonTest.dependencies {
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(kotlin("test"))
+        }
+
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.kotlin.logging.android)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
+            implementation(libs.kotlinx.serialization.json)
         }
 
         jvmMain.dependencies {
@@ -57,6 +69,7 @@ kotlin {
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.apache.pdfbox)
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

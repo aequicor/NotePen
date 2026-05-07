@@ -10,11 +10,26 @@ import com.arkivanov.decompose.router.stack.push
 import com.arkivanov.decompose.value.Value
 import kotlinx.serialization.Serializable
 import ru.kyamshanov.notepen.RootComponent.Child.DetailsChild
-import ru.kyamshanov.notepen.RootComponent.Child.ListChild
+import ru.kyamshanov.notepen.RootComponent.Child.MainChild
+import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 
-
+/**
+ * Стандартная реализация [RootComponent].
+ *
+ * Принимает фабрику [mainComponentFactory], которая создаёт [MainComponent] из `:common`.
+ * Это позволяет `:shared` оставаться независимым от `:common` (нет циклической зависимости).
+ *
+ * @param componentContext Контекст компонента Decompose.
+ * @param mainComponentFactory Фабрика для создания компонента главного экрана.
+ *        Вызывается с [ComponentContext] и колбэком навигации в редактор.
+ */
 class DefaultRootComponent(
     componentContext: ComponentContext,
+    private val historyRepository: FileHistoryRepository,
+    private val mainComponentFactory: (
+        componentContext: ComponentContext,
+        onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
+    ) -> MainComponent,
 ) : RootComponent, ComponentContext by componentContext {
 
     private val navigation = StackNavigation<Config>()
@@ -23,42 +38,39 @@ class DefaultRootComponent(
         childStack(
             source = navigation,
             serializer = Config.serializer(),
-            initialConfiguration = Config.List, // The initial child component is List
-            handleBackButton = true, // Automatically pop from the stack on back button presses
+            initialConfiguration = Config.Main,
+            handleBackButton = true,
             childFactory = ::child,
         )
 
-    private fun child(config: Config, componentContext: ComponentContext): RootComponent.Child =
-        when (config) {
-            is Config.List -> ListChild(listComponent(componentContext))
-            is Config.Details -> DetailsChild(detailsComponent(componentContext, config))
+    private fun child(config: Config, ctx: ComponentContext): RootComponent.Child = when (config) {
+        is Config.Main -> MainChild(mainComponent(ctx))
+        is Config.Details -> DetailsChild(detailsComponent(ctx, config))
+    }
+
+    private fun mainComponent(ctx: ComponentContext): MainComponent =
+        mainComponentFactory(ctx) { uri, lastPageIndex ->
+            navigation.push(Config.Details(uri, lastPageIndex))
         }
 
-    private fun listComponent(componentContext: ComponentContext): ListComponent =
-        DefaultListComponent(
-            componentContext = componentContext,
-            onItemClickedListener = { item: String -> // Supply dependencies and callbacks
-                navigation.push(Config.Details(title = item)) // Push the details component
-            },
-        )
-
-    private fun detailsComponent(componentContext: ComponentContext, config: Config.Details): DetailsComponent =
+    private fun detailsComponent(ctx: ComponentContext, config: Config.Details): DetailsComponent =
         DefaultDetailsComponent(
-            componentContext = componentContext,
-            title = config.title, // Supply arguments from the configuration
-            onBackListener = navigation::pop, // Pop the details component
+            componentContext = ctx,
+            title = config.uri,
+            historyRepository = historyRepository,
+            onBackListener = navigation::pop,
         )
 
     override fun onBackClicked(toIndex: Int) {
         navigation.popTo(index = toIndex)
     }
 
-    @Serializable // kotlinx-serialization plugin must be applied
+    @Serializable
     private sealed interface Config {
         @Serializable
-        data object List : Config
+        data object Main : Config
 
         @Serializable
-        data class Details(val title: String) : Config
+        data class Details(val uri: String, val lastPageIndex: Int = 0) : Config
     }
 }

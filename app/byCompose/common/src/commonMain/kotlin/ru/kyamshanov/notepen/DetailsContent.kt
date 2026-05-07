@@ -8,8 +8,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material.Button
-import androidx.compose.material.Text
+import androidx.compose.material3.Button
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -82,11 +82,12 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                         }
                     }
 
-                    if (imageBitmap != null) {
-                        val pdfDrawingState = remember(imageBitmap) { PdfDrawingState() }
+                    val bm = imageBitmap
+                    if (bm != null) {
+                        val pdfDrawingState = remember(bm) { PdfDrawingState() }
 
                         DrawablePdfPage(
-                            bitmap = imageBitmap!!,
+                            bitmap = bm,
                             pdfDrawingState = pdfDrawingState,
                             modifier = Modifier.size(width, height)
                         )
