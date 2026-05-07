@@ -25,7 +25,8 @@ import ru.kyamshanov.notepen.mainscreen.ui.viewmodel.MainScreenViewModel
  * @param thumbnailRepository Порт кеша миниатюр.
  * @param thumbnailGenerator Порт генерации миниатюр.
  * @param onOpenEditor Обратный вызов при открытии редактора (URI файла, индекс страницы).
- * @param onOpenFilePicker Обратный вызов для открытия системного файлового диалога.
+ * @param onOpenFilePicker Суспендирующий обратный вызов для открытия системного файлового диалога.
+ *        Возвращает нормализованный путь к выбранному файлу или null при отмене.
  */
 class MainScreenComponent(
     componentContext: ComponentContext,
@@ -37,7 +38,7 @@ class MainScreenComponent(
     private val thumbnailRepository: ThumbnailRepository,
     private val thumbnailGenerator: PdfThumbnailGenerator,
     val onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
-    val onOpenFilePicker: () -> Unit,
+    val onOpenFilePicker: suspend () -> String?,
 ) : MainComponent, ComponentContext by componentContext {
 
     /** ViewModel главного экрана, привязанная к жизненному циклу компонента. */

@@ -8,7 +8,7 @@ triggers:
   - "тест-кейсы главный экран"
 confidence: high
 source: ai
-updated: 2026-05-07T20:00:00Z
+updated: 2026-05-07T22:00:00Z
 ---
 
 # Test Cases: Main Screen Redesign
@@ -175,6 +175,8 @@ AI agents do NOT touch the Notes column. AI agents do NOT generate per-TC detail
 | TC-123 | PEND  | —     | error       | [spec][NOT IMPLEMENTED] `FileAvailabilityCheckerDesktop.checkSync` — путь к файлу бросает `IOException` при `canonicalFile` | Возвращает `FILE_ERROR`; не бросает исключение наружу                                                          |
 | TC-124 | PEND  | —     | unit-edge   | [spec][NOT IMPLEMENTED] `RecentFile` сериализация/десериализация JSON при `fileSize = null` и `thumbnailKey = null` | JSON корректно десериализуется; null-поля отсутствуют в JSON или представлены как `null`; roundtrip без потерь |
 | TC-125 | PASS  | —     | unit-edge   | [spec] `FileHistoryManager.findEvictIndex` — список из двух записей: одна `NOT_FOUND` (старше), одна `AVAILABLE` (impl: shared/src/commonTest/kotlin/ru/kyamshanov/notepen/mainscreen/domain/model/FileHistoryManagerTest.kt#findEvictIndex_notFoundEvictedBeforeAvailable) | Возвращает индекс `NOT_FOUND`-записи (не AVAILABLE)                                                            |
+| TC-126 | FAIL  | —     | error       | [DEF-001] Бесконечный лоадер — главный экран Desktop показывает индикатор загрузки, который никогда не исчезает. Ожидается: после появления экрана список файлов (или пустой экран) отображается без лоадера. Фактически: isLoading=true навсегда. | Индикатор загрузки исчезает, отображается список недавних файлов (или пустой экран)                            |
+| TC-127 | PASS  | —     | error       | [DEF-002] Кнопка «Открыть» не открывает нативный файловый диалог на Desktop. Ожидается: появляется FileDialog (Swing). Фактически: ничего не происходит. | Открывается нативный файловый диалог для выбора PDF-файла                                                      |
 
 ---
 
@@ -206,4 +208,5 @@ what to be
 
 > Append-only. Each entry references a TC by id. AI agents (@TestRunner / @BugFixer) maintain this section.
 
-- (empty initially)
+- DEF-001 [HIGH] Бесконечный лоадер — главный экран Desktop показывает isLoading=true навсегда, список файлов не появляется. TC-126. Status: OPEN.
+- DEF-002 [HIGH] Кнопка «Открыть» не открывает нативный файловый диалог на Desktop — ничего не происходит. TC-127. Status: FIXED (fix: vault/guidelines/common/reports/def-002-file-picker-no-op.md).

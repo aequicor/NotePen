@@ -34,7 +34,17 @@ fun RootContent(component: RootComponent, modifier: Modifier = Modifier) {
                             mainScreenComponent.viewModel.onNavigationHandled()
                         }
                         NavigationTarget.FilePicker -> {
-                            // FilePicker открывается из MainContent
+                            val pickedPath = mainScreenComponent.onOpenFilePicker()
+                            mainScreenComponent.viewModel.onIntent(
+                                ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent.FilePickerResult(
+                                    uri = pickedPath,
+                                    displayName = pickedPath
+                                        ?.substringAfterLast('/')
+                                        ?.substringAfterLast('\\')
+                                        ?: "",
+                                    fileSize = null,
+                                ),
+                            )
                         }
                         null -> {}
                     }

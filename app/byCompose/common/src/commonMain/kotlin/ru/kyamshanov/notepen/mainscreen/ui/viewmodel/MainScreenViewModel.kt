@@ -195,7 +195,10 @@ class MainScreenViewModel(
      * Если [AddHistoryResult.Added] или [AddHistoryResult.Moved] — открывает редактор.
      */
     private suspend fun handleFilePickerResult(intent: MainScreenIntent.FilePickerResult) {
-        val uri = intent.uri ?: return
+        val uri = intent.uri ?: run {
+            _state.update { it.copy(navigationTarget = null) }
+            return
+        }
         val result = addToHistory.execute(
             uri = uri,
             displayName = intent.displayName,

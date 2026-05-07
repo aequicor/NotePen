@@ -429,6 +429,50 @@ class MainScreenViewModelTest {
 
         assertNull(viewModel.state.value.errorEvent, "errorEvent should be null after handled")
     }
+
+    // TC-127 / DEF-002: OpenFilePicker intent → navigationTarget = FilePicker,
+    // then FilePickerResult with valid path → navigationTarget = Editor.
+    @Test
+    fun openFilePicker_setsFilePickerTarget_thenFilePickerResult_navigatesToEditor() {
+        viewModel.onIntent(MainScreenIntent.OpenFilePicker)
+
+        assertIs<NavigationTarget.FilePicker>(
+            viewModel.state.value.navigationTarget,
+            "OpenFilePicker intent must set navigationTarget to FilePicker",
+        )
+
+        val selectedPath = "/home/user/document.pdf"
+        viewModel.onIntent(
+            MainScreenIntent.FilePickerResult(
+                uri = selectedPath,
+                displayName = "document.pdf",
+                fileSize = 1024L,
+            ),
+        )
+
+        val target = viewModel.state.value.navigationTarget
+        assertIs<NavigationTarget.Editor>(
+            target,
+            "FilePickerResult with non-null URI must set navigationTarget to Editor",
+        )
+        assertEquals(selectedPath, (target as NavigationTarget.Editor).uri)
+    }
+
+    // TC-127 / DEF-002: FilePickerResult with null URI (user cancelled) → navigationTarget cleared (not stuck on FilePicker).
+    @Test
+    fun filePickerResult_nullUri_clearsFilePickerNavigationTarget() {
+        viewModel.onIntent(MainScreenIntent.OpenFilePicker)
+        assertIs<NavigationTarget.FilePicker>(viewModel.state.value.navigationTarget)
+
+        viewModel.onIntent(
+            MainScreenIntent.FilePickerResult(uri = null, displayName = "", fileSize = null),
+        )
+
+        assertNull(
+            viewModel.state.value.navigationTarget,
+            "FilePickerResult with null URI (cancel) must clear the FilePicker navigationTarget",
+        )
+    }
 }
 
 // --- Controllable FileAvailabilityChecker ---

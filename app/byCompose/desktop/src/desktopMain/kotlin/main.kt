@@ -19,6 +19,7 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.FileHistoryRepositoryDesk
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
+import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 
 
@@ -48,7 +49,7 @@ fun main() {
                         thumbnailRepository = thumbnailRepo,
                         thumbnailGenerator = thumbnailGenerator,
                         onOpenEditor = onOpenEditor,
-                        onOpenFilePicker = {},
+                        onOpenFilePicker = { FilePicker().pickPdfFile() },
                     )
                 },
             )
