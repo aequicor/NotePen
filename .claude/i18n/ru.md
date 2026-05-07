@@ -9,21 +9,20 @@
 | Ключ | Использовать этот текст |
 |------|------------------------|
 | `classify_and_clarify` | Классификация и уточнение задачи |
+| `analysis` | Анализ |
 | `write_code` | Написание кода |
 | `review_code` | Проверка кода |
+| `verify_tests` | Проверка тестов |
 | `fix_bug` | Исправление ошибки |
-| `debug_issue` | Отладка проблемы |
-| `qa_check` | Контроль качества |
 | `design_ui` | Дизайн интерфейса |
-| `prompt_maintenance` | Обслуживание промптов |
+| `traceability_check` | Трассируемость |
+| `dod_gate` | Definition of Done — gate |
 | `checkpoint` | Контрольная точка |
 | `resume_work` | Продолжить работу |
 | `new_feature` | Новая функция |
 | `lint` | Линтинг |
 | `fix` | Исправить |
 | `review` | Ревью |
-| `update_deps` | Обновить зависимости |
-| `deploy` | Деплой |
 | `tech_debt` | Технический долг |
 | `record_tech_debt` | Записать технический долг |
 
@@ -35,10 +34,13 @@
 | source root | корень исходников |
 | test root | корень тестов |
 | docs | документация |
-| requirements | требования |
-| spec | спецификация |
+| feature doc | документ фичи |
+| acceptance criterion | критерий приёмки |
+| edge case | граничный случай |
+| test case | тест-кейс |
+| step | шаг |
 | plan | план |
-| report | отчёт |
+| retro | ретроспектива |
 
 ## Значения статусов
 
@@ -57,4 +59,4 @@
 ## Команды
 
 Имена команд всегда на английском вне зависимости от локали — используй слэш-команду как есть:
-`/kit-new-feature`, `/kit-resume`, `/kit-checkpoint`, `/kit-lint`, `/kit-fix`, `/kit-review`, `/kit-update-deps`, `/kit-deploy`, `/kit-techdebt`
+`/kit-new-feature`, `/kit-fix`, `/kit-techdebt`, `/kit-resume`, `/kit-status`, `/kit-approve`, `/kit-review`, `/kit-lint`, `/kit-config`, `/kit-extend`, `/kit-update`, `/kit-uninstall`

@@ -1,82 +1,63 @@
-﻿---
-genre: concept
+---
+genre: reference
 title: Vault Index — NotePen
-topic: overview
-triggers:
-  - "index"
-  - "overview"
-  - "orientation"
+topic: navigation
 confidence: high
-source: human
+source: kit
 updated: 2026-05-07T00:00:00Z
 ---
 
-# NotePen — Knowledge Vault
+# Vault Index — NotePen
 
-> **Entry point for AI agents.** Search this vault before any action.
-> Structure follows [Diátaxis](https://diataxis.fr/) — each document answers one type of question.
+> Entry point for AI agents. Search here before taking action.
+> ai-agent-kit v5 — flat layout.
 
----
+## How to use
 
-## Vault Map
+1. Search `knowledge-my-app_search_docs` for the topic you need.
+2. Open linked files for full context.
+3. Implement according to guidelines.
+4. Record learnings back to vault.
 
-| Genre | Question | Content |
-|-------|----------|---------|
-| `concepts/` | **Why?** How is it structured? | Architecture, domain model, requirements, plans, ADRs |
-| `reference/` | **What exists?** | API specs, DB schema, env vars, test plans |
-| `how-to/` | **How to do X?** | Stage files, implementation guides, on-boarding |
-| `tutorials/` | **How to learn?** | Getting started, module overviews |
-| `guidelines/` | **What rules to follow?** | Conventions, patterns, anti-patterns, lib usage rules |
-
----
-
-## Modules
-
-| Module | Gradle module | Docs | Responsibility |
-|--------|---------------|------|----------------|
-| `common` | `:app:byCompose:common` | `vault/common/` | Compose Multiplatform UI: PDF rendering, drawing surface, page management |
-| `shared` | `:shared` | `vault/shared/` | Cross-platform business logic and domain models |
-
-### Per-module layout
+## Structure (v5)
 
 ```
 vault/
-├── _INDEX.md
-├── _templates/                        ← document templates
-├── concepts/<module>/                 ← architecture, requirements, plans
-│   ├── requirements/<feature>.md
-│   └── plans/<feature>-plan.md
-├── reference/<module>/                ← specs, test plans, schemas
-│   └── spec/<feature>.md
-│   └── spec/<feature>-test-plan.md
-├── how-to/<module>/                   ← stage files, implementation guides
-│   └── plans/<feature>-stage-NN.md
-├── tutorials/<module>/                ← getting started, module docs
-│   └── documentation/*.md
-├── guidelines/<module>/               ← conventions, patterns, anti-patterns
-│   ├── <topic>.md
-│   └── reports/<bug-name>.md
-├── guidelines/libs/                   ← external library API usage rules
-│   └── <lib>-<version>.md
-└── tech-debt/<module>/                ← deferred non-critical findings (drained by `/kit-techdebt`)
-    ├── <slug>.md                      ← open / in-progress
-    └── done/<slug>.md                 ← archived after fix
+  features/<module>/<feature>/
+    feature.md        — design doc: Why / ACs / ECs / How it works / Test plan / Implementation plan
+    test-cases.md     — live state: TC table + Defects log
+    retro.md          — optional: bug-fix retrospectives
+
+  guidelines/<module>/<topic>.md     — coding patterns
+  guidelines/libs/<lib>-<version>.md — cached external API docs
+
+  tech-debt/<module>/<slug>.md       — open deferred items
+  tech-debt/<module>/done/<slug>.md  — closed items
+
+  _templates/feature.md    — feature doc skeleton
+  _templates/test-cases.md — test cases skeleton
+  _templates/retro.md      — retro skeleton
+  _templates/tech-debt.md  — tech-debt entry skeleton
 ```
 
----
+## Modules
 
-## Agent Workflow
+| Module | Source root |
+|--------|-------------|
+| `common` | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/` |
+| `shared` | `shared/src/commonMain/kotlin/` |
 
-1. **Search**: `search_docs("topic", genre="guideline")` — find relevant rules
-2. **Read**: load linked documents via `[[wikilinks]]`
-3. **Execute**: implement by the rules
-4. **Write**: `write_guideline(...)` / `update_doc(...)` — record learnings
+## Build commands
 
----
+| Command | Purpose |
+|---------|---------|
+| `./gradlew :app:byCompose:common:build` | Build common module |
+| `./gradlew :shared:build` | Build shared module |
+| `./gradlew detekt ktlintCheck` | Lint + code style |
 
-## Quick Links
+## Quick links
 
-- Build: `./gradlew`
-- Compile: `./gradlew compileKotlin`
-- Test: `./gradlew :[module]:test`
-- Lint: `./gradlew detekt ktlintCheck`
+- Feature template: `vault/_templates/feature.md`
+- Test cases template: `vault/_templates/test-cases.md`
+- Agent config: `.claude/_shared.md`
+- File structure: `.claude/FILE_STRUCTURE.md`

@@ -1,4 +1,4 @@
-kit_version: 4.7.0
+kit_version: 5.2.0
 language_code: ru
 hosts: [claude-code]
 
@@ -7,6 +7,8 @@ project:
   description: "The best application for editing pdf"
 
 vault_path: vault
+
+auto_approve: false  # NEW in v5.0.0: when true, @Main skips CONFIRM in FEATURE/TECH. Replaces v4 AUTO_APPROVE=true magic string.
 
 stack:
   language: kotlin

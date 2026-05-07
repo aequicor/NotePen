@@ -1,7 +1,7 @@
-# AGENTS.md — shared / NotePen
+# CLAUDE.md — shared / NotePen
 
 > Nested module-level agent instructions for `shared`.
-> This file is closest to `shared/src/commonMain/kotlin/` — it takes precedence over the root `AGENTS.md`.
+> This file is closest to the source root — it takes precedence over the root `CLAUDE.md` for module-specific rules.
 
 ---
 
@@ -38,9 +38,10 @@
 
 ## Module Docs
 
-Docs path: `vault/shared/`
-- `requirements/` — business requirements
-- `spec/` — technical specifications
-- `guidelines/` — patterns and rules
-- `plans/` — implementation plans
-- `reports/` — bug fix reports
+Docs path: `vault/shared/features/`
+
+- One folder per feature: `<feature>/feature.md`, `<feature>/test-cases.md`, optional `<feature>/retro.md`.
+- Coding patterns / conventions for this module: `vault/shared/guidelines/<topic>.md` (optional).
+- Tech-debt entries: `vault/tech-debt/shared/`.
+
+---

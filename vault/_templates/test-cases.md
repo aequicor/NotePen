@@ -1,46 +1,46 @@
 ---
 genre: reference
-title: Test Cases Template (living document)
+title: Test Cases Template (live document)
 topic: testing
 triggers:
   - "test cases"
   - "test execution"
   - "manual testing"
-  - "test run"
 confidence: high
 source: human
 updated: 2026-05-07T00:00:00Z
 ---
 
-# Test Cases: [Feature Name]
+# Test cases — <feature>
 
-**Module:** [module-name]  
-**Feature:** [feature-slug]  
-**Generated:** YYYY-MM-DD by @QA  
-**Spec:** `[[reference/<module>/spec/<feature>]]`  
-**Requirements:** `[[concepts/<module>/requirements/<feature>]]`  
+**Module:** <module>
+**Feature:** <feature-slug>
+**Source:** `vault/features/<module>/<feature>/feature.md` § Test plan
 
 ---
 
 ## How this file works
 
-This is a **living document**. Ownership is split:
+Live document owned by `@TestKeeper` end-to-end:
 
-- **@QA** (REQUIREMENTS phase) — creates this file from requirements + corner cases. Fills the table with one row per TC. All Status default to `PEND`. Notes empty.
-- **@QA** (IMPLEMENTATION phase, DRAFT/FINAL) — appends impl-level TCs (unit-edge, integration, error). Append-only.
-- **@TestRunner** — interactive walkthrough (mode `EXECUTE`). Updates **Status only**. When a TC fails, allocates DEF-id and appends one entry to the Defects log (which references the TC by id).
-- **@BugFixer** — after a fix, updates Status `FAIL → PASS` and Defects log `OPEN → FIXED` for the row it fixed.
-- **Manual tester** — fills **Notes** when a TC fails (bug root cause, remarks). May also copy the `TC-00: Template` block and fill it in for any TC where elaboration helps (typically failing cases).
+- `MODE=GENERATE` creates this file from `feature.md § Test plan`.
+- `MODE=DRAFT` appends impl-level TCs (unit-edge, integration, error) once the implementation plan is written.
+- `MODE=EXECUTE` runs the test suite after `@CodeWriter` and updates `Status` per TC.
+- `MODE=RECONCILE` (after the last step) attaches `Test impl` references and reruns the full suite.
+- `MODE=RERUN` re-verifies a specific TC after a fix or with PO walkthrough.
+- `MODE=APPEND` adds a new TC row from a free-form bug report.
 
-AI agents do NOT touch the Notes column. AI agents do NOT generate per-TC detailed sections.
+`@BugFixer` flips `Status` from FAIL→PASS and the Defects log entry from OPEN→FIXED after a fix.
 
-`/kit-fix` reads this file, scans for `FAIL` and `PEND` rows, asks PO which to fix, dispatches @BugFixer per chosen TC, then dispatches @TestRunner (RERUN) to verify.
+The PO can edit the file directly — change a Status to FAIL, add a row, append a Note — and `/kit-fix` will pick it up via `MODE=SCAN`.
+
+`Notes` is the only column AI agents do not auto-fill: it is reserved for human observations during manual testing.
 
 ---
 
 ## Status legend
 
-`PEND`  •  `PASS`  •  `FAIL`  •  `SKIP`
+`PEND` (not run) • `PASS` • `FAIL` • `SKIP`
 
 ## Defect lifecycle
 
@@ -48,44 +48,19 @@ AI agents do NOT touch the Notes column. AI agents do NOT generate per-TC detail
 
 ---
 
-> Filled by AI agents. Columns AI may edit: **Status only**.
-> The **Notes** column is owned by the manual tester — written when a TC fails.
+| TC ID | Status | Type | Description | Verifies | Test impl | Notes |
+|-------|--------|------|-------------|----------|-----------|-------|
+| TC-1 | PEND | unit | <what to verify> | AC-1, EC-1 | (pending) | |
+| TC-2 | PEND | integration | ... | AC-2 | (pending) | |
 
-| ID    | Status | Notes | Type | Description | To be |
-|-------|--------|-------|------|-------------|-------|
-| TC-01 | PEND   | —     |      |             |       |
-
-> **Description** = what to test and how (one-line summary).
-> **To be** = expected outcome (observable, e.g. HTTP 200 + redirect).
-
----
-
-> Everything below is written by the manual tester. The `TC-00: Template`
-> block stays as-is — copy and fill it in for individual TCs only when you
-> want to elaborate (typically a failing case). AI agents must NOT duplicate
-> the table by generating `TC-NN` sections automatically.
-
----
-
-## TC-00: Template
-
-**Description:**
-what to test, how to test it
-
-**Steps:**
-
-1. step number 1
-
-**As is:**
-as is
-
-**To be:**
-what to be
+**Type:** `unit` | `unit-edge` | `integration` | `error` | `e2e` | `manual`.
+**Verifies:** comma-separated AC/EC ids from `feature.md`.
+**Test impl:** filled by `@TestKeeper RECONCILE` — `tests/path/to/file.kt:line`.
 
 ---
 
 ## Defects log
 
-> Append-only. Each entry references a TC by id. AI agents (@TestRunner / @BugFixer) maintain this section.
+> Append-only. Each entry references a TC by id.
 
-- **DEF-001** — [HIGH] *<one-line summary>*. TC-NN. Status: OPEN. Reported: YYYY-MM-DD by @TestRunner.
+- **DEF-1** — [HIGH] *<one-line summary>* — TC-NN — Status: OPEN — Opened: YYYY-MM-DD by @TestKeeper

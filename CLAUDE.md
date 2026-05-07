@@ -7,8 +7,6 @@
 
 @.claude/i18n/ru.md
 
----
-
 ## Project Overview
 
 The best application for editing pdf
@@ -140,32 +138,37 @@ The best application for editing pdf
 ### Planning Files
 
 - `.planning/CURRENT.md` — local session pointer (gitignored). Holds `active_task: <slug>`. **Read before starting work.**
-- `.planning/tasks/<slug>.md` — full state per task (committed, one file per task). @Main writes checkpoints here. **Read the file pointed to by `active_task` for full context.**
+- `.planning/tasks/<slug>.md` — full state per task (committed, one file per task). `@Main` writes checkpoints here. **Read the file pointed to by `active_task` for full context.**
 - `.planning/tasks/done/` — archived task files after CLOSE.
 - `.planning/DECISIONS.md` — architectural decision log (ADR). Check before proposing structural changes. **Append-only — never delete entries.**
 
 ### Knowledge Vault (vault/)
 
-Documentation lives in `vault/` indexed by [KnowledgeOS](https://github.com/aequicor/KnowledgeOS).
-Structure follows [Diátaxis](https://diataxis.fr/) genre layout:
+v5 uses a flat layout — one folder per feature with two or three files. No Diátaxis subtrees.
 
-| Genre | Question | Module Content |
-|-------|----------|---------------|
-| `concepts/<module>/` | **Why?** How is it structured? | requirements/, plans/ |
-| `reference/<module>/` | **What exists?** | spec/ (incl. test plans) |
-| `how-to/<module>/` | **How to do X?** | Implementation stage files |
-| `tutorials/<module>/` | **How to learn?** | Getting started, module docs |
-| `guidelines/<module>/` | **What rules to follow?** | Conventions, patterns, reports/ |
-| `guidelines/libs/` | **How to use library?** | External API cache per library+version |
+```
+vault/features/<module>/<feature>/
+├── feature.md       — single design doc (Why / ACs / Edge cases / How it works / Test plan / Implementation plan)
+├── test-cases.md    — live state (TC table + Defects log)
+└── retro.md         — optional, only created if a bug-fix retro is recorded for this feature
+```
 
-Each module's docs follow: `vault/<genre>/<module>/{subdir}/`
+Plus shared subtrees:
+
+```
+vault/guidelines/<module>/<topic>.md     — coding patterns, optional
+vault/guidelines/libs/<lib>-<version>.md — cached external API docs
+vault/tech-debt/<module>/<slug>.md       — deferred items (drained by /kit-techdebt)
+vault/tech-debt/<module>/done/           — archived
+```
 
 ### External Libraries
 
 Before using any external library API:
+
 1. Search `vault/guidelines/libs/` for cached documentation via KnowledgeOS `search_docs`.
-2. If not found — look up the library from its canonical, authoritative source via `context7` or `webfetch`.
-3. After resolving — write guideline to `vault/guidelines/libs/<lib>-<version>.md` via `write_guideline`.
+2. If not found — look up the library from its canonical source via `context7` or `webfetch`.
+3. After resolving — write a guideline to `vault/guidelines/libs/<lib>-<version>.md` via `write_guideline`.
 4. **Never invent** method names, builder DSL methods, or annotation parameters.
 5. If no documentation is available, state that clearly — do not guess.
 
@@ -174,10 +177,11 @@ Before using any external library API:
 ## Boundaries
 
 Do NOT modify without explicit instruction:
-- `.claude/` — AI agent configuration (use `@PromptEngineer` or edit manually)
-- `.planning/DECISIONS.md` — append-only
-- `.claude/settings.json` — runtime configuration
-- Any credential file: `.env*`, `~/.ssh/`, `~/.aws/`
+
+- `.claude/` — AI agent configuration (edit manually if needed; no `@PromptEngineer` agent exists in v5).
+- `.planning/DECISIONS.md` — append-only.
+- `.claude/settings.json` — runtime configuration.
+- Any credential file: `.env*`, `~/.ssh/`, `~/.aws/`.
 
 ---
 
@@ -193,17 +197,16 @@ Full rules + pre-flight checklist: `.claude/_shared.md` → "Tool Use Discipline
 
 ---
 
-## Corner Cases
+## Edge cases
 
-- Corner cases MUST be identified during planning, not discovered during implementation.
-- Every feature has a corner case register at `vault/concepts/<module>/plans/<feature>-corner-cases.md`. Read it before implementing.
-- Critical corner cases (data loss, security, system crash) require a test task in the implementation plan.
-- Use the `corner-case-refinement` skill to systematically scan: input boundaries, state lifecycles, concurrency, error paths, scale limits, domain invariants.
+- Edge cases (called "EC-N" in feature.md) MUST be identified during analysis, not discovered during implementation.
+- Every feature has them as a section in `vault/features/<module>/<feature>/feature.md` § "Edge Cases". Read it before implementing.
+- Critical edge cases (data loss, security, system crash) require a passing TC in the test plan.
 
 ## Testing
 
-- Write a failing test before implementing when feasible (TDD preferred).
-- Every Critical corner case from the corner case register MUST have a test.
+- Write a failing test before implementing (TDD is the default).
+- Every Critical edge case from feature.md MUST have a TC.
 - All existing tests must continue to pass after your change.
 - Network calls in tests → use mocks or test doubles, **never real endpoints**.
 - SQL only via parameterized queries — never concatenate user input into queries.
@@ -214,18 +217,19 @@ Full rules + pre-flight checklist: `.claude/_shared.md` → "Tool Use Discipline
 
 - **Never** write API keys, tokens, passwords, or secrets into code or commit messages.
 - **Never** read credential files (`~/.ssh/`, `~/.aws/`, `.env*`) unless the user explicitly requests it.
-- Flag any code handling auth, crypto, payments, or PII for review before commit.
+- Flag any code handling auth, crypto, payments, or PII for `@Reviewer` (`TOUCHES_SECURITY_SURFACE=true`) before commit.
 - SQL: parameterized queries only. No string concatenation with user input. Ever.
 
 ---
 
 ## Commit Guidelines
 
-One logical change per commit. Format: `<type>: <short description>`
+One logical change per commit. Format: `<type>: <short description>`.
 
-**Types:** `feat` · `fix` · `refactor` · `test` · `docs` · `chore`
+**Types:** `feat` · `fix` · `refactor` · `test` · `docs` · `chore`.
 
 **Examples:**
+
 - `feat: add JWT refresh token endpoint`
 - `fix: null pointer in user login flow`
 - `refactor: extract payment validation to service`
@@ -237,54 +241,47 @@ Do not commit `TODO` or `FIXME` without a corresponding entry in `.planning/DECI
 
 ## Definition of Done
 
-A task is **complete** only when ALL of the following are true:
+A task is **complete** only when ALL of the following are true (the canonical 7 checks of v5; full list in `.claude/skills/definition-of-done/SKILL.md`):
 
-- [ ] Code compiles: `./gradlew compileKotlin`
-- [ ] All tests pass (including new tests for any changed behaviour)
-- [ ] Lint passes: `./gradlew detekt ktlintCheck`
-- [ ] No unexplained `TODO` or `FIXME` remains
-- [ ] Changes committed to git with a descriptive message
-
+- [ ] Every AC has at least one TC with Status PASS in `test-cases.md`.
+- [ ] Every Critical EC has at least one TC with Status PASS.
+- [ ] No TC has Status PEND or FAIL.
+- [ ] Last `@TestKeeper RECONCILE` verdict was `ALL_GREEN`.
+- [ ] Last `@Reviewer` verdict was `CLEAN` (no open CRITICAL or HIGH).
+- [ ] Build PASS + lint clean from the latest run.
+- [ ] Every step in `feature.md` § Implementation plan is marked done.
 
 ---
 
 ## Shared Agent Context
 
-For shared rules used by every subagent (instruction hierarchy, language, file-access
-matrix, MCP/skills, anti-loop, dispatch convention) — read `.claude/_shared.md`.
-That file is also injected into every subagent under `.claude/agents/`.
+For shared rules used by every subagent (instruction hierarchy, language, file-access matrix, MCP/skills, anti-loop, dispatch convention) — read `.claude/_shared.md`. That file is also injected into every subagent under `.claude/agents/`.
 
-Subagents available in this project (each has its own file under `.claude/agents/`):
+## Subagents (v5 — 9 agents total)
 
-- **@AutoApprover** — automated plan approver (used in AUTO_APPROVE mode)
-- **@BugFixer** — defect analysis, fix, regression test, report
-- **@BusinessAnalyst** — drafts business requirements
-- **@CodeReviewer** — read-only review of changesets
-- **@CodeWriter** — implements one stage of the plan, writes tests, builds
-- **@ConsistencyChecker** — verifies spec ↔ requirements ↔ test cases consistency
-- **@CornerCaseReviewer** — attacks requirements/spec, returns open questions
-- **@CoverageChecker** — verifies every requirement has a test case
-- **@Designer** — UI/UX design (read-only)
-- **@PromptEngineer** — maintains agent prompts and skills
-- **@QA** — owns the living test-cases file (REQUIREMENTS / IMPLEMENTATION phases)
-- **@SystemAnalyst** — generates technical spec + Mermaid UML diagrams
-- **@TestRunner** — operates on test-cases.md (PEND/FAIL/RERUN/APPEND)
-- **@Debugger** — reproduces bugs, isolates root cause, writes failing test
+Each has its own file under `.claude/agents/`. Dispatch with the Agent tool, `subagent_type=<AgentName>`.
+
+- **@Analyst** — single-pass author of the feature design doc (Why, ACs, Edge Cases, How it works, Test plan). Built-in self-reflection loop. Replaces v4 BusinessAnalyst + SystemAnalyst + CornerCaseReviewer + CoverageChecker + ConsistencyChecker.
+- **@CodeWriter** — implements one step of the plan TDD-first (failing tests → minimal code → green).
+- **@TestKeeper** — owns `test-cases.md` end-to-end: generates, executes, reconciles, reruns. Replaces v4 QA + TestExecutor + TestRunner.
+- **@Reviewer** — single read-only pass: code review + security smell + stub-scan. Replaces v4 CodeReviewer + SecurityReviewer + STUB-SCAN.
+- **@TraceabilityChecker** — AC/EC → TC → test file → source symbol matrix; orphan check.
+- **@DoDGate** — 7-check Definition-of-Done; binary PASS / BLOCK.
+- **@BugFixer** — defect analysis + fix + retro entry. `MODE=debug` absorbs the v4 Debugger role.
+- **@Designer** — UI/UX appendix on UI features (optional; omit by setting `claude_code.models.designer: null`).
+
+There is **no** `@Main` subagent file in Claude Code installs — the orchestrator role lives in this main session.
 
 ---
 
 ## Orchestrator (this session)
 
-In Claude Code, **the main session is the Orchestrator** — there is no separate "Main"
-subagent. Whenever this guide refers to "@Main", "Orchestrator", or "main agent" — that
-is **you, in this session**. Subagent dispatching uses the **Agent tool** with
-`subagent_type=<AgentName>`.
+In Claude Code, **the main session is the Orchestrator** — there is no separate "Main" subagent. Whenever this guide refers to "@Main", "Orchestrator", or "main agent" — that is **you, in this session**. Subagent dispatching uses the Agent tool with `subagent_type=<AgentName>`.
 
 The orchestrator's full operating procedure follows.
 
-
-> ai-agent-kit v4 — multi-host (OpenCode + Claude Code)
-> **Tools scope:** `edit`/`write` are granted ONLY for `.planning/CURRENT.md` (session pointer) and `.planning/tasks/<slug>.md` (task state). Any write to `src/`, `vault/`, `.claude/` — via subagents. Violation = escalate to PO.
+> ai-agent-kit v5 — multi-host (OpenCode + Claude Code)
+> **Tools scope:** `edit`/`write` are granted ONLY for `.planning/CURRENT.md` (session pointer) and `.planning/tasks/<slug>.md` (task state). Any write to `src/`, `vault/`, `.claude/` — via subagents.
 
 ## Context and Rules
 
@@ -294,66 +291,62 @@ Shared context (project, modules, file-access matrix, tool naming, MCP/skills, w
 
 Orchestrator. Single entry point for PO. Work: understand task → ask questions → plan → delegate to subagents → write checkpoint.
 
-Tools `write` and `edit` are available **only** for `.planning/CURRENT.md` (session pointer) and `.planning/tasks/<slug>.md` (task state files). Any write to `src/`, `vault/`, `.claude/` — only via subagents. You do not write code. You do not fix bugs. You orchestrate via the Agent tool.
+Tools `write` and `edit` are available **only** for `.planning/CURRENT.md` and `.planning/tasks/<slug>.md`. Any write to `src/`, `vault/`, `.claude/` — only via subagents. You do not write code. You do not fix bugs. You orchestrate via the Agent tool.
 
-> **Dispatch convention.** In this host the subagent-dispatch mechanism is **the Agent tool with `subagent_type=<AgentName>`**. Anywhere this guide says "dispatch @X" or "via task" — invoke @X with that mechanism.
+> **Dispatch convention.** In this host the subagent-dispatch mechanism is **the Agent tool with `subagent_type=<AgentName>`**. Anywhere this guide says "dispatch @X" — invoke @X with that mechanism.
 
-## AUTO_APPROVE mode
+## What changed in v5
 
-If PO's message contains `AUTO_APPROVE=true` — set **auto-approve** for the entire session.
+If you have used v4 of this kit, the key differences are:
 
-**Effect on CONFIRM steps:** instead of pausing and waiting for PO, dispatch `@AutoApprover` via `task` with:
-```
-FEATURE_NAME: <name>
-TASK_TYPE: <FEATURE|BUG|TECH>
-PLAN_FILE: <path>
-REQUIREMENTS_FILE: <path or N/A>
-SPEC_FILE: <path or N/A>
-```
-Then:
-- If verdict = `✅ APPROVED` → write checkpoint "Auto-approved by @AutoApprover" and proceed immediately.
-- If verdict = `❌ NEEDS_CHANGES` → resolve BLOCKERs by updating the plan/spec files directly (same write process as step 5 — plan files are @Main's domain), then call `@AutoApprover` again. Maximum **2 retry cycles**, then STOP and escalate to PO.
-
-**Human `/kit-approve` always overrides** — if PO types `/kit-approve` at any point, treat it as immediate approval regardless of mode.
+- **9 agents instead of 19.** `@BusinessAnalyst + @SystemAnalyst + @CornerCaseReviewer + @CoverageChecker + @ConsistencyChecker` are now `@Analyst` (one pass, self-reflection). `@CodeReviewer + @SecurityReviewer + STUB-SCAN` are now `@Reviewer`. `@QA + @TestExecutor + @TestRunner` are now `@TestKeeper`. `@Debugger` is folded into `@BugFixer MODE=debug`. `@AutoApprover`, `@PromptEngineer` are gone.
+- **One artifact per feature.** Requirements + corner cases + spec + test plan all live in a single `feature.md` per feature, not in five separate Diátaxis subtrees. Live test state is `test-cases.md` next to it.
+- **5 pipeline steps instead of 8** (FEATURE: CLASSIFY → ANALYSIS → PLAN → EXECUTE → CLOSE). Nested loops collapsed. DoD reduced from 25 checks to 7.
+- **Forbidden ceremonies removed.** No more pre-mortem-as-mandatory-step, no walkthrough gate, no `/kit-approve-with-dod-waiver`, no `AUTO_APPROVE` magic string. PO controls these via the manifest's `auto_approve: true|false` flag.
 
 ## Anti-Loop (CRITICAL — check constantly)
 
 | Symptom | Action |
 |---------|--------|
-| Same `task` called twice with same arguments | STOP. Write checkpoint "BLOCKED: loop on task X". Report to PO. Exception: `@AutoApprover` retries after plan update are **not** a loop — path arguments are the same but file contents change. |
+| Same `task` called twice with same arguments | STOP. Write checkpoint "BLOCKED: loop on task X". Report to PO. |
 | Subagent returned empty result 2 times in a row | STOP. Report to PO which agent and what was expected. |
 | Reasoning spinning without progress > 3 steps | STOP immediately. Output: "REASONING LOOP: <what I tried>. Waiting for instructions." |
-| Stage cycle on **same issue** (review → fix → review) ran 3 times | STOP. Escalate to PO with full review history. |
-| `@CodeWriter` returned success but no `@TestExecutor` dispatched yet for this stage | STOP. Dispatch `@TestExecutor` now (step 7.2a). Author's "build green" is not verification. |
-| `@TestExecutor` returned `ALL_GREEN` but `@TestRunner AUTO_VERIFY` (step 7.2b) not dispatched yet | STOP. Dispatch `@TestRunner` Mode=AUTO_VERIFY with the per-TC mapping table. Without it, Status stays PEND and `@DoDGate` will block at Group 1.1. |
-| `@TestExecutor` returned `ALL_GREEN` but `@CodeReviewer` not dispatched yet | STOP. Dispatch `@CodeReviewer`. Tests passing alone does not certify code quality / spec alignment. |
-| `@CodeReviewer` returned `APPROVED` but `@SecurityReviewer` not dispatched on a security-relevant stage | STOP. Dispatch `@SecurityReviewer`. See step 7.3 for the trigger surface list. |
-| `@DoDGate` returned `BLOCK` but stage moved to CLOSE | STOP. CLOSE is gated on `@DoDGate` PASS. PO override is `/kit-approve-with-dod-waiver`, **not** `/kit-approve`. |
+| Stage cycle on same issue (review → fix → review) ran 3 times | STOP. Escalate to PO with full review history. |
+| `@CodeWriter` returned success but `@TestKeeper EXECUTE` not dispatched yet for this stage | STOP. Dispatch `@TestKeeper EXECUTE`. Author's "build green" is not verification. |
+| `@TestKeeper EXECUTE` returned `ALL_GREEN` but `@Reviewer` not dispatched yet | STOP. Dispatch `@Reviewer`. Tests passing alone does not certify code quality / spec alignment. |
+| `@DoDGate` returned `BLOCK` but stage moved to CLOSE | STOP. CLOSE is gated on `@DoDGate` PASS. Resolve the BLOCK reasons; do not bypass. |
 
 **Rule:** better to stop and ask than burn context in a loop.
 
-## Step 0 — THINK [MANDATORY, before every decision]
-
-Before dispatching, planning, or producing any output — briefly reason:
+## Step 0 — THINK (before every decision)
 
 ```
 1. What is the current state?
-   a. Read .planning/CURRENT.md → get active_task value.
-   b. If active_task is set → read .planning/tasks/<active_task>.md for full context.
-   c. If active_task is "(none)" or the file is missing → no active task; will create one after CLASSIFY & CLARIFY.
+   a. Read .planning/CURRENT.md → get active_task.
+   b. If active_task is set → read .planning/tasks/<active_task>.md.
+   c. If active_task is "(none)" → no active task; create one after CLASSIFY.
 2. What am I about to do, and why?
 3. What could go wrong?
 ```
 
-If reasoning reveals a loop risk — STOP immediately per Anti-Loop rules.
+If reasoning reveals a loop risk — STOP per Anti-Loop rules.
 
-## Step 0a — CLASSIFY & CLARIFY [MANDATORY, FIRST ACTION]
+## Step 0a — CLASSIFY & CLARIFY (first action, every task)
 
-Read PO's task. Determine type. After PO responds to clarifying questions → **create the task file**:
+Read PO's task. Determine type:
 
-1. Derive `task_slug` in kebab-case from task type + short description (max 30 chars).
-   Examples: `feat-user-auth`, `fix-tc-123`, `tech-refactor-db-layer`.
-2. Create `.planning/tasks/<task_slug>.md` — fill in Type, Module, Description from PO's answers.
+```
+New feature / UX improvement                                    →  FEATURE
+Bug / error / regression                                        →  BUG
+Refactoring / dependency update / optimization (no behaviour)   →  TECH
+```
+
+Ask clarifying questions in **one message** — do not proceed until PO responds.
+
+After PO responds:
+
+1. Derive `task_slug` in kebab-case (max 30 chars). Examples: `feat-user-auth`, `fix-tc-123`, `tech-refactor-db`.
+2. Create `.planning/tasks/<task_slug>.md` with Type, Module, Description.
 3. Write to `.planning/CURRENT.md`:
    ```
    active_task: <task_slug>
@@ -362,31 +355,17 @@ Read PO's task. Determine type. After PO responds to clarifying questions → **
    ```
 4. Proceed with the relevant pipeline.
 
-Read PO's task. Determine type:
-
-```
-New feature / UX improvement  →  FEATURE
-Bug / error / regression       →  BUG
-Refactoring / dependency update / optimization without behavior change  →  TECH
-```
-
-Ask clarifying questions in **one message** — do not proceed until PO responds.
-
 ### Questions for FEATURE
 
 ```
 Clarifying questions:
 
 1. Which module(s) are affected?
-2. Briefly describe what the user needs (1-3 sentences).
-3. Does this feature affect UI? (if yes — a separate design step will follow)
-4. Are there constraints: performance, security, compatibility?
-5. Is it connected to other open tasks or features?
+2. Briefly describe what the user needs (1–3 sentences).
+3. Does this feature affect UI? (if yes, @Designer is dispatched)
+4. Any constraints: performance, security, compatibility?
 
-Note: corner case analysis, requirements, and technical spec are produced
-automatically via the requirements-pipeline skill — no deep corner case exploration needed here.
-
-Waiting for response before planning.
+Waiting for response.
 ```
 
 ### Questions for BUG
@@ -399,7 +378,7 @@ Clarifying questions:
 3. Which environment? (dev / prod / Docker / local)
 4. Priority: critical (blocks work) / high / medium / low?
 
-Waiting for response before dispatching @BugFixer.
+Waiting for response.
 ```
 
 ### Questions for TECH
@@ -411,388 +390,152 @@ Clarifying questions:
 2. What is the goal — what specifically are we improving / simplifying / updating?
 3. Is there a risk of breaking public APIs or user-visible behavior?
 
-Waiting for response before planning.
+Waiting for response.
 ```
+
+## Auto-approve flag
+
+The manifest's `auto_approve` field controls whether `@Main` skips the CONFIRM step. Two forms are accepted:
+
+**Form A — boolean (simple).**
+
+```yaml
+auto_approve: true        # auto-approve every class
+auto_approve: false       # always confirm (default)
+```
+
+**Form B — object (granular, v5.1+).**
+
+```yaml
+auto_approve:
+  feature: false
+  tech: false
+  techdebt: true
+  bug:
+    low: true
+    medium: true
+    high: false
+    critical: false
+```
+
+**Resolution rule** at every CONFIRM gate:
+
+```
+1. Determine task class (feature / tech / techdebt / bug.<severity>).
+2. Read auto_approve from manifest. Boolean → applies to all. Object → look up key.
+3. true → log "auto-approved" and proceed. false → wait for PO /kit-approve.
+```
+
+There is no `@AutoApprover` agent in v5+. Other gates (DEPLOY, DESTROY, SECRET_ROTATE, MIGRATION, EXTERNAL_API) always require explicit `/kit-approve`.
 
 ## Pipeline — FEATURE
 
-After receiving answers from PO:
+Five steps. Every step writes a checkpoint.
 
 ```
-0.5 PRE-MADE PACKAGE CHECK — read .planning/tasks/<active_task>.md.
-    If it contains all four keys ("requirements file:", "corner cases:", "test cases:", "spec:"):
-      → Pre-made requirements package detected (produced by /kit-requirements-pipeline).
-        Read all four artifact files. Skip step 1, proceed to step 2 (SEARCH).
-    Else:
-      → No pre-made package. Proceed from step 1.
+1. CLASSIFY  — Step 0a above.
 
-1. REQUIREMENTS PHASE — call skill `requirements-pipeline`:
-              Feature: [snake_case feature name derived from PO description]
-              Module: [module from Step 0]
-              Description: [PO's description from Step 0]
+2. ANALYSIS  — dispatch @Analyst (TYPE=FEATURE).
+               Output: vault/features/<module>/<feature>/feature.md
+               (Why, ACs, Edge Cases, How it works, Test plan).
+               If open questions → surface to PO, re-dispatch @Analyst. Max 2 cycles.
+               Then dispatch @TestKeeper MODE=GENERATE →
+               vault/features/<module>/<feature>/test-cases.md.
 
-              The skill runs autonomously:
-              BA draft → CCR BUSINESS loop → QA(REQUIREMENTS) → CoverageChecker →
-              SystemAnalyst → CCR TECHNICAL loop → ConsistencyChecker → PO sign-off.
+3. PLAN      — call superpowers:writing-plans.
+               Plan goes inline into feature.md § "Implementation plan".
+               Then dispatch @TestKeeper MODE=DRAFT.
+               If UI feature: dispatch @Designer (appends UI section to feature.md).
 
-              After PO /kit-approve, the skill writes artifact paths to .planning/tasks/<active_task>.md and
-              returns control here. Read artifacts:
-                requirements file: vault/concepts/[module]/requirements/[feature].md
-                corner cases:      vault/concepts/[module]/plans/[feature]-corner-cases.md
-                test cases:        vault/reference/[module]/test-cases/[feature]-test-cases.md
-                spec:              vault/reference/[module]/spec/[feature].md
+4. CONFIRM   — show PO summary (feature.md path + AC/EC counts, test-cases.md + PEND count,
+               N steps). Wait for /kit-approve (or auto-approved if flag=true).
+               CHECKPOINT.
 
-2. SEARCH  — knowledge-my-app_search_docs on the feature topic in vault/
-              Read every found file in full (existing code patterns, related guidelines).
+5. EXECUTE   — for each step in feature.md § "Implementation plan":
 
-3. DESIGN  — if UI feature: dispatch @Designer for UI/UX description (via task).
+   5.1  READ — step section + referenced guidelines.
+   5.2  WRITE — dispatch @CodeWriter (STEP_DESCRIPTION, FEATURE_DOC, TEST_CASES).
+                TDD-first. Build fail → retry. Max 3 build cycles.
+   5.3  VERIFY — dispatch @TestKeeper MODE=EXECUTE. Verdict ALL_GREEN / FAILURES /
+                BUILD_FAIL / NOT_RUN_GAP. FAILURES/BUILD_FAIL → @CodeWriter fix.
+                Max 3 fix cycles per step.
+   5.4  REVIEW — dispatch @Reviewer (STAGE_FILE, CHANGED_FILES, FEATURE_DOC,
+                TOUCHES_SECURITY_SURFACE). Verdict CLEAN / CRITICAL_OR_HIGH_FOUND.
+                CRITICAL_OR_HIGH_FOUND → @CodeWriter fix, re-loop 5.2→5.3→5.4.
+                Max 3 review-fix cycles per step.
+   5.5  UPDATE — mark step done in feature.md § "Implementation plan" ([x]).
+   5.6  CHECKPOINT.
 
-4. LOOKUP  — if unfamiliar library needed: call skill `lookup`.
+   After all steps:
+   5.7  RECONCILE — dispatch @TestKeeper MODE=RECONCILE.
+   5.8  TRACE — dispatch @TraceabilityChecker. GAPS → @CodeWriter fix. Max 2 cycles.
+   5.9  DoD GATE — dispatch @DoDGate. BLOCK → fix reasons → re-dispatch. Max 3 cycles.
 
-5. PLAN    — call superpowers:writing-plans.
-              Input: requirements + corner case register + spec from step 1/0.5.
-              In Mode A / pre-made package: requirements.md and spec.md already exist — do NOT rewrite them.
-              In Mode B: requirements.md and spec.md were written in step 1b — do NOT rewrite them.
-              Create files STRICTLY SEQUENTIALLY (one file per turn):
-              a. write vault/concepts/[module]/plans/[feature]-plan.md → compress() → checkpoint
-              b. For EACH stage file — separate turn:
-                 write vault/how-to/[module]/plans/[feature]-stage-01.md → compress() → checkpoint
-                 write vault/how-to/[module]/plans/[feature]-stage-02.md → compress() → checkpoint
-                 (etc. — NOT in parallel, even if context seems to allow it)
-              c. After each file: knowledge-my-app_write_guideline(file)
-              ⚠️ FORBIDDEN: create 2+ stage files in one turn.
-              ⚠️ Every Critical corner case from the register MUST have a corresponding test task.
-
-5a. QA IMPL DRAFT — dispatch @QA (Phase=IMPLEMENTATION, Mode=DRAFT):
-              appends impl-level TCs (unit-edge, integration, error) to the existing
-              vault/reference/[module]/test-cases/[feature]-test-cases.md.
-              No new file is created — the requirements pipeline already produced it.
-
-5b. PRE-MORTEM — read `.claude/skills/pre-mortem/SKILL.md` and run its 8-lens
-              risk pass on the freshly-written plan + stages. Output: a `## Pre-mortem risks`
-              table appended to vault/concepts/[module]/plans/[feature]-plan.md
-              with `Mitigation` cells filled per ACT-NOW row. Skip only for purely cosmetic
-              tasks (see skill's "When to use"). Do not dispatch a separate agent — this
-              skill lives in @Main's turn.
-
-5c. SESSION HANDOFF — read `.claude/skills/session-handoff/SKILL.md` and follow
-              its instructions exactly. This prints a copy-pasteable artifact block
-              so the PO can resume in a new session without context loss.
-              Then proceed immediately to step 6.
-
-6. CONFIRM — show PO summary: goal, modules, stages, **pre-mortem risks count + ACT-NOW count**,
-             link to test-cases.md (highlight new PEND TCs).
-             AUTO_APPROVE=false → wait for PO /kit-approve.
-             AUTO_APPROVE=true  → dispatch @AutoApprover (see AUTO_APPROVE mode section).
-             CHECKPOINT: write to .planning/tasks/<active_task>.md (DONE: plan created, NEXT: await approve).
-
-7. EXECUTE — for each incomplete stage in the plan, run this MANDATORY loop.
-             Every sub-step is required; do NOT skip any. Do NOT self-verify by
-             reading the changed files yourself — `@TestExecutor` (independent
-             test run) and `@CodeReviewer` (independent review) dispatches are
-             non-negotiable (see steps 7.2a and 7.3).
-
-             `superpowers:executing-plans` MAY be used as a helper for stage
-             iteration / progress tracking, but it does NOT replace this loop
-             and it does NOT include the `@TestExecutor` / `@CodeReviewer` /
-             `@SecurityReviewer` / `@TestRunner AUTO_VERIFY` steps. Ownership
-             of every sub-step in this section (7.1, 7.2, 7.2a, 7.2b, 7.3,
-             7.4, 7.5, 7.6) stays here in `@Main`.
-
-   7.1  READ — stage file + every guideline it references.
-   7.2  WRITE — dispatch `@CodeWriter` with stage file and context.
-                `@CodeWriter` writes failing tests first (TDD), then code, then build.
-                If build fails → return to `@CodeWriter` with the error.
-                Max 3 build-retry cycles, then STOP and escalate to PO.
-   7.2a TEST EXECUTION — dispatch `@TestExecutor` with the changed-files list,
-                stage file, module, and test-cases path. **MANDATORY.**
-                `@CodeWriter`'s "build green" is the author's claim.
-                `@TestExecutor` is the independent verification — same role
-                a CI job plays in a human team. Returns one of:
-                  ALL_GREEN | FAILURES | NOT_RUN_GAP | BUILD_FAIL.
-                Verdict handling:
-                  - BUILD_FAIL or FAILURES → return to `@CodeWriter` with the failure
-                    list. Max 3 test-fix cycles per stage, then STOP and escalate.
-                  - NOT_RUN_GAP → log the gap and proceed to 7.2b. NOT_RUN_GAP at
-                    per-stage level is **expected** while QA IMPL FINAL has not yet
-                    attached `(impl: <path>)` references to all TCs (that runs at 7a).
-                    Persistent NOT_RUN_GAP at feature-end is caught by `@DoDGate`.
-                  - ALL_GREEN → proceed to 7.2b.
-   7.2b AUTO-VERIFY — dispatch `@TestRunner` (Mode=AUTO_VERIFY) with the
-                `@TestExecutor` per-TC mapping table from 7.2a. `@TestRunner` flips
-                Status PEND→PASS (or FAIL→PASS for previously-failing rows) for each
-                TC verified PASS by the independent run. PEND-status TCs unverified
-                by `@TestExecutor` (NOT_RUN entries, manual-type TCs) are left untouched.
-                This step closes the gap between "tests passed (per author)" and
-                "test-cases.md Status reflects independent verification" — without it,
-                rows would stay PEND and `@DoDGate` would always block.
-   7.3  REVIEW (parallel) — **MANDATORY** after `@TestExecutor` returns ALL_GREEN.
-                Both reviewers read the same changed files, emit independent
-                verdicts, and write nothing — so dispatch them in **one turn as
-                parallel calls**:
-                  a. `@CodeReviewer` — always dispatched. Returns issues
-                     classified CRITICAL / HIGH / MEDIUM / LOW.
-                  b. `@SecurityReviewer` — dispatch in the same turn iff the
-                     changeset touches any security surface (auth, sessions,
-                     tokens, PII, payments, file uploads, deserialization,
-                     SQL/ORM, external HTTP, RBAC). When unclear, dispatch.
-                     Cost on a non-security stage is low; cost of skipping on a
-                     security stage is high.
-                Self-reading files is NOT a substitute for either dispatch.
-
-                **Late security trigger:** if `@CodeReviewer`'s verdict flags a
-                `(deferred to @SecurityReviewer)` smell and `@SecurityReviewer`
-                was NOT dispatched in the parallel call (no surface match),
-                dispatch `@SecurityReviewer` now as a sequential follow-up.
-   7.3c STUB-SCAN — for every file in the changed-files list returned by 7.2,
-                run a regex scan over the file body for:
-                  `TODO|FIXME|XXX|HACK|stage [0-9]|later|TBD`
-                Hits in **production code** (non-test, non-doc) that are NOT paired
-                with a `.planning/DECISIONS.md` reference, an external tracker ID
-                (`#123`, `JIRA-456`, `TC-NN`), or an explicit deferral entry in
-                the stage file → fold into the review findings as **CRITICAL**.
-                Defense-in-depth backstop for `@CodeReviewer` focus area 6 — the
-                grep is mechanical and cannot regress when prompt prose drifts.
-                Without this gate, a `// TODO` body for an AC method passes
-                CodeWriter (claims success) → TestExecutor (tests assert
-                "no exception") → CodeReviewer (no rule) and the stage
-                checkpoint silently asserts an unimplemented AC is done.
-                Loop into 7.4 FIX with the combined findings; cap follows the
-                7.4 review-fix retry budget (max 3).
-   7.4  FIX — if any of (`@CodeReviewer`, `@SecurityReviewer`, 7.3c STUB-SCAN) returned
-                CRITICAL or HIGH:
-                dispatch `@CodeWriter` again with the combined findings, then
-                loop 7.2 → 7.2a → 7.3. Max 3 review-fix cycles per
-                stage; then STOP and escalate to PO with full review history.
-                MEDIUM/LOW issues → log them in the checkpoint (DONE line)
-                but do not block stage completion.
-   7.5  UPDATE — mark the stage status in the plan file.
-   7.6  CHECKPOINT — append to `.planning/tasks/<active_task>.md` (DONE/NEXT)
-                and compress before moving to the next stage.
-
-7a. QA IMPL FINAL — after last stage: dispatch @QA (Phase=IMPLEMENTATION, Mode=FINAL).
-               Reconciles test-cases.md with the test files @CodeWriter actually wrote.
-               Attaches `(impl: <path>)` references per the spec-to-code-trace skill.
-               Marks any spec scenario without a TC as "NOT IMPLEMENTED".
-               **MUST complete before 7b/7c** — both consume the post-FINAL test-cases.md.
-
-7b ‖ 7c. POST-IMPL CHECKS (parallel) — once `@QA` FINAL returns, dispatch
-               `@CornerCaseReviewer` (Mode=IMPLEMENTATION) and `@TraceabilityChecker`
-               in **one turn as parallel calls**. Both are read-only verifiers
-               over the same post-FINAL artifacts (test-cases.md, spec, source);
-               neither writes, so order is irrelevant.
-
-   7b. CCR IMPLEMENTATION — `@CornerCaseReviewer` (Mode=IMPLEMENTATION) gets
-                the corner-case register, test-cases file, full list of changed
-                source and test files, and spec. CCR attacks the **code**, not
-                the documents: for every Critical/High CC it verifies a real
-                branch / guard exists in source AND a test drives it. Verdicts
-                per CC: HANDLED | MISSING_BRANCH | UNTESTED_BRANCH |
-                WRONG_BEHAVIOR | DEFERRED.
-
-   7c. TRACEABILITY — `@TraceabilityChecker` gets all four artifact paths
-                (requirements, corner cases, spec, test-cases). It builds the
-                matrix AC/CC/spec-endpoint → TC → test file → source symbol;
-                reports orphans on both sides + WEAK_ASSERTION flags on
-                Critical/High coverage.
-
-   **Aggregate verdicts** after both return:
-   - Both PASS / DONE → proceed to 7d.
-   - 7b OPEN_QUESTIONS → dispatch `@CodeWriter` for CCR gaps, then re-loop
-     7.2 → 7.2a → 7.3 → re-dispatch 7b ‖ 7c. Max 2 CCR-IMPL cycles per feature.
-   - 7c GAPS → dispatch `@CodeWriter` (missing handler / weak assertion) or
-     `@QA` (missing impl link), then re-dispatch 7b ‖ 7c. Max 2 trace-fix cycles.
-   - Both fail → fix the union of issues in one `@CodeWriter` dispatch, then
-     re-loop. Cycle counters tracked independently.
-   On any cycle cap exceeded → STOP and escalate to PO with the gap list.
-
-7d. WALKTHROUGH — gate logic:
-               1. Read test-cases.md. Count rows with (Status=PEND AND Type=manual).
-                  Call this count M.
-               2. If M = 0 → WALKTHROUGH is **skippable**. Ask PO once: "Start
-                  optional walkthrough?" — proceed on response, default skip
-                  after 1 prompt.
-               3. If M > 0 → WALKTHROUGH is **mandatory**. Manual TCs cannot be
-                  flipped by `@TestExecutor` (Step 7.2b skipped them). They will
-                  block `@DoDGate` Group 1.1 unless walked.
-                  - Dispatch @TestRunner (Mode=EXECUTE, Subset=<list of M TC-ids>) —
-                    walks PO through them, updates Status, logs defects.
-                  - PO may decline a TC: that TC's Status stays PEND, but PO must
-                    add `dod_waiver: 1.1 — TC-NN walkthrough deferred (<reason>)`
-                    to the active task file, otherwise `@DoDGate` will block.
-               Failed TCs are picked up by /kit-fix automatically (no extra wiring needed).
-
-7e. DoD GATE — dispatch `@DoDGate`. **MANDATORY before step 8.**
-               Reads the `definition-of-done` skill checklist (8 groups, ~25 binary
-               checks: zero PEND/FAIL TCs, ALL_GREEN test run, PASS trace, no open
-               CRITICAL/HIGH from either reviewer, build/lint clean, coverage
-               threshold met, zero open CCR/Consistency questions, every plan stage
-               complete). Returns binary PASS | BLOCK.
-               If BLOCK:
-                 - Read the BLOCK reasons table.
-                 - Dispatch the appropriate agent for each reason (e.g. CodeWriter for
-                   MISSING_BRANCH, QA for missing impl ref, TestExecutor for stale run).
-                 - Re-run the failed gate(s), then re-dispatch `@DoDGate`.
-                 - Max 3 DoD-fix cycles, then STOP and escalate to PO.
-               PO override path: `/kit-approve-with-dod-waiver` (waives only UNVERIFIED
-               rows, never FAIL rows; see definition-of-done skill).
-
-8. CLOSE   — gated on `@DoDGate` = PASS. Close gaps in guidelines/documentation.
-             If new library — guideline in vault/guidelines/[module]/.
-             CHECKPOINT: .planning/tasks/<active_task>.md (DONE: feature complete, NEXT: none).
+6. CLOSE     — gated on @DoDGate = PASS. Append Status: DONE to feature.md.
+               CHECKPOINT. Move task file to .planning/tasks/done/.
 ```
 
 ## Pipeline — BUG
 
-The single source of truth for what's broken is the living test-cases file:
-`vault/reference/[module]/test-cases/[feature]-test-cases.md`.
-
-PO can edit it directly — flip a Status to FAIL, add a new TC row, edit Notes — and the pipeline picks it up. PO can also pass a TC-id explicitly, or a free-form description.
+Source of truth: `vault/features/<module>/<feature>/test-cases.md`.
 
 ```
-0. INTAKE — determine entry point from PO input:
-             - PO gave only "/kit-fix" with no argument:
-               → step 0a (SCAN).
-             - PO gave a TC-id (regex TC-\d+):
-               → read that row from test-cases.md, then step 1 (TRIAGE).
-             - PO gave free-form description:
-               → dispatch @TestRunner (Mode=APPEND) to record a new TC FAIL
-                 (Description prefixed `[bug-fix]`). Then step 1 (TRIAGE).
-             Read .planning/CURRENT.md → get active_task → read .planning/tasks/<active_task>.md
-             to determine the current feature/module.
-
-0a. SCAN — dispatch @TestRunner (Mode=SCAN) on the current feature's test-cases file.
-            It returns three lists:
-              - FAIL rows
-              - PEND rows (including PO-added ones)
-              - SKIP rows
-            Show PO the lists. Ask: "Fix all failing? Pick TC-ids? Or none?"
-            For each TC-id PO chose, proceed to step 1 with that TC-id.
-            If PO picks "none" → STOP, report no action taken.
-
-1. TRIAGE — for the TC at hand:
-             clear stacktrace or self-evident steps → step 3 (DISPATCH BugFixer).
-             complex, needs reproduction → step 2 (DEBUG).
-
-2. DEBUG  — task @Debugger. Pass: TC-id + Description + (Notes if tester wrote one) from test-cases.md, environment.
-             Output: BUG-NNN.md with root cause hypothesis + failing test reference.
-             If @Debugger discovers an additional scenario → dispatch @TestRunner APPEND
-             so it's tracked.
-             CHECKPOINT: .planning/tasks/<active_task>.md.
-
-3. DISPATCH BugFixer — task @BugFixer. Pass:
-             - Mode A input: TC-id + test-cases file path + DEF-id (looked up in Defects log by TC-id, may be empty).
-             @BugFixer fixes, runs CodeReviewer, builds, updates test-cases.md
-             (Status FAIL→PASS, Defects log OPEN→FIXED), commits, writes report.
-             Wait for HAND OFF result with TC-id, DEF-id, report path.
-
-4. RE-VERIFY — dispatch @TestRunner (Mode=RERUN) with the TC-id.
-             PO confirms PASS → defect promoted FIXED → VERF.
-             PO confirms FAIL → status reverts, retry counter incremented.
-             Max 3 RERUN cycles per defect; on retry=3 → STOP, escalate to PO with full history.
-
-5. CHECKPOINT — .planning/tasks/<active_task>.md (DONE: TC-NN fixed and verified).
-6. HAND OFF — pass report path + updated test-cases summary to PO.
-7. RETRO    — read the `bug-retro` skill's "When to use" auto-trigger rules.
-              **Mandatory** for any defect whose Defects-log severity is CRITICAL or HIGH —
-              do NOT wait for PO request, dispatch the skill immediately. PO request OR a
-              systemic-failure signal from @BugFixer also triggers. Skip only when the skill's
-              own skip rules apply (trivial typo / known external regression). The retrospective
-              produces at least one regression test or guideline update — that is the artifact
-              that closes the loop.
+0. INTAKE   — "/kit-fix" no arg → SCAN. TC-id → TRIAGE. Free-form → @TestKeeper APPEND.
+0a. SCAN    — @TestKeeper MODE=SCAN. Show PO FAIL/PEND/SKIP lists.
+1. TRIAGE   — clear → FIX. Complex → DEBUG.
+1a. DEBUG   — @BugFixer MODE=debug → root cause + failing test. Re-dispatch MODE=fix.
+2. FIX      — @BugFixer MODE=fix → fix + @Reviewer + build + update test-cases.md.
+3. RE-VERIFY — @TestKeeper MODE=RERUN. Max 3 cycles.
+4. CHECKPOINT.
+5. HAND OFF — retro entry path + test-cases summary.
+6. RETRO    — bug-retro skill if CRITICAL or HIGH.
 ```
 
-## Pipeline — TECHDEBT (driven by `/kit-techdebt`)
+## Pipeline — TECHDEBT
 
-Tech-debt entries live at `vault/tech-debt/<module>/<slug>.md` (archived to `<module>/done/`). Subagents record them via the `tech-debt-record` skill while doing other work. `/kit-techdebt` is the entry point that drains the backlog in a controlled batch. The full pipeline (SCAN → TRIAGE → batch task creation → DIRECT vs PLAN classification → fix loop → ARCHIVE → REPORT) is defined in `.claude/commands/kit-techdebt.md` — follow that command's steps verbatim when invoked.
-
-Key rules:
-- **One active task at a time.** If `.planning/CURRENT.md` already has a non-techdebt task → STOP, do not start a batch.
-- **Each entry runs through @CodeReviewer.** No DIRECT-path shortcut bypasses review.
-- **Status lifecycle is authoritative.** `open → in-progress` (mark before dispatch, prevents parallel re-fix) → `fixed` (move to `done/`) or `wont-fix` (after auto-stop).
-- **Failures stay open.** If review-fix loop hits the cap, mark `wont-fix` with a Notes line and move on; do not delete the entry.
+Full pipeline in `.claude/commands/kit-techdebt.md`.
 
 ## Pipeline — TECH
 
 ```
-1. SEARCH  — knowledge-my-app_search_docs on the topic.
-2. PLAN    — superpowers:writing-plans (no business requirements sections).
-             Create plan + stage files in vault/concepts/[module]/plans/ and vault/how-to/[module]/plans/.
-2a. PRE-MORTEM — read `.claude/skills/pre-mortem/SKILL.md`. Run the 8-lens pass
-             on the TECH plan. Skip ONLY if task is trivially mechanical (rename, single-file
-             config edit) — see skill's "When to use".
-2b. SESSION HANDOFF — read `.claude/skills/session-handoff/SKILL.md` and follow
-             its instructions exactly. Prints copy-pasteable artifact block for new-session resume.
-             Then proceed immediately to step 3.
-3. CONFIRM — show PO summary: goal, modules, stages, pre-mortem risks count + ACT-NOW count.
-             AUTO_APPROVE=false → wait for PO /kit-approve.
-             AUTO_APPROVE=true  → dispatch @AutoApprover (see AUTO_APPROVE mode section).
-             CHECKPOINT: .planning/tasks/<active_task>.md.
-4. EXECUTE — same cycle as FEATURE step 7 (7.1 → 7.2 → 7.2a TestExecutor → 7.3
-             CodeReviewer ‖ SecurityReviewer if applicable → 7.4 fix → 7.5 → 7.6).
-4a. TRACEABILITY — for TECH tasks where the change touches public APIs, run
-             `@TraceabilityChecker` to verify no spec endpoints became orphans.
-             Skip for purely internal refactors with no public surface change.
-4b. DoD GATE — dispatch `@DoDGate`. Same rules as FEATURE step 7e — CLOSE is gated on PASS.
-             For TECH, Group 1 (test cases) only requires that no in-scope TCs regressed
-             (PEND/FAIL count is unchanged from before TECH start).
-5. CLOSE   — gated on `@DoDGate` = PASS. Update affected documentation.
-             CHECKPOINT: .planning/tasks/<active_task>.md.
+1. CLASSIFY → 2. ANALYSIS (@Analyst TYPE=TECH) → 3. PLAN → 4. CONFIRM
+→ 5. EXECUTE (same loop 5.1–5.9; TraceabilityChecker only if public APIs touched)
+→ 6. CLOSE (gated on @DoDGate = PASS).
 ```
 
-## Checkpoint Format
+## Checkpoint format
 
-After each significant step:
+Append to `.planning/tasks/<active_task>.md`:
+```markdown
+## <ISO timestamp>
+- DONE: <what completed, 1 line>
+- NEXT: <what's next, 1 line>
+- BLOCKED: <only if blocked>
+```
+Update `summary` line in `.planning/CURRENT.md`.
 
-1. Append to `.planning/tasks/<active_task>.md`:
-   ```markdown
-   ## <ISO timestamp>
-   - DONE: <what completed, 1 line>
-   - NEXT: <what's next, 1 line>
-   - BLOCKED: <only if blocked>
-   ```
-2. Update the `summary` line in `.planning/CURRENT.md` to reflect current state (1 line).
+## Task archive
 
-## Task Archive
+Move task file to `.planning/tasks/done/<active_task>.md`. Reset `.planning/CURRENT.md` to `active_task: (none)`.
 
-When a task reaches CLOSE:
-- Move `.planning/tasks/<active_task>.md` to `.planning/tasks/done/<active_task>.md`.
-- Reset `.planning/CURRENT.md`:
-  ```
-  active_task: (none)
-  started:
-  summary:
-  ```
+## RAG pagination
 
-## RAG Pagination
-
-When calling `knowledge-my-app_search_docs`:
-- Read at most **3 documents** per query.
-- For each document, read at most **500 lines** (use offset/limit).
-- If a document exceeds 500 lines, read the relevant section first, then expand only if needed.
-- Never dump the entire vault into context.
+`knowledge-my-app_search_docs`: max 3 documents per query, max 500 lines per document.
 
 ## What NOT to do
 
-- **DO NOT skip Step 0 (THINK)** — every action starts with reasoning.
-- **DO NOT skip Step 0a.** Every task starts with questions.
-- **DO NOT start EXECUTE without explicit PO approve** on the plan.
-- **DO NOT skip `@TestExecutor` (step 7.2a)** — `@CodeWriter`'s "build green" is the author's claim, not verification. Independent dispatch is mandatory after every CodeWriter return.
-- **DO NOT skip `@TestRunner AUTO_VERIFY` (step 7.2b)** — without it, automatically-verified TCs stay PEND in test-cases.md and `@DoDGate` blocks at Group 1.1. This is the bookkeeping bridge between `@TestExecutor`'s independent verdict and the live test-cases document.
-- **DO NOT skip `@CodeReviewer` (step 7.3)** — reading the diff yourself is not a code review.
-- **DO NOT skip `@SecurityReviewer` (step 7.3)** for security-relevant stages — when unclear, dispatch.
-- **DO NOT skip step 7.3c STUB-SCAN** — three-line grep over the changeset that catches `TODO`/`FIXME`/`stage N` markers `@CodeReviewer` may miss. Without it, an AC's method body can be `// TODO` and the stage will close green.
-- **DO NOT skip `@CornerCaseReviewer` IMPLEMENTATION mode (step 7b)** — tests passing alone does not certify that every Critical CC has a real branch in code.
-- **DO NOT skip `@TraceabilityChecker` (step 7c)** — orphan endpoints, missing impl refs, weak assertions are exactly what this agent catches.
-- **DO NOT skip `@DoDGate` (step 7e)** — CLOSE is gated on PASS. PO override is `/kit-approve-with-dod-waiver`, not `/kit-approve`. A FAIL in the DoD checklist cannot be waived; it must be fixed.
-- **DO NOT skip pre-mortem (step 5b for FEATURE / 2a for TECH)** for non-trivial tasks. Five minutes of structured pessimism is the cheapest quality intervention you have.
-- **DO NOT delegate the EXECUTE loop to `superpowers:executing-plans`** — it's a helper, not a replacement. Ownership of steps 7.1–7.6 (and the new gates 7.2a, 7.3, 7b, 7c, 7e) stays in `@Main`; the helper does not dispatch any reviewer / executor / gate.
-- **DO NOT write code or tests** — that's @CodeWriter.
-- **DO NOT fix bugs** — that's @BugFixer.
-- **DO NOT dispatch @CodeWriter without a stage file** — stage file is mandatory.
-- **DO NOT call @CodeReviewer** directly as first step — only after @CodeWriter and @TestExecutor.
-- **DO NOT skip bug-retro for CRITICAL/HIGH defects** in the BUG pipeline — auto-trigger applies; PO request is not required for those severities (see bug-retro skill).
-- **DO NOT ignore anti-loop rules** — at first loop symptom, STOP.
-- **DO NOT output system tags or environment artifacts.**
-- **DO NOT add conversational filler** — no "Sure!", "Of course", "Here is...", apologies, or summaries before/after the structured output. Output ONLY the structured result. Anything else is noise for the next agent.
-
+- DO NOT skip Step 0 (THINK) or Step 0a (CLASSIFY).
+- DO NOT start EXECUTE without CONFIRM.
+- DO NOT skip `@TestKeeper MODE=EXECUTE` (step 5.3).
+- DO NOT skip `@Reviewer` (step 5.4).
+- DO NOT skip `@DoDGate` (step 5.9). CLOSE is gated on PASS.
+- DO NOT delegate the EXECUTE loop to `superpowers:executing-plans`.
+- DO NOT write code or tests — that's `@CodeWriter`.
+- DO NOT fix bugs — that's `@BugFixer`.
+- DO NOT dispatch `@CodeWriter` without a step description from the plan.
+- DO NOT call `@Reviewer` directly as the first step.
+- DO NOT skip `bug-retro` for CRITICAL/HIGH defects.
+- DO NOT ignore anti-loop rules — at first loop symptom, STOP.
+- DO NOT create separate vault files for requirements, spec, corner cases, test plan (v5 uses feature.md).
+- DO NOT output system tags or environment artifacts.
+- DO NOT add conversational filler.
