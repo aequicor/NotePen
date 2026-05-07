@@ -15,9 +15,11 @@
 | TC-8 | PEND | unit | Кнопка «Назад» является дочерним элементом `Box` и объявлена после `LazyColumn` (z-order поверх контента) | AC-3, EC-4 | (нет impl-ссылки) | Требует Compose UI Test runtime; не запускается в jvmTest без Compose окружения |
 | TC-9 | PASS | integration | `DetailsContent` компонуется с минимальным фейком `DetailsComponent` и не бросает исключение при начальной отрисовке | AC-1 | app/byCompose/common/src/commonTest/kotlin/ru/kyamshanov/notepen/DetailsContentTest.kt:37 | |
 | TC-10 | PASS | unit | Кнопка «Назад» имеет непустой `contentDescription` (accessibility) | AC-4 | app/byCompose/common/src/commonTest/kotlin/ru/kyamshanov/notepen/DetailsContentTest.kt:backButtonContentDescription_isNotEmpty | |
+| TC-11 | FAIL | manual | Кнопка «Назад» выглядит круглой, без избыточной тени, соответствует дизайну | AC-4 | (PO-reported) | Дефект: PO обнаружил, что кнопка не круглая, имеет большую тень и выглядит некрасиво |
 
 ## Журнал дефектов
 
 | DEF ID | TC | Серьёзность | Статус | Открыт | Примечания |
 |--------|----|-------------|--------|--------|------------|
 | DEF-1 | TC-10 | medium | FIXED | 2026-05-07 | PO at 5.6 manual verification: нет accessibility (contentDescription=null на SmallFloatingActionButton). Исправлено: добавлен contentDescription в DetailsContent.kt |
+| DEF-2 | TC-11 | medium | OPEN | 2026-05-07 | PO at 5.6 manual verification: кнопка не круглая, имеет большую тень и не красивая. Фикс применён в DetailsContent.kt. Автотесты прошли (jvmTest 2026-05-07). Ожидает ручной верификации PO (MODE=RERUN). |
