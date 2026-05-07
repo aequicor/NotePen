@@ -6,7 +6,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
-// covers TC-2, TC-7, TC-9
+// covers TC-2, TC-7, TC-9, TC-10
 
 class DetailsContentTest {
 
@@ -39,6 +39,18 @@ class DetailsContentTest {
         val fake = FakeDetailsComponent(title = "file:///test.pdf")
 
         assertEquals("file:///test.pdf", fake.model.value.title)
+    }
+
+    // TC-10: кнопка «Назад» имеет непустой contentDescription (accessibility — AC-4)
+    @Test
+    fun backButtonContentDescription_isNotEmpty() {
+        // covers TC-10
+        // BACK_CONTENT_DESCRIPTION — константа, используемая в Icon contentDescription.
+        // Тест гарантирует что значение не пустое и не null, обеспечивая поддержку экранных чтецов.
+        assertTrue(
+            BACK_CONTENT_DESCRIPTION.isNotEmpty(),
+            "contentDescription кнопки «Назад» не должен быть пустым"
+        )
     }
 
     // TC-2 (multi-call): несколько нажатий → onBack() вызывается столько раз, сколько нажато

@@ -37,6 +37,9 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Описание кнопки «Назад» для экранных чтецов (accessibility — AC-4). */
+internal const val BACK_CONTENT_DESCRIPTION = "Назад"
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
@@ -128,7 +131,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = null,
+                contentDescription = BACK_CONTENT_DESCRIPTION,
             )
         }
     }

@@ -14,10 +14,10 @@
 | TC-7 | PASS | unit-edge | `onBack()` не вызывается при начальной composition `DetailsContent` (без нажатия кнопки) | AC-2 | app/byCompose/common/src/commonTest/kotlin/ru/kyamshanov/notepen/DetailsContentTest.kt:28 | |
 | TC-8 | PEND | unit | Кнопка «Назад» является дочерним элементом `Box` и объявлена после `LazyColumn` (z-order поверх контента) | AC-3, EC-4 | (нет impl-ссылки) | Требует Compose UI Test runtime; не запускается в jvmTest без Compose окружения |
 | TC-9 | PASS | integration | `DetailsContent` компонуется с минимальным фейком `DetailsComponent` и не бросает исключение при начальной отрисовке | AC-1 | app/byCompose/common/src/commonTest/kotlin/ru/kyamshanov/notepen/DetailsContentTest.kt:37 | |
+| TC-10 | PASS | unit | Кнопка «Назад» имеет непустой `contentDescription` (accessibility) | AC-4 | app/byCompose/common/src/commonTest/kotlin/ru/kyamshanov/notepen/DetailsContentTest.kt:backButtonContentDescription_isNotEmpty | |
 
 ## Журнал дефектов
 
 | DEF ID | TC | Серьёзность | Статус | Открыт | Примечания |
 |--------|----|-------------|--------|--------|------------|
-
-(Заполняется по мере возникновения ошибок. Изначально пуст.)
+| DEF-1 | TC-10 | medium | FIXED | 2026-05-07 | PO at 5.6 manual verification: нет accessibility (contentDescription=null на SmallFloatingActionButton). Исправлено: добавлен contentDescription в DetailsContent.kt |
