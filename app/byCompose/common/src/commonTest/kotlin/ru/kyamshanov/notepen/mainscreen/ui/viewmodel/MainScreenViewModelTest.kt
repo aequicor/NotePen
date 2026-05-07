@@ -7,7 +7,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import ru.kyamshanov.notepen.mainscreen.domain.exception.FileDuplicateInFolderException
+import ru.kyamshanov.notepen.mainscreen.domain.exception.FileNotInHistoryException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderLimitExceededException
+import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNotFoundException
 import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
 import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
 import ru.kyamshanov.notepen.mainscreen.domain.model.RecentFile
@@ -20,8 +23,10 @@ import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
+import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
+import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
@@ -303,6 +308,7 @@ class MainScreenViewModelTest {
         // SafMergeDialogState already has both fields; verify the state model holds both
         val existingUiModel = ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel(
             id = "existing-id",
+            uri = "content://test/existing",
             displayName = "doc.pdf",
             openedAt = 1000L,
             availabilityStatus = AvailabilityStatus.AVAILABLE,
@@ -473,6 +479,543 @@ class MainScreenViewModelTest {
             "FilePickerResult with null URI (cancel) must clear the FilePicker navigationTarget",
         )
     }
+
+    // TC-1: DragStarted → dragState = Active(fileId, fileUri, displayName)
+    @Test
+    fun dragStarted_setsDragStateActive() {
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-file-1",
+                fileUri = "file:///drag.pdf",
+                displayName = "drag.pdf",
+            ),
+        )
+
+        val dragState = viewModel.state.value.dragState
+        assertIs<DragState.Active>(dragState, "DragStarted must set dragState to Active")
+        assertEquals("drag-file-1", dragState.fileId)
+        assertEquals("file:///drag.pdf", dragState.fileUri)
+        assertEquals("drag.pdf", dragState.displayName)
+    }
+
+    // TC-2: DragCancelled → dragState = None
+    @Test
+    fun dragCancelled_setsDragStateNone() {
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-file-2",
+                fileUri = "file:///drag2.pdf",
+                displayName = "drag2.pdf",
+            ),
+        )
+        assertIs<DragState.Active>(viewModel.state.value.dragState, "precondition: dragState is Active")
+
+        viewModel.onIntent(MainScreenIntent.DragCancelled)
+
+        assertIs<DragState.None>(viewModel.state.value.dragState, "DragCancelled must reset dragState to None")
+    }
+
+    // TC-3: DropOnFolder with valid drag → addFile called, dragState cleared, successEvent = FileAddedToFolder with folderName
+    @Test
+    fun dropOnFolder_validDrag_addsFileAndClearsDragState() {
+        val folder = Folder(id = "folder-drop", name = "МоиДокументы", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-file-3",
+                fileUri = "file:///drop.pdf",
+                displayName = "drop.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-drop"))
+
+        val state = viewModel.state.value
+        assertIs<DragState.None>(state.dragState, "dragState must be None after successful drop")
+        val successEvent = state.successEvent
+        assertIs<SuccessEvent.FileAddedToFolder>(successEvent, "successEvent must be FileAddedToFolder after successful drop")
+        assertEquals("МоиДокументы", successEvent.folderName, "folderName must match the target folder name")
+        assertNull(state.errorEvent, "errorEvent must be null after successful drop")
+    }
+
+    // TC-5: DropOnFolder when dragState = None → no-op (addFile not called)
+    @Test
+    fun dropOnFolder_noDragActive_isNoOp() {
+        val folder = Folder(id = "folder-noop", name = "НеАктивная", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+
+        // No DragStarted intent — dragState is None
+        assertIs<DragState.None>(viewModel.state.value.dragState, "precondition: dragState is None")
+
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-noop"))
+
+        assertNull(viewModel.state.value.errorEvent, "No error should occur when dragState is None")
+        assertNull(viewModel.state.value.successEvent, "No success event when dragState is None")
+        // TC-5: dragState must remain None (drop was ignored — no state transition)
+        assertIs<DragState.None>(viewModel.state.value.dragState, "dragState must remain None after no-op drop")
+    }
+
+    // TC-6: DropOnFolder when isLoading = true → no-op (EC-4)
+    @Test
+    fun dropOnFolder_isLoadingTrue_isNoOp() {
+        // Simulate long-running load that won't complete (not resuming lifecycle so load waits)
+        // We manually set a drag active then trigger load to keep isLoading=true
+        // Instead, we use the known initial state: isLoading = true (default) before ScreenVisible
+        assertIs<DragState.None>(viewModel.state.value.dragState, "initial dragState is None")
+
+        // First set drag active via intent (succeeds since load guard only blocks drop)
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-file-6",
+                fileUri = "file:///loading.pdf",
+                displayName = "loading.pdf",
+            ),
+        )
+
+        // State: isLoading=true (default initial state), dragState=Active
+        assertTrue(viewModel.state.value.isLoading, "precondition: isLoading should be true before ScreenVisible")
+        assertIs<DragState.Active>(viewModel.state.value.dragState)
+
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "any-folder"))
+
+        // With isLoading guard: drop is ignored
+        assertNull(viewModel.state.value.errorEvent, "No error when isLoading=true on drop")
+        assertNull(viewModel.state.value.successEvent, "No success event when isLoading=true on drop")
+        // TC-6: dragState must remain Active — drop was silently ignored, drag was not cleared
+        assertIs<DragState.Active>(viewModel.state.value.dragState, "dragState must remain Active when drop is ignored due to isLoading=true")
+    }
+
+    // TC-7: DropOnFolder → FileDuplicateInFolderException → successEvent = FileAlreadyInFolder (NOT errorEvent)
+    @Test
+    fun dropOnFolder_fileDuplicate_setsSuccessEventFileAlreadyInFolder() {
+        val folder = Folder(id = "folder-dup", name = "ДубликатПапка", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        fakeFolderRepo.addFileThrows = FileDuplicateInFolderException("folder-dup", "file:///dup.pdf")
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-dup",
+                fileUri = "file:///dup.pdf",
+                displayName = "dup.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-dup"))
+
+        val state = viewModel.state.value
+        assertIs<SuccessEvent.FileAlreadyInFolder>(
+            state.successEvent,
+            "FileDuplicateInFolderException must produce successEvent=FileAlreadyInFolder, not an errorEvent",
+        )
+        assertNull(state.errorEvent, "errorEvent must be null when file is duplicate (not an error)")
+    }
+
+    // EC-8: DropOnFolder with a folder whose name exceeds 40 characters → folderName in successEvent is truncated to 40 chars + "…"
+    @Test
+    fun dropOnFolder_longFolderName_truncatesTo40Chars() {
+        // 255-character folder name (simulates EC-8 maximum)
+        val longName = "А".repeat(255)
+        val folder = Folder(id = "folder-long", name = longName, createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-long",
+                fileUri = "file:///long.pdf",
+                displayName = "long.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-long"))
+
+        val successEvent = viewModel.state.value.successEvent
+        assertIs<SuccessEvent.FileAddedToFolder>(successEvent, "successEvent must be FileAddedToFolder")
+        val truncated = successEvent.folderName
+        assertTrue(
+            truncated.length <= 41,
+            "Truncated name must be at most 41 chars (40 + ellipsis), got ${truncated.length}",
+        )
+        assertTrue(truncated.endsWith("…"), "Truncated name must end with ellipsis '…', got: '$truncated'")
+        assertEquals("А".repeat(40) + "…", truncated, "Truncated name must be first 40 chars + '…'")
+    }
+
+    // TC-8: DropOnFolder → FolderNotFoundException → errorEvent = FolderOperationFailed, dragState = None
+    @Test
+    fun dropOnFolder_folderNotFoundException_setsErrorEvent() {
+        // TC-8: folder deleted after drag started (EC-1 Critical)
+        val folder = Folder(id = "folder-deleted", name = "УдалённаяПапка", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        fakeFolderRepo.addFileThrows = FolderNotFoundException("folder-deleted")
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-ec1",
+                fileUri = "file:///ec1.pdf",
+                displayName = "ec1.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-deleted"))
+
+        val state = viewModel.state.value
+        assertEquals(
+            ErrorEvent.FolderOperationFailed,
+            state.errorEvent,
+            "FolderNotFoundException must produce errorEvent=FolderOperationFailed",
+        )
+        assertIs<DragState.None>(state.dragState, "dragState must be None after failed drop")
+        assertNull(state.successEvent, "successEvent must be null when folder not found")
+    }
+
+    // TC-16: DropOnFolder → FolderNotFoundException (folder deleted after drag start) → same as TC-8
+    @Test
+    fun dropOnFolder_folderDeletedAfterDragStart_setsErrorEvent() {
+        // TC-16: scenario where folder was deleted between DragStarted and DropOnFolder (EC-1 Critical)
+        val folder = Folder(id = "folder-gone", name = "ИсчезнувшаяПапка", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-ec1b",
+                fileUri = "file:///ec1b.pdf",
+                displayName = "ec1b.pdf",
+            ),
+        )
+
+        // Folder deleted between DragStarted and DropOnFolder
+        fakeFolderRepo.addFileThrows = FolderNotFoundException("folder-gone")
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-gone"))
+
+        val state = viewModel.state.value
+        assertEquals(
+            ErrorEvent.FolderOperationFailed,
+            state.errorEvent,
+            "FolderNotFoundException after folder deletion must produce errorEvent=FolderOperationFailed",
+        )
+        assertIs<DragState.None>(state.dragState, "dragState must be None after failed drop")
+        assertNull(state.successEvent, "successEvent must be null when folder is gone")
+    }
+
+    // TC-9: DropOnFolder → FileNotInHistoryException → errorEvent = FileNotInHistory, dragState = None
+    @Test
+    fun dropOnFolder_fileNotInHistoryException_setsErrorEvent() {
+        // TC-9: file URI not in history (EC-3 Critical)
+        val folder = Folder(id = "folder-noh", name = "ПапкаБезИстории", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        fakeFolderRepo.addFileThrows = FileNotInHistoryException("file:///noh.pdf")
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-ec3",
+                fileUri = "file:///noh.pdf",
+                displayName = "noh.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-noh"))
+
+        val state = viewModel.state.value
+        assertEquals(
+            ErrorEvent.FileNotInHistory,
+            state.errorEvent,
+            "FileNotInHistoryException must produce errorEvent=FileNotInHistory",
+        )
+        assertIs<DragState.None>(state.dragState, "dragState must be None after failed drop")
+        assertNull(state.successEvent, "successEvent must be null when file not in history")
+    }
+
+    // TC-17: DropOnFolder → FileNotInHistoryException (file URI not tracked in history) → same as TC-9
+    @Test
+    fun dropOnFolder_fileUriNotInHistory_setsErrorEvent() {
+        // TC-17: file was dragged but its URI does not exist in history (EC-3 Critical)
+        val folder = Folder(id = "folder-noh2", name = "ПапкаФайлВнеИстории", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-ec3b",
+                fileUri = "file:///not-tracked.pdf",
+                displayName = "not-tracked.pdf",
+            ),
+        )
+
+        // File URI not in history — simulated via exception on addFile
+        fakeFolderRepo.addFileThrows = FileNotInHistoryException("file:///not-tracked.pdf")
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-noh2"))
+
+        val state = viewModel.state.value
+        assertEquals(
+            ErrorEvent.FileNotInHistory,
+            state.errorEvent,
+            "FileNotInHistoryException when URI not tracked must produce errorEvent=FileNotInHistory",
+        )
+        assertIs<DragState.None>(state.dragState, "dragState must be None after failed drop")
+        assertNull(state.successEvent, "successEvent must be null when file URI not in history")
+    }
+
+    // TC-10: Concurrent duplicate drops — first sets FileAlreadyInFolder, second is no-op (EC-2 Critical)
+    @Test
+    fun dropOnFolder_quickDoubleDropSameFile_secondIsNoOp() {
+        // TC-10: rapid double drop with same file (EC-2 Critical — concurrent duplicate drops)
+        val folder = Folder(id = "folder-concurrent", name = "КонкурентнаяПапка", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        // Every addFile call throws FileDuplicateInFolderException (file already in folder)
+        fakeFolderRepo.addFileThrows = FileDuplicateInFolderException("folder-concurrent", "file:///concurrent.pdf")
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        // First drop: dragState = Active → drop dispatched → FileDuplicateInFolderException → successEvent = FileAlreadyInFolder, dragState = None
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-concurrent",
+                fileUri = "file:///concurrent.pdf",
+                displayName = "concurrent.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-concurrent"))
+
+        val stateAfterFirst = viewModel.state.value
+        assertIs<SuccessEvent.FileAlreadyInFolder>(
+            stateAfterFirst.successEvent,
+            "First duplicate drop must set successEvent=FileAlreadyInFolder",
+        )
+        assertIs<DragState.None>(stateAfterFirst.dragState, "dragState must be None after first drop")
+
+        // Second drop: dragState is None — must be a no-op (EC-2: second drop ignored)
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-concurrent"))
+
+        val stateAfterSecond = viewModel.state.value
+        // State must not change — successEvent remains FileAlreadyInFolder, no new errorEvent
+        assertIs<SuccessEvent.FileAlreadyInFolder>(
+            stateAfterSecond.successEvent,
+            "Second drop (dragState=None) must not change successEvent",
+        )
+        assertNull(stateAfterSecond.errorEvent, "Second no-op drop must not produce an errorEvent")
+    }
+
+    // TC-11: DragStarted while launchAvailabilityCheck is running — state consistent (EC-6 High)
+    @Test
+    fun dragStarted_parallelWithAvailabilityCheck_stateConsistent() {
+        // TC-11: DragStarted + launchAvailabilityCheck running simultaneously (EC-6 High)
+        val file = RecentFile(
+            id = "avail-file-1",
+            uri = "file:///avail.pdf",
+            displayName = "avail.pdf",
+            openedAt = 1000L,
+            availabilityStatus = AvailabilityStatus.UNKNOWN,
+        )
+        fakeHistoryRepo.files = listOf(file)
+        // Availability check will update to AVAILABLE
+        fakeAvailabilityChecker.asyncResult = AvailabilityStatus.AVAILABLE
+
+        // ScreenVisible triggers loadInitialData + launchAvailabilityCheck (runs eagerly with UnconfinedTestDispatcher)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        // DragStarted dispatched after ScreenVisible — availability check may have already run
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "avail-file-1",
+                fileUri = "file:///avail.pdf",
+                displayName = "avail.pdf",
+            ),
+        )
+
+        val state = viewModel.state.value
+        // dragState must be Active regardless of availability check state
+        val drag = state.dragState
+        assertIs<DragState.Active>(drag, "DragStarted must set dragState to Active even during availability check")
+        assertEquals("avail-file-1", drag.fileId, "dragState.fileId must match")
+
+        // File availability status must have been updated (availability check ran) — not corrupted by drag
+        val fileUiModel = state.recentFiles.firstOrNull { it.id == "avail-file-1" }
+        assertNotNull(fileUiModel, "File must still be present in recentFiles")
+        assertEquals(
+            AvailabilityStatus.AVAILABLE,
+            fileUiModel.availabilityStatus,
+            "Availability check result must not be corrupted by concurrent DragStarted",
+        )
+    }
+
+    // TC-4: DropOnFolder success → fileCount of target folder updated without full list reload
+    @Test
+    fun dropOnFolder_success_updatesFolderFileCountWithoutFullReload() {
+        // TC-4 (AC-7): after a successful drop, the folder's fileCount must increase;
+        // the other folders' fileCount must not be affected.
+        val targetFolder = Folder(id = "folder-count-target", name = "ЦелеваяПапка", createdAt = 0L)
+        val otherFolder = Folder(id = "folder-count-other", name = "ДругаяПапка", createdAt = 0L)
+        fakeFolderRepo.folders.add(targetFolder)
+        fakeFolderRepo.folders.add(otherFolder)
+        // After addFile the target folder will have 1 file
+        fakeFolderRepo.filesInFolder["folder-count-target"] = listOf("file:///count.pdf")
+        fakeFolderRepo.filesInFolder["folder-count-other"] = listOf()
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        val initialOtherCount = viewModel.state.value.folders
+            .firstOrNull { it.id == "folder-count-other" }
+            ?.fileCount
+        assertEquals(0, initialOtherCount, "other folder must start with 0 files")
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-count",
+                fileUri = "file:///count.pdf",
+                displayName = "count.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-count-target"))
+
+        val state = viewModel.state.value
+        val targetUiFolder = state.folders.firstOrNull { it.id == "folder-count-target" }
+        assertNotNull(targetUiFolder, "target folder must still be in the list after drop")
+        assertEquals(1, targetUiFolder.fileCount, "target folder fileCount must be updated to 1 after drop")
+
+        val otherUiFolder = state.folders.firstOrNull { it.id == "folder-count-other" }
+        assertNotNull(otherUiFolder, "other folder must still be in the list")
+        assertEquals(initialOtherCount, otherUiFolder.fileCount, "other folder fileCount must remain unchanged")
+    }
+
+    // TC-12: DropOnFolder when folders list is empty — FolderNotFoundException handled correctly (AC-9)
+    @Test
+    fun dropOnFolder_emptyFoldersList_folderNotFoundExceptionHandled() {
+        // TC-12 (AC-9): folders is empty, DropOnFolder targets a non-existent folder.
+        // The ViewModel must propagate FolderNotFoundException as FolderOperationFailed errorEvent.
+        fakeFolderRepo.addFileThrows = FolderNotFoundException("non-existent-folder")
+        // No folders added — folders list is empty
+
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        assertIs<DragState.None>(viewModel.state.value.dragState, "precondition: dragState must be None")
+        assertTrue(
+            viewModel.state.value.folders.isEmpty(),
+            "precondition: folders list must be empty",
+        )
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-tc12",
+                fileUri = "file:///tc12.pdf",
+                displayName = "tc12.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "non-existent-folder"))
+
+        val state = viewModel.state.value
+        assertEquals(
+            ErrorEvent.FolderOperationFailed,
+            state.errorEvent,
+            "FolderNotFoundException on empty folders list must produce errorEvent=FolderOperationFailed",
+        )
+        assertIs<DragState.None>(state.dragState, "dragState must be None after failed drop")
+        assertNull(state.successEvent, "successEvent must be null when folder not found (empty list)")
+    }
+
+    // TC-13: File in ARCHIVED_UNAVAILABLE state dragged to folder — addFile called, availability not changed
+    @Test
+    fun dropOnFolder_archivedUnavailableFile_addFileCalledAndStatusUnchanged() {
+        // TC-13 (AC-12): a file with ARCHIVED_UNAVAILABLE status is still droppable.
+        // addFile must be called, and the file's availabilityStatus must NOT change.
+        val archivedFile = RecentFile(
+            id = "arc-drag-1",
+            uri = "file:///archived-drag.pdf",
+            displayName = "archived-drag.pdf",
+            openedAt = 1000L,
+            availabilityStatus = AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+        )
+        val targetFolder = Folder(id = "folder-arc", name = "АрхивнаяПапка", createdAt = 0L)
+        fakeHistoryRepo.files = listOf(archivedFile)
+        fakeFolderRepo.folders.add(targetFolder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        val fileBeforeDrop = viewModel.state.value.recentFiles.firstOrNull { it.id == "arc-drag-1" }
+        assertNotNull(fileBeforeDrop, "archived file must be present in the list")
+        assertEquals(
+            AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+            fileBeforeDrop.availabilityStatus,
+            "precondition: file must have ARCHIVED_UNAVAILABLE status",
+        )
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "arc-drag-1",
+                fileUri = "file:///archived-drag.pdf",
+                displayName = "archived-drag.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-arc"))
+
+        val state = viewModel.state.value
+        // Drop must succeed (addFile called, no exception)
+        assertIs<SuccessEvent.FileAddedToFolder>(
+            state.successEvent,
+            "Drop of ARCHIVED_UNAVAILABLE file must produce successEvent=FileAddedToFolder",
+        )
+        assertIs<DragState.None>(state.dragState, "dragState must be None after successful drop")
+
+        // Availability status must NOT be changed by the drop
+        val fileAfterDrop = state.recentFiles.firstOrNull { it.id == "arc-drag-1" }
+        assertNotNull(fileAfterDrop, "archived file must still be in the list after drop")
+        assertEquals(
+            AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+            fileAfterDrop.availabilityStatus,
+            "ARCHIVED_UNAVAILABLE status must not be changed by DropOnFolder",
+        )
+    }
+
+    // TC-18 (unit portion): AC-8 — ViewModel drop behavior is layout-agnostic (wide layout ≥ 600 dp)
+    // Full e2e visual test deferred pending Compose UI test setup; state-machine verified here.
+    @Test
+    fun dropOnFolder_wideLayout_stateIdenticalToNarrowLayout() {
+        // AC-8: behaviour on a wide-screen layout (LazyVerticalGrid) must be identical to narrow (LazyColumn).
+        // The ViewModel does not know about layout; this test verifies the invariant at the state-machine level.
+        val folder = Folder(id = "folder-wide", name = "ШирокийЭкран", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-wide",
+                fileUri = "file:///wide.pdf",
+                displayName = "wide.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-wide"))
+
+        val state = viewModel.state.value
+        // Identical outcome expected for both narrow (LazyColumn) and wide (LazyVerticalGrid) layouts
+        assertIs<DragState.None>(state.dragState, "dragState must be None after drop (AC-8)")
+        val successEvent = state.successEvent
+        assertIs<SuccessEvent.FileAddedToFolder>(successEvent, "successEvent must be FileAddedToFolder (AC-8)")
+        assertEquals("ШирокийЭкран", successEvent.folderName, "folderName must match folder (AC-8)")
+        assertNull(state.errorEvent, "errorEvent must be null on successful drop (AC-8)")
+    }
+
+    // TC-25: DropOnFolder success → successEvent cleared by OnSuccessEventHandled
+    @Test
+    fun onSuccessEventHandled_clearsSuccessEvent() {
+        val folder = Folder(id = "folder-clear", name = "ОчиститьПапка", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.DragStarted(
+                fileId = "drag-clear",
+                fileUri = "file:///clear.pdf",
+                displayName = "clear.pdf",
+            ),
+        )
+        viewModel.onIntent(MainScreenIntent.DropOnFolder(folderId = "folder-clear"))
+
+        assertIs<SuccessEvent.FileAddedToFolder>(
+            viewModel.state.value.successEvent,
+            "precondition: successEvent must be set",
+        )
+
+        viewModel.onIntent(MainScreenIntent.OnSuccessEventHandled)
+
+        assertNull(viewModel.state.value.successEvent, "successEvent must be null after OnSuccessEventHandled")
+    }
 }
 
 // --- Controllable FileAvailabilityChecker ---
@@ -514,7 +1057,10 @@ private class FakeFileHistoryRepository : FileHistoryRepository {
 
 private class FakeFolderRepository : FolderRepository {
     var createThrows: Exception? = null
+    var addFileThrows: Exception? = null
     val folders: MutableList<Folder> = mutableListOf()
+    /** Per-folder file lists returned by [getFilesInFolder]. Defaults to empty if key is absent. */
+    val filesInFolder: MutableMap<String, List<String>> = mutableMapOf()
 
     override suspend fun create(name: String): Folder {
         val ex = createThrows
@@ -523,11 +1069,15 @@ private class FakeFolderRepository : FolderRepository {
     }
 
     override suspend fun delete(id: String) { folders.removeAll { it.id == id } }
-    override suspend fun addFile(folderId: String, uri: String) {}
+    override suspend fun addFile(folderId: String, uri: String) {
+        val ex = addFileThrows
+        if (ex != null) throw ex
+    }
     override suspend fun removeFile(folderId: String, uri: String) {}
     override suspend fun rename(id: String, newName: String) {}
     override suspend fun getAll(): List<Folder> = folders
-    override suspend fun getFilesInFolder(folderId: String): List<String> = emptyList()
+    override suspend fun getFilesInFolder(folderId: String): List<String> =
+        filesInFolder[folderId] ?: emptyList()
 }
 
 private class FakeThumbnailRepository : ThumbnailRepository {

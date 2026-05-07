@@ -133,6 +133,29 @@ deferred to a future FolderView feature that will implement the archive concept 
 
 ---
 
+## ADR-008 — SAF Merge Deferral (mergeSafRecords no-op)
+
+**Status:** Accepted
+**Date:** 2026-05-07
+
+### Context
+`MainScreenViewModel.mergeSafRecords()` needs to merge two SAF file records when the user confirms. The full SAF reconciliation flow (updating the existing record's URI in persistent storage, cascading folder links) requires a dedicated storage migration path not yet available.
+
+### Decision
+`mergeSafRecords` is intentionally a no-op placeholder that only closes the dialog. The merge itself is deferred to a future feature that will implement the full SAF reconciliation flow with proper repository support.
+
+### Alternatives considered
+Partial merge (update in-memory state only): rejected — would cause inconsistency between UI state and persistent storage on restart.
+
+### Consequences
++: No broken invariants or data loss from incomplete merge attempts.
+-: Merge confirmation silently does nothing beyond closing the dialog until the full implementation lands.
+
+**Reference:** `MainScreenViewModel.kt` — `mergeSafRecords()` method.
+**Target stage:** Future SAF reconciliation feature.
+
+---
+
 ## ADR-006 — FilePicker MainActivity wiring deferred
 
 **Date:** 2026-05-07
@@ -153,3 +176,26 @@ On Desktop, `FilePicker.jvm.kt` uses `java.awt.FileDialog` which is triggered di
 ### Consequences
 -: Android file picker does not open from the main screen until the integration task is done.
 +: No broken abstraction or unsafe casts introduced as a workaround.
+
+---
+
+## ADR-009 — SAFMerge Call-site discardId
+
+**Status:** Accepted
+**Date:** 2026-05-07
+
+### Context
+`MainContent.kt` line 175 passes `discardId = ""` to the `MergeSafRecords` intent. This is intentional for the current no-op SAF merge implementation (ADR-008) where `mergeSafRecords()` closes the dialog without performing any actual storage operation.
+
+### Decision
+`discardId = ""` is correct as-is while ADR-008's no-op placeholder is in effect. The empty string is never read by the current implementation. When ADR-008 is resolved (full SAF merge implementation), this call-site **must** be updated to pass `dialog.existingRecord.id` so the merge correctly identifies which record to discard.
+
+### Alternatives considered
+Passing `dialog.existingRecord.id` now: rejected — would require non-null access to `dialog.existingRecord` in a branch where the dialog state is already partially consumed; premature coupling to an unimplemented flow.
+
+### Consequences
+-: Latent bug exists: when full SAF merge lands, the developer must remember to update `MainContent.kt:175`.
++: No broken invariants or unnecessary null-safety workarounds in the current no-op flow.
+
+**Reference:** `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/mainscreen/ui/screen/MainContent.kt:175`, ADR-008.
+**Target:** When ADR-008 is resolved (full SAF reconciliation feature).

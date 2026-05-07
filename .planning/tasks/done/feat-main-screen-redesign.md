@@ -138,3 +138,26 @@
 - ВЫПОЛНЕНО: TraceabilityChecker PASS — все Critical/High CC с сильными assertions
 - ВЫПОЛНЕНО: CodeReviewer APPROVED, SecurityReviewer APPROVED
 - ДАЛЕЕ: CLOSE — коммит всех файлов, архивирование задачи
+
+## 2026-05-08T02:30:00Z
+- ✅ ВЫПОЛНЕНО: CLOSE — DoD-файл обновлён с датой закрытия и статусом PASS
+- ✅ ВЫПОЛНЕНО: Задача архивирована в .planning/tasks/done/feat-main-screen-redesign.md
+- ✅ ВЫПОЛНЕНО: CURRENT.md обновлена (active_task → (none))
+
+**Финальный статус: CLOSED**
+
+**Итоговая информация:**
+- ✅ 7 implementation stages all DONE
+- ✅ 77 unit/JVM tests ALL_GREEN
+- ✅ 32 DoD checks PASS (6 waivers documented and approved)
+- ✅ All Critical/High CC with PASS TC or documented waiver
+- ✅ Traceability PASS
+- ✅ Code review APPROVED
+- ✅ Security review APPROVED
+
+**Артефакты:**
+- `vault/concepts/common/requirements/main_screen_redesign.md` — 58 AC
+- `vault/concepts/common/plans/main_screen_redesign.md` — 7-stage implementation plan
+- `vault/reference/common/spec/main_screen_redesign.md` — full specification
+- `vault/reference/common/test-cases/main_screen_redesign-test-cases.md` — 125 TC
+- `vault/reference/common/spec/main_screen_redesign-dod.md` — Definition of Done matrix

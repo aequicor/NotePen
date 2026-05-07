@@ -11,6 +11,8 @@ package ru.kyamshanov.notepen.mainscreen.ui.model
  * @property createFolderDialog Состояние диалога создания папки; null — диалог скрыт.
  * @property deleteFolderDialog Состояние диалога удаления папки; null — диалог скрыт.
  * @property errorEvent Одноразовое событие ошибки; null — нет активной ошибки.
+ * @property dragState Текущее состояние операции перетаскивания файла.
+ * @property successEvent Одноразовое событие успеха; null — нет активного события.
  */
 data class MainScreenUiState(
     val recentFiles: List<RecentFileUiModel> = emptyList(),
@@ -21,4 +23,6 @@ data class MainScreenUiState(
     val createFolderDialog: CreateFolderDialogState? = null,
     val deleteFolderDialog: DeleteFolderDialogState? = null,
     val errorEvent: ErrorEvent? = null,
+    val dragState: DragState = DragState.None,
+    val successEvent: SuccessEvent? = null,
 )

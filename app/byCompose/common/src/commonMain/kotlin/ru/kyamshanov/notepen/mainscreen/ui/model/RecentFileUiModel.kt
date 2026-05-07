@@ -6,6 +6,7 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
  * UI-модель записи истории файлов для отображения в главном экране.
  *
  * @property id Уникальный идентификатор записи.
+ * @property uri Нормализованный URI файла (используется для drag-and-drop).
  * @property displayName Отображаемое имя файла.
  * @property openedAt Момент последнего открытия (epochMillis).
  * @property availabilityStatus Текущий статус доступности файла.
@@ -14,6 +15,7 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
  */
 data class RecentFileUiModel(
     val id: String,
+    val uri: String,
     val displayName: String,
     val openedAt: Long,
     val availabilityStatus: AvailabilityStatus,

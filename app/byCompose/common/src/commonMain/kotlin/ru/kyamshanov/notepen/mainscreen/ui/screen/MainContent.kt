@@ -45,8 +45,10 @@ import ru.kyamshanov.notepen.mainscreen.ui.component.RecentFileCard
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.CreateFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.DeleteFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.SafMergeDialog
+import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
+import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import androidx.compose.ui.platform.LocalWindowInfo
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
@@ -70,6 +72,8 @@ fun MainContent(
     val isWide = with(LocalDensity.current) { windowWidth.toDp() >= WIDE_SCREEN_THRESHOLD }
     val snackbarHostState = remember { SnackbarHostState() }
 
+    LaunchedEffect(Unit) { onIntent(MainScreenIntent.ScreenVisible) }
+
     val errorMessage = when (state.errorEvent) {
         ErrorEvent.FileNotFound -> "Файл не найден"
         ErrorEvent.FileError -> "Ошибка доступа к файлу"
@@ -78,6 +82,7 @@ fun MainContent(
         ErrorEvent.FolderLimitExceeded -> "Достигнут лимит папок"
         ErrorEvent.FolderNameCharsInvalid -> "Недопустимые символы в имени папки"
         ErrorEvent.FolderOperationFailed -> "Ошибка операции с папкой"
+        ErrorEvent.FileNotInHistory -> "Файл не найден в истории"
         null -> null
     }
 
@@ -85,6 +90,16 @@ fun MainContent(
         if (errorMessage != null) {
             snackbarHostState.showSnackbar(errorMessage)
         }
+    }
+
+    LaunchedEffect(state.successEvent) {
+        val successEvent = state.successEvent ?: return@LaunchedEffect
+        val message = when (successEvent) {
+            is SuccessEvent.FileAddedToFolder -> "Файл добавлен в «${successEvent.folderName}»"
+            SuccessEvent.FileAlreadyInFolder -> "Файл уже есть в этой папке"
+        }
+        snackbarHostState.showSnackbar(message)
+        onIntent(MainScreenIntent.OnSuccessEventHandled)
     }
 
     Scaffold(
@@ -194,6 +209,17 @@ private fun RecentFilesAndFoldersList(
                     RecentFileCard(
                         model = file,
                         onClick = { onIntent(MainScreenIntent.OpenRecentFile(file.id)) },
+                        onDragStarted = {
+                            onIntent(
+                                MainScreenIntent.DragStarted(
+                                    fileId = file.id,
+                                    fileUri = file.uri,
+                                    displayName = file.displayName,
+                                ),
+                            )
+                        },
+                        onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
+                        isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
                     )
                 }
             }
@@ -204,6 +230,7 @@ private fun RecentFilesAndFoldersList(
                         model = folder,
                         onClick = { /* открытие папки — будущая фича */ },
                         onDelete = { onIntent(MainScreenIntent.RequestDeleteFolder(folder.id)) },
+                        onDropFile = { onIntent(MainScreenIntent.DropOnFolder(folderId = folder.id)) },
                     )
                 }
             }
@@ -216,6 +243,17 @@ private fun RecentFilesAndFoldersList(
                     RecentFileCard(
                         model = file,
                         onClick = { onIntent(MainScreenIntent.OpenRecentFile(file.id)) },
+                        onDragStarted = {
+                            onIntent(
+                                MainScreenIntent.DragStarted(
+                                    fileId = file.id,
+                                    fileUri = file.uri,
+                                    displayName = file.displayName,
+                                ),
+                            )
+                        },
+                        onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
+                        isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),
@@ -230,6 +268,7 @@ private fun RecentFilesAndFoldersList(
                         model = folder,
                         onClick = { /* открытие папки — будущая фича */ },
                         onDelete = { onIntent(MainScreenIntent.RequestDeleteFolder(folder.id)) },
+                        onDropFile = { onIntent(MainScreenIntent.DropOnFolder(folderId = folder.id)) },
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),

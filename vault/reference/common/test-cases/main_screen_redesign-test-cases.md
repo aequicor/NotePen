@@ -8,7 +8,9 @@ triggers:
   - "тест-кейсы главный экран"
 confidence: high
 source: ai
-updated: 2026-05-07T22:00:00Z
+updated: 2026-05-07T22:30:00Z
+reconcile_status: RECONCILE_GAP
+reconcile_run: 2026-05-07
 ---
 
 # Test Cases: Main Screen Redesign
@@ -65,8 +67,8 @@ AI agents do NOT touch the Notes column. AI agents do NOT generate per-TC detail
 | TC-13 | PEND   | —     | acceptance  | [AC-9a] Открыть главный экран с медленными сетевыми дисками в истории                                               | Список отображается немедленно с предыдущим статусом; статус каждой записи обновляется асинхронно; UI не блокируется |
 | TC-14 | PEND   | —     | acceptance  | [AC-9b] История содержит смесь доступных и недоступных записей; общее число = 20                                     | Недоступные записи не вытесняют доступные из лимита; все 20 слотов заняты совместно                           |
 | TC-15 | PEND   | —     | acceptance  | [AC-9e] Все 20 слотов заняты недоступными записями; пользователь открывает новый доступный файл                      | Самая старая недоступная запись вытесняется; новый файл добавляется в начало; доступные записи не затронуты   |
-| TC-16 | PEND   | —     | acceptance  | [AC-9c] Открыть из списка PDF-файл, который повреждён или зашифрован                                                 | Элемент помечается «ошибка файла» (состояние отличается от «файл не найден»); пользователь видит понятное сообщение; запись остаётся в списке |
-| TC-17 | PEND   | —     | acceptance  | [AC-9d] Просмотреть элемент списка, миниатюра которого не может быть сгенерирована из-за ошибки рендеринга          | Показывается плейсхолдер ошибки, визуально отличающийся от плейсхолдера «в процессе генерации»               |
+| TC-16 | PASS   | —     | acceptance  | [AC-9c] Открыть из списка PDF-файл, который повреждён или зашифрован (impl: shared/src/commonTest/kotlin/ru/kyamshanov/notepen/mainscreen/domain/usecase/OpenRecentFileUseCaseTest.kt#checkSync_securityException_returnsFileError) | Элемент помечается «ошибка файла» (состояние отличается от «файл не найден»); пользователь видит понятное сообщение; запись остаётся в списке |
+| TC-17 | PASS   | —     | acceptance  | [AC-9d] Просмотреть элемент списка, миниатюра которого не может быть сгенерирована из-за ошибки рендеринга (impl: app/byCompose/common/src/commonTest/kotlin/ru/kyamshanov/notepen/mainscreen/ui/viewmodel/MainScreenViewModelTest.kt#thumbnailGeneration_oom_emitsThumbnailStateError) | Показывается плейсхолдер ошибки, визуально отличающийся от плейсхолдера «в процессе генерации»               |
 | TC-18 | PEND   | —     | acceptance  | [AC-10] Нажать на доступный элемент списка недавних файлов                                                           | Приложение открывает соответствующий PDF в редакторе                                                          |
 | TC-19 | PASS   | —     | acceptance  | [AC-11] Нажать на элемент, помеченный как недоступный (impl: app/byCompose/common/src/jvmTest/kotlin/ru/kyamshanov/notepen/mainscreen/infrastructure/FileHistoryRepositoryDesktopTest.kt) | Пользователь видит понятное сообщение «файл не найден»; запись остаётся в списке                              |
 | TC-20 | PASS   | —     | acceptance  | [AC-12] Нажать кнопку открытия нового файла на главном экране (impl: app/byCompose/common/src/commonTest/kotlin/ru/kyamshanov/notepen/mainscreen/ui/viewmodel/MainScreenViewModelTest.kt) | Открывается нативный файловый диалог платформы                                                                |
@@ -175,7 +177,7 @@ AI agents do NOT touch the Notes column. AI agents do NOT generate per-TC detail
 | TC-123 | PEND  | —     | error       | [spec][NOT IMPLEMENTED] `FileAvailabilityCheckerDesktop.checkSync` — путь к файлу бросает `IOException` при `canonicalFile` | Возвращает `FILE_ERROR`; не бросает исключение наружу                                                          |
 | TC-124 | PEND  | —     | unit-edge   | [spec][NOT IMPLEMENTED] `RecentFile` сериализация/десериализация JSON при `fileSize = null` и `thumbnailKey = null` | JSON корректно десериализуется; null-поля отсутствуют в JSON или представлены как `null`; roundtrip без потерь |
 | TC-125 | PASS  | —     | unit-edge   | [spec] `FileHistoryManager.findEvictIndex` — список из двух записей: одна `NOT_FOUND` (старше), одна `AVAILABLE` (impl: shared/src/commonTest/kotlin/ru/kyamshanov/notepen/mainscreen/domain/model/FileHistoryManagerTest.kt#findEvictIndex_notFoundEvictedBeforeAvailable) | Возвращает индекс `NOT_FOUND`-записи (не AVAILABLE)                                                            |
-| TC-126 | FAIL  | —     | error       | [DEF-001] Бесконечный лоадер — главный экран Desktop показывает индикатор загрузки, который никогда не исчезает. Ожидается: после появления экрана список файлов (или пустой экран) отображается без лоадера. Фактически: isLoading=true навсегда. | Индикатор загрузки исчезает, отображается список недавних файлов (или пустой экран)                            |
+| TC-126 | PASS  | —     | error       | [DEF-001] Бесконечный лоадер — главный экран Desktop показывает индикатор загрузки, который никогда не исчезает. Ожидается: после появления экрана список файлов (или пустой экран) отображается без лоадера. Фактически: isLoading=true навсегда. | Индикатор загрузки исчезает, отображается список недавних файлов (или пустой экран)                            |
 | TC-127 | PASS  | —     | error       | [DEF-002] Кнопка «Открыть» не открывает нативный файловый диалог на Desktop. Ожидается: появляется FileDialog (Swing). Фактически: ничего не происходит. | Открывается нативный файловый диалог для выбора PDF-файла                                                      |
 
 ---
@@ -208,5 +210,5 @@ what to be
 
 > Append-only. Each entry references a TC by id. AI agents (@TestRunner / @BugFixer) maintain this section.
 
-- DEF-001 [HIGH] Бесконечный лоадер — главный экран Desktop показывает isLoading=true навсегда, список файлов не появляется. TC-126. Status: OPEN.
+- DEF-001 [HIGH] Бесконечный лоадер — главный экран Desktop показывает isLoading=true навсегда, список файлов не появляется. TC-126. Status: VERF.
 - DEF-002 [HIGH] Кнопка «Открыть» не открывает нативный файловый диалог на Desktop — ничего не происходит. TC-127. Status: FIXED (fix: vault/guidelines/common/reports/def-002-file-picker-no-op.md).

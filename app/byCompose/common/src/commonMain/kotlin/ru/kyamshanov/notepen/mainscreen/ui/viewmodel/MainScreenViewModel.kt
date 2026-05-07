@@ -14,8 +14,11 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
+import ru.kyamshanov.notepen.mainscreen.domain.exception.FileDuplicateInFolderException
+import ru.kyamshanov.notepen.mainscreen.domain.exception.FileNotInHistoryException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderLimitExceededException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNameCharsInvalidException
+import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNotFoundException
 import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
 import ru.kyamshanov.notepen.mainscreen.domain.model.RecentFile
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
@@ -36,7 +39,9 @@ import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SafMergeDialogState
+import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState
 
 /**
@@ -108,7 +113,37 @@ class MainScreenViewModel(
                 _state.update { it.copy(deleteFolderDialog = null) }
             is MainScreenIntent.FolderDialogNameChanged -> updateFolderDialogName(intent.name)
             is MainScreenIntent.FilePickerResult -> handleFilePickerResult(intent)
+            is MainScreenIntent.DragStarted -> handleDragStarted(intent)
+            is MainScreenIntent.DragCancelled -> handleDragCancelled()
+            is MainScreenIntent.DropOnFolder -> handleDropOnFolder(intent)
+            is MainScreenIntent.OnSuccessEventHandled ->
+                _state.update { it.copy(successEvent = null) }
         }
+    }
+
+    private fun handleDragStarted(intent: MainScreenIntent.DragStarted) {
+        _state.update {
+            it.copy(
+                dragState = DragState.Active(
+                    fileId = intent.fileId,
+                    fileUri = intent.fileUri,
+                    displayName = intent.displayName,
+                ),
+            )
+        }
+    }
+
+    private fun handleDragCancelled() {
+        _state.update { it.copy(dragState = DragState.None) }
+    }
+
+    private suspend fun handleDropOnFolder(intent: MainScreenIntent.DropOnFolder) {
+        // EC-4: silently ignore drop while loading
+        if (_state.value.isLoading) return
+        val currentDrag = _state.value.dragState as? DragState.Active ?: return
+        val folderName = _state.value.folders.firstOrNull { it.id == intent.folderId }?.name ?: intent.folderId
+        _state.update { it.copy(dragState = DragState.None) }
+        addFileToFolder(intent.folderId, currentDrag.fileUri, folderName)
     }
 
     private suspend fun loadInitialData() {
@@ -394,11 +429,26 @@ class MainScreenViewModel(
         _state.update { it.copy(deleteFolderDialog = DeleteFolderDialogState(id, folder.name)) }
     }
 
-    private suspend fun addFileToFolder(folderId: String, fileUri: String) {
+    private suspend fun addFileToFolder(folderId: String, fileUri: String, folderName: String? = null) {
         try {
             folderRepository.addFile(folderId, fileUri)
+            val rawName = folderName ?: _state.value.folders.firstOrNull { it.id == folderId }?.name ?: folderId
+            val name = if (rawName.length > 40) rawName.take(40) + "…" else rawName
+            _state.update { it.copy(successEvent = SuccessEvent.FileAddedToFolder(name)) }
             refreshFolderFileCount(folderId)
-        } catch (_: Exception) {
+        } catch (e: FileDuplicateInFolderException) {
+            // AC-5: duplicate is not an error — show informational success event
+            _state.update { it.copy(successEvent = SuccessEvent.FileAlreadyInFolder) }
+        } catch (e: FileNotInHistoryException) {
+            logger.warn { "addFileToFolder: file not in history — ${e::class.simpleName}" }
+            _state.update { it.copy(errorEvent = ErrorEvent.FileNotInHistory) }
+        } catch (e: FolderNotFoundException) {
+            logger.warn { "addFileToFolder: folder not found — ${e::class.simpleName}" }
+            _state.update { it.copy(errorEvent = ErrorEvent.FolderOperationFailed) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn { "addFileToFolder failed: ${e::class.simpleName}" }
             _state.update { it.copy(errorEvent = ErrorEvent.FolderOperationFailed) }
         }
     }
@@ -478,6 +528,7 @@ class MainScreenViewModel(
 
 private fun RecentFile.toUiModel() = RecentFileUiModel(
     id = id,
+    uri = uri,
     displayName = displayName,
     openedAt = openedAt,
     availabilityStatus = availabilityStatus,

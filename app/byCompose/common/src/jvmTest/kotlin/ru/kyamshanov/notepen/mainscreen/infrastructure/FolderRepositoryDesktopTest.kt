@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen.mainscreen.infrastructure
 
 import kotlinx.coroutines.test.runTest
+import ru.kyamshanov.notepen.mainscreen.domain.exception.FileDuplicateInFolderException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNotFoundException
 import java.io.File
 import kotlin.test.AfterTest
@@ -13,6 +14,9 @@ import kotlin.test.assertTrue
 /**
  * Тесты [FolderRepositoryDesktop].
  *
+ * TC-14 / drag-drop AC-2, AC-10: addFile → success → getFilesInFolder contains URI.
+ * TC-15 / drag-drop AC-5: addFile → duplicate → FileDuplicateInFolderException.
+ * TC-16 / drag-drop EC-1: addFile with unknown folderId → FolderNotFoundException.
  * TC-88 / CC-26: cascade delete of FolderFileLink on folder delete.
  * TC-89 / CC-27: empty folder remains visible in getAll with zero files.
  */
@@ -30,6 +34,43 @@ class FolderRepositoryDesktopTest {
     @AfterTest
     fun tearDown() {
         tmpDir.deleteRecursively()
+    }
+
+    // TC-14 / drag-drop: addFile → success → getFilesInFolder contains URI (AC-2, AC-10)
+    @Test
+    fun addFile_success_fileAppearsInGetFilesInFolder() = runTest {
+        val folder = repo.create("MyDocs")
+        val fileUri = "file:///home/user/docs/report.pdf"
+
+        repo.addFile(folder.id, fileUri)
+
+        val files = repo.getFilesInFolder(folder.id)
+        assertTrue(files.contains(fileUri), "After addFile the URI must appear in getFilesInFolder")
+    }
+
+    // TC-15 / drag-drop: addFile duplicate → FileDuplicateInFolderException (AC-5)
+    @Test
+    fun addFile_duplicate_throwsFileDuplicateInFolderException() = runTest {
+        val folder = repo.create("MyDocs2")
+        val fileUri = "file:///home/user/docs/report2.pdf"
+
+        repo.addFile(folder.id, fileUri) // first add — must succeed
+
+        assertFailsWith<FileDuplicateInFolderException>(
+            "Second addFile for the same URI must throw FileDuplicateInFolderException",
+        ) {
+            repo.addFile(folder.id, fileUri)
+        }
+    }
+
+    // TC-16 / drag-drop: addFile with non-existent folderId → FolderNotFoundException (EC-1)
+    @Test
+    fun addFile_unknownFolderId_throwsFolderNotFoundException() = runTest {
+        assertFailsWith<FolderNotFoundException>(
+            "addFile with unknown folderId must throw FolderNotFoundException",
+        ) {
+            repo.addFile("non-existent-folder-id", "file:///some.pdf")
+        }
     }
 
     // TC-88 / CC-26: delete folder → associated FolderFileLinks are removed (cascade delete)

@@ -3,10 +3,10 @@ package ru.kyamshanov.notepen.mainscreen.ui
 /** Интенты (действия пользователя) для главного экрана. */
 sealed class MainScreenIntent {
 
-    /** Экран стал видимым — инициировать загрузку данных. */
+    /** Открыть системный файловый менеджер для выбора PDF. */
     object OpenFilePicker : MainScreenIntent()
 
-    /** Открыть системный файловый менеджер для выбора PDF. */
+    /** Экран стал видимым — инициировать загрузку данных. */
     object ScreenVisible : MainScreenIntent()
 
     /**
@@ -116,4 +116,30 @@ sealed class MainScreenIntent {
         val displayName: String,
         val fileSize: Long?,
     ) : MainScreenIntent()
+
+    /**
+     * Пользователь начал перетаскивать файл.
+     *
+     * @property fileId Идентификатор записи в истории.
+     * @property fileUri Нормализованный URI файла.
+     * @property displayName Отображаемое имя файла.
+     */
+    data class DragStarted(
+        val fileId: String,
+        val fileUri: String,
+        val displayName: String,
+    ) : MainScreenIntent()
+
+    /** Пользователь отменил перетаскивание файла (опустил вне папки или нажал Escape). */
+    object DragCancelled : MainScreenIntent()
+
+    /**
+     * Пользователь бросил файл на папку.
+     *
+     * @property folderId UUID папки, на которую был брошен файл.
+     */
+    data class DropOnFolder(val folderId: String) : MainScreenIntent()
+
+    /** UI подтвердил обработку события успеха — сбросить [ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent]. */
+    object OnSuccessEventHandled : MainScreenIntent()
 }

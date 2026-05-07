@@ -23,4 +23,7 @@ sealed class ErrorEvent {
 
     /** Общая ошибка операции с папкой. */
     object FolderOperationFailed : ErrorEvent()
+
+    /** Файл не найден в истории при попытке добавить в папку. */
+    object FileNotInHistory : ErrorEvent()
 }
