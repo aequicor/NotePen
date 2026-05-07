@@ -53,3 +53,5 @@ bin/
 .planning/.session-bootstrap.md
 .planning/MORNING_REPORT.md
 /local.properties
+/java_pid34416.hprof
+/.claude/settings.local.json
