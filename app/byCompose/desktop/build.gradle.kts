@@ -23,6 +23,7 @@ kotlin {
             implementation(projects.shared)
             implementation(projects.app.byCompose.common)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.kotlinx.coroutines.swing)
 
             //decompose
             implementation(libs.decompose)
