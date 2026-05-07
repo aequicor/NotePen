@@ -38,7 +38,6 @@ fun DrawablePdfPage(
             .pointerInput(Unit) {
                 detectDragGestures(
                     onDragStart = { offset ->
-                        println("Xyi $offset")
                         pdfDrawingState.startDrawing(offset.x, offset.y)
                     },
                     onDrag = { change, _ ->

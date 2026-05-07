@@ -1,0 +1,32 @@
+services:
+  chromadb:
+    image: chromadb/chroma
+    volumes:
+      - chroma-data:/chroma/chroma
+    restart: unless-stopped
+    environment:
+      - ALLOW_RESET=true
+
+  mcp:
+    image: aequicor/knowledgeos:latest
+    ports:
+      - "8081:8080"
+    env_file: .env
+    environment:
+      - CHROMA_URL=http://chromadb:8000
+      - CHROMA_COLLECTION=vault_my_project
+      - BM25_INDEX_PATH=/app/index
+      - VAULT_PATH=/vault
+    volumes:
+      - ./vault:/vault
+      - bm25-index:/app/index
+      - bm25-models:/app/model         # ONNX models (download once, persist across rebuilds)
+    depends_on:
+      chromadb:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  chroma-data:
+  bm25-index:
+  bm25-models:
