@@ -25,6 +25,72 @@ If `evals/runs/` does not exist → no-op, no warning, no log entry. The skill i
 - Task is a `/kit-techdebt` batch — those generate one record per entry, which would clutter `runs/`. Tech-debt batches use their own batch report file.
 - Task was aborted before CLOSE (no DoDGate verdict to record).
 
+## v6.3+ gates.csv aggregation
+
+This skill is also the read-side counterpart to `evals/runs/<kit_version>/gates.csv` (written by the `gate-telemetry` skill on every gate verdict). At task CLOSE the skill computes per-gate signal_ratio for this task and a rolling window for the project.
+
+**Per-task aggregation** (written into `<task_slug>.md` § "Gate signals (v6.3+)"):
+
+For each `gate` id present in gates.csv rows for this task:
+
+```
+| Gate | Fires | Blocks | Signal ratio (this task) |
+|------|-------|--------|--------------------------|
+| build | 7 | 1 | 0.143 |
+| review-correctness | 6 | 0 | 0.000 |
+| review-scope | 6 | 1 | 0.167 |
+| ground-truth | 4 | 0 | 0.000 |
+| dod | 1 | 0 | 0.000 |
+| diff-review | 1 | 0 | 0.000 |
+| ... |
+```
+
+`signal_ratio = blocking_fires / total_fires` per gate, this task only. Single-task ratios are noisy — the cross-task rolling ratio (computed on demand by `/kit-status`, not by eval-collector itself) is the actionable metric.
+
+**Cross-reference defects.csv** (best-effort false-negative detection):
+
+For each defect in `defects.csv` for this task:
+- If `defect.origin` maps to a gate (mapping below) AND that gate logged a `pass` for the same step before the defect was reported → mark the gate's row in this task's `<task_slug>.md` aggregation with a `*` and add a footnote "missed defect <TC-id>".
+
+Origin → gate mapping (v6.3+ heuristic; refined in v7+):
+```
+spec      → diff-review (PO eye), trace
+code      → build, review-correctness
+review    → review-correctness, review-scope, review-adversarial
+test      → build, reconcile
+ui        → ground-truth (UI artefact)
+trace     → traceability
+scope     → review-scope, unchanged-call-sites
+unknown   → no mapping (skip footnote)
+```
+
+Multiple gates may "own" a defect-origin class — annotate all of them.
+
+**Update gates.csv rows** (best-effort false-positive flag):
+
+For each gates.csv row of this task with `verdict: block`:
+- If PO subsequently invoked `/kit-defect ... --false-positive=<this_gate>` (v6.3 partial; full attribution in v7+) → update the row's `false_positive` column from `unknown` to `true`.
+- Otherwise → leave as `unknown`. Do NOT guess.
+
+CSV updates are append-and-fix patterns: read the file, modify the matching row, atomic-rewrite the file. If concurrent writes are a concern (multiple agents writing simultaneously, rare in this kit), use a lock file `evals/runs/<kit_version>/.gates.lock`.
+
+## v6.2+ defect-origin telemetry
+
+In addition to the per-task `<task_slug>.md` records below, this skill is
+the read-side counterpart to `evals/runs/<kit_version>/defects.csv` (written
+incrementally by `/kit-defect` at every PO-found defect). At task CLOSE the
+skill aggregates the defects.csv rows for this task and emits a per-task
+defects summary (count by origin, count by severity, ground_truth_attached
+ratio) into the `<task_slug>.md` record.
+
+The aggregation feeds gate_signal_ratio analysis: if a particular `origin`
+class accumulates over many tasks while no gate is being credited with
+catching it pre-CLOSE, that gate is a candidate for redesign or deletion
+(per the v7 proposal § 8.2 exit criterion: signal_ratio < 5% → deprecate).
+
+The skill is purely read-on-CLOSE for defects.csv; it never writes to it
+(that is /kit-defect's job per row).
+
 ## Process
 
 ```
@@ -84,6 +150,17 @@ If `evals/runs/` does not exist → no-op, no warning, no log entry. The skill i
    - post_close_bugs = "(manual: fill 24h after CLOSE)"
    - notes = "(manual: surprises, escalations, subjective readability)"
 
+   ## v6.2+ defect telemetry aggregation (auto from defects.csv):
+   - If evals/runs/<kit_version>/defects.csv exists:
+     Filter rows where task_slug == this task. For the matched rows compute:
+     - defects_total = row count
+     - defects_by_origin = histogram (spec/code/review/test/ui/trace/scope/unknown)
+     - defects_by_severity = histogram (low/medium/high/critical)
+     - ground_truth_attached_ratio = count(true) / count(true|false|waived)
+     - waived_count = count(waived)
+     Render as a "## Defects (v6.2 telemetry)" subsection in the task record.
+   - If defects.csv absent → omit the subsection (no error).
+
    ## For long-horizon tasks (tier: long-horizon in seed file):
    - sessions_used = count of /kit-resume invocations recorded in task file
      (grep for "Resume Context" or session-handoff entries)
@@ -120,7 +197,7 @@ If `evals/runs/` does not exist → no-op, no warning, no log entry. The skill i
 2. **Never overwrite an existing run record.** If `<task_slug>.md` already exists, append a version suffix. Eval history is audit data — never lose it.
 3. **Honest about what is automatable.** If a field cannot be derived deterministically (token counts, subjective notes, post-CLOSE bugs), mark it `(manual)` — do not synthesize a value.
 4. **No external network calls.** Skill operates only on filesystem + git. No fetching token counts from provider APIs (that requires credentials and adds dependency surface).
-5. **Idempotent on re-run.** If invoked twice on the same closed task (e.g. PO re-runs `/kit-status` then `/kit-checkpoint` to re-trigger), produce the same output deterministically (re-read filesystem each time).
+5. **Idempotent on re-run.** If invoked twice on the same closed task (e.g. PO re-runs `/kit-status` to inspect the record), produce the same output deterministically — re-read filesystem each time, never assume state from prior invocation.
 
 ## Cross-host compatibility
 

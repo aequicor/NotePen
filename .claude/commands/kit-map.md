@@ -67,7 +67,7 @@ For each module, compute (use `glob` and `serena_find_symbol` where available; f
 
 - **Name:** NotePen
 - **Description:** The best application for editing pdf
-- **Stack:** NotePen — kotlin stack
+- **Stack:** NotePen -- kotlin stack
 - **Total modules:** <N>
 
 ## Modules

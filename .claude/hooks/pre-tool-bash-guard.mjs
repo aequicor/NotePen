@@ -111,7 +111,7 @@ if (/^git\s+commit\b/.test(cmd)) {
       } else {
         emit(
           "ask",
-          `Source files staged (${srcFiles.slice(0, 3).join(", ")}${srcFiles.length > 3 ? ", …" : ""}) without any test, test-cases.md, or plan.md update. Likely missing @TestKeeper RECONCILE or regression test. Proceed anyway?`
+          `Source files staged (${srcFiles.slice(0, 3).join(", ")}${srcFiles.length > 3 ? ", …" : ""}) without any test, test-cases.md, or plan.md update. Likely missing @Verifier MODE=RECONCILE or regression test. Proceed anyway?`
         );
         process.exit(0);
       }

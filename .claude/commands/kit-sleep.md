@@ -18,6 +18,17 @@ Argument: $FEATURE_DESCRIPTION
 3. Verify `manifest.auto_commit_per_step != false`:
    - If the manifest has `auto_commit_per_step: false` → STOP. Output: "Sleep mode requires `auto_commit_per_step: true` (default). Set it in the manifest or run `/kit-new-feature --sleep` only after enabling per-step commits."
 
+3a. v7.0.0+ — risk gate. If `$FEATURE_DESCRIPTION` carries `--risk=critical` (or auto-classify infers critical based on heuristics in @Main Step 0a) AND `manifest.lanes.critical_block_sleep: true` (default) → STOP. Output:
+    "Critical risk + sleep mode is the highest blast-radius combination. Refused per `manifest.lanes.critical_block_sleep: true`. Either run interactively (drop --sleep) or set the flag false in your manifest (logged as risk acceptance)."
+    Note: this check runs at /kit-sleep entry on the explicit flag. Auto-classification happens later in @Main Step 0a; if @Main classifies as critical mid-startup, BLOCKED-shutdown procedure runs immediately with reason "critical risk auto-detected during sleep startup".
+
+3b. v7.0.0-alpha+ — `Bash(git reset --hard *)` allowlist advisory. Sleep mode's BLOCKED-shutdown procedure uses `git reset --hard <last_green>`, which the harness flags as destructive. Without the allowlist in `.claude/settings.json` (CC) or equivalent permission grant (OC), the harness will prompt mid-sleep and defeat the autonomous mode.
+    - If `.claude/settings.json` exists AND does NOT contain `Bash(git reset --hard *)` in `permissions.allow` → output WARNING:
+      "⚠️  Sleep mode BLOCKED-shutdown requires `Bash(git reset --hard *)` in your harness allowlist. Without it, an unrecoverable sleep failure will pause for permission prompt — defeating sleep. Add it to `.claude/settings.json` permissions.allow before /kit-sleep, or accept the risk by typing 'I accept'. Otherwise abort with anything else."
+      WAIT for "I accept" or abort.
+    - If allowlist already contains it → no warning, proceed silently.
+    - If `.claude/settings.json` does not exist (OpenCode-only project, etc.) → skip this advisory.
+
 4. Output one-time advisory to PO:
 
 ```

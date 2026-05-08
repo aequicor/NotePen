@@ -11,7 +11,7 @@ vault/tech-debt/<module>/<slug>.md          ← open / in-progress
 vault/tech-debt/<module>/done/<slug>.md     ← archived after successful fix
 ```
 
-Entries are written by code-touching agents (`@CodeWriter`, `@BugFixer`, `@Reviewer`) via the `tech-debt-record` skill while doing other work. `/kit-techdebt` is where the PO drains that backlog in a controlled batch.
+Entries are written by code-touching agents (`@CodeWriter`, `@BugFixer`, `@Verifier MODE=REVIEW`) via the `tech-debt-record` skill while doing other work. `/kit-techdebt` is where the PO drains that backlog in a controlled batch.
 
 ## Step 0 — Preconditions
 
@@ -92,8 +92,8 @@ For each TD-id in the picked list, classify:
 
 | Path | When | Pipeline |
 |------|------|----------|
-| **DIRECT** | severity ∈ {low, medium} AND `Files` table lists ≤ 2 files AND category ∈ {warning, todo, deprecation, smell} | `@BugFixer`-style cycle: ANALYZE → FIX → (REGRESSION TEST if behaviour could shift) → `@Reviewer` → BUILD |
-| **PLAN** | severity = high OR ≥ 3 files OR category = duplication (cross-cutting refactor) | Standard TECH pipeline: write spec.md (TECH form) + plan.md skeleton for the synthetic feature `techdebt-<slug>`, then `@CodeWriter` → `@Reviewer` per step |
+| **DIRECT** | severity ∈ {low, medium} AND `Files` table lists ≤ 2 files AND category ∈ {warning, todo, deprecation, smell} | `@BugFixer`-style cycle: ANALYZE → FIX → (REGRESSION TEST if behaviour could shift) → `@Verifier MODE=REVIEW` → BUILD |
+| **PLAN** | severity = high OR ≥ 3 files OR category = duplication (cross-cutting refactor) | Standard TECH pipeline: write spec.md (TECH form) + plan.md skeleton for the synthetic feature `techdebt-<slug>`, then `@CodeWriter` → `@Verifier MODE=REVIEW` per step |
 
 Set the entry's `status: open` → `status: in-progress` (frontmatter only) before dispatching, so a parallel run does not double-fix it.
 
@@ -111,7 +111,7 @@ for each TD-id in selected:
            module = entry module
            feature = techdebt-<slug>
            tech-debt entry path
-         BugFixer: ANALYZE → FIX → @Reviewer → BUILD → commit.
+         BugFixer: ANALYZE → FIX → @Verifier MODE=REVIEW → BUILD → commit.
          Note: do NOT update test-cases.md (no TC was assigned). Skip Defects log.
 
        PLAN path:
@@ -119,7 +119,7 @@ for each TD-id in selected:
             vault/features/<module>/techdebt-<slug>/{spec.md, plan.md}
             with TYPE=TECH (spec.md: only § How it works + § Test plan; plan.md:
             skeleton + 1–3 step Implementation plan written immediately).
-         b. For each step: dispatch @CodeWriter → @Reviewer → fix loop (max 3 review-fix cycles, then escalate).
+         b. For each step: dispatch @CodeWriter → @Verifier MODE=REVIEW → fix loop (max 3 review-fix cycles, then escalate).
          c. After last step: BUILD + LINT.
 
   5.3 ARCHIVE — on success:
@@ -166,5 +166,5 @@ When report is delivered:
 
 - DO NOT fix entries marked `status: wont-fix` — skip them in SCAN.
 - DO NOT mass-update entries' frontmatter without dispatching the actual fix.
-- DO NOT skip `@Reviewer` on the DIRECT path. Tech debt is the easy place for review to catch a wrong "obvious" fix.
+- DO NOT skip `@Verifier MODE=REVIEW` on the DIRECT path. Tech debt is the easy place for review to catch a wrong "obvious" fix.
 - DO NOT delete tech-debt files — always move to `done/`. The history is the audit trail.

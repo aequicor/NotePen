@@ -9,7 +9,7 @@ triggers:
   - "requirements"
 confidence: high
 source: human
-updated: 2026-05-07T17:37:42Z
+updated: {{ISO_TIMESTAMP_PLACEHOLDER}}
 ---
 
 # <Feature title — plain English, no jargon>
@@ -21,12 +21,12 @@ updated: 2026-05-07T17:37:42Z
 <!--
   ⚠ FROZEN at CONFIRM. v6.0+ rule: once @Main step 4 (CONFIRM) passes, this file
   is read-only for the rest of the FEATURE pipeline. EXECUTE-phase agents
-  (@CodeWriter, @Reviewer, @TestKeeper, @TraceabilityChecker, @DoDGate,
-  replan-on-discovery) MUST NOT edit this file. Mutable state — implementation
-  steps, DoD verdict, replan markers — lives in the sibling plan.md.
+  (@CodeWriter, @Verifier, replan-on-discovery) MUST NOT edit this file.
+  Mutable state — implementation steps, DoD verdict, replan markers —
+  lives in the sibling plan.md.
 
   If a structural discovery requires changing AC / EC / How-it-works,
-  @Main escalates to PO and re-dispatches @Analyst with TYPE=FEATURE
+  @Main escalates to PO and re-dispatches @Architect with TYPE=FEATURE
   EXISTING_DOCS=<this spec.md>. The amendment is a new DRAFT cycle, not
   an in-place edit. Spec rot is the failure mode this split prevents.
 -->
@@ -93,7 +93,7 @@ GET  /api/v1/orders/:id → getOrderHandler
 
 ## UI / UX
 
-(Filled by `@Designer` for UI features only. Otherwise omit this section. UI/UX is part of the spec — frozen at CONFIRM along with everything else.)
+(Filled by `@Architect` (UI section) for UI features only. Otherwise omit this section. UI/UX is part of the spec — frozen at CONFIRM along with everything else.)
 
 ## Open questions
 

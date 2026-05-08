@@ -9,7 +9,7 @@ triggers:
   - "duplication"
 confidence: high
 source: human
-updated: 2026-05-07T17:37:42Z
+updated: {{ISO_TIMESTAMP_PLACEHOLDER}}
 ---
 
 # Tech Debt: <short-title>

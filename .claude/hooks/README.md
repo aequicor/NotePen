@@ -84,7 +84,7 @@ This matters: if you ship the kit to a teammate whose machine is misconfigured, 
 
 The prompt-level Anti-Loop rules in `@Main` and the agent bodies are still the primary control plane. Hooks are a **second line of defence**:
 
-- The model still has to choose to dispatch `@Reviewer` after `@CodeWriter` (prompt rule).
+- The model still has to choose to dispatch `@Verifier MODE=REVIEW` after `@CodeWriter` (prompt rule).
 - The model still has to mark steps in `plan.md § Implementation plan` (prompt rule; v6 — used to be feature.md).
 - Hooks only catch what slips through: pushing to main, committing without tests, leaving an active task on session close.
 

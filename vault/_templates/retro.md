@@ -9,7 +9,7 @@ triggers:
   - "bug report"
 confidence: high
 source: human
-updated: 2026-05-07T17:37:42Z
+updated: {{ISO_TIMESTAMP_PLACEHOLDER}}
 ---
 
 # Retrospective — <feature>
@@ -58,7 +58,7 @@ What was changed.
 
 - [x] Unit test passes
 - [x] All module tests pass
-- [x] @Reviewer verdict CLEAN
+- [x] @Verifier MODE=REVIEW verdict CLEAN
 - [x] Build successful
 
 ### Lesson

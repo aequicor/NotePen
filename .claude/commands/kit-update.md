@@ -1,4 +1,4 @@
-﻿---
+---
 description: Update ai-agent-kit configuration to the latest version. Reads current kit_version from manifest, follows the update prompt to fetch changelog, re-render templates with merge, and update manifest fields.
 ---
 

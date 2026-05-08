@@ -14,7 +14,7 @@ The retrospective is **mandatory** for any defect classified `CRITICAL` or `HIGH
 **Auto-trigger criteria (any one fires the skill):**
 
 - The fixed defect's severity in the Defects log is `CRITICAL` or `HIGH` (read at fix time).
-- A systemic problem was identified by `@BugFixer` or `@Reviewer` during the fix (recurrence pattern, architectural smell, missing guideline).
+- A systemic problem was identified by `@BugFixer` or `@Verifier MODE=REVIEW` during the fix (recurrence pattern, architectural smell, missing guideline).
 - The same TC has been re-opened ≥ 2 times in the retry counter (bug returns after a "fix").
 - Bug is linked to an architectural decision, missing tests, or a guideline gap.
 - PO explicitly requests it.
@@ -64,7 +64,7 @@ For each root cause, define a specific action:
 | **New test** | Write unit or integration test | Mirror of src/ in test/ |
 | **Update guideline** | Add rule, pattern, anti-pattern | `vault/guidelines/<module>/` |
 | **New guideline** | Create document on the bug topic | `vault/guidelines/<module>/` |
-| **Update feature spec** | Clarify Edge Cases or How it works — escalate to PO; spec.md is FROZEN, amendments go through @Analyst as a fresh DRAFT cycle | `vault/features/<module>/<feature>/spec.md` (read-only after CONFIRM) |
+| **Update feature spec** | Clarify Edge Cases or How it works — escalate to PO; spec.md is FROZEN, amendments go through @Architect as a fresh DRAFT cycle | `vault/features/<module>/<feature>/spec.md` (read-only after CONFIRM) |
 | **Refactor task** | Describe TECH task | Return to PO |
 
 ### Step 4 — Implement Actions (priority order)

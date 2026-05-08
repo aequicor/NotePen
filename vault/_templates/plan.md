@@ -8,7 +8,7 @@ triggers:
   - "DoD"
 confidence: high
 source: human
-updated: 2026-05-07T17:37:42Z
+updated: {{ISO_TIMESTAMP_PLACEHOLDER}}
 ---
 
 # Implementation plan & DoD â€” <feature>
@@ -19,7 +19,7 @@ updated: 2026-05-07T17:37:42Z
 
 <!--
   This file is mutable across EXECUTE. v6.1 rule: only @Main, @CodeWriter
-  (via @Main), replan-on-discovery skill, and @DoDGate edit it. The sibling
+  (via @Main), replan-on-discovery skill, and @Verifier MODE=DOD edit it. The sibling
   spec.md is FROZEN at CONFIRM and is the immutable contract this plan
   implements.
 
@@ -92,4 +92,4 @@ Default verdict gate for CLOSE. `auto_approve.diff_review: true` bypasses this â
 
 ## Definition of Done
 
-Filled by `@DoDGate` at CLOSE. Walked verdict from the canonical 7-check list (see `definition-of-done` skill). Left empty until then.
+Filled by `@Verifier MODE=DOD` at CLOSE. Walked verdict from the canonical 7-check list (see `definition-of-done` skill). Left empty until then.

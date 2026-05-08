@@ -14,7 +14,7 @@
 
 ## План реализации
 
-- [ ] Шаг 1: Добавить кнопку «Назад» в DetailsContent.kt
+- [x] Шаг 1: Добавить кнопку «Назад» в DetailsContent.kt
 
   **Цель:** Разместить `SmallFloatingActionButton` (Material3) с иконкой `Icons.AutoMirrored.Filled.ArrowBack` в левом верхнем углу `Box`-контейнера `DetailsContent`. По нажатию вызывать `component.onBack()`.
 

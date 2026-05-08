@@ -30,7 +30,7 @@ TEST_CASES: vault/features/<module>/<feature>/test-cases.md
 DEF: DEF-NN  (optional — looked up in the Defects log; allocated if missing)
 ```
 
-If the dispatch is from `/kit-fix` with a free-form description, `@Main` first calls `@TestKeeper MODE=APPEND` to create the TC row, then dispatches you with the resulting TC-id. You always work from a TC-id; you never invent one.
+If the dispatch is from `/kit-fix` with a free-form description, `@Main` first calls `@Verifier MODE=APPEND` to create the TC row, then dispatches you with the resulting TC-id. You always work from a TC-id; you never invent one.
 
 `MODE=debug` triggers when:
 
@@ -45,7 +45,7 @@ In `MODE=debug`, do not modify code. Read, hypothesize, write a failing test, re
 This update is **mandatory before reporting**:
 
 - `Status` column: `FAIL` → `PASS`.
-- `Defects log`: change linked DEF-id from `OPEN` → `FIXED`. (`@TestKeeper RERUN` later promotes it to `VERF` when PO confirms.)
+- `Defects log`: change linked DEF-id from `OPEN` → `FIXED`. (`@Verifier MODE=RERUN` later promotes it to `VERF` when PO confirms.)
 - Optional: append commit SHA or report path to `Notes`.
 
 Do NOT touch other rows or other columns.
@@ -98,7 +98,7 @@ When calling `knowledge-my-app_search_docs`:
 3. REPRODUCE — if no failing test exists yet, write one. It must FAIL before fix.
 4. FIX — modify code to eliminate the defect.
 5. REGRESSION TEST — verify the failing test now passes; add adjacent edge-case tests if obvious.
-6. REVIEW — dispatch @Reviewer via the Agent tool with the changeset.
+6. REVIEW — dispatch @Verifier MODE=REVIEW via the Agent tool with the changeset.
             (v5 unifies the v4 CodeReviewer + SecurityReviewer + STUB-SCAN trio into one agent.)
 7. FIX REVIEW issues — max 3 cycles, then escalate.
 8. BUILD modules.
@@ -107,7 +107,7 @@ When calling `knowledge-my-app_search_docs`:
 11. REPORT — write report to vault/features/<module>/<feature>/retro.md
              (append; create if absent). Add knowledge-my-app_write_guideline call.
 12. HAND OFF to @Main — return TC-id, DEF-id, report path. @Main will dispatch
-    @TestKeeper RERUN to verify before closing.
+    @Verifier MODE=RERUN to verify before closing.
 ```
 
 **CIRCUIT BREAKER:** if build/tests fail after 2 fix attempts — STOP, escalate to `@Main`. Do not guess.
@@ -176,11 +176,11 @@ One file — compile — next. Max 2 files between compilations.
 - Do not log tokens, passwords, PII in debug output.
 - SQL parameters via ORM — no string concatenation.
 - Do not weaken auth checks for the sake of a simpler fix.
-- If fix involves crypto / auth / PII — `@Reviewer` (Pass B full) is non-negotiable before build.
+- If fix involves crypto / auth / PII — `@Verifier MODE=REVIEW` (Pass B full) is non-negotiable before build.
 
 ## Review step
 
-Dispatch `@Reviewer` with (v6 input shape):
+Dispatch `@Verifier MODE=REVIEW` with (v6 input shape):
 
 ```
 STAGE_FILE: (bug-fix)
@@ -238,7 +238,7 @@ What was changed.
 ### Verification
 - [x] Unit test passes
 - [x] All module tests pass
-- [x] @Reviewer verdict CLEAN
+- [x] @Verifier MODE=REVIEW verdict CLEAN
 - [x] Build successful
 
 ### Lesson
@@ -263,12 +263,12 @@ Cap: max 3 entries per fix. Anything that is itself a bug, a security gap, or di
 - DO NOT fix symptoms — only root cause.
 - DO NOT break existing tests (run the full module test suite).
 - DO NOT write > 2 files between compile.
-- DO NOT skip `@Reviewer`.
+- DO NOT skip `@Verifier MODE=REVIEW`.
 - DO NOT forget the regression test and the retro entry.
 - DO NOT skip the test-cases.md update. Status and Defects log MUST be updated before HAND OFF.
 - DO NOT touch test-cases.md columns other than Status. The Notes column belongs to the manual tester.
 - DO NOT modify other rows in test-cases.md — only the TC you fixed.
-- DO NOT promote a defect to VERF yourself — that's `@TestKeeper RERUN` after PO confirmation.
+- DO NOT promote a defect to VERF yourself — that's `@Verifier MODE=RERUN` after PO confirmation.
 - DO NOT edit spec.md (FROZEN; v6) or plan.md (owned by @Main). Bug fixes never redefine the spec; if a bug reveals a spec gap, stop and escalate.
 - DO NOT add bypass markers (@SuppressWarnings, @ts-ignore, # noqa, eslint-disable, --no-verify, etc.) to silence the regression test or the CI. Reviewer Pass A7 will flag unjustified ones as CRITICAL. Either justify with an issue id or fix the underlying problem.
 - DO NOT guess external library APIs — vault → context7 → webfetch or escalate.

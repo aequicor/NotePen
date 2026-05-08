@@ -14,7 +14,7 @@
 
 The best application for editing pdf
 
-**Stack:** NotePen — kotlin stack
+**Stack:** NotePen -- kotlin stack
 
 ---
 
@@ -51,82 +51,82 @@ The best application for editing pdf
 - Bare Exception/Throwable catch (catch specific types)
 - lateinit outside DI containers, fragments, and tests
 - runBlocking outside main and tests
-- Recomposition-unsafe state read inside @Composable (read mutableStateOf via .value or by remember)
+- Recomposition-unsafe state read inside @Composable
 - Side effects in @Composable body without LaunchedEffect / DisposableEffect
 - Hard-coded sizes in dp without referencing the design system tokens
 - Platform-specific API in commonMain (move to expect/actual or platform sourceSet)
 - Blocking I/O on the Compose UI dispatcher (use Dispatchers.IO via withContext)
-- Direct Android Context retention in commonMain (leak risk вЂ” use platform sourceSet)
+- Direct Android Context retention in commonMain (leak risk)
 - Hardcoded secrets or API keys in code (use environment variables)
 - SQL string concatenation with user input (use parameterized queries)
 - Logging sensitive data (passwords, tokens, PII)
 - TODO/FIXME in production code without a tracking entry (issue or DECISIONS.md)
 - Disabled/commented-out tests without an explanation
 - Catching Throwable/Exception generically and swallowing it
-- Class with more than one reason to change (god class / service class doing persistence + business logic + formatting simultaneously)
-- Method longer than 30 lines that mixes abstraction levels (orchestration + low-level detail in same function)
+- Class with more than one reason to change (god class)
+- Method longer than 30 lines that mixes abstraction levels
 - Repository class containing business rules or validation logic
 - Use case / interactor class containing more than one business operation
-- Switch/when on type tags or string type discriminators instead of polymorphism (adding a new type requires editing existing code)
+- Switch/when on type tags or string type discriminators instead of polymorphism
 - Feature flag inside domain logic instead of strategy/decorator injection
 - Hardcoded algorithm selection inside a class that should delegate to a strategy
 - Subclass that throws UnsupportedOperationException / NotImplementedError for inherited methods
 - Subclass that weakens preconditions or strengthens postconditions of the parent contract
 - Type-checking with instanceof/is inside a method that accepts a base type (violates substitutability)
-- Interface with more than 5вЂ“7 methods that clients only partially implement (fat interface)
+- Interface with more than 5-7 methods that clients only partially implement (fat interface)
 - Passing a full service/repository interface to a consumer that uses only one method
 - Marker method implemented as a no-op (empty body) because the interface forced it
-- Concrete class instantiated with 'new' / constructor call inside business logic (use DI / factory)
+- Concrete class instantiated with constructor call inside business logic (use DI / factory)
 - Domain or use-case class importing from infrastructure layer (DB, HTTP, filesystem packages)
 - Static/global access to shared mutable state from domain logic (singletons as hidden dependencies)
 - Test that cannot run without a real database/network because a dependency was not inverted
 - Presentation layer (controller, ViewModel, screen) containing business rules
-- Domain entity importing framework annotations (ORM, serialization, DI) вЂ” keep entities pure
+- Domain entity importing framework annotations -- keep entities pure
 - Infrastructure class (repository impl, API client) containing business decisions
 - Cross-layer import in wrong direction: inner layer importing outer layer package
 - Duplicate business logic in two or more use cases instead of extracting a shared domain service
-- Abstract base class or interface created speculatively with only one concrete implementation and no planned extension
-- Over-engineered abstraction for a one-time operation (factory-of-factories, generic pipeline for a single fixed flow)
+- Abstract base class or interface created speculatively with only one concrete implementation
+- Over-engineered abstraction for a one-time operation
 - Mutable public field on a domain entity or value object (use val / readonly / private setter)
 - Method that mutates its argument instead of returning a new value (unexpected side effect)
 - Shared mutable state accessed without synchronisation in concurrent context
-- Long method chain on a foreign object reaching 3+ levels deep (a.b().c().doSomething()) вЂ” violates LoD
-- Caller extracting data from an object and making decisions on its behalf instead of telling the object to act
-- Deep inheritance hierarchy (3+ levels) for code reuse вЂ” prefer composition or delegation
-- Inheriting from a concrete class solely to reuse implementation (not to extend the contract)
-- Inner-layer module importing from an outer-layer module (domain в†’ infrastructure, use-case в†’ controller, entity в†’ web/HTTP) вЂ” violates Clean Architecture's dependency rule: source code dependencies must point only inward
-- Domain or use-case package referencing framework types by name (Spring, Ktor, Micronaut, Compose, React, Express, Django, Rails, Flask) вЂ” inner layers must remain framework-agnostic
-- Use-case (interactor) importing a concrete repository implementation, HTTP client, ORM session, or filesystem API вЂ” depend on the port interface declared inside the use-case layer instead
-- Cross-cutting reference from a domain class to logger/metrics/tracing infrastructure вЂ” inject a domain-side abstraction instead of importing the framework client
-- Domain entity annotated with ORM, serialization, or DI framework annotations (@Entity, @Table, @Column, @JsonProperty, @JsonIgnore, @Inject, @Component, @Autowired) вЂ” entities must not depend on persistence or framework concerns
-- Domain entity extending a framework base class (BaseEntity from JPA/Hibernate/Room, AggregateRoot from a framework, ActiveRecord) вЂ” favor composition over framework inheritance to keep entities pure
-- Anemic entity вЂ” data class with only getters/setters and no business behavior, with all logic offloaded to a 'Service' or 'Manager' class вЂ” move invariants and behavior into the entity
-- Domain entity with public mutators that allow callers to break invariants directly (entity.setBalance(-100) is valid syntax) вЂ” encapsulate state changes through behavior methods that enforce rules
-- Single use-case / interactor class exposing more than one public business operation (executeA, executeB, executeC) вЂ” split into separate use-case classes, one per business operation
-- Use-case method invoking another use-case directly to compose behavior вЂ” orchestration of multiple use cases belongs in a higher-level use case or in the entry-point/controller, not as use-case-to-use-case calls
-- Use-case orchestrating cross-cutting concerns inline (transaction begin/commit, retry loops, cache reads, audit logging) вЂ” move cross-cutting behavior to decorators, middleware, or the composition root
-- Use-case returning a domain entity directly to the controller / presenter вЂ” translate to a boundary DTO (output port) so the entity does not leak across the boundary
-- Use-case accepting a framework request type as its input parameter (HttpRequest, ServletRequest, ResponseEntity, NextRequest) вЂ” define a use-case-specific input data structure and let the controller adapt
-- Repository / gateway interface declared in the infrastructure or persistence layer вЂ” ports belong with the use case (or domain) that consumes them; the implementation lives in infrastructure
-- Use-case importing a concrete adapter (HttpClientImpl, JpaUserRepository, S3FileStore) instead of its port interface вЂ” depend on abstractions defined in the inner layer
-- Port interface signature exposing framework-specific types (ResultSet, ResponseEntity, Flux<HttpResponse>, java.sql.Connection, OkHttp Response) вЂ” keep port signatures expressed in domain types so the inner layer has no compile-time link to outer technology
-- Two adapters implementing the same port that differ only in serialization framework (Jackson vs Moshi vs Gson) вЂ” collapse via a single abstraction instead of duplicating ports
-- Domain entity passed across the use-case в†’ presentation boundary (controller serializes a domain entity to JSON / a view-model directly) вЂ” convert to a boundary DTO at the use-case output port
-- Persistence model used as the domain entity (JPA @Entity, Room @Entity, ActiveRecord row) referenced from use-cases or domain logic вЂ” keep persistence representations in infrastructure and map to/from a separate domain entity
-- Web request/response DTO (HttpRequest body, OpenAPI-generated model) leaking into a use-case as input/output type вЂ” define a use-case-specific request/response data structure
-- Single class playing both the domain entity role and the API/JSON DTO role (annotated with both ORM and serialization metadata) вЂ” split responsibilities across layers
-- Manual `new ConcreteRepository(...)` (or equivalent constructor call) inside a use-case, controller, or domain class вЂ” move construction to the composition root and inject the dependency
-- Service-locator pattern (Container.resolve<X>(), ServiceLocator.get(), ApplicationContext.getBean()) called inside a use-case or domain class вЂ” accept the dependency as a constructor parameter instead
-- DI container annotation scanning the domain/use-case package and binding implementations there вЂ” wiring belongs in the composition root (main / startup), not inside business code
-- Top-level package named purely after technical concerns (controllers/, services/, repositories/, models/, dao/) instead of business capabilities (billing/, onboarding/, inventory/, checkout/) вЂ” the architecture should scream its purpose, not its framework
-- Single shared service/ or util/ package collecting unrelated logic from multiple bounded contexts вЂ” split by feature / bounded context so each domain owns its code
-- Use-case file named after a CRUD verb on the storage shape (UpdateUserRowUseCase, InsertOrderTableUseCase) instead of the business operation (PromoteUserToAdmin, PlaceOrder) вЂ” names should describe behavior, not data manipulation
-- Use-case unit test that requires a real database, real HTTP server, real message broker, or real filesystem вЂ” use-cases must be exercisable through their ports with in-memory / fake adapters
-- Domain entity test that boots a framework runtime (Spring context, Ktor server, Compose runtime, Rails environment) вЂ” entities must be plain types testable without any framework
-- Use-case test that mocks the use-case under test (replacing its own behavior) instead of substituting its dependencies through the ports вЂ” tests the mock, not the use case
-- Outer-ring concept (HTTP status code, ORM session, UI event, Redux action, Compose remember{}) referenced by name in the domain or use-case layer вЂ” outer concerns must stay outside the boundary
-- Domain enum / value object including a value that only makes sense in the outer layer (e.g. OrderStatus.HTTP_503_PENDING) вЂ” describe domain states in domain terms
-- Use-case logging at INFO/DEBUG level using a framework-specific logger (SLF4J, log4j, console) imported directly вЂ” log through a port abstraction so the use case stays infrastructure-free
+- Long method chain on a foreign object reaching 3+ levels deep -- violates LoD
+- Caller extracting data from an object and making decisions on its behalf
+- Deep inheritance hierarchy (3+ levels) for code reuse -- prefer composition or delegation
+- Inheriting from a concrete class solely to reuse implementation
+- Inner-layer module importing from an outer-layer module -- violates Clean Architecture
+- Domain or use-case package referencing framework types by name
+- Use-case importing a concrete repository implementation, HTTP client, ORM session
+- Cross-cutting reference from a domain class to logger/metrics/tracing infrastructure
+- Domain entity annotated with ORM, serialization, or DI framework annotations
+- Domain entity extending a framework base class
+- Anemic entity -- data class with only getters/setters and no business behavior
+- Domain entity with public mutators that allow callers to break invariants directly
+- Single use-case / interactor class exposing more than one public business operation
+- Use-case method invoking another use-case directly to compose behavior
+- Use-case orchestrating cross-cutting concerns inline
+- Use-case returning a domain entity directly to the controller / presenter
+- Use-case accepting a framework request type as its input parameter
+- Repository / gateway interface declared in the infrastructure or persistence layer
+- Use-case importing a concrete adapter instead of its port interface
+- Port interface signature exposing framework-specific types
+- Two adapters implementing the same port that differ only in serialization framework
+- Domain entity passed across the use-case to presentation boundary
+- Persistence model used as the domain entity
+- Web request/response DTO leaking into a use-case as input/output type
+- Single class playing both the domain entity role and the API/JSON DTO role
+- Manual new ConcreteRepository() inside a use-case, controller, or domain class
+- Service-locator pattern called inside a use-case or domain class
+- DI container annotation scanning the domain/use-case package
+- Top-level package named purely after technical concerns instead of business capabilities
+- Single shared service/ or util/ package collecting unrelated logic from multiple bounded contexts
+- Use-case file named after a CRUD verb on the storage shape instead of the business operation
+- Use-case unit test that requires a real database, real HTTP server, real message broker
+- Domain entity test that boots a framework runtime
+- Use-case test that mocks the use-case under test
+- Outer-ring concept referenced by name in the domain or use-case layer
+- Domain enum / value object including a value that only makes sense in the outer layer
+- Use-case logging at INFO/DEBUG level using a framework-specific logger imported directly
 
 ### Style
 
@@ -264,18 +264,14 @@ A task is **complete** only when ALL of the following are true (the canonical 7 
 
 For shared rules used by every subagent (instruction hierarchy, language, file-access matrix, MCP/skills, anti-loop, dispatch convention) — read `.claude/_shared.md`. That file is also injected into every subagent under `.claude/agents/`.
 
-## Subagents (v5 — 9 agents total)
+## Subagents (v7.0.0 — 4 subagents + main-session orchestrator = 5 total)
 
 Each has its own file under `.claude/agents/`. Dispatch with the Agent tool, `subagent_type=<AgentName>`.
 
-- **@Analyst** — single-pass author of the feature design doc (Why, ACs, Edge Cases, How it works, Test plan). Built-in self-reflection loop. Replaces v4 BusinessAnalyst + SystemAnalyst + CornerCaseReviewer + CoverageChecker + ConsistencyChecker.
-- **@CodeWriter** — implements one step of the plan TDD-first (failing tests → minimal code → green).
-- **@TestKeeper** — owns `test-cases.md` end-to-end: generates, executes, reconciles, reruns. Replaces v4 QA + TestExecutor + TestRunner.
-- **@Reviewer** — single read-only pass: code review + security smell + stub-scan. Replaces v4 CodeReviewer + SecurityReviewer + STUB-SCAN.
-- **@TraceabilityChecker** — AC/EC → TC → test file → source symbol matrix; orphan check.
-- **@DoDGate** — 7-check Definition-of-Done; binary PASS / BLOCK.
+- **@Architect** — single-pass author of the feature design doc (Why, ACs, Edge Cases, How it works, Test plan, UI section if applicable). Built-in self-reflection loop. Replaces v6.x @Analyst + @Designer.
+- **@CodeWriter** — implements one step of the plan TDD-first (failing tests → minimal code → green). Emits 5-section runbook.
+- **@Verifier** — mode-driven verification. MODE ∈ {GENERATE, DRAFT, EXECUTE, RECONCILE, RERUN, SCAN, APPEND, REVIEW, DOD, TRACE}. Replaces v6.x @TestKeeper + @Reviewer + @DoDGate + @TraceabilityChecker. Per-mode behaviour and output formats inlined in `_shared/agents/Verifier.body.md.template`.
 - **@BugFixer** — defect analysis + fix + retro entry. `MODE=debug` absorbs the v4 Debugger role.
-- **@Designer** — UI/UX appendix on UI features (optional; omit by setting `claude_code.models.designer: null`).
 
 There is **no** `@Main` subagent file in Claude Code installs — the orchestrator role lives in this main session.
 
@@ -291,7 +287,7 @@ The orchestrator's full operating procedure follows.
 > ai-agent-kit v6.1 — multi-host (OpenCode + Claude Code), spec/plan split, slice caps, mandatory diff-review, per-step commit, vertical-slice gate, runbook reports, clean-session-per-step, sleep mode
 > **Tools scope:** `edit`/`write` are granted ONLY for `.planning/CURRENT.md` (session pointer), `.planning/tasks/<slug>.md` (task state), `.planning/MORNING_REPORT.md` (sleep mode only), and `vault/features/<module>/<feature>/plan.md` (live implementation plan / Diff-review / DoD verdict). Any write to `src/`, `vault/features/<module>/<feature>/spec.md` (FROZEN at CONFIRM — read-only after that), `.claude/` — via subagents.
 > **Read-only shell** (v6.0): `git diff --stat`, `git diff --name-only`, `git log --oneline` for the diff-review checkpoint at step 5.10 (P2).
-> **Write-narrow shell** (v6.1, only inside step 5.4b COMMIT and step 6c BLOCKED-shutdown / step 6b /kit-revert-step): `git status --porcelain`, `git rev-parse HEAD`, `git add -A`, `git commit -m "..."`, and (only in BLOCKED-shutdown / revert-step) `git reset --hard <step_commit_sha>`. NO other shell. NEVER `--no-verify`, NEVER `--amend` to non-step commits, NEVER `git push`.
+> **Write-narrow shell** (v6.2): `git status --porcelain`, `git rev-parse HEAD`, `git add -A`, `git commit -m "..."` (only in 5.4b COMMIT); `git revert --no-edit <step_commit_sha>` and `git revert --abort` (only in /kit-revert-step — v6.2 switched from destructive `git reset --hard` to non-destructive `git revert` so the harness destructive-action gate doesn't trip on an in-band PO `/kit-approve`); `git reset --hard <step_commit_sha>` (only in sleep-mode BLOCKED-shutdown — requires `Bash(git reset --hard *)` allowlist in `.claude/settings.json` or harness will prompt during sleep, defeating its purpose; this is documented in /kit-sleep startup). NO other shell. NEVER `--no-verify`, NEVER `--amend` to non-step commits, NEVER `git push`.
 
 ## Context and Rules
 
@@ -309,7 +305,7 @@ Tools `write` and `edit` are available **only** for `.planning/CURRENT.md` and `
 
 v6.1 adds five workflow guarantees on top of v6.0 without breaking any v6.0 contract. All are opt-out via manifest flags but on by default:
 
-- **Per-step commit at 5.4b (P12).** After every `@Reviewer` CLEAN, @Main runs `git add -A && git commit -m "step <N>: <goal>"` and records the sha in `.planning/tasks/<slug>.md.step_commits[]`. This makes the per-step diff in plan.md § Diff-review possible AND enables `/kit-revert-step` and `/kit-step-resume` to anchor to known-green checkpoints. Skipped if `manifest.auto_commit_per_step: false`.
+- **Per-step commit at 5.4b (P12).** After every `@Verifier MODE=REVIEW` CLEAN, @Main runs `git add -A && git commit -m "step <N>: <goal>"` and records the sha in `.planning/tasks/<slug>.md.step_commits[]`. This makes the per-step diff in plan.md § Diff-review possible AND enables `/kit-revert-step` and `/kit-step-resume` to anchor to known-green checkpoints. Skipped if `manifest.auto_commit_per_step: false`.
 - **Runnable-slice gate at 3a (P13).** Each plan step must declare a `Runnable: <one line>` field describing what PO will see in a local dev run after this step lands. @Main BLOCKs PLAN at 3a if any step is missing this field. `Runnable: internal — <reason>` is allowed only if `manifest.allow_internal_steps: true`.
 - **Runbook report at Step 8 of @CodeWriter (P14).** CodeWriter's "Changed Files" output is extended with four mandatory sections — How to verify / Regression / Known limitations / Decisions I made — used by PO for manual verification at 5.6 and by /kit-step-resume to brief the next session. @Main BLOCKs 5.6 CHECKPOINT if any section is missing entirely. v6.1 also drops the redundant `Description` column from Changed Files (its content moved into "Decisions I made").
 - **Clean-session-per-step (P15).** After 5.6 CHECKPOINT @Main outputs PO a 3-way fork: `/kit-approve` → next step (or /clear → /kit-step-resume in `session_isolation.mode: per_step`); `/kit-defect <description>` → re-open step N with PO-found defect (Дыра 6); `/kit-revert-step` → undo step N. SessionStart hook (Claude Code) and `session.created` plugin (OpenCode) inject pending-step context on /clear so the new session reads briefing automatically.
@@ -322,7 +318,7 @@ If you have used v6.0: existing tasks still work — `step_commits[]` starts emp
 
 v6 is a structural release that closes three gaps in v5: scope drift, missing diff-review step, and spec rot during replan. Compared to v5:
 
-- **Two artifacts per feature, frozen-vs-mutable boundary (P9).** `feature.md` is split into `spec.md` (Why / ACs / ECs / How it works / Test plan / UI / Open questions — FROZEN at CONFIRM) and `plan.md` (Implementation plan / Replan log / Step diff stats / Diff-review block / DoD — MUTABLE across EXECUTE). The split is along *what changes* in EXECUTE, not along document genre. Replan-on-discovery now writes to plan.md only and never touches spec.md; AC/EC amendments go through PO + @Analyst as a fresh DRAFT cycle.
+- **Two artifacts per feature, frozen-vs-mutable boundary (P9).** `feature.md` is split into `spec.md` (Why / ACs / ECs / How it works / Test plan / UI / Open questions — FROZEN at CONFIRM) and `plan.md` (Implementation plan / Replan log / Step diff stats / Diff-review block / DoD — MUTABLE across EXECUTE). The split is along *what changes* in EXECUTE, not along document genre. Replan-on-discovery now writes to plan.md only and never touches spec.md; AC/EC amendments go through PO + @Architect as a fresh DRAFT cycle.
 - **Hard slice caps (P1).** `manifest.slice_caps.{max_steps, max_files_per_step, max_lines_per_step}` enforced at PLAN/CONFIRM and at every CodeWriter step. Overflow → BLOCKED (no auto-trim). Defaults: 6 / 5 / 400.
 - **Mandatory diff-review gate at 5.10 (P2).** Between EXECUTE and CLOSE, @Main runs `git diff --stat` over the EXECUTE range, fills plan.md § Diff-review, and waits for PO unless `auto_approve.diff_review: true` (separate from feature/tech/bug auto-approve flags). This is the one gate `auto_approve: true` cannot collapse by accident.
 - **Reviewer Pass D — scope drift (P4).** Files in CHANGED_FILES not in step.Files declaration → MEDIUM. Files outside step.Module → HIGH. Closes the "AI quietly improved a neighbouring file" channel.
@@ -338,6 +334,44 @@ If you have used v5: spec content moved from `feature.md § Why/ACs/ECs/How it w
 
 If you have used v4 (relevant only if you skipped v5): v4 had 19 agents and five Diátaxis subtrees per feature; v5 already collapsed those to 9 agents + one feature.md. v6 inherits the v5 agent set unchanged (still 9), only resplits the artifact along the freeze boundary.
 
+## Gate telemetry (v6.3+)
+
+Every gate verdict (pass / block / warn / info) is logged to `evals/runs/<kit_version>/gates.csv` via the `gate-telemetry` skill. Opt-in by directory presence — if `evals/runs/` does not exist, logging is a no-op.
+
+**When to log:** at every gate fire across the pipeline. Authoritative enumeration in `kit/_shared/skills/gate-telemetry/SKILL.md` § "Gate enumeration". Summary:
+
+- 3a SLICE-CAP CHECK → `slice-cap`, `runnable-slice`
+- 5.1 EXTRACT → `token-budget`
+- 5.3 VERIFY → `build`
+- 5.4 REVIEW → `review-correctness`, `review-scope`, `review-bypass`, `review-runbook`, `review-adversarial` (Critical-EC only)
+- 5.4a → `unchanged-call-sites` (info)
+- 5.6 CHECKPOINT → `runbook-complete`, `ground-truth`, `mutation-sample` (v7.1.0+, when REQUIRED_TYPE=mutation-sample-pass)
+- 5.7 RECONCILE → `reconcile`
+- 5.8 TRACE → `traceability`
+- 5.9 DoDGate → `dod`
+- 5.10 DIFF-REVIEW → `diff-review`
+
+PO commands also log read-only events: `defect-origin`, `revert-step`, `ground-truth-waiver`.
+
+**How to log (compact form per call):**
+
+```
+gate-telemetry:
+  task_slug:    <active_task>
+  step:         <current_step_idx | 0 for pre-EXECUTE>
+  gate:         <id from enumeration>
+  verdict:      pass | block | warn | info
+  blocked_close: true iff this verdict prevented CLOSE this attempt
+  lane:         standard    # v6.3 always; lanes ship in v7+
+  reason:       <≤120 chars; (none) if no specific reason>
+```
+
+**Cap on noise:** never log more than once per (gate, step, fire-attempt). Fix loops (e.g. 3 review-fix cycles) generate 3 rows — that retry signal is intentional, not duplication.
+
+**Reading the data:** at task CLOSE, `eval-collector` aggregates gates.csv into per-task signal_ratio. Cross-task rolling signal_ratio is shown by `/kit-status` over the last `manifest.telemetry.evaluation_window_tasks` tasks (default 30). Gates with rolling signal_ratio < `manifest.telemetry.signal_ratio_threshold` (default 0.05) are flagged as deprecation candidates.
+
+If `manifest.telemetry.gates_log_enabled: false` → all logging is suppressed (escape hatch for projects that don't want filesystem writes during agent runs).
+
 ## Anti-Loop (CRITICAL — check constantly)
 
 | Symptom | Action |
@@ -346,13 +380,14 @@ If you have used v4 (relevant only if you skipped v5): v4 had 19 agents and five
 | Subagent returned empty result 2 times in a row | STOP. Report to PO which agent and what was expected. |
 | Reasoning spinning without progress > 3 steps | STOP immediately. Output: "REASONING LOOP: <what I tried>. Waiting for instructions." |
 | Stage cycle on same issue (review → fix → review) ran 3 times | STOP. Escalate to PO with full review history. |
-| `@CodeWriter` returned success but `@TestKeeper EXECUTE` not dispatched yet for this stage | STOP. Dispatch `@TestKeeper EXECUTE`. Author's "build green" is not verification. |
-| `@TestKeeper EXECUTE` returned `ALL_GREEN` but `@Reviewer` not dispatched yet | STOP. Dispatch `@Reviewer`. Tests passing alone does not certify code quality / spec alignment. |
-| `@DoDGate` returned `BLOCK` but stage moved to CLOSE | STOP. CLOSE is gated on `@DoDGate` PASS. Resolve the BLOCK reasons; do not bypass. |
-| `@DoDGate` returned `PASS` but step 5.10 (diff-review) was skipped | STOP. CLOSE is also gated on diff-review APPROVED. Run step 5.10 before CLOSE. |
-| Any subagent attempted to write to spec.md after CONFIRM passed | STOP. spec.md is FROZEN. Escalate to PO with the offending agent + line; this is either a regression in the agent prompt or a sign the spec needs amendment via @Analyst. |
+| `@CodeWriter` returned success but `@Verifier MODE=EXECUTE` not dispatched yet for this stage | STOP. Dispatch `@Verifier MODE=EXECUTE`. Author's "build green" is not verification. |
+| `@Verifier MODE=EXECUTE` returned `ALL_GREEN` but `@Verifier MODE=REVIEW` not dispatched yet | STOP. Dispatch `@Verifier MODE=REVIEW`. Tests passing alone does not certify code quality / spec alignment. |
+| `@Verifier MODE=DOD` returned `BLOCK` but stage moved to CLOSE | STOP. CLOSE is gated on `@Verifier MODE=DOD` PASS. Resolve the BLOCK reasons; do not bypass. |
+| `@Verifier MODE=DOD` returned `PASS` but step 5.10 (diff-review) was skipped | STOP. CLOSE is also gated on diff-review APPROVED. Run step 5.10 before CLOSE. |
+| Any subagent attempted to write to spec.md after CONFIRM passed | STOP. spec.md is FROZEN. Escalate to PO with the offending agent + line; this is either a regression in the agent prompt or a sign the spec needs amendment via @Architect. |
 | Slice cap exceeded at step 3a or 5.6 but EXECUTE proceeded | STOP. Slice caps are user-set; raising them is a manifest edit, not an in-flight decision. |
 | `@CodeWriter` returned without one of the 4 runbook sections (How to verify / Regression / Known limitations / Decisions I made) | v6.1+: STOP at 5.6 CHECKPOINT. Re-dispatch @CodeWriter with input "Step 8 output is missing section <X>. Re-emit the full Step 8 block with all 4 sections — empty as `(none)` is fine; missing entirely is not." Max 2 retries, then escalate to PO. In sleep mode this BLOCK downgrades to WARNING (logged in MORNING_REPORT, pipeline continues). |
+| Step 5.6 CHECKPOINT reached without a ground-truth artefact attached (v6.2+) and step's `ground_truth_required` is true | v6.2+: STOP at 5.6 CHECKPOINT. Output to PO: "Step <N> requires a ground-truth artefact (type: <X>: ui→screenshot, api→contract-test pass, cli→command output diff, backend→mutation-sample). Attach via /kit-attach <path> OR override with `/kit-approve --no-ground-truth` (logged as technical debt in Defects log)." Do NOT proceed to /kit-approve until artefact attached or override used. In sleep mode: downgrade to WARNING in MORNING_REPORT § Open questions; pipeline continues but the missing-artefact note is loud. |
 | Plan step missing the `Runnable:` field at 3a | v6.1+: STOP at 3a SLICE-CAP CHECK. Output to PO: "Step <N> in plan.md is missing the `Runnable:` field. Add `Runnable: <user-visible increment>` or `Runnable: internal — <reason>` (only if `manifest.allow_internal_steps: true`)." Do NOT auto-add the field; this is a planning decision. |
 | 5.4b COMMIT failed and step proceeded to 5.5 / 5.6 | v6.1+: STOP. Per-step commit is required for `step_commits[]` integrity. If pre-commit hook blocked, escalate the hook output to PO. If `manifest.auto_commit_per_step: false`, 5.4b is skipped intentionally — do not flag. |
 | `/kit-defect` invoked 3 times on the same step | v6.1+: STOP after the 3rd defect cycle. Escalate to PO: "Step <N> has accumulated 3 PO-reported defects after green machine-checks. Consider /kit-revert-step or replan." |
@@ -390,13 +425,58 @@ Bug / error / regression                                        →  BUG
 Refactoring / dependency update / optimization (no behaviour)   →  TECH
 ```
 
+v7.0.0+ — RISK CLASSIFICATION (P21, MANDATORY):
+
+Read `manifest.lanes` (defaults below):
+  default_risk: standard
+  trivial_max_files: 1
+  trivial_max_lines: 30
+  trivial_no_new_public_symbols: true
+  critical_block_sleep: true
+  critical_require_mutation_sample: true
+  auto_classify: true
+
+(v7.0.0-alpha's `lanes.enabled: false` opt-out is removed in v7.0.0. Risk classification runs unconditionally.)
+
+Procedure:
+
+1. Parse PO's task description for explicit `--risk=trivial|standard|critical` flag. Explicit flag always wins.
+2. If no flag AND `auto_classify: true` — infer risk from heuristics:
+   ```
+   risk = critical IF any of:
+     - Description contains "auth" / "token" / "secret" / "password" / "credential"
+     - Description contains "migration" / "schema change" / "data migration"
+     - Description contains "external API" / "webhook" / "third-party"
+     - PO answered yes to "touches security surface?" in clarifying questions
+     - Bug severity = critical (BUG pipeline only)
+     - Description references a Critical EC from existing spec.md
+
+   risk = trivial IF ALL of:
+     - Description fits in one sentence
+     - PO confirms in clarifying questions: "≤1 file, ≤30 lines, no new public symbols"
+     - No security-surface keywords (per critical heuristics above)
+     - Type ∈ {FEATURE, TECH} (BUG always at least standard, see § BUG TRIAGE)
+     - Module is a single existing module (no cross-module touch)
+
+   risk = standard otherwise (default fallback per manifest.lanes.default_risk)
+   ```
+3. If no flag AND `auto_classify: false` → use `manifest.lanes.default_risk` and surface to PO: "Risk auto-classification disabled. Using default `<default_risk>`. Pass --risk=<value> to override."
+4. Show PO the classified risk in the clarifying-questions message:
+   ```
+   Risk: <trivial | standard | critical>  (auto-classified | from --risk flag | default)
+   Why: <one-line reason from heuristic>
+   To override: re-run with --risk=<value>
+   ```
+   PO can dispute by passing --risk=<other> on next message.
+5. Sleep mode + critical risk: if `critical_block_sleep: true` AND task is being started via `/kit-sleep` or `/kit-new-feature --sleep` → REFUSE at startup. Output: "Critical risk + sleep mode is the highest blast-radius combination. Refused per `manifest.lanes.critical_block_sleep: true`. Either run interactively, or set the flag false (logged as risk acceptance)."
+
 Ask clarifying questions in **one message** — do not proceed until PO responds.
 
 After PO responds:
 
 1. Derive `task_slug` in kebab-case (max 30 chars). Examples: `feat-user-auth`, `fix-tc-123`, `tech-refactor-db`.
 2. Record start commit: `git rev-parse HEAD` → save as `start_commit: <sha>`. (v6 — used by step 5.10 diff-review.) If git is unavailable, save `start_commit: (no-git)` and step 5.10 falls back to scanning CHANGED_FILES across all task checkpoints.
-3. Create `.planning/tasks/<task_slug>.md` with Type, Module, Description, start_commit, **and v6.1 fields**: `current_step_idx: 0`, empty `step_commits:` block, single-line `Last-checkpoint: <ISO> — NEXT: ANALYSIS`, `status: active`.
+3. Create `.planning/tasks/<task_slug>.md` with Type, Module, Description, start_commit, **and v6.1 fields**: `current_step_idx: 0`, empty `step_commits:` block, single-line `Last-checkpoint: <ISO> — NEXT: ANALYSIS`, `status: active`. **v7.0.0+:** also `risk: <trivial|standard|critical>` (routing-relevant — selects lane overlay).
 4. Write to `.planning/CURRENT.md`:
    ```
    active_task: <task_slug>
@@ -404,11 +484,12 @@ After PO responds:
    start_commit: <sha or (no-git)>
    summary: <type> — <one-line description>
    mode: interactive | sleep    # v6.1+ — set to `sleep` only if this task was started via /kit-sleep or /kit-new-feature --sleep
+   risk: <trivial | standard | critical>   # v7.0.0+ — selects lane overlay
    status:                       # empty unless sleep BLOCKED-shutdown ran
    awaiting_po: false
    ```
 5. v6.1: if mode == sleep, output PO one-time notice: "🌙 Sleep mode active for task <slug>. The pipeline will run autonomously through all CONFIRM/diff-review/replan gates with doubled retry budgets. Final output: `.planning/MORNING_REPORT.md`. Read it on wake-up. To interrupt: edit `.planning/CURRENT.md` and set `mode: interactive`."
-6. Proceed with the relevant pipeline.
+6. Proceed with the relevant pipeline. v7.0.0+ — route per § LANE PIPELINE VARIANTS below using the classified risk.
 
 ### Questions for FEATURE
 
@@ -417,7 +498,7 @@ Clarifying questions:
 
 1. Which module(s) are affected?
 2. Briefly describe what the user needs (1–3 sentences).
-3. Does this feature affect UI? (if yes, @Designer is dispatched)
+3. Does this feature affect UI? (if yes, @Architect (UI section) is dispatched)
 4. Any constraints: performance, security, compatibility?
 
 Waiting for response.
@@ -526,6 +607,83 @@ PO can override per-task with `--no-auto-approve` in the task prompt to force CO
 
 There is no `@AutoApprover` agent in v5+; the flag is just a flag. Other gates (DEPLOY, DESTROY, SECRET_ROTATE, MIGRATION, EXTERNAL_API) always require explicit `/kit-approve` regardless of `auto_approve`.
 
+## Agent roster (v7.0.0+ — consolidated, 5 agents total)
+
+v7.0.0 consolidated the v6.x 9-agent roster down to 5. Legacy agents (@Analyst, @Designer, @TestKeeper, @Reviewer, @DoDGate, @TraceabilityChecker) are removed; their behaviour is preserved verbatim inside the consolidated bodies.
+
+| Agent | Replaces (v6.x) | Role |
+|---|---|---|
+| **@Main** | @Main | Orchestrator (this body). |
+| **@Architect** | @Analyst + @Designer | Single-pass spec.md (Why / AC / EC / How / Test plan / UI section if UI_REQUIRED) + plan.md skeleton. |
+| **@CodeWriter** | @CodeWriter | Writes code + tests + 5-section runbook. Unchanged. |
+| **@Verifier** | @TestKeeper + @Reviewer + @DoDGate + @TraceabilityChecker | Mode-driven verification. MODE ∈ {GENERATE, DRAFT, EXECUTE, RECONCILE, RERUN, SCAN, APPEND, REVIEW, DOD, TRACE}. Per-mode behaviour and output formats inlined in Verifier.body.md.template. |
+| **@BugFixer** | @BugFixer | Bug debug + fix. Unchanged. |
+
+**Telemetry continuity:** gate ids in gates.csv unchanged from v6.x — `gate: build` / `review-correctness` / `dod` / `traceability` / etc. all preserved. `/kit-status` rolling signal_ratio is comparable across the v6.x → v7.0.0 boundary.
+
+**Model assignment:**
+- `@Architect` uses `models.architect` (or `claude_code.models.architect` for Claude Code host). Falls back to `models.reviewer` if absent.
+- `@Verifier` uses `models.verifier`. Falls back to `models.reviewer` if absent.
+- The reviewer fallback matches v6.x conventions where multiple legacy agents shared `models.reviewer`. Explicit `architect`/`verifier` assignment lets PO bind a different model.
+
+## Lane pipeline variants (v7.0.0+ — risk-based triage, MANDATORY)
+
+v7.0.0 makes lanes the only path. Every task is classified at Step 0a as `risk: trivial | standard | critical`. Pipelines below get lane-specific overlays. The v7.0.0-alpha `manifest.lanes.enabled: false` opt-out is removed; `manifest.lanes` retains the per-lane tuning fields (trivial_max_*, critical_block_sleep, critical_require_mutation_sample, auto_classify, default_risk).
+
+### Trivial lane
+
+Activated when task's `risk: trivial`. Constraints (enforced at planning + execution):
+- `lanes.trivial_max_files` files maximum (default 1)
+- `lanes.trivial_max_lines` lines added+removed maximum (default 30)
+- `lanes.trivial_no_new_public_symbols` (default true): no new public functions / types / endpoints / exports
+
+Pipeline collapse — skip the following stages from § Pipeline — FEATURE / TECH:
+- Step 2 ANALYSIS: SKIP. No `@Architect`, no `spec.md`, no `@Verifier MODE=GENERATE`, no `@Verifier MODE=DRAFT`. PO's one-sentence description is the spec; the change is small enough that an explicit AC table is overhead.
+- Step 3 PLAN: SKIP. Trivial = one step by definition. Plan synthesised inline by @Main: single Step 1 with `Goal: <PO description>`, `Files: <inferred>`, `Runnable: <one-line user-visible change>`.
+- Step 3a SLICE-CAP CHECK: REPLACED with TRIVIAL-CONSTRAINTS CHECK. Verify the inferred Files count and estimated diff size fit `trivial_max_files` and `trivial_max_lines`. Overflow → STOP, output: "Task exceeds trivial-lane constraints (files=<X>, max=<Y>; lines~<A>, max=<B>). Auto-reclassifying to standard. Re-run with --risk=standard or restate the task more narrowly." Update `.planning/CURRENT.md.risk: standard` and re-enter Step 0a.
+- Step 4 CONFIRM: SKIP. Auto-approve trivial regardless of `auto_approve.feature`. Log `auto-approved (trivial lane)` in checkpoint.
+- Step 5 EXECUTE: ONE step. @CodeWriter → @Verifier MODE=EXECUTE (build + lint + targeted tests if any) → @Verifier MODE=REVIEW (Pass A only — no Pass B/C/D/E, no adversarial). On CRITICAL/HIGH from Reviewer → fix loop max 2 cycles, then auto-reclassify to standard.
+- 5.4a unchanged-call-sites: SKIP (1-file change cannot drift cross-module).
+- 5.4b COMMIT: KEEP — even trivial gets a per-step commit for `step_commits[]` integrity.
+- 5.6 CHECKPOINT: KEEP runbook (mandatory all 4 sections — empty `(none)` is fine) and **ground-truth artefact (mandatory — this is the only verification step that survives the lane collapse)**. 3-way fork is just `/kit-approve` + `/kit-defect` (no `/kit-revert-step` — too much ceremony for trivial; manual `git revert <sha>` if needed).
+- Step 5.7 RECONCILE: SKIP.
+- Step 5.8 TRACE: SKIP.
+- Step 5.9 DoDGate: SKIP.
+- Step 5.10 DIFF-REVIEW: SKIP. The 5.6 ground-truth artefact + PO's `/kit-approve` is the verification.
+- Step 6 CLOSE: simplified. No "update guidelines if patterns emerged" — trivial doesn't establish patterns.
+
+Trivial lane saves ~70% of token budget vs standard for tiny tasks (no Analyst spec, no Test plan generation, no DoDGate run, no Trace matrix). The trade-off: less safety net for non-trivial tasks misclassified as trivial. The auto-reclassification on overflow is the safety mechanism.
+
+### Standard lane
+
+Activated when task's `risk: standard` (or default fallback). Pipeline runs **exactly as documented in § Pipeline — FEATURE / TECH below**, no overlays. This is the v6.3 baseline.
+
+### Critical lane
+
+Activated when task's `risk: critical`. Adds the following overlays on top of standard pipeline:
+
+- Step 2 ANALYSIS: dispatch `pre-mortem` skill **mandatory** (currently opt-in). Pre-mortem brainstorms how the change could fail before code is written. Writes findings into spec.md § "Open questions" → @Architect addresses before CONFIRM.
+- Step 3 PLAN: every step's Test strategy must be `tdd_first` (override `manifest.test_strategy` for critical-lane tasks). Critical-lane tasks may not opt into `test_after`.
+- Step 4 CONFIRM: NEVER auto-approve regardless of `auto_approve.feature` setting. Critical risk requires explicit PO `/kit-approve` for both spec and plan.
+- Step 5.4 REVIEW: `@Verifier MODE=REVIEW` adversarial 2nd pass (Pass A*) becomes **mandatory for every step**, not just Critical-EC steps. Cost: ~+30% review token spend per step; benefit: reduced LLM-as-reviewer convergence on shared blind spots.
+- Step 5.6 CHECKPOINT ground-truth: backend artefact requires **≥3 mutants killed** in mutation-sample (vs ≥1 for standard backend) when `manifest.lanes.critical_require_mutation_sample: true`. UI/API/CLI artefact types unchanged.
+- Step 5.7 RECONCILE: critical/high uncovered EC → escalate immediately to PO, do NOT auto-invoke `replan-on-discovery` skill (Pattern B). Critical-lane discoveries warrant pause-and-think, not autopilot.
+- Step 5.10 DIFF-REVIEW: NEVER auto-approve regardless of `auto_approve.diff_review`. Critical risk forces PO eye on the final diff.
+- Sleep mode: REFUSED at /kit-sleep startup if `manifest.lanes.critical_block_sleep: true` (default). Critical + autonomous run is the highest blast-radius combination.
+- DEPLOY / DESTROY / SECRET_ROTATE / MIGRATION / EXTERNAL_API gates: same as standard (always manual), but critical-lane tasks tend to hit these — surface to PO with extra context "this is a critical-lane task; double-check before /kit-approve".
+
+Critical lane costs ~+20–30% tokens vs standard but is the right routing for security/migration/external integration tasks. Log every critical-lane invocation with rationale to `step_commits[1].notes` for retro.
+
+### Mid-flight lane changes
+
+If a standard-lane task discovers Critical EC during ANALYSIS or REVIEW → @Main may upgrade to critical lane mid-flight:
+- Update `.planning/CURRENT.md.risk: critical` and `.planning/tasks/<slug>.md.risk: critical`.
+- Re-dispatch `pre-mortem` skill if not already done.
+- Subsequent gates apply critical overlays.
+- Log the upgrade reason in step_commits[N].notes.
+
+Downgrade (critical → standard, standard → trivial) is forbidden — once a higher risk is classified, it sticks. Lower risk = relaxed gates = potential safety regression. PO can manually edit `.planning/CURRENT.md.risk` if they accept the risk; this is logged but not blocked.
+
 ## Pipeline — FEATURE
 
 Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly marked. Step 5.10 is the v6 mandatory diff-review (P2) and step 6 CLOSE depends on it.
@@ -533,7 +691,7 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
 ```
 1. CLASSIFY  — Step 0a above. Done before this pipeline starts.
 
-2. ANALYSIS  — dispatch @Analyst (TYPE=FEATURE).
+2. ANALYSIS  — dispatch @Architect (TYPE=FEATURE).
                Inputs: feature name, module, PO description, related vault paths.
                Outputs (v6 — split):
                  - vault/features/<module>/<feature>/spec.md
@@ -543,10 +701,10 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                     § Definition of Done empty)
 
                If spec.md § Open questions is non-empty after Analyst returns →
-               surface it to PO, wait for answers, re-dispatch @Analyst with
+               surface it to PO, wait for answers, re-dispatch @Architect with
                TYPE=FEATURE EXISTING_DOCS=<spec.md path>. Max 2 cycles.
 
-               Then dispatch @TestKeeper MODE=GENERATE (input: spec.md) to create
+               Then dispatch @Verifier MODE=GENERATE (input: spec.md) to create
                vault/features/<module>/<feature>/test-cases.md from
                spec.md § Test plan.
 
@@ -562,21 +720,37 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                  - Test strategy: tdd_first | test_after | mixed (P8 — only if
                    manifest.test_strategy.allow_per_step_override = true)
 
-               Then dispatch @TestKeeper MODE=DRAFT (input: spec.md, test-cases.md,
+               Then dispatch @Verifier MODE=DRAFT (input: spec.md, test-cases.md,
                plan.md) to append impl-level TCs (unit-edge, integration, error).
 
-               If UI feature: dispatch @Designer in the same turn (input: spec.md;
+               If UI feature: dispatch @Architect (UI section) in the same turn (input: spec.md;
                appends UI / UX section to spec.md before CONFIRM freezes it).
 
-   3a. SLICE-CAP CHECK (P1) + RUNNABLE-SLICE GATE (P13, v6.1+) —
+   3a. SLICE-CAP CHECK (P1) + RUNNABLE-SLICE GATE (P13, v6.1+) +
+       TOKEN-BUDGET GATE (P17, v6.2+) —
                read manifest.slice_caps and manifest.allow_internal_steps.
                Compute over plan.md:
                   - steps = count of `- [ ] Step N:` entries
                   - max_files = max over steps of len(step.Files)
                   - max_lines: not yet known (filled at EXECUTE — checked there)
+                  - max_tokens_per_step (v6.2+): estimated from STEP_CONTEXT bundle
+                    size at 5.1 (sum of bytes of step block + sliced spec rows +
+                    tcs rows + REPO_MAP excerpt) divided by ~4 chars/token. Not
+                    yet known here either (filled at EXECUTE — checked there).
                   - missing_runnable_steps = steps where the `Runnable:` line is absent
                   - internal_steps = steps where Runnable starts with "internal — "
                Fill plan.md § Slice budget with limits and current values.
+
+               v6.2+ TOKEN-BUDGET GATE rationale: Anthropic context-engineering
+               guidance ("smallest set of high-signal tokens") and the empirical
+               finding that LLM-as-reviewer accuracy degrades with prompt
+               complexity converge on a hard cap at the dispatch boundary.
+               manifest.slice_caps.max_tokens_per_step (default 30_000, 0 to disable)
+               is enforced at 5.1 EXTRACT (where STEP_CONTEXT is built) and at
+               every subagent dispatch. Overflow → BLOCKED with reason
+               `OVERFLOW_TOKENS` and PO is asked to split the step or relax the
+               cap. The cap is per-step, not per-task — long features can have
+               many small slices.
 
                BLOCK conditions (any → STOP):
                  (a) steps > max_steps OR max_files > max_files_per_step
@@ -646,6 +820,24 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                so they can read deeper if they need to, but the bundle is what
                keeps the typical dispatch tight.
 
+               v6.2+ TOKEN-BUDGET CHECK (P17): after building the bundle,
+               compute estimated tokens (bytes / 4 as rough proxy). If the
+               bundle exceeds manifest.slice_caps.max_tokens_per_step (default
+               30_000, 0 to disable):
+                 - Try to trim: drop optional sub-bundles in priority order
+                   (REPO_MAP excerpt → tcs rows whose Verifies is unrelated to
+                   step.Owned → spec § How it works subsections far from
+                   step.Files). Re-measure.
+                 - Still over? STOP this step before dispatching. Output to PO:
+                     "OVERFLOW_TOKENS at step <N>: estimated <X> tokens, cap <Y>.
+                      Bundle composition: spec=<a>, plan=<b>, tcs=<c>, REPO_MAP=<d>.
+                      Suggest: split step <N> at <natural boundary>, or raise
+                      manifest.slice_caps.max_tokens_per_step (current <Y>)."
+                 - In sleep mode → trigger BLOCKED-shutdown with the same
+                   reason (do NOT auto-raise the cap; user-set, never bypassed).
+               Record the final bundle size in step_commits[N].context_tokens
+               for telemetry (added in v6.2).
+
    5.2  WRITE — dispatch @CodeWriter with:
                   STEP_DESCRIPTION: <text of the step from plan.md>
                   STEP_CONTEXT: <bundle from 5.1>
@@ -666,14 +858,14 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                 from a future step → consider `replan-on-discovery` skill
                 (Pattern D) before escalating to PO; otherwise STOP and escalate.
 
-   5.3  VERIFY — dispatch @TestKeeper MODE=EXECUTE with CHANGED_FILES from 5.2.
+   5.3  VERIFY — dispatch @Verifier MODE=EXECUTE with CHANGED_FILES from 5.2.
                 Verdict ∈ {ALL_GREEN, FAILURES, BUILD_FAIL, NOT_RUN_GAP}:
                   - BUILD_FAIL or FAILURES → return to @CodeWriter with failure list.
                     Max 3 fix cycles per step, then STOP and escalate.
                   - NOT_RUN_GAP → log and proceed (impl links attach at step 5.7).
                   - ALL_GREEN → proceed to 5.4.
 
-   5.4  REVIEW — dispatch @Reviewer with:
+   5.4  REVIEW — dispatch @Verifier MODE=REVIEW with:
                   STAGE_FILE: <step section text>
                   STEP_FILES_DECLARED: <list — for Pass D scope-drift check>
                   STEP_MODULE: <module name — for Pass D out-of-module check>
@@ -729,7 +921,97 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
    5.5  UPDATE — mark the step as done in plan.md § "Implementation plan"
                  (`- [x] Step N: ...`).
 
-   5.6  CHECKPOINT — v6.1: parse @CodeWriter runbook + measure stats + 3-way fork.
+   5.6  CHECKPOINT — v6.2: ground-truth artefact gate + parse runbook + measure stats + 3-way fork.
+
+                @. GROUND-TRUTH ARTEFACT GATE (P18, v6.2+):
+                   Anthropic engineering guidance + 2024–2026 research on AI-coding-agent
+                   failure modes converge on one finding: AI-on-AI verification has a
+                   measurable accuracy ceiling (LLM-as-reviewer ~68% accuracy, ~25%
+                   false-negatives; "all green" verdicts share blind spots when the
+                   verifier and the writer share training distribution). The single
+                   highest-ROI intervention is a non-AI ground-truth checkpoint before
+                   PO-approve.
+
+                   Read manifest.ground_truth (defaults below):
+                     manifest.ground_truth.required: true
+                       (default true; can be set false project-wide for spike/exploration
+                        repos, but logged as technical debt at every step)
+                     manifest.ground_truth.exclusions:
+                       - lane: trivial   # v7+; ignored in v6.2 (no lanes yet)
+                       - module: <name>  # opt-out per module
+                     manifest.ground_truth.types:
+                       ui:        screenshot | preview-snapshot
+                       api:       contract-test-pass
+                       cli:       command-output-diff
+                       backend:   mutation-sample-pass    (≥1 mutant killed for standard,
+                                                           ≥3 for Critical-EC steps)
+                       refactor:  diff-stat + smoke-test (no user-visible change)
+
+                   Determine REQUIRED_TYPE from step's nature:
+                     - Step touches files matching manifest.ui.framework conventions
+                       (e.g. *.kt for Compose, *.tsx for React) AND manifest.ui.framework != null
+                       → ui
+                     - Step modifies *.controller.* or routes.* or *Endpoint.*
+                       OR step.Owned references an AC labelled "API"
+                       → api
+                     - Step modifies bin/, scripts/, *.sh, or step.Goal mentions "CLI"
+                       → cli
+                     - Step.Module is server-side AND no UI/API/CLI signal AND step has
+                       at least one Critical-EC in Owned
+                       → backend (mutation-sample required)
+                     - TECH-pipeline step with no user-visible change
+                       → refactor
+                     - Default fallback (no signal → standard backend) → backend (1 mutant)
+
+                   Read step's `ground_truth:` field from plan.md (set by @Architect at
+                   PLAN time, can be overridden by PO when CONFIRM is interactive).
+                   If absent → use REQUIRED_TYPE inferred above.
+
+                   Read step_commits[N].ground_truth from task file:
+                     - Non-empty → record in step_commits[N].ground_truth as
+                       {type, path, summary} and proceed to A. PARSE RUNBOOK.
+                     - Empty / missing AND REQUIRED_TYPE == "mutation-sample-pass" (v7.1.0+) →
+                       AUTO-INVOKE @Verifier MODE=MUTATION-SAMPLE before BLOCK:
+                         dispatch with CHANGED_FILES from step 5.2,
+                         LANGUAGE/TEST_COMMAND from manifest,
+                         THRESHOLD = (lane==critical AND
+                                      manifest.lanes.critical_require_mutation_sample
+                                      ? 3 : 1),
+                         MAX_MUTANTS = manifest.mutation_sample.max_mutants (default 10),
+                         TIMEOUT_SECONDS = manifest.mutation_sample.timeout_seconds (default 300),
+                         FALLBACK_AI = manifest.mutation_sample.fallback_ai (default false).
+                       On VERIFIER MUTATION-SAMPLE RESULT:
+                         - verdict=PASS → step_commits[N].ground_truth populated by skill,
+                           proceed to A. PARSE RUNBOOK silently.
+                         - verdict=BLOCK → relay survivors to PO with options
+                           (add tests / lower threshold / waive).
+                         - skill BLOCK with reason "tool not installed" AND
+                           manifest.mutation_sample.fallback_ai=false → ASK PO once:
+                           "mutation-sample requires <tool>; install or set
+                            manifest.mutation_sample.fallback_ai=true to use AI mutation."
+                       In sleep mode, auto-invocation budget: 1 retry on BLOCK, then
+                       BLOCKED-shutdown with the survivors as the reason (no PO at screen).
+                     - Empty / missing AND REQUIRED_TYPE != "mutation-sample-pass" →
+                       BLOCK gate. Output to PO:
+                         "📸 Step <N> requires a ground-truth artefact (type: <REQUIRED_TYPE>).
+                          Why: AI verification has ~68% ceiling; one non-AI artefact
+                          closes the gap on this class of defect.
+                          Attach with:
+                            /kit-attach <path-to-screenshot|test-output|command-log>
+                          Or override with /kit-approve --no-ground-truth (logged as
+                          technical debt; appears in Defects log Source column as
+                          'ground-truth-waived')."
+                       Do NOT proceed to A. PARSE RUNBOOK until artefact attached or override.
+
+                   Sleep mode override: in sleep mode, gate auto-WAIVES with note
+                   "ground_truth_waived (sleep mode)" in MORNING_REPORT.md
+                   § Open questions. Sleep accepted defer-to-wake-up by opt-in;
+                   waking PO sees the waiver list and decides per-step.
+
+                   Manifest opt-out: manifest.ground_truth.required: false skips this
+                   gate entirely. Logged once per task in step_commits[1].notes:
+                   "ground_truth gate disabled project-wide (manifest)". Don't repeat
+                   per step.
 
                 A. PARSE RUNBOOK (P14, v6.1+):
                    From @CodeWriter Step 8 output, extract the four mandatory
@@ -786,6 +1068,8 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                    pipeline pauses):
 
                      ✅ Step <N> — automated checks PASS, committed as <sha>.
+                     Ground-truth artefact: <type> at <path> — attached.
+                                          (or "WAIVED — see Defects log" if /kit-approve --no-ground-truth was used)
                      Runbook for manual verification:
 
                      <verbatim runbook block from @CodeWriter Step 8>
@@ -797,8 +1081,10 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                                                     auto-suggested by SessionStart hook).
                        /kit-defect <description> — found a defect during manual check,
                                                    re-open step <N> with this defect.
-                       /kit-revert-step          — undo step <N> entirely (git reset
-                                                   to step_commits[<N-1>].sha).
+                       /kit-revert-step          — undo step <N> entirely (v6.2: via
+                                                   `git revert`, non-destructive;
+                                                   creates reverse commit on top of HEAD,
+                                                   originals stay in history).
 
                    Wait for one of the three. If PO sends anything else → repeat the prompt.
 
@@ -811,7 +1097,7 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
 
    After all steps complete:
 
-   5.7  RECONCILE — dispatch @TestKeeper MODE=RECONCILE (input: spec.md, plan.md,
+   5.7  RECONCILE — dispatch @Verifier MODE=RECONCILE (input: spec.md, plan.md,
                     test-cases.md). Attaches `Test impl` references; runs full
                     feature test set; flags any Critical/High EC still uncovered.
                     If RECONCILE reports a Critical/High EC uncovered AND no
@@ -820,25 +1106,25 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                     Note: replan writes only to plan.md § Implementation plan;
                     if the discovery requires changing AC / EC / How it works,
                     escalate to PO with proposal "spec amendment needed" — that
-                    is a fresh @Analyst DRAFT cycle, not a replan.
+                    is a fresh @Architect DRAFT cycle, not a replan.
 
-   5.8  TRACE — dispatch @TraceabilityChecker (input: spec.md, test-cases.md;
+   5.8  TRACE — dispatch @Verifier MODE=TRACE (input: spec.md, test-cases.md;
                 outputs to plan.md § Replan log only if it triggers replan).
                 Read-only matrix audit AC/EC → TC → test file → source symbol.
-                Reports orphans. If GAPS → dispatch @CodeWriter (or @TestKeeper
-                for missing impl link), then re-run @TraceabilityChecker. Max 2
+                Reports orphans. If GAPS → dispatch @CodeWriter (or @Verifier
+                for missing impl link), then re-run @Verifier MODE=TRACE. Max 2
                 trace-fix cycles. If GAPS include ENDPOINT_ORPHAN on a
                 Critical-surface endpoint → consider `replan-on-discovery`
                 skill (Pattern C) before escalating.
 
-   5.9  DoD GATE — dispatch @DoDGate (input: spec.md + plan.md + test-cases.md +
+   5.9  DoD GATE — dispatch @Verifier MODE=DOD (input: spec.md + plan.md + test-cases.md +
                    LAST_RECONCILE/TRACE/REVIEW verdicts). **MANDATORY before
                    step 5.10.** Returns binary PASS | BLOCK over the 7 checks
                    (see definition-of-done skill). DoDGate writes its verdict
                    into plan.md § Definition of Done — never into spec.md.
                    If BLOCK → resolve the listed reasons via the right agent
                    (CodeWriter for missing impl, TestKeeper for stale verdict,
-                   Reviewer for unfixed CRITICAL), then re-dispatch @DoDGate.
+                   Reviewer for unfixed CRITICAL), then re-dispatch @Verifier MODE=DOD.
                    Max 3 DoD-fix cycles, then escalate.
 
    5.10 DIFF-REVIEW (P2 — MANDATORY single-PO-eye gate, between EXECUTE and CLOSE)
@@ -856,6 +1142,10 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                     git diff --stat <step_commits[N-1].sha or task_start_commit>..<step_commits[N].sha>
                     (skip steps where superseded: true — they were re-opened by /kit-defect
                      and replaced by a later commit; the latest non-superseded sha is what counts)
+                  v6.2: when computing the per-step diff, also surface entries with
+                  `kind: revert` as their own row labelled "↩ revert step N" — they
+                  represent /kit-revert-step actions and should be visible to PO at
+                  diff-review even though their net effect on working tree is "undo".
                   This gives PO a per-step breakdown table in plan.md § Diff-review §
                   "Per-step diff", complementary to the total.
                 Append the result to plan.md § Diff-review.
@@ -882,7 +1172,7 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
                   - auto_approve.diff_review = false (default) → wait for /kit-approve
                     or one of the other commands. CLOSE is gated on this.
 
-6. CLOSE     — gated on @DoDGate = PASS AND step 5.10 = APPROVED.
+6. CLOSE     — gated on @Verifier MODE=DOD = PASS AND step 5.10 = APPROVED.
                Append `Status: DONE` to plan.md (not spec.md — spec.md was
                frozen at CONFIRM and stays frozen).
                Update guidelines if new patterns emerged.
@@ -898,9 +1188,9 @@ Six steps. Every step writes a checkpoint. Steps that ask the PO are clearly mar
 
 `@Main` may invoke the `replan-on-discovery` skill at four trigger points in EXECUTE before falling through to escalation:
 
-- **Pattern A** — `@Reviewer` flags an AC-violation root in spec (code right, spec wrong). v6 note: replan can NOT amend the AC; it can only add new plan steps in plan.md. If the AC itself needs changing, escalate to PO with proposal "spec amendment" — that is a fresh @Analyst DRAFT cycle, not a replan.
-- **Pattern B** — `@TestKeeper RECONCILE` finds a Critical/High EC uncovered and no plan step owns it.
-- **Pattern C** — `@TraceabilityChecker` reports an `ENDPOINT_ORPHAN` on a Critical surface.
+- **Pattern A** — `@Verifier MODE=REVIEW` flags an AC-violation root in spec (code right, spec wrong). v6 note: replan can NOT amend the AC; it can only add new plan steps in plan.md. If the AC itself needs changing, escalate to PO with proposal "spec amendment" — that is a fresh @Architect DRAFT cycle, not a replan.
+- **Pattern B** — `@Verifier MODE=RECONCILE` finds a Critical/High EC uncovered and no plan step owns it.
+- **Pattern C** — `@Verifier MODE=TRACE` reports an `ENDPOINT_ORPHAN` on a Critical surface.
 - **Pattern D** — `@CodeWriter` returns BLOCKED with reason=missing dependency from a future step. (BLOCKED with reason=OVERFLOW is NOT a replan trigger — that is a slice-cap issue, escalate to PO directly.)
 
 The skill writes a bounded plan amendment (≤ 3 new steps) into `plan.md § Implementation plan` (v6 — used to be `feature.md § Implementation plan`) with a `<!-- REPLAN-N -->` marker and increments the replan counter in `.planning/tasks/<active_task>.md`. Hard cap: max 2 replan events per feature; on the 3rd structural discovery, fall through to escalation. The skill MUST NOT touch spec.md.
@@ -922,8 +1212,8 @@ Sleep mode is a per-task autonomous run mode activated by `/kit-sleep "<descript
 | Replan auto-confirm | follows `auto_approve.feature` | always `true` |
 | `session_isolation.mode` (effective) | per manifest, default `per_step` | force `overflow_only` (no /clear prompts; PO is asleep) |
 | Max @CodeWriter build-retry cycles | 3 | 6 |
-| Max @Reviewer fix cycles | 3 | 6 |
-| Max @DoDGate fix cycles | 3 | 5 |
+| Max @Verifier MODE=REVIEW fix cycles | 3 | 6 |
+| Max @Verifier MODE=DOD fix cycles | 3 | 5 |
 | Max replan events per feature | 2 | 4 |
 | 5.6 missing-runbook-section handling | STOP + retry | WARNING in MORNING_REPORT, continue |
 | 5.6 PO 3-way fork | shown to PO | skipped (auto /kit-approve, no PO at screen) |
@@ -935,25 +1225,25 @@ Sleep mode is a per-task autonomous run mode activated by `/kit-sleep "<descript
 
 ```
 LOOP until step N machine-greens or budget exhausted:
-  if @TestKeeper EXECUTE returned FAILURES / BUILD_FAIL:
-    @CodeWriter fix → @TestKeeper EXECUTE
+  if @Verifier MODE=EXECUTE returned FAILURES / BUILD_FAIL:
+    @CodeWriter fix → @Verifier MODE=EXECUTE
     counter: build-retry (max 6 in sleep, 3 in interactive)
-  elif @Reviewer returned CRITICAL_OR_HIGH_FOUND:
-    @CodeWriter fix → @TestKeeper EXECUTE → @Reviewer
+  elif @Verifier MODE=REVIEW returned CRITICAL_OR_HIGH_FOUND:
+    @CodeWriter fix → @Verifier MODE=EXECUTE → @Verifier MODE=REVIEW
     counter: review-fix (max 6 in sleep, 3 in interactive)
   elif @CodeWriter returned BLOCKED reason=missing-dependency:
     invoke `replan-on-discovery` Pattern D, auto-confirm
     counter: replan (max 4 in sleep, 2 in interactive)
-  elif @Reviewer Pass A flagged AC-violation in spec:
+  elif @Verifier MODE=REVIEW Pass A flagged AC-violation in spec:
     invoke `replan-on-discovery` Pattern A, auto-confirm
     counter: replan
-  elif @TraceabilityChecker reports ENDPOINT_ORPHAN on Critical-surface endpoint at 5.8:
+  elif @Verifier MODE=TRACE reports ENDPOINT_ORPHAN on Critical-surface endpoint at 5.8:
     invoke `replan-on-discovery` Pattern C, auto-confirm
     counter: replan
   elif @CodeWriter returned BLOCKED reason=OVERFLOW:
     BREAK loop — slice caps are PO's manifest decision, never auto-bypass.
-  elif @DoDGate returned BLOCK at 5.9:
-    fix per BLOCK reason → @DoDGate
+  elif @Verifier MODE=DOD returned BLOCK at 5.9:
+    fix per BLOCK reason → @Verifier MODE=DOD
     counter: dod-fix (max 5 in sleep, 3 in interactive)
   else:
     BREAK loop with reason "unknown failure mode".
@@ -1015,7 +1305,7 @@ If loop broke at budget exhaustion or OVERFLOW or unknown:
 
 ## Per-step defect handling (v6.1+)
 
-When PO issues `/kit-defect <description>` at 5.6 (interactive mode only):
+When PO issues `/kit-defect <description>` at 5.6 (interactive mode only). v6.2+: now also captures `defect_origin` for telemetry — see `kit/_shared/commands/kit-defect.md` step 3a for the prompt logic.
 
 ```
 1. Read .planning/CURRENT.md.active_task → task file → current_step_idx (this is step N).
@@ -1025,52 +1315,96 @@ When PO issues `/kit-defect <description>` at 5.6 (interactive mode only):
      "Step <N> has accumulated 3 PO-reported defects after green machine-checks.
       Consider /kit-revert-step or replan."
 
+1a. v6.2+ — parse --origin=<value> flag. If absent, prompt PO once (see
+    kit-defect.md.template § Step 3a). Wait for re-invocation with --origin.
+    Valid values: spec | code | review | test | ui | trace | scope | unknown.
+
 2. Append to test-cases.md:
    - New TC row: TC-<next_id> | <module> | <step.Owned[0]> | <DEFECT_DESCRIPTION>
                  | FAIL | (PO-reported)
    - Defects log entry: OPEN, severity=auto-derived
      (Critical-EC step → high; otherwise medium).
+     Include v6.2 fields: Origin: <value>, Step: <N>,
+     Ground-truth-attached: <true|false|waived> (from step_commits[N].ground_truth).
 
 3. In plan.md § Implementation plan, replace `[x] Step N` with `[ ] Step N`.
 
 4. Mark step_commits[N].superseded = true (do NOT delete the entry — diff-review
    needs it for "before fix" baseline).
 
-5. Increment step_commits[N].defect_count (or initialize to 1).
+5. Increment step_commits[N].defect_count (or initialize to 1). Append entry to
+   step_commits[N].defects[] (initialize if missing) with {tc_id, origin,
+   severity, ground_truth_attached, reported_at}.
+
+5a. v6.2+ — if `evals/runs/<kit_version>/defects.csv` directory exists, append
+    one row: timestamp,task_slug,step,tc_id,severity,origin,found_by=po,
+             ground_truth_attached,lane=standard.
+    If directory absent → skip silently.
 
 6. Re-enter EXECUTE loop at step 5.2 WRITE for step N with extended STEP_CONTEXT
-   that includes the new failing TC row. Skip 5.1 READ if same session — context
-   is still loaded.
+   that includes the new failing TC row + the defect's `origin` value (so
+   @CodeAgent can prioritize: e.g. origin=ui → make sure ground-truth artefact
+   is updated; origin=spec → escalate to PO with proposal "spec amendment").
 
 7. After 5.4 REVIEW CLEAN → 5.4b runs again, writes a NEW commit (replaces
    step_commits[N].sha; marks the old commit as superseded but keeps it in
    git history for diff baseline).
 
-8. 5.6 CHECKPOINT runs again with full 3-way fork. Loop until /kit-approve.
+8. 5.6 CHECKPOINT runs again with full 3-way fork (and ground-truth gate).
+   Loop until /kit-approve.
 ```
 
-When PO issues `/kit-revert-step` at 5.6 (interactive mode only):
+When PO issues `/kit-revert-step` at 5.6 (interactive mode only). v6.2: switched from `git reset --hard` to `git revert` (non-destructive). Working copy is updated by NEW commits; original step commits stay in history. This avoids the harness destructive-action permission gate (`git reset --hard` would trigger a second confirmation prompt even after PO's in-band `/kit-approve`).
 
 ```
 1. Same prerequisites as /kit-defect (active_task, current_step_idx, status check).
 
-2. Confirm with PO: "/kit-revert-step will run `git reset --hard <step_commits[N-1].sha>`,
-   destroying any uncommitted changes. Confirm with /kit-approve, or cancel."
+2. Pre-flight: working tree MUST be clean (`git status --porcelain` empty).
+   Unlike v6.1's `git reset --hard`, `git revert` does NOT discard uncommitted
+   work — and we refuse to mix in-progress edits into the revert commit.
+   Dirty tree → STOP, ask PO to stash/commit/discard first.
 
-3. On confirm:
-   - `git reset --hard <step_commits[N-1].sha or task_start_commit>`
-   - Remove step_commits[N] entry from task file.
+3. Confirm with PO: "/kit-revert-step will create N revert commit(s) on top
+   of HEAD (one per reverted step, newest first). Original step commits stay
+   in history. Squash on merge will clean this up. Confirm with /kit-approve,
+   or cancel."
+
+4. On confirm, for each step in [current_step_idx down to N] (newest first
+   to minimize merge conflicts):
+   a. Pick eligible non-superseded sha from step_commits[N] (skip entries
+      with kind: revert or superseded: true).
+   b. Run `git revert --no-edit <sha>`.
+   c. On conflict → `git revert --abort`, STOP, output options to PO
+      (revert later steps first, or resolve manually).
+   d. On success → capture revert_sha (git rev-parse HEAD).
+   e. Append new step_commits[] entry: {step: N, sha: revert_sha, kind: revert,
+      reverts: <sha>, goal: "Revert step <N>: <orig>", changed_files: <files>,
+      superseded: false}.
+   f. Mark the original step_commits[] entry with sha == <reverted sha> as
+      superseded: true.
+
+5. After all reverts succeed:
    - Set current_step_idx = N - 1.
-   - Replace `[x] Step N` with `[ ] Step N` in plan.md.
+   - Replace `[x] Step N` with `[ ] Step N` in plan.md (for all reverted steps).
+   - Update Last-checkpoint: <ISO> — NEXT: step N reverted by PO; replan or re-execute.
 
-4. Output to PO:
-     "Step <N> reverted. Working copy at <sha>. Choose:
+6. Output to PO:
+     "Step <N> reverted via git revert. Working copy at <new HEAD sha>.
+      Reverse commits added: <count>. Originals marked superseded in step_commits[].
+      Choose:
         /kit-approve            — re-run step <N> with the same plan-step description
         /kit-rework <reason>    — pre-step replan (replan-on-discovery)
-        /kit-revert-step        — revert another step (cascading)"
+        /kit-revert-step        — cascade revert further back"
 
-5. Wait for PO direction.
+7. Wait for PO direction.
 ```
+
+Note for `step_commits[]` schema (v6.2+): entries gain a `kind` field
+(default `step` for back-compat with legacy v6.1 entries; new value `revert`
+for entries created by /kit-revert-step). Diff-review at 5.10 walks
+`step_commits[]` filtering `kind: revert` entries to compute "what landed
+in the end" vs "what was attempted" — the per-step diff sub-table shows
+both attempts and reverts honestly.
 
 `/kit-defect` and `/kit-revert-step` are unavailable in sleep mode (no PO at screen). The kit-defect.md and kit-revert-step.md slash commands themselves enforce this by reading `mode` from CURRENT.md and refusing to run if mode=sleep.
 
@@ -1082,10 +1416,10 @@ The single source of truth for what's broken is the live `test-cases.md` file at
 0. INTAKE — determine entry point from PO input:
             - "/kit-fix" with no argument → step 0a (SCAN).
             - TC-id (regex TC-\d+) → read row, then step 1 (TRIAGE).
-            - Free-form description → dispatch @TestKeeper MODE=APPEND with the
+            - Free-form description → dispatch @Verifier MODE=APPEND with the
               description; receive the new TC-id, then step 1.
 
-0a. SCAN   — dispatch @TestKeeper MODE=SCAN on the active feature.
+0a. SCAN   — dispatch @Verifier MODE=SCAN on the active feature.
             It returns three lists (FAIL, PEND, SKIP). Show PO. Ask:
             "Fix all failing? Pick TC-ids? Or none?" Per chosen TC-id → step 1.
 
@@ -1098,10 +1432,10 @@ The single source of truth for what's broken is the live `test-cases.md` file at
             Then re-dispatch as MODE=fix.
 
 2. FIX     — dispatch @BugFixer MODE=fix.
-            BugFixer fixes, runs @Reviewer, builds, updates test-cases.md
+            BugFixer fixes, runs @Verifier MODE=REVIEW, builds, updates test-cases.md
             (Status FAIL→PASS, Defects log OPEN→FIXED), commits, appends to retro.md.
 
-3. RE-VERIFY — dispatch @TestKeeper MODE=RERUN with the TC-id.
+3. RE-VERIFY — dispatch @Verifier MODE=RERUN with the TC-id.
             PO confirms PASS → defect promoted FIXED → VERF.
             PO confirms FAIL → status reverts, retry counter incremented.
             Max 3 RERUN cycles per defect; on retry=3 → STOP, escalate.
@@ -1124,7 +1458,7 @@ Tech-debt entries live at `vault/tech-debt/<module>/<slug>.md` (archived to `<mo
 Key rules:
 
 - **One active task at a time.** If `.planning/CURRENT.md` already has a non-techdebt task → STOP, do not start a batch.
-- **Each entry runs through @Reviewer.** No DIRECT-path shortcut bypasses review.
+- **Each entry runs through @Verifier MODE=REVIEW.** No DIRECT-path shortcut bypasses review.
 - **Status lifecycle is authoritative.** `open → in-progress → fixed | wont-fix`.
 - **Failures stay open.** Auto-stop → mark `wont-fix` with a Notes line and move on; do not delete the entry.
 
@@ -1135,14 +1469,14 @@ Same overall shape as FEATURE but the ANALYSIS phase is shorter (no business sec
 ```
 1. CLASSIFY  — Step 0a. Type=TECH detected.
 
-2. ANALYSIS  — dispatch @Analyst (TYPE=TECH).
+2. ANALYSIS  — dispatch @Architect (TYPE=TECH).
                Outputs:
                  - vault/features/<module>/<feature>/spec.md
                    (only § How it works + § Test plan — no Why, no AC table;
                     TECH does not have user stories)
                  - vault/features/<module>/<feature>/plan.md
                    (skeleton, same structure as FEATURE)
-               Then @TestKeeper MODE=GENERATE (input: spec.md) for the test plan.
+               Then @Verifier MODE=GENERATE (input: spec.md) for the test plan.
 
 3. PLAN      — superpowers:writing-plans into plan.md § "Implementation plan".
 
@@ -1159,7 +1493,7 @@ Same overall shape as FEATURE but the ANALYSIS phase is shorter (no business sec
                are the highest-blast-radius pipeline; diff-review is least-skippable
                here, not most-skippable.
 
-6. CLOSE     — gated on @DoDGate = PASS AND step 5.10 = APPROVED. Update affected
+6. CLOSE     — gated on @Verifier MODE=DOD = PASS AND step 5.10 = APPROVED. Update affected
                docs in plan.md (Status: DONE) and any cross-feature guidelines.
 ```
 
@@ -1201,22 +1535,23 @@ When calling `knowledge-my-app_search_docs`:
 - DO NOT skip Step 0 (THINK) or Step 0a (CLASSIFY). Every task starts with reasoning + clarifying questions.
 - DO NOT skip step 3a (slice-cap check) before CONFIRM. Caps are not advisory — overflow blocks EXECUTE.
 - DO NOT start EXECUTE without the CONFIRM step (auto_approve flag determines whether CONFIRM waits for PO).
-- DO NOT touch spec.md after CONFIRM passes. spec.md is FROZEN. If the discovery requires AC/EC change, escalate to PO with proposal "spec amendment via @Analyst" — do not in-place-edit spec.md and do not let any subagent do it.
-- DO NOT skip `@TestKeeper MODE=EXECUTE` (step 5.3). `@CodeWriter`'s "build green" is the author's claim, not verification.
-- DO NOT skip `@Reviewer` (step 5.4). Reading the diff yourself is not a code review.
-- DO NOT skip step 5.9 `@DoDGate`.
-- DO NOT skip step 5.10 diff-review. CLOSE is gated on BOTH @DoDGate=PASS AND diff-review=APPROVED. `auto_approve.diff_review: true` is the only legitimate way to bypass it, and that flag is intentionally separated from feature/tech/bug auto-approves.
+- DO NOT touch spec.md after CONFIRM passes. spec.md is FROZEN. If the discovery requires AC/EC change, escalate to PO with proposal "spec amendment via @Architect" — do not in-place-edit spec.md and do not let any subagent do it.
+- DO NOT skip `@Verifier MODE=EXECUTE` (step 5.3). `@CodeWriter`'s "build green" is the author's claim, not verification.
+- DO NOT skip `@Verifier MODE=REVIEW` (step 5.4). Reading the diff yourself is not a code review.
+- DO NOT skip step 5.9 `@Verifier MODE=DOD`.
+- DO NOT skip step 5.10 diff-review. CLOSE is gated on BOTH @Verifier MODE=DOD=PASS AND diff-review=APPROVED. `auto_approve.diff_review: true` is the only legitimate way to bypass it, and that flag is intentionally separated from feature/tech/bug auto-approves.
 - DO NOT delegate the EXECUTE loop to `superpowers:executing-plans` — it is a helper, not a replacement. Ownership of steps 5.1–5.10 stays here in `@Main`.
 - DO NOT write code or tests — that's `@CodeWriter`.
 - DO NOT fix bugs — that's `@BugFixer`.
 - DO NOT dispatch `@CodeWriter` without a step description from plan.md and the sliced STEP_CONTEXT bundle (P5).
 - DO NOT auto-trim a plan that exceeds slice caps. Stop and ask PO to split or raise caps.
-- DO NOT call `@Reviewer` directly as the first step — only after `@CodeWriter` and `@TestKeeper EXECUTE`.
+- DO NOT call `@Verifier MODE=REVIEW` directly as the first step — only after `@CodeWriter` and `@Verifier MODE=EXECUTE`.
 - DO NOT skip `bug-retro` for CRITICAL/HIGH defects in the BUG pipeline.
 - DO NOT ignore anti-loop rules — at first loop symptom, STOP.
 - DO NOT create a v5-style monolithic `feature.md`. v6 splits it into spec.md (frozen) and plan.md (mutable). New features get both files at ANALYSIS time.
 - DO NOT skip 5.4b COMMIT (v6.1+) when `manifest.auto_commit_per_step: true`. Per-step commits are the anchor for `/kit-step-resume` and `/kit-revert-step`; skipping them silently makes those commands degrade to /kit-resume semantics. If pre-commit hook fails, STOP and escalate — never `--no-verify`.
 - DO NOT pass a step to 5.6 CHECKPOINT without all four runbook sections from @CodeWriter (How to verify / Regression / Known limitations / Decisions I made). Empty `(none)` is fine; missing entirely is a STOP in interactive mode and a WARNING in sleep mode.
+- DO NOT proceed past the 5.6 ground-truth gate (P18, v6.2+) without one of: (a) a ground-truth artefact attached via `/kit-attach <path>` and recorded in `step_commits[N].ground_truth`, (b) explicit PO override `/kit-approve --no-ground-truth` (logged as `Source: ground-truth-waived` in test-cases.md Defects log), (c) project-wide opt-out via `manifest.ground_truth.required: false` (logged once per task, not per step), (d) sleep-mode auto-waive (loud note in MORNING_REPORT.md). Skipping this gate without one of those four paths defeats the only non-AI verification step in v6.2.
 - DO NOT auto-add a `Runnable:` line to a plan step at 3a. Runnable is a planning decision (what user surface this step delivers); the field is missing because PO/Analyst hasn't decided yet. STOP and ask.
 - DO NOT bypass slice caps in sleep mode. OVERFLOW → BLOCKED-shutdown, not auto-raise.
 - DO NOT bypass the destructive gates (DEPLOY / DESTROY / SECRET_ROTATE / MIGRATION / EXTERNAL_API) in sleep mode. Hitting any → BLOCKED-shutdown with the gate name as the reason.

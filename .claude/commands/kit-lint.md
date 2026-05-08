@@ -11,7 +11,7 @@ Run the project lint command and report results:
 3. If lint fails:
    a. List ONLY files with actual errors (skip clean files).
    b. Categorize each issue: `style` | `correctness` | `warning`.
-   c. For `style` issues: propose `` as auto-fix if formatter is configured.
+   c. For `style` issues: propose ``./gradlew detekt --auto-correct`` as auto-fix if formatter is configured.
    d. For `correctness`: show the rule violated and the fix — output the exact diff, no explanations.
    e. Output the structured report below.
 

@@ -1,4 +1,4 @@
-﻿---
+---
 description: Review code changes — staged, unstaged, or specified files. Argument: $SCOPE — staged / unstaged / all / file paths. Outputs review report.
 ---
 

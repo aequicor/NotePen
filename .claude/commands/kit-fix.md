@@ -16,7 +16,7 @@ PO marks Status `FAIL` for known bugs and may add new TC rows there at any time.
 
 1. **No argument** → SCAN mode:
    - Read `.planning/CURRENT.md` → get `active_task` → read `.planning/tasks/<active_task>.md` to find the current feature + module.
-   - Dispatch `@TestKeeper MODE=SCAN` on the test-cases file.
+   - Dispatch `@Verifier MODE=SCAN` on the test-cases file.
    - Show PO the FAIL / PEND / SKIP lists (highlight PO-added rows).
    - Ask PO: "Fix all failing? Pick TC-ids? Or none?"
    - For each chosen TC-id → enter BUG pipeline.
@@ -26,7 +26,7 @@ PO marks Status `FAIL` for known bugs and may add new TC rows there at any time.
    - Enter BUG pipeline at TRIAGE with the TC-id.
 
 3. **Argument is free-form text** → APPEND-then-fix mode:
-   - Dispatch `@TestKeeper MODE=APPEND` with the text.
+   - Dispatch `@Verifier MODE=APPEND` with the text.
      The agent allocates the next TC id, sets `Status=FAIL`, fills `Description` and `Notes` from the text, allocates a DEF entry.
    - Enter BUG pipeline at TRIAGE with the new TC-id.
 
@@ -42,11 +42,11 @@ DEBUG    — dispatch @BugFixer MODE=debug with TC-id + test-cases path.
 
 FIX      — dispatch @BugFixer MODE=fix.
            BugFixer: ANALYZE → REPRODUCE (failing test) → FIX → REGRESSION TEST →
-             dispatch @Reviewer (single read-only pass: code + security + stub-scan)
+             dispatch @Verifier MODE=REVIEW (single read-only pass: code + security + stub-scan)
              → BUILD → update test-cases.md (Status FAIL→PASS, Defects log OPEN→FIXED)
              → commit → append to vault/features/<module>/<feature>/retro.md.
 
-RE-VERIFY — dispatch @TestKeeper MODE=RERUN with the TC-id.
+RE-VERIFY — dispatch @Verifier MODE=RERUN with the TC-id.
            PO confirms PASS → DEF promoted FIXED → VERF.
            PO confirms FAIL → Status reverts, retry counter incremented. Max 3 retries per DEF.
 

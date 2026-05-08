@@ -95,7 +95,7 @@ Proceed? (reply "yes" or correct me)
 
 12. WAIT for explicit "yes" before any edit/bash beyond the inspection above.
 
-13. On "yes" → dispatch to `@Main` with the bundle as the prompt, instructing it to enter 5.2 WRITE for the target step (5.1 READ context is already loaded). Do NOT directly invoke `@CodeWriter` or `@Reviewer` — let `@Main` orchestrate.
+13. On "yes" → dispatch to `@Main` with the bundle as the prompt, instructing it to enter 5.2 WRITE for the target step (5.1 READ context is already loaded). Do NOT directly invoke `@CodeWriter` or `@Verifier` — let `@Main` orchestrate.
 
 ## What NOT to do
 

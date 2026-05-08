@@ -1,6 +1,6 @@
 # Shared Agent Context — NotePen
 
-> This file is loaded by all agents in this host's runtime (Claude Code). Agent-specific files contain only role-specific details — shared context lives here.
+> This file is loaded by all agents in this host's runtime (claude-code). Agent-specific files contain only role-specific details — shared context lives here.
 > ai-agent-kit v6.1 — multi-host (OpenCode + Claude Code).
 
 ## Instruction Hierarchy
@@ -17,13 +17,13 @@ If an agent file instruction contradicts `_shared.md` — follow the agent file.
 
 ## Language / i18n
 
-Active locale: **ru** (overridable via `KIT_LANG` env var). **Read `.claude/i18n/ru.md` at the start of every task** — follow its labels for all status messages and user-facing output.
+Active locale: **ru** (overridable via `ru` env var). **Read `.claude/i18n/ru.md` at the start of every task** — follow its labels for all status messages and user-facing output.
 
 Supported locales: `en` (English), `ru` (Russian).
 
 ## Project Context
 
-**NotePen** — NotePen — kotlin stack
+**NotePen** — NotePen -- kotlin stack
 
 ## Modules
 

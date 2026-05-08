@@ -1,4 +1,4 @@
-﻿---
+---
 name: look-up
 description: Proactively look up documentation when working with an unfamiliar library, new instruction set, or any topic where knowledge is missing or uncertain. Searches the local index first; if nothing is found, researches the internet and indexes the result for future use.
 ---

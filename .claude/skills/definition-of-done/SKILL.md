@@ -1,11 +1,11 @@
 ---
 name: definition-of-done
-description: Canonical 7-check Definition-of-Done used by @DoDGate as the last gate before @Main closes a FEATURE or TECH task. Each check is binary with required evidence. Use ONLY when @DoDGate evaluates a feature for closure.
+description: Canonical 7-check Definition-of-Done used by @Verifier MODE=DOD as the last gate before @Main closes a FEATURE or TECH task. Each check is binary with required evidence. Use ONLY when @Verifier MODE=DOD evaluates a feature for closure.
 ---
 
 # Definition of Done (v5)
 
-The Definition of Done is the contract between `@Main` and PO that decides whether a feature is closeable. `@DoDGate` walks this 7-check list, records evidence per row, and returns a binary verdict: any BLOCK → BLOCK; otherwise PASS.
+The Definition of Done is the contract between `@Main` and PO that decides whether a feature is closeable. `@Verifier MODE=DOD` walks this 7-check list, records evidence per row, and returns a binary verdict: any BLOCK → BLOCK; otherwise PASS.
 
 This file is the **single source of truth** for what "done" means. Do not duplicate the list elsewhere — agents read it from here.
 
@@ -20,8 +20,8 @@ v5 collapses to **7 hard checks** plus an info-only diagnostic block. There is n
 
 ## When to use
 
-- `@DoDGate` runs this skill at `@Main` step 5.9, after `@TraceabilityChecker`.
-- `@Main` re-dispatches `@DoDGate` after every fix cycle until verdict = PASS.
+- `@Verifier MODE=DOD` runs this skill at `@Main` step 5.9, after `@Verifier MODE=TRACE`.
+- `@Main` re-dispatches `@Verifier MODE=DOD` after every fix cycle until verdict = PASS.
 - No other agent invokes this skill.
 
 ## Verdict logic
@@ -43,9 +43,9 @@ Walk in order. Stop walking only when you hit BLOCK — record it and continue: 
 | 1 | ACs | Every Acceptance Criterion in `spec.md` has at least one TC in `test-cases.md` whose `Verifies` cell references it AND that TC has Status PASS | List AC-id → TC-id (verbatim cell), confirm Status PASS |
 | 2 | Critical ECs | Every Critical Edge Case has at least one TC with Status PASS | List EC-id → TC-id, confirm Status PASS |
 | 3 | TCs state | No TC has Status PEND or FAIL | Counts of PEND and FAIL must both be zero |
-| 4 | Test run | The latest `@TestKeeper RECONCILE` verdict was `ALL_GREEN` | Quote the verdict line from the reconcile output |
-| 5 | Reviewer | The last `@Reviewer` verdict for the feature was `CLEAN` (no open CRITICAL or HIGH) | Quote the verdict line from the latest reviewer output |
-| 6 | Build & lint | Build PASS + lint clean from the latest `@TestKeeper EXECUTE` run | Quote the build/lint result |
+| 4 | Test run | The latest `@Verifier MODE=RECONCILE` verdict was `ALL_GREEN` | Quote the verdict line from the reconcile output |
+| 5 | Reviewer | The last `@Verifier MODE=REVIEW` verdict for the feature was `CLEAN` (no open CRITICAL or HIGH) | Quote the verdict line from the latest reviewer output |
+| 6 | Build & lint | Build PASS + lint clean from the latest `@Verifier MODE=EXECUTE` run | Quote the build/lint result |
 | 7 | Plan complete | Every step in `plan.md` § "Implementation plan" is marked done | Count `[x]` checkboxes vs total steps |
 
 ## Info-only diagnostics (non-blocking)
@@ -53,19 +53,19 @@ Walk in order. Stop walking only when you hit BLOCK — record it and continue: 
 These appear in the DoD report but **do not** affect the verdict:
 
 - **Coverage** (line + branch). v4 made this hard-blocking, which broke projects without a coverage tool. In v5 it is reported when a tool is configured; absence of a tool is not a block.
-- **WEAK_ASSERTION flags** from `@TraceabilityChecker`. Reported as info; if PO cares, they re-dispatch `@TraceabilityChecker` after fixes. The blocking concerns (`MISSING_IMPL`, `ENDPOINT_ORPHAN` on Critical/High) are subsumed by checks 1, 2, and the implication of check 6 (build+test green means handlers exist).
+- **WEAK_ASSERTION flags** from `@Verifier MODE=TRACE`. Reported as info; if PO cares, they re-dispatch `@Verifier MODE=TRACE` after fixes. The blocking concerns (`MISSING_IMPL`, `ENDPOINT_ORPHAN` on Critical/High) are subsumed by checks 1, 2, and the implication of check 6 (build+test green means handlers exist).
 - **Open Tech-debt entries** created during this feature. Listed for visibility; not blocking — that is what `/kit-techdebt` is for.
 
 ## Reading the inputs
 
-`@DoDGate` receives:
+`@Verifier MODE=DOD` receives:
 
 - `SPEC_DOC` — `vault/features/<module>/<feature>/spec.md` (FROZEN — AC/EC source)
 - `PLAN_DOC` — `vault/features/<module>/<feature>/plan.md` (Implementation plan checkboxes; the verdict block is written into this file's § Definition of Done — never spec.md)
 - `TEST_CASES` — `vault/features/<module>/<feature>/test-cases.md`
-- `LAST_RECONCILE` — verdict from the most recent `@TestKeeper RECONCILE`
-- `LAST_REVIEW` — verdict from the most recent `@Reviewer`
-- `LAST_TRACE` — verdict from the most recent `@TraceabilityChecker` (info only)
+- `LAST_RECONCILE` — verdict from the most recent `@Verifier MODE=RECONCILE`
+- `LAST_REVIEW` — verdict from the most recent `@Verifier MODE=REVIEW`
+- `LAST_TRACE` — verdict from the most recent `@Verifier MODE=TRACE` (info only)
 
 If any input is missing → the corresponding check returns BLOCK. There is no soft fallback.
 
@@ -86,11 +86,11 @@ If any input is missing → the corresponding check returns BLOCK. There is no s
 
 ## Notes
 
-The skill is intentionally **read-only documentation**. `@DoDGate` reads it as a checklist; the skill does not "execute" anything itself.
+The skill is intentionally **read-only documentation**. `@Verifier MODE=DOD` reads it as a checklist; the skill does not "execute" anything itself.
 
 In v5 there is no `@TestExecutor`, no `@CornerCaseReviewer IMPLEMENTATION` mode, no `@CodeReviewer + @SecurityReviewer` split, and no `@ConsistencyChecker`. Their roles are subsumed:
 
-- `@TestKeeper EXECUTE` + `RECONCILE` cover Group 2 of v4.
-- `@Reviewer` covers Group 4 of v4 (single verdict).
-- `@Analyst`'s self-reflection covers Group 7 of v4 (open questions).
-- `@TraceabilityChecker` is unchanged but its WEAK_ASSERTION findings are info-only.
+- `@Verifier MODE=EXECUTE` + `RECONCILE` cover Group 2 of v4.
+- `@Verifier MODE=REVIEW` covers Group 4 of v4 (single verdict).
+- `@Architect`'s self-reflection covers Group 7 of v4 (open questions).
+- `@Verifier MODE=TRACE` is unchanged but its WEAK_ASSERTION findings are info-only.
