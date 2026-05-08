@@ -179,6 +179,7 @@ AI agents do NOT touch the Notes column. AI agents do NOT generate per-TC detail
 | TC-125 | PASS  | —     | unit-edge   | [spec] `FileHistoryManager.findEvictIndex` — список из двух записей: одна `NOT_FOUND` (старше), одна `AVAILABLE` (impl: shared/src/commonTest/kotlin/ru/kyamshanov/notepen/mainscreen/domain/model/FileHistoryManagerTest.kt#findEvictIndex_notFoundEvictedBeforeAvailable) | Возвращает индекс `NOT_FOUND`-записи (не AVAILABLE)                                                            |
 | TC-126 | PASS  | —     | error       | [DEF-001] Бесконечный лоадер — главный экран Desktop показывает индикатор загрузки, который никогда не исчезает. Ожидается: после появления экрана список файлов (или пустой экран) отображается без лоадера. Фактически: isLoading=true навсегда. | Индикатор загрузки исчезает, отображается список недавних файлов (или пустой экран)                            |
 | TC-127 | PASS  | —     | error       | [DEF-002] Кнопка «Открыть» не открывает нативный файловый диалог на Desktop. Ожидается: появляется FileDialog (Swing). Фактически: ничего не происходит. | Открывается нативный файловый диалог для выбора PDF-файла                                                      |
+| TC-128 | PASS  | —     | error       | [DEF-003] Превью PDF на главной странице не отображается. Ожидается: после перехода в ThumbnailState.Ready миниатюра появляется без мерцания. Фактически: отображается пустой (прозрачный) 1×1 placeholder пока PNG декодируется асинхронно. (impl: app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/mainscreen/ui/component/ThumbnailView.kt, app/byCompose/common/src/jvmMain/kotlin/ru/kyamshanov/notepen/mainscreen/platform/ThumbnailPainter.desktop.kt) | Пока bitmap декодируется, показывается shimmer-плейсхолдер (surfaceVariant); после декодирования отображается миниатюра |
 
 ---
 
@@ -212,3 +213,4 @@ what to be
 
 - DEF-001 [HIGH] Бесконечный лоадер — главный экран Desktop показывает isLoading=true навсегда, список файлов не появляется. TC-126. Status: VERF.
 - DEF-002 [HIGH] Кнопка «Открыть» не открывает нативный файловый диалог на Desktop — ничего не происходит. TC-127. Status: FIXED (fix: vault/guidelines/common/reports/def-002-file-picker-no-op.md).
+- DEF-003 [MEDIUM] Превью PDF на главной странице не отображается — при переходе ThumbnailState.Loading→Ready отображается пустой прозрачный 1×1 placeholder (BitmapPainter(ImageBitmap(1,1))) вместо shimmer. TC-128. Status: FIXED.

@@ -13,15 +13,16 @@ import kotlinx.coroutines.withContext
 /**
  * Android-реализация [rememberPdfThumbnailPainter].
  *
- * Декодирует [imageData] через [android.graphics.BitmapFactory] на [Dispatchers.IO] и возвращает [BitmapPainter].
+ * Декодирует [imageData] через [android.graphics.BitmapFactory] на [Dispatchers.IO].
+ * Возвращает null пока декодирование не завершено (DEF-003).
  */
 @Composable
-actual fun rememberPdfThumbnailPainter(imageData: ByteArray): Painter {
+actual fun rememberPdfThumbnailPainter(imageData: ByteArray): Painter? {
     val bitmap by produceState<ImageBitmap?>(null, imageData) {
         value = withContext(Dispatchers.IO) {
             android.graphics.BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
                 ?.asImageBitmap()
         }
     }
-    return bitmap?.let { BitmapPainter(it) } ?: BitmapPainter(ImageBitmap(1, 1))
+    return bitmap?.let { BitmapPainter(it) }
 }

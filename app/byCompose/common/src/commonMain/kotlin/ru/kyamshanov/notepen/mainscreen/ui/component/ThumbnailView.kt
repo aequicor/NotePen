@@ -45,12 +45,22 @@ fun ThumbnailView(
                 )
             }
             is ThumbnailState.Ready -> {
-                Image(
-                    painter = rememberPdfThumbnailPainter(state.imageData),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
+                val painter = rememberPdfThumbnailPainter(state.imageData)
+                if (painter != null) {
+                    Image(
+                        painter = painter,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    // Shimmer while bytes are still decoding asynchronously (DEF-003)
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                    )
+                }
             }
             is ThumbnailState.Error -> {
                 Box(
