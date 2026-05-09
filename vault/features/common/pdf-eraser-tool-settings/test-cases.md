@@ -56,3 +56,4 @@ updated: 2026-05-09
 | Date | Step | Severity | Source | Description | Status |
 |------|------|----------|--------|-------------|--------|
 | 2026-05-09 | 2 | medium | ground-truth-waived | Step 2 (`erasePointsInZone`) — REQUIRED_TYPE=backend (mutation-sample). User approved via `/kit-approve --no-ground-truth`. Не выполнен mutation-sample на новой extension-функции; покрытие подтверждено только unit-тестами `PdfDrawingStateEraseTest` (9 тестов, 138/138 jvmTest green). | WAIVED |
+| 2026-05-09 | 3 | medium | ground-truth-waived | Step 3 (`StrokeCap.Round` / `StrokeJoin.Round` в `DrawablePdfPage`) — REQUIRED_TYPE=ui (визуальный AC-9, TC-25 manual). User approved via `/kit-approve --no-ground-truth`. Скриншот не приложен; визуальная верификация AC-9 будет повторена на Шаге 4 (когда `DrawablePdfPage` получит `penSettings`/`toolMode` wiring) или на финальной проверке Шага 7. | WAIVED |

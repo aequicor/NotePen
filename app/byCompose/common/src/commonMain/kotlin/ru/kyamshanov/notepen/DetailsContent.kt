@@ -58,6 +58,12 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     val pagesCache = remember(pages, scale) { mutableMapOf<Int, ImageBitmap>() }
 
     var isDrawingEnabled by remember { mutableStateOf(false) }
+    // Временный wiring до Шага 7: toolMode выводится из isDrawingEnabled (PEN при true,
+    // NONE при false). penSettings/eraserSettings — дефолтные. Полноценный wiring
+    // (отдельный toolMode, persistence pen/eraser) добавляется в Шагах 6–7.
+    val toolMode = if (isDrawingEnabled) ToolMode.PEN else ToolMode.NONE
+    val penSettings = remember { PenSettings() }
+    val eraserSettings = remember { EraserSettings() }
     var isSaving by remember { mutableStateOf(false) }
     val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
     val hasAnnotations by remember {
@@ -123,7 +129,9 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                         DrawablePdfPage(
                             bitmap = bm,
                             pdfDrawingState = pdfDrawingState,
-                            isDrawingEnabled = isDrawingEnabled,
+                            toolMode = toolMode,
+                            penSettings = penSettings,
+                            eraserSettings = eraserSettings,
                             modifier = Modifier.size(width, height),
                         )
                     } else {

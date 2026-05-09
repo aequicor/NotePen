@@ -73,7 +73,7 @@ updated: 2026-05-09
   - Runnable: internal — UI-вход появится в Шаге 4; пока — unit-тесты `PdfDrawingStateTest`,
     которые можно гонять локально (`./gradlew :app:byCompose:common:test`).
 
-- [ ] Step 3: StrokeCap.Round + StrokeJoin.Round в `DrawablePdfPage` (минимальный визуальный fix)
+- [x] Step 3: StrokeCap.Round + StrokeJoin.Round в `DrawablePdfPage` (минимальный визуальный fix)
   - Goal: обновить вызовы `drawPath(... style = Stroke(width=..., cap=StrokeCap.Round,
     join=StrokeJoin.Round))` для отрисовки `currentPaths` и `currentPath`. Никаких других
     правок этого файла на этом шаге — изоляция изменения для проверки AC-9 в одиночку.
@@ -86,7 +86,7 @@ updated: 2026-05-09
   - Runnable: запусти приложение, открой любой PDF, включи рисование, проведи штрих —
     концы и стыки округлены.
 
-- [ ] Step 4: `DrawablePdfPage` — поддержка `ToolMode`, settings-параметров, ластика и индикатора
+- [x] Step 4: `DrawablePdfPage` — поддержка `ToolMode`, settings-параметров, ластика и индикатора
   - Goal: заменить параметр `isDrawingEnabled: Boolean` на `toolMode: ToolMode` +
     `penSettings: PenSettings` + `eraserSettings: EraserSettings`. Развести обработку жестов:
     PEN — текущая логика (с использованием `penSettings`), ERASER — вызов `erasePointsInZone`

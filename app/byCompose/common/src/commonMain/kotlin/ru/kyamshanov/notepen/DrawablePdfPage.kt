@@ -5,11 +5,14 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -19,35 +22,57 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 
+/** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
+private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
+
+/** Толщина обводки индикатора зоны ластика, в пикселях canvas. */
+private const val ERASER_INDICATOR_STROKE_WIDTH_PX = 2f
+
 @Composable
 fun DrawablePdfPage(
     bitmap: ImageBitmap,
     pdfDrawingState: PdfDrawingState,
+    toolMode: ToolMode,
+    penSettings: PenSettings,
+    eraserSettings: EraserSettings,
     modifier: Modifier = Modifier,
-    isDrawingEnabled: Boolean = true,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
 
-    LaunchedEffect(isDrawingEnabled) {
-        if (!isDrawingEnabled && pdfDrawingState.isDrawing.value) {
+    // Позиция пальца ластика в нормализованных координатах [0..1] относительно canvas.
+    // null → жест ластика не активен (палец не на экране) → индикатор не отрисовывается.
+    val eraserPos = remember { mutableStateOf<Offset?>(null) }
+
+    // EC-1 / EC-2: при смене инструмента финализируем незавершённый штрих и
+    // сбрасываем активную сессию стирания.
+    LaunchedEffect(toolMode) {
+        if (toolMode != ToolMode.PEN && pdfDrawingState.isDrawing.value) {
             pdfDrawingState.finishDrawing()
         }
+        if (toolMode != ToolMode.ERASER) {
+            eraserPos.value = null
+        }
     }
+
+    val indicatorColor = MaterialTheme.colorScheme.outline
 
     Box(
         modifier = modifier
             .onSizeChanged { canvasSize.value = it }
             .then(
-                if (isDrawingEnabled) {
-                    Modifier.pointerInput(isDrawingEnabled) {
+                when (toolMode) {
+                    ToolMode.PEN -> Modifier.pointerInput(toolMode) {
                         detectDragGestures(
                             onDragStart = { offset ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
+                                    pdfDrawingState.strokeColor.value =
+                                        penSettings.color.copy(alpha = penSettings.alpha)
+                                    pdfDrawingState.strokeWidth.value = penSettings.strokeWidth
                                     pdfDrawingState.startDrawing(
                                         x = offset.x / w,
                                         y = offset.y / h,
-                                        normalizedStrokeWidth = pdfDrawingState.strokeWidth.value / w,
+                                        normalizedStrokeWidth = penSettings.strokeWidth / w,
                                     )
                                 }
                             },
@@ -63,7 +88,44 @@ fun DrawablePdfPage(
                             onDragEnd = { pdfDrawingState.finishDrawing() },
                         )
                     }
-                } else Modifier
+
+                    ToolMode.ERASER -> Modifier.pointerInput(toolMode) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val (w, h) = canvasSize.value
+                                if (w > 0 && h > 0) {
+                                    val nx = offset.x / w
+                                    val ny = offset.y / h
+                                    eraserPos.value = Offset(nx, ny)
+                                    pdfDrawingState.erasePointsInZone(
+                                        centerX = nx,
+                                        centerY = ny,
+                                        halfSizeNormalized = eraserSettings.sizeNormalized / 2f,
+                                        shape = eraserSettings.shape,
+                                    )
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                val (w, h) = canvasSize.value
+                                if (w > 0 && h > 0) {
+                                    val nx = change.position.x / w
+                                    val ny = change.position.y / h
+                                    eraserPos.value = Offset(nx, ny)
+                                    pdfDrawingState.erasePointsInZone(
+                                        centerX = nx,
+                                        centerY = ny,
+                                        halfSizeNormalized = eraserSettings.sizeNormalized / 2f,
+                                        shape = eraserSettings.shape,
+                                    )
+                                }
+                            },
+                            onDragEnd = { eraserPos.value = null },
+                            onDragCancel = { eraserPos.value = null },
+                        )
+                    }
+
+                    ToolMode.NONE -> Modifier
+                }
             )
     ) {
         Image(
@@ -107,6 +169,46 @@ fun DrawablePdfPage(
                         join = StrokeJoin.Round,
                     ),
                 )
+            }
+
+            // Индикатор зоны ластика (AC-12). Отрисовывается только если палец на экране
+            // и выбран ластик. Заливка полупрозрачная; обводка — сплошная.
+            val pos = eraserPos.value
+            if (toolMode == ToolMode.ERASER && pos != null) {
+                val cx = pos.x * size.width
+                val cy = pos.y * size.height
+                val sizePx = eraserSettings.sizeNormalized * size.width
+                val halfPx = sizePx / 2f
+                when (eraserSettings.shape) {
+                    EraserShape.CIRCLE -> {
+                        drawCircle(
+                            color = indicatorColor.copy(alpha = ERASER_INDICATOR_FILL_ALPHA),
+                            radius = halfPx,
+                            center = Offset(cx, cy),
+                        )
+                        drawCircle(
+                            color = indicatorColor,
+                            radius = halfPx,
+                            center = Offset(cx, cy),
+                            style = Stroke(width = ERASER_INDICATOR_STROKE_WIDTH_PX),
+                        )
+                    }
+                    EraserShape.SQUARE -> {
+                        val topLeft = Offset(cx - halfPx, cy - halfPx)
+                        val rectSize = Size(sizePx, sizePx)
+                        drawRect(
+                            color = indicatorColor.copy(alpha = ERASER_INDICATOR_FILL_ALPHA),
+                            topLeft = topLeft,
+                            size = rectSize,
+                        )
+                        drawRect(
+                            color = indicatorColor,
+                            topLeft = topLeft,
+                            size = rectSize,
+                            style = Stroke(width = ERASER_INDICATOR_STROKE_WIDTH_PX),
+                        )
+                    }
+                }
             }
         }
     }
