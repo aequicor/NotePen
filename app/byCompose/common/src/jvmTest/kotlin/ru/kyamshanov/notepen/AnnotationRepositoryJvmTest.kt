@@ -159,6 +159,46 @@ class AnnotationRepositoryJvmTest {
         assertTrue(result.isFailure)
     }
 
+    // TC-30 (Step 7): full DetailsContent flow — save (annotations + scale + pen + eraser) then
+    // load — all 4 fields round-trip together. This pins the contract DetailsContent depends on.
+    @Test
+    fun saveAndLoad_fullDetailsContentFlow_roundTripsAllFields() = runBlocking {
+        val dir = createTempDirectory("notepen_step7_full")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        val annotations = mapOf(
+            0 to listOf(
+                DrawingPath(
+                    points = listOf(DrawingPoint(0.1f, 0.2f, true), DrawingPoint(0.3f, 0.4f)),
+                    color = Color(0xFFE53935),
+                    strokeWidth = 18f,
+                )
+            ),
+            2 to listOf(DrawingPath(color = Color(0xFF1E88E5), strokeWidth = 5f)),
+        )
+        val pen = PenSettings(color = Color(0xFF43A047), strokeWidth = 25f, alpha = 0.7f)
+        val eraser = EraserSettings(shape = EraserShape.SQUARE, sizeNormalized = 0.15f)
+        val scale = 140
+
+        val saveResult = repo.save(pdfPath, annotations, scale, pen, eraser)
+        assertTrue(saveResult.isSuccess, "save must succeed for the full DetailsContent flow")
+
+        val bundle = repo.load(pdfPath).getOrThrow()
+
+        // scale
+        assertEquals(scale, bundle.scale)
+        // pages
+        assertEquals(2, bundle.pages.size)
+        assertEquals(Color(0xFFE53935), bundle.pages[0]?.first()?.color)
+        assertEquals(Color(0xFF1E88E5), bundle.pages[2]?.first()?.color)
+        // pen
+        assertEquals(pen.strokeWidth, bundle.pen.strokeWidth)
+        assertEquals(pen.alpha, bundle.pen.alpha)
+        assertEquals(pen.color.value, bundle.pen.color.value, "pen ARGB Long round-trip")
+        // eraser
+        assertEquals(eraser.shape, bundle.eraser.shape)
+        assertEquals(eraser.sizeNormalized, bundle.eraser.sizeNormalized)
+    }
+
     // TC-19 surrogate: AnnotationRepositoryAndroid is structurally identical and shares
     // the JSON shape via AnnotationData — cross-validated through round-trip on JVM.
     // The dedicated Android instrumentation test lives in androidTest (out of scope for

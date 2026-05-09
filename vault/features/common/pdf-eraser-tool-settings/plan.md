@@ -139,7 +139,7 @@ updated: 2026-05-09
   - Runnable: открой PDF; кнопка «Перо» включает перо и раскрывает PenSettingsPanel;
     кнопка «Ластик» — наоборот; повторное нажатие на активный инструмент сворачивает.
 
-- [ ] Step 7: `DetailsContent` — финальный wiring + persistence applied/saved
+- [x] Step 7: `DetailsContent` — финальный wiring + persistence applied/saved
   - Goal: завести `var penSettings`, `var eraserSettings`, `var toolMode` в `DetailsContent`;
     при загрузке `bundle` применять `bundle.pen` / `bundle.eraser`; при `onSave` передавать
     их в `AnnotationRepository.save(...)`. `LaunchedEffect(toolMode)` финализирует
