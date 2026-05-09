@@ -3,17 +3,21 @@ package ru.kyamshanov.notepen
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.Color
+import kotlinx.serialization.Serializable
 
+@Serializable
 data class DrawingPoint(
     val x: Float,
     val y: Float,
-    val isNewPath: Boolean = false
+    val isNewPath: Boolean = false,
 )
 
+@Serializable
 data class DrawingPath(
     val points: List<DrawingPoint> = emptyList(),
+    @Serializable(with = ColorAsLongSerializer::class)
     val color: Color = Color.Black,
-    val strokeWidth: Float = 10f
+    val strokeWidth: Float = 10f,
 )
 
 class PdfDrawingState {

@@ -47,6 +47,7 @@ kotlin {
             implementation(projects.app.byCompose.uikit)
 
             implementation(libs.kotlin.logging.common)
+            implementation(libs.kotlinx.serialization.core)
         }
 
         commonTest.dependencies {
