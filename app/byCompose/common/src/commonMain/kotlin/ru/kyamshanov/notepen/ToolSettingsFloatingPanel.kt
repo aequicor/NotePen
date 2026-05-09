@@ -306,16 +306,25 @@ private class SlotItem(
     val content: @Composable () -> Unit,
 )
 
+// Wrapping in Row is required so the whole slot is a SINGLE layout node.
+// SubcomposeLayout's measure pass calls .first() on the subcomposed measurables;
+// without the Row wrapper, label Text and slot.content() would be separate nodes
+// and only the first (label) would be measured, producing incorrect natural widths.
 @Composable
 private fun FullSlotContent(slot: SlotItem) {
-    if (slot.label != null) {
-        Text(
-            text = slot.label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
+    ) {
+        if (slot.label != null) {
+            Text(
+                text = slot.label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        slot.content()
     }
-    slot.content()
 }
 
 @Composable
@@ -343,7 +352,13 @@ private fun CollapsedSlotContent(
             enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
             exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
         ) {
-            slot.content()
+            // AnimatedVisibility requires a single child; Row wraps multi-node content.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
+            ) {
+                slot.content()
+            }
         }
     }
 }
