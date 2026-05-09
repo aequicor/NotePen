@@ -25,7 +25,6 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -48,7 +47,7 @@ internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 @Composable
 fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     val localWindowInfo = LocalWindowInfo.current
-    val windowSizeInPx = rememberSaveable { localWindowInfo.containerSize }
+    val windowSizeInPx = localWindowInfo.containerSize
     val model by component.model.subscribeAsState()
     val filePath = remember(model.title) { model.title }
     val pdfManager = remember(filePath) { PdfManager(filePath) }
