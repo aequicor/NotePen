@@ -57,13 +57,12 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     var scale by remember { mutableStateOf(100) }
     val pagesCache = remember(pages, scale) { mutableMapOf<Int, ImageBitmap>() }
 
-    var isDrawingEnabled by remember { mutableStateOf(false) }
-    // Временный wiring до Шага 7: toolMode выводится из isDrawingEnabled (PEN при true,
-    // NONE при false). penSettings/eraserSettings — дефолтные. Полноценный wiring
-    // (отдельный toolMode, persistence pen/eraser) добавляется в Шагах 6–7.
-    val toolMode = if (isDrawingEnabled) ToolMode.PEN else ToolMode.NONE
-    val penSettings = remember { PenSettings() }
-    val eraserSettings = remember { EraserSettings() }
+    // Step 6 wiring: toolMode is now first-class state driven by the toolbar's
+    // Pen / Eraser toggles. penSettings / eraserSettings are local state until
+    // Step 7 wires them into AnnotationRepository.load / save (persistence).
+    var toolMode by remember { mutableStateOf(ToolMode.NONE) }
+    var penSettings by remember { mutableStateOf(PenSettings()) }
+    var eraserSettings by remember { mutableStateOf(EraserSettings()) }
     var isSaving by remember { mutableStateOf(false) }
     val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
     val hasAnnotations by remember {
@@ -142,8 +141,12 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         }
 
         PdfFloatingToolbar(
-            isDrawingEnabled = isDrawingEnabled,
-            onToggleDrawing = { isDrawingEnabled = !isDrawingEnabled },
+            toolMode = toolMode,
+            onToolModeChange = { toolMode = it },
+            penSettings = penSettings,
+            onPenSettingsChange = { penSettings = it },
+            eraserSettings = eraserSettings,
+            onEraserSettingsChange = { eraserSettings = it },
             hasAnnotations = hasAnnotations,
             isSaving = isSaving,
             onSave = {
