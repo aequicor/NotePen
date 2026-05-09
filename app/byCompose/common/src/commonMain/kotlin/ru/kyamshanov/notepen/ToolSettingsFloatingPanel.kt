@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -175,11 +173,10 @@ private fun PenSettingsRow(
             suffix = "%",
         )
 
-        // Color presets — horizontal lazy row, lives on the same horizontal strip.
-        LazyRow(
+        Row(
             horizontalArrangement = Arrangement.spacedBy(PRESET_GAP),
         ) {
-            items(PenSettings.PRESET_COLORS) { preset ->
+            PenSettings.PRESET_COLORS.forEach { preset ->
                 ColorPresetDot(
                     preset = preset,
                     selected = preset.value == settings.color.copy(alpha = 1f).value,
