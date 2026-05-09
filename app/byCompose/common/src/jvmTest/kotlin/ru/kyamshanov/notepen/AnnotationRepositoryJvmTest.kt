@@ -199,6 +199,58 @@ class AnnotationRepositoryJvmTest {
         assertEquals(eraser.sizeNormalized, bundle.eraser.sizeNormalized)
     }
 
+    // TC-1 (Step 2): save(currentPage = 5) → JSON contains "currentPage": 5
+    @Test
+    fun save_withCurrentPage_writesCurrentPageToJson() = runBlocking {
+        val dir = createTempDirectory("notepen_cp_save")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+
+        val result = repo.save(pdfPath, emptyMap(), scale = 100, currentPage = 5)
+
+        assertTrue(result.isSuccess)
+        val content = java.io.File("$pdfPath.notepen.json").readText()
+        assertTrue(content.contains("\"currentPage\":5") || content.contains("\"currentPage\": 5"),
+            "JSON must contain currentPage 5, got: $content")
+    }
+
+    // TC-2 (Step 2): load JSON with currentPage=5 → bundle.currentPage == 5
+    @Test
+    fun load_jsonWithCurrentPage_returnsBundleWithCurrentPage() = runBlocking {
+        val dir = createTempDirectory("notepen_cp_load")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        repo.save(pdfPath, emptyMap(), scale = 100, currentPage = 5)
+
+        val bundle = repo.load(pdfPath).getOrThrow()
+
+        assertEquals(5, bundle.currentPage)
+    }
+
+    // TC-3 (Step 2): legacy JSON without currentPage → bundle.currentPage == 0 (backward compat)
+    @Test
+    fun load_legacyJsonWithoutCurrentPage_returnsZero() = runBlocking {
+        val dir = createTempDirectory("notepen_cp_legacy")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        // Legacy file without currentPage field
+        java.io.File("$pdfPath.notepen.json").writeText("""{"pages":{},"scale":100}""")
+
+        val bundle = repo.load(pdfPath).getOrThrow()
+
+        assertEquals(0, bundle.currentPage, "missing currentPage must default to 0")
+    }
+
+    // TC-4 (Step 2, Android surrogate via JVM): same schema is used by Android impl
+    @Test
+    fun save_currentPage_roundTripsToBundle() = runBlocking {
+        val dir = createTempDirectory("notepen_cp_rt")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        repo.save(pdfPath, emptyMap(), scale = 120, currentPage = 3)
+
+        val bundle = repo.load(pdfPath).getOrThrow()
+
+        assertEquals(3, bundle.currentPage)
+        assertEquals(120, bundle.scale)
+    }
+
     // TC-19 surrogate: AnnotationRepositoryAndroid is structurally identical and shares
     // the JSON shape via AnnotationData — cross-validated through round-trip on JVM.
     // The dedicated Android instrumentation test lives in androidTest (out of scope for

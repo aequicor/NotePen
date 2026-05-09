@@ -78,8 +78,6 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         }
     }
 
-    // Step 7: persistence wiring — apply saved pen / eraser / scale / annotations
-    // from AnnotationRepository.load on PDF reopen (AC-16, AC-19, EC-14).
     LaunchedEffect(filePath) {
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
             scale = bundle.scale
@@ -87,6 +85,9 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
             eraserSettings = bundle.eraser
             bundle.pages.forEach { (pageIndex, paths) ->
                 drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.currentPaths.addAll(paths)
+            }
+            if (pages.isNotEmpty() && bundle.currentPage > 0) {
+                lazyListState.scrollToItem(bundle.currentPage.coerceIn(0, pages.size - 1))
             }
         }
     }
@@ -154,14 +155,13 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                     val annotations = drawingStates.mapValues { (_, state) ->
                         state.currentPaths.toList()
                     }
-                    // Step 7: pass current pen / eraser settings to persistence
-                    // so они round-trip-ятся между переоткрытиями PDF (AC-16, AC-17).
                     val result = annotationRepository.save(
                         pdfPath = filePath,
                         annotations = annotations,
                         scale = scale,
                         pen = penSettings,
                         eraser = eraserSettings,
+                        currentPage = lazyListState.firstVisibleItemIndex,
                     )
                     isSaving = false
                     val message = if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"

@@ -16,12 +16,14 @@ class AnnotationRepositoryJvm : AnnotationRepository {
         scale: Int,
         pen: PenSettings,
         eraser: EraserSettings,
+        currentPage: Int,
     ): Result<Unit> {
         return try {
             val data = AnnotationData(
                 pages = annotations.mapKeys { it.key.toString() },
                 scale = scale,
                 tools = ToolsBundle(pen = pen, eraser = eraser),
+                currentPage = currentPage,
             )
             File("$pdfPath.notepen.json").writeText(json.encodeToString(AnnotationData.serializer(), data))
             Result.success(Unit)
@@ -43,6 +45,7 @@ class AnnotationRepositoryJvm : AnnotationRepository {
                     scale = data.scale,
                     pen = tools.pen,
                     eraser = tools.eraser,
+                    currentPage = data.currentPage,
                 )
             )
         } catch (e: Exception) {
