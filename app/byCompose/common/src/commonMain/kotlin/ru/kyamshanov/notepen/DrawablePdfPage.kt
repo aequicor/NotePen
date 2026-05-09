@@ -61,7 +61,18 @@ fun DrawablePdfPage(
             .onSizeChanged { canvasSize.value = it }
             .then(
                 when (toolMode) {
-                    ToolMode.PEN -> Modifier.pointerInput(toolMode) {
+                    // ПРИМЕЧАНИЕ к ключам pointerInput:
+                    // pointerInput кэширует suspending-block по ключам и НЕ перезапускает
+                    // его, пока ключи неизменны. Если в ключе только `toolMode`, замыкание
+                    // onDragStart захватывает старое значение `penSettings` (или
+                    // `eraserSettings`), и при движении слайдеров «Толщина» / «Прозрачность» /
+                    // выборе нового цвета-пресета следующий штрих использует устаревшие
+                    // значения. Поэтому ключи включают и сами settings — при их изменении
+                    // gesture-handler перезапускается с актуальным замыканием. EC-1/EC-2
+                    // (финализация незавершённого штриха) обрабатываются LaunchedEffect выше
+                    // по `toolMode`, поэтому риск частичных штрихов при перезапуске
+                    // pointerInput на лету покрыт.
+                    ToolMode.PEN -> Modifier.pointerInput(toolMode, penSettings) {
                         detectDragGestures(
                             onDragStart = { offset ->
                                 val (w, h) = canvasSize.value
@@ -89,7 +100,7 @@ fun DrawablePdfPage(
                         )
                     }
 
-                    ToolMode.ERASER -> Modifier.pointerInput(toolMode) {
+                    ToolMode.ERASER -> Modifier.pointerInput(toolMode, eraserSettings) {
                         detectDragGestures(
                             onDragStart = { offset ->
                                 val (w, h) = canvasSize.value

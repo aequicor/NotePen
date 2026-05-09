@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -41,15 +42,21 @@ fun EraserSettingsPanel(
             horizontalArrangement = Arrangement.spacedBy(ERASER_SHAPE_GAP),
             modifier = Modifier.padding(top = ERASER_SHAPE_TOP_PADDING),
         ) {
+            // shape = CircleShape — pill-форма у chip и его hover/press-ripple
+            // одинакова в обоих состояниях (selected / unselected). Material 3
+            // FilterChipDefaults.shape — RoundedCornerShape(8dp), что воспринимается
+            // как «квадратное затемнение» при hover на неактивном элементе.
             FilterChip(
                 selected = settings.shape == EraserShape.CIRCLE,
                 onClick = { onChange(settings.applyShape(EraserShape.CIRCLE)) },
                 label = { Text("Круг") },
+                shape = CircleShape,
             )
             FilterChip(
                 selected = settings.shape == EraserShape.SQUARE,
                 onClick = { onChange(settings.applyShape(EraserShape.SQUARE)) },
                 label = { Text("Квадрат") },
+                shape = CircleShape,
             )
         }
 

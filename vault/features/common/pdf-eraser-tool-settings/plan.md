@@ -123,7 +123,7 @@ updated: 2026-05-09
   - Runnable: построй модуль, открой `PenSettingsPanel(PenSettings()) { }` через
     composable preview / временную точку входа — три контрола видны и реагируют.
 
-- [ ] Step 6: `PdfFloatingToolbar` — кнопки Перо/Ластик + раскрывающаяся секция настроек
+- [x] Step 6: `PdfFloatingToolbar` — кнопки Перо/Ластик + раскрывающаяся секция настроек
   - Goal: расширить toolbar новой сигнатурой (см. spec.md § Публичные сигнатуры);
     кнопка «Перо» / «Ластик» — взаимоисключаемые тогглы; под колонкой кнопок отображается
     либо `PenSettingsPanel`, либо `EraserSettingsPanel`, либо ничего — по `toolMode`.
