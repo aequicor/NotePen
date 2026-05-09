@@ -47,6 +47,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 
 /**
@@ -333,8 +334,16 @@ private fun SliderWithValueField(
 
     val onSurface = MaterialTheme.colorScheme.onSurface
     val outline = MaterialTheme.colorScheme.outlineVariant
+    // Defect F: BasicTextField's inner editable slot and the trailing suffix
+    // Text were rendering with different baselines/line-heights, making the
+    // "dp"/"%" suffix look like a misaligned superscript next to the digits.
+    // Pin both to identical TextStyle with explicit fontSize == lineHeight
+    // (zero extra leading) so the Row's CenterVertically lines them up
+    // pixel-equal regardless of bodySmall theme tweaks across platforms.
     val textStyle = MaterialTheme.typography.bodySmall.copy(
         color = onSurface,
+        fontSize = VALUE_FIELD_FONT_SIZE,
+        lineHeight = VALUE_FIELD_FONT_SIZE,
         textAlign = TextAlign.Center,
     )
 
@@ -398,5 +407,6 @@ private val VALUE_FIELD_CORNER_RADIUS = 6.dp
 private val VALUE_FIELD_BORDER_WIDTH = 1.dp
 private val VALUE_FIELD_PADDING_H = 6.dp
 private val VALUE_FIELD_PADDING_V = 2.dp
+private val VALUE_FIELD_FONT_SIZE = 12.sp
 private const val PANEL_GLASS_ALPHA = 0.85f
 private const val PANEL_BORDER_ALPHA = 0.5f
