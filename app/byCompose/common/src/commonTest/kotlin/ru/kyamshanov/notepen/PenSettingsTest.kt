@@ -1,0 +1,69 @@
+package ru.kyamshanov.notepen
+
+import androidx.compose.ui.graphics.Color
+import kotlinx.serialization.json.Json
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+// covers TC-10, TC-11, TC-13, TC-14
+
+class PenSettingsTest {
+
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+
+    // TC-10: PenSettings defaults: color=Black, strokeWidth=10f, alpha=1f
+    @Test
+    fun penSettings_defaults_areBlackTenAndOne() {
+        // covers TC-10
+        val s = PenSettings()
+        assertEquals(Color.Black, s.color, "default color must be Black")
+        assertEquals(10f, s.strokeWidth, "default strokeWidth must be 10f")
+        assertEquals(1f, s.alpha, "default alpha must be 1f")
+        assertEquals(10f, PenSettings.DEFAULT_STROKE_WIDTH)
+        assertTrue(PenSettings.PRESET_COLORS.isNotEmpty(), "PRESET_COLORS must not be empty")
+    }
+
+    // TC-13: PenSettings round-trip serialization preserves alpha
+    @Test
+    fun penSettings_roundTripSerialization_preservesAlpha() {
+        // covers TC-13
+        val original = PenSettings(
+            color = Color(red = 1f, green = 0f, blue = 0f, alpha = 0.5f),
+            strokeWidth = 25f,
+            alpha = 0.5f,
+        )
+
+        val text = json.encodeToString(PenSettings.serializer(), original)
+        val decoded = json.decodeFromString(PenSettings.serializer(), text)
+
+        assertEquals(original.strokeWidth, decoded.strokeWidth)
+        assertEquals(original.alpha, decoded.alpha)
+        assertEquals(original.color.value, decoded.color.value, "ARGB Long must round-trip including alpha channel")
+    }
+
+    // TC-11: EraserSettings defaults: shape=CIRCLE, sizeNormalized=DEFAULT_SIZE_NORMALIZED
+    @Test
+    fun eraserSettings_defaults_areCircleAndDefaultSize() {
+        // covers TC-11
+        val s = EraserSettings()
+        assertEquals(EraserShape.CIRCLE, s.shape)
+        assertEquals(EraserSettings.DEFAULT_SIZE_NORMALIZED, s.sizeNormalized)
+        assertTrue(
+            EraserSettings.MIN_SIZE_NORMALIZED < EraserSettings.MAX_SIZE_NORMALIZED,
+            "MIN < MAX size constraint",
+        )
+    }
+
+    // TC-14: EraserSettings round-trip serialization
+    @Test
+    fun eraserSettings_roundTripSerialization() {
+        // covers TC-14
+        val original = EraserSettings(shape = EraserShape.SQUARE, sizeNormalized = 0.1f)
+
+        val text = json.encodeToString(EraserSettings.serializer(), original)
+        val decoded = json.decodeFromString(EraserSettings.serializer(), text)
+
+        assertEquals(original, decoded)
+    }
+}

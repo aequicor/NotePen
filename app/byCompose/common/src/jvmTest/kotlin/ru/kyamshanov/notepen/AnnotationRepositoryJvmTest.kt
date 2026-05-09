@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class AnnotationRepositoryJvmTest {
@@ -13,7 +14,7 @@ class AnnotationRepositoryJvmTest {
     private val repo = AnnotationRepositoryJvm()
     private val json = Json { ignoreUnknownKeys = true }
 
-    // TC-6: save creates .notepen.json with correct structure
+    // TC-6 (legacy): save creates .notepen.json with correct structure
     @Test
     fun save_withAnnotations_createsJsonFile() = runBlocking {
         val dir = createTempDirectory("notepen_test")
@@ -38,7 +39,7 @@ class AnnotationRepositoryJvmTest {
         assertTrue(content.contains("\"0\""), "JSON must contain page index key: $content")
     }
 
-    // TC-6: round-trip — saved annotations can be decoded back
+    // TC-6 (legacy round-trip)
     @Test
     fun save_roundTrip_annotationsDecodedCorrectly() = runBlocking {
         val dir = createTempDirectory("notepen_test_rt")
@@ -57,14 +58,13 @@ class AnnotationRepositoryJvmTest {
         assertEquals(150, annotationData.scale)
     }
 
-    // TC-7: save to non-existent directory returns Result.failure
+    // TC-7 (legacy)
     @Test
     fun save_nonExistentDirectory_returnsFailure() = runBlocking {
         val result = repo.save("/nonexistent_dir_abc123/sample.pdf", emptyMap(), scale = 100)
         assertTrue(result.isFailure, "save must return failure for bad path")
     }
 
-    // load — missing file returns empty bundle (no error)
     @Test
     fun load_noFile_returnsEmptyBundle() = runBlocking {
         val dir = createTempDirectory("notepen_load_empty")
@@ -73,7 +73,6 @@ class AnnotationRepositoryJvmTest {
         assertEquals(AnnotationBundle(), result.getOrNull())
     }
 
-    // load — round-trip with save (annotations + scale)
     @Test
     fun load_afterSave_returnsOriginalAnnotationsAndScale() = runBlocking {
         val dir = createTempDirectory("notepen_load_rt")
@@ -90,5 +89,97 @@ class AnnotationRepositoryJvmTest {
         assertEquals(Color.Red, bundle.pages[0]?.first()?.color)
         assertEquals(Color.Blue, bundle.pages[2]?.first()?.color)
         assertEquals(130, bundle.scale)
+    }
+
+    // TC-15: save writes JSON with tools.pen and tools.eraser
+    @Test
+    fun save_writesToolsBlock_withPenAndEraser() = runBlocking {
+        // covers TC-15
+        val dir = createTempDirectory("notepen_tools")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        val pen = PenSettings(color = Color.Red, strokeWidth = 22f, alpha = 0.8f)
+        val eraser = EraserSettings(shape = EraserShape.SQUARE, sizeNormalized = 0.07f)
+
+        val result = repo.save(pdfPath, emptyMap(), scale = 100, pen = pen, eraser = eraser)
+
+        assertTrue(result.isSuccess)
+        val content = java.io.File("$pdfPath.notepen.json").readText()
+        assertTrue(content.contains("\"tools\""), "JSON must contain tools key: $content")
+        assertTrue(content.contains("\"pen\""), "JSON must contain tools.pen: $content")
+        assertTrue(content.contains("\"eraser\""), "JSON must contain tools.eraser: $content")
+        assertTrue(content.contains("\"SQUARE\""), "eraser shape SQUARE must round-trip: $content")
+    }
+
+    // TC-16: legacy JSON without tools loads with default pen/eraser
+    @Test
+    fun load_legacyJsonWithoutToolsBlock_returnsDefaults() = runBlocking {
+        // covers TC-16 (AC-19 backward compat)
+        val dir = createTempDirectory("notepen_legacy")
+        val pdfPath = dir.resolve("legacy.pdf").toString()
+        // Write a legacy file by hand — no `tools` field at all.
+        val legacyJson = """{"pages":{"0":[]},"scale":120}"""
+        java.io.File("$pdfPath.notepen.json").writeText(legacyJson)
+
+        val bundle = repo.load(pdfPath).getOrThrow()
+
+        assertEquals(120, bundle.scale)
+        assertEquals(PenSettings(), bundle.pen, "missing tools must yield default PenSettings")
+        assertEquals(EraserSettings(), bundle.eraser, "missing tools must yield default EraserSettings")
+    }
+
+    // TC-17: new JSON with tools loads pen/eraser from file
+    @Test
+    fun load_newJsonWithTools_returnsPenAndEraserFromFile() = runBlocking {
+        // covers TC-17 (AC-16)
+        val dir = createTempDirectory("notepen_tools_load")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        val pen = PenSettings(color = Color(0xFF8E24AA), strokeWidth = 30f, alpha = 0.6f)
+        val eraser = EraserSettings(shape = EraserShape.SQUARE, sizeNormalized = 0.12f)
+        repo.save(pdfPath, emptyMap(), scale = 100, pen = pen, eraser = eraser)
+
+        val bundle = repo.load(pdfPath).getOrThrow()
+
+        assertEquals(pen.strokeWidth, bundle.pen.strokeWidth)
+        assertEquals(pen.alpha, bundle.pen.alpha)
+        assertEquals(pen.color.value, bundle.pen.color.value, "ARGB Long round-trip")
+        assertEquals(eraser, bundle.eraser)
+    }
+
+    // TC-18: save under IOException returns Result.failure
+    @Test
+    fun save_ioException_returnsFailure() = runBlocking {
+        // covers TC-18 / EC-12 — using a path that cannot be written to
+        val result = repo.save(
+            "/nonexistent_path_xyz_777/file.pdf",
+            emptyMap(),
+            scale = 100,
+            pen = PenSettings(),
+            eraser = EraserSettings(),
+        )
+        assertTrue(result.isFailure)
+    }
+
+    // TC-19 surrogate: AnnotationRepositoryAndroid is structurally identical and shares
+    // the JSON shape via AnnotationData — cross-validated through round-trip on JVM.
+    // The dedicated Android instrumentation test lives in androidTest (out of scope for
+    // jvmTest); see plan.md Step 1 Known limitations.
+    @Test
+    fun jsonShape_isCompatibleAcrossPlatforms() = runBlocking {
+        // covers TC-19 (structural — same AnnotationData schema used by both impls)
+        val dir = createTempDirectory("notepen_cross_platform")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        repo.save(
+            pdfPath,
+            emptyMap(),
+            scale = 100,
+            pen = PenSettings(),
+            eraser = EraserSettings(),
+        )
+        val content = java.io.File("$pdfPath.notepen.json").readText()
+        // Re-decode through the same serializer the Android impl uses.
+        val decoded = json.decodeFromString(AnnotationData.serializer(), content)
+        assertNotNull(decoded.tools, "tools block must round-trip")
+        assertEquals(PenSettings(), decoded.tools?.pen)
+        assertEquals(EraserSettings(), decoded.tools?.eraser)
     }
 }
