@@ -58,7 +58,7 @@ updated: 2026-05-09
   - Runnable: internal — backend-слой настроек ещё не виден пользователю до Шага 5;
     верификация через unit-тесты на сериализацию и обратную совместимость.
 
-- [ ] Step 2: Точечное стирание в `PdfDrawingState`
+- [x] Step 2: Точечное стирание в `PdfDrawingState`
   - Goal: добавить `erasePointsInZone(centerX, centerY, halfSizeNormalized, shape): Boolean`
     с алгоритмом разрезания штриха на подштрихи (CIRCLE / SQUARE). Старые методы остаются
     без изменений.
