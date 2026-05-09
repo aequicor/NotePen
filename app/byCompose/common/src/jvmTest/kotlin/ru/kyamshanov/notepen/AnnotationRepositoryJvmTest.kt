@@ -28,7 +28,7 @@ class AnnotationRepositoryJvmTest {
             )
         )
 
-        val result = repo.save(pdfPath, annotations)
+        val result = repo.save(pdfPath, annotations, scale = 100)
 
         assertTrue(result.isSuccess, "save must succeed")
         val outputFile = java.io.File("$pdfPath.notepen.json")
@@ -47,46 +47,48 @@ class AnnotationRepositoryJvmTest {
             1 to listOf(DrawingPath(color = Color.Blue, strokeWidth = 5f))
         )
 
-        repo.save(pdfPath, original)
+        repo.save(pdfPath, original, scale = 150)
 
         val outputFile = java.io.File("$pdfPath.notepen.json")
         val annotationData = json.decodeFromString(AnnotationData.serializer(), outputFile.readText())
         val decoded = annotationData.pages["1"]
         assertEquals(1, decoded?.size)
         assertEquals(Color.Blue, decoded?.first()?.color)
+        assertEquals(150, annotationData.scale)
     }
 
     // TC-7: save to non-existent directory returns Result.failure
     @Test
     fun save_nonExistentDirectory_returnsFailure() = runBlocking {
-        val result = repo.save("/nonexistent_dir_abc123/sample.pdf", emptyMap())
+        val result = repo.save("/nonexistent_dir_abc123/sample.pdf", emptyMap(), scale = 100)
         assertTrue(result.isFailure, "save must return failure for bad path")
     }
 
-    // load — missing file returns empty map (no error)
+    // load — missing file returns empty bundle (no error)
     @Test
-    fun load_noFile_returnsEmptyMap() = runBlocking {
+    fun load_noFile_returnsEmptyBundle() = runBlocking {
         val dir = createTempDirectory("notepen_load_empty")
         val result = repo.load(dir.resolve("missing.pdf").toString())
         assertTrue(result.isSuccess)
-        assertEquals(emptyMap(), result.getOrNull())
+        assertEquals(AnnotationBundle(), result.getOrNull())
     }
 
-    // load — round-trip with save
+    // load — round-trip with save (annotations + scale)
     @Test
-    fun load_afterSave_returnsOriginalAnnotations() = runBlocking {
+    fun load_afterSave_returnsOriginalAnnotationsAndScale() = runBlocking {
         val dir = createTempDirectory("notepen_load_rt")
         val pdfPath = dir.resolve("doc.pdf").toString()
         val original = mapOf(
             0 to listOf(DrawingPath(color = Color.Red, strokeWidth = 3f)),
             2 to listOf(DrawingPath(color = Color.Blue)),
         )
-        repo.save(pdfPath, original)
+        repo.save(pdfPath, original, scale = 130)
 
-        val loaded = repo.load(pdfPath).getOrThrow()
+        val bundle = repo.load(pdfPath).getOrThrow()
 
-        assertEquals(2, loaded.size)
-        assertEquals(Color.Red, loaded[0]?.first()?.color)
-        assertEquals(Color.Blue, loaded[2]?.first()?.color)
+        assertEquals(2, bundle.pages.size)
+        assertEquals(Color.Red, bundle.pages[0]?.first()?.color)
+        assertEquals(Color.Blue, bundle.pages[2]?.first()?.color)
+        assertEquals(130, bundle.scale)
     }
 }

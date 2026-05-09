@@ -10,9 +10,9 @@ class AnnotationRepositoryAndroid : AnnotationRepository {
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
-    override suspend fun save(pdfPath: String, annotations: Map<Int, List<DrawingPath>>): Result<Unit> {
+    override suspend fun save(pdfPath: String, annotations: Map<Int, List<DrawingPath>>, scale: Int): Result<Unit> {
         return try {
-            val data = AnnotationData(pages = annotations.mapKeys { it.key.toString() })
+            val data = AnnotationData(pages = annotations.mapKeys { it.key.toString() }, scale = scale)
             File("$pdfPath.notepen.json").writeText(json.encodeToString(AnnotationData.serializer(), data))
             Result.success(Unit)
         } catch (e: IOException) {
@@ -20,12 +20,13 @@ class AnnotationRepositoryAndroid : AnnotationRepository {
         }
     }
 
-    override suspend fun load(pdfPath: String): Result<Map<Int, List<DrawingPath>>> {
+    override suspend fun load(pdfPath: String): Result<AnnotationBundle> {
         return try {
             val file = File("$pdfPath.notepen.json")
-            if (!file.exists()) return Result.success(emptyMap())
+            if (!file.exists()) return Result.success(AnnotationBundle())
             val data = json.decodeFromString(AnnotationData.serializer(), file.readText())
-            Result.success(data.pages.mapKeys { it.key.toIntOrNull() ?: return Result.success(emptyMap()) })
+            val pages = data.pages.mapKeys { it.key.toIntOrNull() ?: return Result.success(AnnotationBundle()) }
+            Result.success(AnnotationBundle(pages = pages, scale = data.scale))
         } catch (e: Exception) {
             Result.failure(e)
         }

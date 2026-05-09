@@ -75,8 +75,11 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     }
 
     LaunchedEffect(filePath) {
-        annotationRepository.load(filePath).getOrNull()?.forEach { (pageIndex, paths) ->
-            drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.currentPaths.addAll(paths)
+        annotationRepository.load(filePath).getOrNull()?.let { bundle ->
+            scale = bundle.scale
+            bundle.pages.forEach { (pageIndex, paths) ->
+                drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.currentPaths.addAll(paths)
+            }
         }
     }
 
@@ -141,7 +144,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                     val annotations = drawingStates.mapValues { (_, state) ->
                         state.currentPaths.toList()
                     }
-                    val result = annotationRepository.save(filePath, annotations)
+                    val result = annotationRepository.save(filePath, annotations, scale)
                     isSaving = false
                     val message = if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
                     snackbarHostState.showSnackbar(message)
