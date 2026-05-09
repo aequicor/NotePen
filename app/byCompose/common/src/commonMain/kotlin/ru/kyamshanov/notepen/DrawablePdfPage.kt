@@ -12,6 +12,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -81,7 +83,11 @@ fun DrawablePdfPage(
                         }
                     },
                     color = path.color,
-                    style = Stroke(width = path.strokeWidth * size.width),
+                    style = Stroke(
+                        width = path.strokeWidth * size.width,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    ),
                 )
             }
 
@@ -95,7 +101,11 @@ fun DrawablePdfPage(
                         }
                     },
                     color = pdfDrawingState.currentPath.value.color,
-                    style = Stroke(width = pdfDrawingState.currentPath.value.strokeWidth * size.width),
+                    style = Stroke(
+                        width = pdfDrawingState.currentPath.value.strokeWidth * size.width,
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    ),
                 )
             }
         }

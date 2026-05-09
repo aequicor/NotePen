@@ -53,4 +53,6 @@ updated: 2026-05-09
 
 ## Defects log
 
-(пусто — фича в фазе CONFIRM; defects регистрируются командой `/kit-defect <description> --origin=<value>` в EXECUTE)
+| Date | Step | Severity | Source | Description | Status |
+|------|------|----------|--------|-------------|--------|
+| 2026-05-09 | 2 | medium | ground-truth-waived | Step 2 (`erasePointsInZone`) — REQUIRED_TYPE=backend (mutation-sample). User approved via `/kit-approve --no-ground-truth`. Не выполнен mutation-sample на новой extension-функции; покрытие подтверждено только unit-тестами `PdfDrawingStateEraseTest` (9 тестов, 138/138 jvmTest green). | WAIVED |
