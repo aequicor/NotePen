@@ -347,45 +347,38 @@ private fun SliderWithValueField(
         textAlign = TextAlign.Center,
     )
 
-    Box(
-        modifier = Modifier
-            .width(VALUE_FIELD_WIDTH)
-            .border(
-                width = VALUE_FIELD_BORDER_WIDTH,
-                color = outline,
-                shape = RoundedCornerShape(VALUE_FIELD_CORNER_RADIUS),
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .width(VALUE_FIELD_WIDTH)
+                .border(
+                    width = VALUE_FIELD_BORDER_WIDTH,
+                    color = outline,
+                    shape = RoundedCornerShape(VALUE_FIELD_CORNER_RADIUS),
+                )
+                .padding(horizontal = VALUE_FIELD_PADDING_H, vertical = VALUE_FIELD_PADDING_V),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicTextField(
+                value = text,
+                onValueChange = { text = it },
+                singleLine = true,
+                textStyle = textStyle,
+                cursorBrush = SolidColor(onSurface),
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = { commit() }),
             )
-            .padding(horizontal = VALUE_FIELD_PADDING_H, vertical = VALUE_FIELD_PADDING_V),
-        contentAlignment = Alignment.Center,
-    ) {
-        BasicTextField(
-            value = text,
-            onValueChange = { text = it },
-            singleLine = true,
-            textStyle = textStyle,
-            cursorBrush = SolidColor(onSurface),
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number,
-                imeAction = ImeAction.Done,
-            ),
-            keyboardActions = KeyboardActions(onDone = { commit() }),
-            decorationBox = { inner ->
-                // Center text + static suffix. The suffix is non-editable,
-                // shown as a hint after the digits.
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center,
-                ) {
-                    inner()
-                    if (suffix.isNotEmpty()) {
-                        Text(
-                            text = suffix,
-                            style = textStyle,
-                        )
-                    }
-                }
-            },
-        )
+        }
+        if (suffix.isNotEmpty()) {
+            Text(
+                text = suffix,
+                style = textStyle,
+                modifier = Modifier.padding(start = 2.dp),
+            )
+        }
     }
 }
 
