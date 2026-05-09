@@ -398,26 +398,34 @@ private fun AdaptiveSettingsRow(
             val paddingPx = (PANEL_HORIZONTAL_PADDING * 2).roundToPx()
             val iconButtonWidthPx = ADAPTIVE_ICON_BUTTON_SIZE.roundToPx()
 
-            // Pass 1: measure each slot at full slider width.
+            // Measure every slot at both widths up-front.
             val naturalWidths = slots.indices.map { i ->
                 subcompose("measure_nat_$i") { FullSlotContent(slots[i], SLIDER_WIDTH) }
                     .first().measure(Constraints()).width
             }
-            val naturalFits = greedyFit(naturalWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
-
-            // Pass 2: if ANY slot overflowed at full width, compress ALL sliders.
-            // Keeping previously-fitting slots at full width would unfairly consume
-            // budget and prevent later slots from fitting at compressed width.
-            val resolvedWidths: List<Dp?> = if (naturalFits.all { it }) {
-                slots.indices.map { SLIDER_WIDTH }
-            } else {
-                val minWidths = slots.indices.map { i ->
-                    subcompose("measure_min_$i") { FullSlotContent(slots[i], ADAPTIVE_MIN_SLIDER_WIDTH) }
-                        .first().measure(Constraints()).width
-                }
-                val minFits = greedyFit(minWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
-                slots.indices.map { i -> if (minFits[i]) ADAPTIVE_MIN_SLIDER_WIDTH else null }
+            val compressedWidths = slots.indices.map { i ->
+                subcompose("measure_min_$i") { FullSlotContent(slots[i], ADAPTIVE_MIN_SLIDER_WIDTH) }
+                    .first().measure(Constraints()).width
             }
+            // Baseline: all slots start as icon-buttons — always fits regardless of width.
+            // Budget is the space left after reserving one icon-button per slot + gaps.
+            // Phase 1: promote icon → compressed inline (80 dp slider) left-to-right.
+            // Phase 2: promote compressed → full inline (140 dp slider) left-to-right.
+            // Icons are NEVER collapsed — only sliders are demoted.
+            val gapCount = (slots.size - 1).coerceAtLeast(0)
+            var budget = constraints.maxWidth - paddingPx - slots.size * iconButtonWidthPx - gapCount * gapPx
+            val resolvedArr = arrayOfNulls<Dp>(slots.size)
+            for (i in slots.indices) {
+                val extra = compressedWidths[i] - iconButtonWidthPx
+                if (budget >= extra) { resolvedArr[i] = ADAPTIVE_MIN_SLIDER_WIDTH; budget -= extra }
+            }
+            for (i in slots.indices) {
+                if (resolvedArr[i] == ADAPTIVE_MIN_SLIDER_WIDTH) {
+                    val extra = naturalWidths[i] - compressedWidths[i]
+                    if (budget >= extra) { resolvedArr[i] = SLIDER_WIDTH; budget -= extra }
+                }
+            }
+            val resolvedWidths: List<Dp?> = resolvedArr.toList()
 
             val placeable = subcompose("row") {
                 Row(
