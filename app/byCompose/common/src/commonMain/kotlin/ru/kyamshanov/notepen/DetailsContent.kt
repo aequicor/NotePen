@@ -101,8 +101,11 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
             bundle.pages.forEach { (pageIndex, paths) ->
                 drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.currentPaths.addAll(paths)
             }
-            if (pages.isNotEmpty() && bundle.currentPage > 0) {
-                lazyListState.scrollToItem(bundle.currentPage.coerceIn(0, pages.size - 1))
+            if (pages.isNotEmpty() && (bundle.currentPage > 0 || bundle.currentPageOffset > 0)) {
+                lazyListState.scrollToItem(
+                    index = bundle.currentPage.coerceIn(0, pages.size - 1),
+                    scrollOffset = bundle.currentPageOffset,
+                )
             }
         }
     }
@@ -188,6 +191,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                             pen = penSettings,
                             eraser = eraserSettings,
                             currentPage = lazyListState.firstVisibleItemIndex,
+                            currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
                         )
                         isSaving = false
                         val message = if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
@@ -244,6 +248,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                         pen = penSettings,
                         eraser = eraserSettings,
                         currentPage = lazyListState.firstVisibleItemIndex,
+                        currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
                     ).onFailure { e ->
                         logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
                     }

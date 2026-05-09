@@ -17,6 +17,7 @@ class AnnotationRepositoryAndroid : AnnotationRepository {
         pen: PenSettings,
         eraser: EraserSettings,
         currentPage: Int,
+        currentPageOffset: Int,
     ): Result<Unit> {
         return try {
             val data = AnnotationData(
@@ -24,6 +25,7 @@ class AnnotationRepositoryAndroid : AnnotationRepository {
                 scale = scale,
                 tools = ToolsBundle(pen = pen, eraser = eraser),
                 currentPage = currentPage,
+                currentPageOffset = currentPageOffset,
             )
             File("$pdfPath.notepen.json").writeText(json.encodeToString(AnnotationData.serializer(), data))
             Result.success(Unit)
@@ -46,6 +48,7 @@ class AnnotationRepositoryAndroid : AnnotationRepository {
                     pen = tools.pen,
                     eraser = tools.eraser,
                     currentPage = data.currentPage,
+                    currentPageOffset = data.currentPageOffset,
                 )
             )
         } catch (e: Exception) {

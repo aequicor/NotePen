@@ -13,6 +13,7 @@ data class AnnotationData(
      */
     val tools: ToolsBundle? = null,
     val currentPage: Int = 0,
+    val currentPageOffset: Int = 0,
 )
 
 @Serializable
@@ -27,6 +28,7 @@ data class AnnotationBundle(
     val pen: PenSettings = PenSettings(),
     val eraser: EraserSettings = EraserSettings(),
     val currentPage: Int = 0,
+    val currentPageOffset: Int = 0,
 )
 
 interface AnnotationRepository {
@@ -37,6 +39,7 @@ interface AnnotationRepository {
         pen: PenSettings = PenSettings(),
         eraser: EraserSettings = EraserSettings(),
         currentPage: Int = 0,
+        currentPageOffset: Int = 0,
     ): Result<Unit>
 
     suspend fun load(pdfPath: String): Result<AnnotationBundle>
