@@ -3,13 +3,13 @@ genre: feature-spec
 title: Панель инструментов и Material 3 дизайн экрана просмотра PDF
 topic: feature
 module: common
-status: DRAFT
+status: FROZEN
 updated: 2026-05-09
 ---
 
 # Панель инструментов и Material 3 дизайн экрана просмотра PDF
 
-> Статус: DRAFT
+> Статус: FROZEN (CONFIRM пройден 2026-05-09)
 > Модуль: common
 > Владелец: PO
 

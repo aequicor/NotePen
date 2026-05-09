@@ -9,7 +9,7 @@ updated: 2026-05-09
 
 > Spec: ./spec.md (FROZEN at CONFIRM)
 > Test cases (live): ./test-cases.md
-> Status: PLANNING
+> Status: DONE
 
 ## Slice budget
 
@@ -88,15 +88,18 @@ updated: 2026-05-09
 
 (пусто)
 
-## Diff-review (заполняется при 5.10)
+## Diff-review (5.10 — 2026-05-09)
 
 | Field | Value |
 |-------|-------|
-| Total files changed | — |
-| Total +/-lines | — |
-| Files NOT in any step.Files | — |
-| Out-of-module touches | — |
-| PO verdict | — |
+| Total files changed (app/ + vault/) | 16 |
+| Total +/-lines | +830 / -754 (удаления — старые .planning файлы из git status) |
+| Новые продуктовые файлы | ColorAsLongSerializer.kt, AnnotationRepository.kt, AnnotationRepositoryJvm.kt, AnnotationRepositoryAndroid.kt, ScrollablePdfColumn.kt, .jvm.kt, .android.kt, PdfFloatingToolbar.kt |
+| Изменённые продуктовые файлы | DrawablePdfPage.kt, PdfDrawingState.kt, DetailsContent.kt, build.gradle.kts |
+| Новые тестовые файлы | DrawingSerializationTest.kt, AnnotationRepositoryJvmTest.kt |
+| Files NOT in any step.Files declaration | (нет) |
+| Out-of-module touches | (нет) |
+| PO verdict | PENDING |
 
 ## Definition of Done
 
