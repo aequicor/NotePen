@@ -405,21 +405,18 @@ private fun AdaptiveSettingsRow(
             }
             val naturalFits = greedyFit(naturalWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
 
-            // Pass 2: for slots that failed pass 1, try the compressed slider width.
-            val minWidths = slots.indices.map { i ->
-                if (naturalFits[i]) naturalWidths[i]
-                else subcompose("measure_min_$i") { FullSlotContent(slots[i], ADAPTIVE_MIN_SLIDER_WIDTH) }
-                    .first().measure(Constraints()).width
-            }
-            val minFits = greedyFit(minWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
-
-            // Resolve per-slot slider width: full, compressed, or null (collapsed).
-            val resolvedWidths: List<Dp?> = slots.indices.map { i ->
-                when {
-                    naturalFits[i] -> SLIDER_WIDTH
-                    minFits[i] -> ADAPTIVE_MIN_SLIDER_WIDTH
-                    else -> null
+            // Pass 2: if ANY slot overflowed at full width, compress ALL sliders.
+            // Keeping previously-fitting slots at full width would unfairly consume
+            // budget and prevent later slots from fitting at compressed width.
+            val resolvedWidths: List<Dp?> = if (naturalFits.all { it }) {
+                slots.indices.map { SLIDER_WIDTH }
+            } else {
+                val minWidths = slots.indices.map { i ->
+                    subcompose("measure_min_$i") { FullSlotContent(slots[i], ADAPTIVE_MIN_SLIDER_WIDTH) }
+                        .first().measure(Constraints()).width
                 }
+                val minFits = greedyFit(minWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
+                slots.indices.map { i -> if (minFits[i]) ADAPTIVE_MIN_SLIDER_WIDTH else null }
             }
 
             val placeable = subcompose("row") {
