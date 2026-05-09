@@ -68,6 +68,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         derivedStateOf { drawingStates.values.any { it.currentPaths.isNotEmpty() } }
     }
     val lazyListState = rememberLazyListState()
+    val firstVisiblePage by remember { derivedStateOf { lazyListState.firstVisibleItemIndex } }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
@@ -192,6 +193,16 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        if (pages.isNotEmpty()) {
+            PageIndicatorAirbar(
+                currentPage = firstVisiblePage + 1,
+                totalPages = pages.size,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 8.dp),
+            )
+        }
 
         IconButton(
             onClick = { component.onBack() },
