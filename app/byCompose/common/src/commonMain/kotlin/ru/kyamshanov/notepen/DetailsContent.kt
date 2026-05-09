@@ -46,9 +46,12 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private val logger = KotlinLogging.logger {}
 
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 private val SCROLL_BOTTOM_EXTRA = 240.dp
@@ -229,7 +232,25 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         }
 
         IconButton(
-            onClick = { component.onBack() },
+            onClick = {
+                coroutineScope.launch {
+                    val annotations = drawingStates.mapValues { (_, state) ->
+                        state.currentPaths.toList()
+                    }
+                    annotationRepository.save(
+                        pdfPath = filePath,
+                        annotations = annotations,
+                        scale = scale,
+                        pen = penSettings,
+                        eraser = eraserSettings,
+                        currentPage = lazyListState.firstVisibleItemIndex,
+                    ).onFailure { e ->
+                        logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
+                    }
+                    component.saveLastPageIndex(lazyListState.firstVisibleItemIndex)
+                    component.onBack()
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .padding(16.dp)
