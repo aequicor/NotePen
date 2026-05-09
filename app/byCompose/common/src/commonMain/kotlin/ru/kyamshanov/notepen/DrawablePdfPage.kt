@@ -7,11 +7,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntSize
 
 @Composable
 fun DrawablePdfPage(
@@ -20,6 +24,8 @@ fun DrawablePdfPage(
     modifier: Modifier = Modifier,
     isDrawingEnabled: Boolean = true,
 ) {
+    val canvasSize = remember { mutableStateOf(IntSize.Zero) }
+
     LaunchedEffect(isDrawingEnabled) {
         if (!isDrawingEnabled && pdfDrawingState.isDrawing.value) {
             pdfDrawingState.finishDrawing()
@@ -27,48 +33,51 @@ fun DrawablePdfPage(
     }
 
     Box(
-        modifier = modifier.then(
-            if (isDrawingEnabled) {
-                Modifier.pointerInput(isDrawingEnabled) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            pdfDrawingState.startDrawing(offset.x, offset.y)
-                        },
-                        onDrag = { change, _ ->
-                            pdfDrawingState.addPoint(change.position.x, change.position.y)
-                        },
-                        onDragEnd = {
-                            pdfDrawingState.finishDrawing()
-                        }
-                    )
-                }
-            } else Modifier
-        )
+        modifier = modifier
+            .onSizeChanged { canvasSize.value = it }
+            .then(
+                if (isDrawingEnabled) {
+                    Modifier.pointerInput(isDrawingEnabled) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val (w, h) = canvasSize.value
+                                if (w > 0 && h > 0) {
+                                    pdfDrawingState.startDrawing(offset.x / w, offset.y / h)
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                val (w, h) = canvasSize.value
+                                if (w > 0 && h > 0) {
+                                    pdfDrawingState.addPoint(
+                                        change.position.x / w,
+                                        change.position.y / h,
+                                    )
+                                }
+                            },
+                            onDragEnd = { pdfDrawingState.finishDrawing() },
+                        )
+                    }
+                } else Modifier
+            )
     ) {
-        // Отображение PDF страницы
         Image(
             bitmap = bitmap,
             contentDescription = "PDF Page",
-            modifier = Modifier
-                .fillMaxSize()
+            modifier = Modifier.fillMaxSize(),
         )
 
-        // Отображение рисунков
         Canvas(modifier = Modifier.fillMaxSize()) {
-
             pdfDrawingState.currentPaths.forEach { path ->
                 drawPath(
                     path = Path().apply {
                         path.points.forEachIndexed { index, point ->
-                            if (index == 0 || point.isNewPath) {
-                                moveTo(point.x, point.y)
-                            } else {
-                                lineTo(point.x, point.y)
-                            }
+                            val x = point.x * size.width
+                            val y = point.y * size.height
+                            if (index == 0 || point.isNewPath) moveTo(x, y) else lineTo(x, y)
                         }
                     },
                     color = path.color,
-                    style = Stroke(width = path.strokeWidth)
+                    style = Stroke(width = path.strokeWidth),
                 )
             }
 
@@ -76,15 +85,13 @@ fun DrawablePdfPage(
                 drawPath(
                     path = Path().apply {
                         pdfDrawingState.currentPath.value.points.forEachIndexed { index, point ->
-                            if (index == 0 || point.isNewPath) {
-                                moveTo(point.x, point.y)
-                            } else {
-                                lineTo(point.x, point.y)
-                            }
+                            val x = point.x * size.width
+                            val y = point.y * size.height
+                            if (index == 0 || point.isNewPath) moveTo(x, y) else lineTo(x, y)
                         }
                     },
                     color = pdfDrawingState.currentPath.value.color,
-                    style = Stroke(width = pdfDrawingState.currentPath.value.strokeWidth)
+                    style = Stroke(width = pdfDrawingState.currentPath.value.strokeWidth),
                 )
             }
         }
