@@ -8,7 +8,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -131,10 +133,12 @@ private fun PenSettingsRow(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
-        modifier = Modifier.padding(
-            horizontal = PANEL_HORIZONTAL_PADDING,
-            vertical = PANEL_VERTICAL_PADDING,
-        ),
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(
+                horizontal = PANEL_HORIZONTAL_PADDING,
+                vertical = PANEL_VERTICAL_PADDING,
+            ),
     ) {
         Text(
             text = "Толщина",
@@ -219,10 +223,12 @@ private fun EraserSettingsRow(
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
-        modifier = Modifier.padding(
-            horizontal = PANEL_HORIZONTAL_PADDING,
-            vertical = PANEL_VERTICAL_PADDING,
-        ),
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(
+                horizontal = PANEL_HORIZONTAL_PADDING,
+                vertical = PANEL_VERTICAL_PADDING,
+            ),
     ) {
         Text(
             text = "Форма",

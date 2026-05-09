@@ -1,5 +1,10 @@
 package ru.kyamshanov.notepen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -48,6 +53,7 @@ internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     val localWindowInfo = LocalWindowInfo.current
     val windowSizeInPx = localWindowInfo.containerSize
+    val isCompact = with(LocalDensity.current) { windowSizeInPx.width.toDp() < 600.dp }
     val model by component.model.subscribeAsState()
     val filePath = remember(model.title) { model.title }
     val pdfManager = remember(filePath) { PdfManager(filePath) }
@@ -145,37 +151,43 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
             }
         }
 
-        PdfFloatingToolbar(
-            toolMode = toolMode,
-            onToolModeChange = { toolMode = it },
-            hasAnnotations = hasAnnotations,
-            isSaving = isSaving,
-            onSave = {
-                isSaving = true
-                coroutineScope.launch {
-                    val annotations = drawingStates.mapValues { (_, state) ->
-                        state.currentPaths.toList()
-                    }
-                    val result = annotationRepository.save(
-                        pdfPath = filePath,
-                        annotations = annotations,
-                        scale = scale,
-                        pen = penSettings,
-                        eraser = eraserSettings,
-                        currentPage = lazyListState.firstVisibleItemIndex,
-                    )
-                    isSaving = false
-                    val message = if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
-                    snackbarHostState.showSnackbar(message)
-                }
-            },
-            scale = scale,
-            onZoomIn = { scale = minOf(MAX_SCALE, scale + 10) },
-            onZoomOut = { scale = maxOf(MIN_SCALE, scale - 10) },
+        AnimatedVisibility(
+            visible = !isCompact || toolMode == ToolMode.NONE,
+            enter = slideInHorizontally { -it } + fadeIn(),
+            exit = slideOutHorizontally { -it } + fadeOut(),
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(16.dp),
-        )
+        ) {
+            PdfFloatingToolbar(
+                toolMode = toolMode,
+                onToolModeChange = { toolMode = it },
+                hasAnnotations = hasAnnotations,
+                isSaving = isSaving,
+                onSave = {
+                    isSaving = true
+                    coroutineScope.launch {
+                        val annotations = drawingStates.mapValues { (_, state) ->
+                            state.currentPaths.toList()
+                        }
+                        val result = annotationRepository.save(
+                            pdfPath = filePath,
+                            annotations = annotations,
+                            scale = scale,
+                            pen = penSettings,
+                            eraser = eraserSettings,
+                            currentPage = lazyListState.firstVisibleItemIndex,
+                        )
+                        isSaving = false
+                        val message = if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
+                        snackbarHostState.showSnackbar(message)
+                    }
+                },
+                scale = scale,
+                onZoomIn = { scale = minOf(MAX_SCALE, scale + 10) },
+                onZoomOut = { scale = maxOf(MIN_SCALE, scale - 10) },
+            )
+        }
 
         // Floating "glass" tool-settings panel — separate from the right-side
         // vertical toolbar; docked at BottomCenter and only visible when a
