@@ -105,7 +105,7 @@ updated: 2026-05-09
     `mutableStateOf` (без UI-кнопок ластика — они будут в Шаге 5); проведение пальцем по
     штриху удаляет точки и разрезает штрих; индикатор виден под пальцем.
 
-- [ ] Step 5: `PenSettingsPanel` + `EraserSettingsPanel` (composables)
+- [x] Step 5: `PenSettingsPanel` + `EraserSettingsPanel` (composables)
   - Goal: реализовать оба composables (commonMain) — слайдеры, LazyRow пресетов цвета,
     переключатель формы ластика. Все размеры — private dp-токены файлов; все цвета —
     `MaterialTheme.colorScheme.*`.

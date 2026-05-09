@@ -36,8 +36,8 @@ updated: 2026-05-09
 | TC-17 | common | AC-16 | `AnnotationRepositoryJvm.load(...)` с новым JSON возвращает `AnnotationBundle` с pen / eraser из файла | PEND | (pending) |
 | TC-18 | common | EC-12 | `AnnotationRepositoryJvm.save(...)` при IOException возвращает `Result.failure` | PEND | (pending) |
 | TC-19 | common | AC-15 | `AnnotationRepositoryAndroid.save(...)` создаёт JSON с `tools` | PEND | (pending) |
-| TC-20 | common | AC-6, AC-7, AC-8 | Снапшот `PenSettingsPanel`: оба слайдера + LazyRow пресетов рендерятся; `onChange` зовётся при клике на пресет / при движении слайдера | PEND | (pending) |
-| TC-21 | common | AC-10, AC-11 | Снапшот `EraserSettingsPanel`: переключатель формы и слайдер размера; `onChange` зовётся при переключении формы | PEND | (pending) |
+| TC-20 | common | AC-6, AC-7, AC-8 | Снапшот `PenSettingsPanel`: оба слайдера + LazyRow пресетов рендерятся; `onChange` зовётся при клике на пресет / при движении слайдера | PART | PenSettingsPanelLogicTest.kt (state-mapping); panel render = manual (no compose-test-infra) |
+| TC-21 | common | AC-10, AC-11 | Снапшот `EraserSettingsPanel`: переключатель формы и слайдер размера; `onChange` зовётся при переключении формы | PART | PenSettingsPanelLogicTest.kt (state-mapping); panel render = manual (no compose-test-infra) |
 | TC-22 | common | AC-1 | `PdfFloatingToolbar(toolMode = NONE)` — ни одна секция настроек не отрисована | PEND | (pending) |
 | TC-23 | common | AC-2 | `PdfFloatingToolbar(toolMode = PEN)` — `PenSettingsPanel` отрисован; `EraserSettingsPanel` нет | PEND | (pending) |
 | TC-24 | common | AC-3 | `PdfFloatingToolbar(toolMode = ERASER)` — `EraserSettingsPanel` отрисован; `PenSettingsPanel` нет | PEND | (pending) |
@@ -57,3 +57,4 @@ updated: 2026-05-09
 |------|------|----------|--------|-------------|--------|
 | 2026-05-09 | 2 | medium | ground-truth-waived | Step 2 (`erasePointsInZone`) — REQUIRED_TYPE=backend (mutation-sample). User approved via `/kit-approve --no-ground-truth`. Не выполнен mutation-sample на новой extension-функции; покрытие подтверждено только unit-тестами `PdfDrawingStateEraseTest` (9 тестов, 138/138 jvmTest green). | WAIVED |
 | 2026-05-09 | 3 | medium | ground-truth-waived | Step 3 (`StrokeCap.Round` / `StrokeJoin.Round` в `DrawablePdfPage`) — REQUIRED_TYPE=ui (визуальный AC-9, TC-25 manual). User approved via `/kit-approve --no-ground-truth`. Скриншот не приложен; визуальная верификация AC-9 будет повторена на Шаге 4 (когда `DrawablePdfPage` получит `penSettings`/`toolMode` wiring) или на финальной проверке Шага 7. | WAIVED |
+| 2026-05-09 | 4 | medium | ground-truth-waived | Step 4 (`DrawablePdfPage` — `ToolMode`/`penSettings`/`eraserSettings` wiring + eraser gesture handling + zone indicator) — REQUIRED_TYPE=ui (TC-26/TC-27/TC-33 manual: индикатор зоны, покадровое стирание, EC-1/EC-2 переключение). User approved via `/kit-approve --no-ground-truth`. Скриншот/скринкаст не приложен; визуальная верификация будет выполнена на Шаге 6 (UI-тоглы Перо/Ластик в toolbar) и Шаге 7 (финальный wiring + persistence). | WAIVED |

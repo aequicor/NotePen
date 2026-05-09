@@ -37,3 +37,30 @@ data class PenSettings(
         )
     }
 }
+
+/**
+ * Replace the RGB channels with [preset] while keeping the current alpha slider value.
+ * Verifies AC-8 — preset selection does not reset the alpha slider.
+ */
+fun PenSettings.applyPreset(preset: Color): PenSettings =
+    copy(color = preset.copy(alpha = alpha))
+
+/**
+ * Apply a new alpha value coming from the slider: clamp to `[0, 1]`, store it
+ * verbatim in [PenSettings.alpha], and rebuild [PenSettings.color] so the
+ * persisted color carries the same alpha (the file format keeps a single
+ * ARGB Long — see `ColorAsLongSerializer`).
+ *
+ * Verifies AC-7 + EC-9 (next-stroke semantics handled by the caller).
+ */
+fun PenSettings.applyAlpha(newAlpha: Float): PenSettings {
+    val clamped = newAlpha.coerceIn(0f, 1f)
+    return copy(color = color.copy(alpha = clamped), alpha = clamped)
+}
+
+/**
+ * Apply a new stroke width coming from the slider; clamp to
+ * `[MIN_STROKE_WIDTH, MAX_STROKE_WIDTH]`. Verifies AC-6.
+ */
+fun PenSettings.applyStrokeWidth(newWidth: Float): PenSettings =
+    copy(strokeWidth = newWidth.coerceIn(PenSettings.MIN_STROKE_WIDTH, PenSettings.MAX_STROKE_WIDTH))

@@ -24,3 +24,14 @@ data class EraserSettings(
         const val MAX_SIZE_NORMALIZED = 0.20f
     }
 }
+
+/** Switch the eraser shape; size is preserved. Verifies AC-10. */
+fun EraserSettings.applyShape(newShape: EraserShape): EraserSettings =
+    copy(shape = newShape)
+
+/**
+ * Apply a new size coming from the slider; clamp to
+ * `[MIN_SIZE_NORMALIZED, MAX_SIZE_NORMALIZED]`. Verifies AC-11 + EC-10/EC-11.
+ */
+fun EraserSettings.applySize(newSize: Float): EraserSettings =
+    copy(sizeNormalized = newSize.coerceIn(EraserSettings.MIN_SIZE_NORMALIZED, EraserSettings.MAX_SIZE_NORMALIZED))
