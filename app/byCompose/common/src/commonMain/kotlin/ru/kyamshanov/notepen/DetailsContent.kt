@@ -40,7 +40,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntSize
@@ -83,9 +92,13 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     }
     val lazyListState = rememberLazyListState()
     val firstVisiblePage by remember { derivedStateOf { lazyListState.firstVisibleItemIndex } }
+    val globalUndoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
+    val globalRedoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
+    val focusRequester = remember { FocusRequester() }
+    var shiftHeld by remember { mutableStateOf(false) }
 
     DisposableEffect(pdfManager) {
         onDispose {
@@ -110,7 +123,38 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         }
     }
 
-    Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .focusRequester(focusRequester)
+            .focusTarget()
+            .onKeyEvent { e ->
+                val isShift = e.key == Key.ShiftLeft || e.key == Key.ShiftRight
+                if (isShift) {
+                    shiftHeld = e.type == KeyEventType.KeyDown
+                    false
+                } else if (e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && !shiftHeld) {
+                    if (globalUndoStack.isNotEmpty()) {
+                        val (pageIndex, snapshot) = globalUndoStack.removeLast()
+                        val current = drawingStates[pageIndex]?.currentPaths?.toList() ?: emptyList()
+                        globalRedoStack.addLast(pageIndex to current)
+                        drawingStates[pageIndex]?.restoreSnapshot(snapshot)
+                    }
+                    true
+                } else if (e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && shiftHeld) {
+                    if (globalRedoStack.isNotEmpty()) {
+                        val (pageIndex, snapshot) = globalRedoStack.removeLast()
+                        val current = drawingStates[pageIndex]?.currentPaths?.toList() ?: emptyList()
+                        globalUndoStack.addLast(pageIndex to current)
+                        drawingStates[pageIndex]?.restoreSnapshot(snapshot)
+                    }
+                    true
+                } else false
+            },
+    ) {
 
         ScrollablePdfColumn(state = lazyListState, modifier = Modifier.fillMaxSize()) {
             items(items = pages, key = { it.pageNumber }) { page ->
@@ -153,6 +197,10 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                             toolMode = toolMode,
                             penSettings = penSettings,
                             eraserSettings = eraserSettings,
+                            onGestureStart = { snapshot ->
+                                globalUndoStack.addLast(pageIndex to snapshot)
+                                globalRedoStack.clear()
+                            },
                             modifier = Modifier.size(width, height),
                         )
                     } else {

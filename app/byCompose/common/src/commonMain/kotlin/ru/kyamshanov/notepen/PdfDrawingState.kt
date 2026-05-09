@@ -26,7 +26,6 @@ class PdfDrawingState {
     var isDrawing = mutableStateOf(false)
     var strokeWidth = mutableStateOf(10f)
     var strokeColor = mutableStateOf(Color.Black)
-
     fun startDrawing(x: Float, y: Float, normalizedStrokeWidth: Float = strokeWidth.value) {
         isDrawing.value = true
         currentPath.value = DrawingPath(
@@ -58,10 +57,9 @@ class PdfDrawingState {
         currentPath.value = DrawingPath()
     }
 
-    fun undo() {
-        if (currentPaths.isNotEmpty()) {
-            currentPaths.removeLast()
-        }
+    fun restoreSnapshot(snapshot: List<DrawingPath>) {
+        currentPaths.clear()
+        currentPaths.addAll(snapshot)
     }
 }
 

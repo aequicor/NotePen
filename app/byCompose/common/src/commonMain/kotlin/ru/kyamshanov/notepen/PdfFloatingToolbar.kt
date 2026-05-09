@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.ZoomIn
@@ -68,7 +68,7 @@ fun PdfFloatingToolbar(
             )
 
             ToolToggleButton(
-                icon = Icons.Default.Delete,
+                icon = Icons.Default.CleaningServices,
                 contentDescription = "Ластик",
                 selected = toolMode == ToolMode.ERASER,
                 onClick = {

@@ -35,6 +35,7 @@ fun DrawablePdfPage(
     toolMode: ToolMode,
     penSettings: PenSettings,
     eraserSettings: EraserSettings,
+    onGestureStart: (snapshot: List<DrawingPath>) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -77,6 +78,7 @@ fun DrawablePdfPage(
                             onDragStart = { offset ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
+                                    onGestureStart(pdfDrawingState.currentPaths.toList())
                                     pdfDrawingState.strokeColor.value =
                                         penSettings.color.copy(alpha = penSettings.alpha)
                                     pdfDrawingState.strokeWidth.value = penSettings.strokeWidth
@@ -105,6 +107,7 @@ fun DrawablePdfPage(
                             onDragStart = { offset ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
+                                    onGestureStart(pdfDrawingState.currentPaths.toList())
                                     val nx = offset.x / w
                                     val ny = offset.y / h
                                     eraserPos.value = Offset(nx, ny)
