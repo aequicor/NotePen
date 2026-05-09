@@ -143,10 +143,6 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         PdfFloatingToolbar(
             toolMode = toolMode,
             onToolModeChange = { toolMode = it },
-            penSettings = penSettings,
-            onPenSettingsChange = { penSettings = it },
-            eraserSettings = eraserSettings,
-            onEraserSettingsChange = { eraserSettings = it },
             hasAnnotations = hasAnnotations,
             isSaving = isSaving,
             onSave = {
@@ -167,6 +163,18 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .padding(16.dp),
+        )
+
+        // Floating "glass" tool-settings panel — separate from the right-side
+        // vertical toolbar; docked at BottomCenter and only visible when a
+        // tool is active. Slides up + fades in / out on toolMode change.
+        ToolSettingsFloatingPanel(
+            toolMode = toolMode,
+            penSettings = penSettings,
+            onPenSettingsChange = { penSettings = it },
+            eraserSettings = eraserSettings,
+            onEraserSettingsChange = { eraserSettings = it },
+            modifier = Modifier.align(Alignment.BottomCenter),
         )
 
         SnackbarHost(

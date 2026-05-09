@@ -1,12 +1,8 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
@@ -27,9 +23,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 /**
- * Floating PDF toolbar with the Pen / Eraser / Save / Zoom controls and an
- * expandable settings section that shows either [PenSettingsPanel] or
- * [EraserSettingsPanel] depending on [toolMode].
+ * Vertical floating PDF toolbar with the Pen / Eraser / Save / Zoom controls.
+ *
+ * Tool-settings (color / thickness / alpha for pen, shape / size for eraser)
+ * are now rendered as a separate [ToolSettingsFloatingPanel] docked at
+ * BottomCenter — see Step 6 rework. This composable owns only the icon column.
  *
  * Toggle semantics (AC-2 / AC-3) live in [nextToolModeOnToggle] — pure helper
  * unit-tested in `PdfFloatingToolbarLogicTest`. Re-tap on the active tool
@@ -42,10 +40,6 @@ import androidx.compose.ui.unit.dp
 fun PdfFloatingToolbar(
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
-    penSettings: PenSettings,
-    onPenSettingsChange: (PenSettings) -> Unit,
-    eraserSettings: EraserSettings,
-    onEraserSettingsChange: (EraserSettings) -> Unit,
     hasAnnotations: Boolean,
     isSaving: Boolean,
     onSave: () -> Unit,
@@ -60,108 +54,77 @@ fun PdfFloatingToolbar(
         tonalElevation = TOOLBAR_TONAL_ELEVATION,
         color = MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        Row(
+        Column(
             modifier = Modifier.padding(TOOLBAR_PADDING),
-            verticalAlignment = Alignment.Top,
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Left column — tool buttons + save + zoom.
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
+            ToolToggleButton(
+                icon = Icons.Default.Edit,
+                contentDescription = "Перо",
+                selected = toolMode == ToolMode.PEN,
+                onClick = {
+                    onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN))
+                },
+            )
+
+            ToolToggleButton(
+                icon = Icons.Default.Delete,
+                contentDescription = "Ластик",
+                selected = toolMode == ToolMode.ERASER,
+                onClick = {
+                    onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER))
+                },
+            )
+
+            IconButton(
+                onClick = onSave,
+                enabled = hasAnnotations && !isSaving,
             ) {
-                ToolToggleButton(
-                    icon = Icons.Default.Edit,
-                    contentDescription = "Перо",
-                    selected = toolMode == ToolMode.PEN,
-                    onClick = {
-                        onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN))
-                    },
-                )
-
-                ToolToggleButton(
-                    icon = Icons.Default.Delete,
-                    contentDescription = "Ластик",
-                    selected = toolMode == ToolMode.ERASER,
-                    onClick = {
-                        onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER))
-                    },
-                )
-
-                IconButton(
-                    onClick = onSave,
-                    enabled = hasAnnotations && !isSaving,
-                ) {
-                    if (isSaving) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(SAVE_PROGRESS_SIZE),
-                            strokeWidth = SAVE_PROGRESS_STROKE,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Save,
-                            contentDescription = "Сохранить аннотации",
-                            tint = if (hasAnnotations) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SAVE_DISABLED_ALPHA)
-                            },
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onZoomIn,
-                    enabled = scale < MAX_SCALE,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ZoomIn,
-                        contentDescription = "Увеличить",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                if (isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(SAVE_PROGRESS_SIZE),
+                        strokeWidth = SAVE_PROGRESS_STROKE,
+                        color = MaterialTheme.colorScheme.primary,
                     )
-                }
-
-                Text(
-                    text = "$scale%",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-
-                IconButton(
-                    onClick = onZoomOut,
-                    enabled = scale > MIN_SCALE,
-                ) {
+                } else {
                     Icon(
-                        imageVector = Icons.Default.ZoomOut,
-                        contentDescription = "Уменьшить",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        imageVector = Icons.Default.Save,
+                        contentDescription = "Сохранить аннотации",
+                        tint = if (hasAnnotations) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SAVE_DISABLED_ALPHA)
+                        },
                     )
                 }
             }
 
-            // Right column — expandable settings panel; only present when a tool is active.
-            // Recomposition-safe: when toolMode = NONE the entire branch is skipped.
-            when (toolMode) {
-                ToolMode.PEN -> {
-                    Spacer(Modifier.width(TOOLBAR_PANEL_GAP))
-                    PenSettingsPanel(
-                        settings = penSettings,
-                        onChange = onPenSettingsChange,
-                        modifier = Modifier.width(SETTINGS_PANEL_WIDTH),
-                    )
-                }
+            IconButton(
+                onClick = onZoomIn,
+                enabled = scale < MAX_SCALE,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ZoomIn,
+                    contentDescription = "Увеличить",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
-                ToolMode.ERASER -> {
-                    Spacer(Modifier.width(TOOLBAR_PANEL_GAP))
-                    EraserSettingsPanel(
-                        settings = eraserSettings,
-                        onChange = onEraserSettingsChange,
-                        modifier = Modifier.width(SETTINGS_PANEL_WIDTH),
-                    )
-                }
+            Text(
+                text = "$scale%",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
 
-                ToolMode.NONE -> {
-                    // No settings section — verifies AC-1 / TC-22.
-                }
+            IconButton(
+                onClick = onZoomOut,
+                enabled = scale > MIN_SCALE,
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ZoomOut,
+                    contentDescription = "Уменьшить",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
     }
@@ -208,8 +171,6 @@ internal const val MAX_SCALE = 200
 private val TOOLBAR_CORNER_RADIUS = 16.dp
 private val TOOLBAR_TONAL_ELEVATION = 3.dp
 private val TOOLBAR_PADDING = 4.dp
-private val TOOLBAR_PANEL_GAP = 8.dp
-private val SETTINGS_PANEL_WIDTH = 220.dp
 private val SAVE_PROGRESS_SIZE = 24.dp
 private val SAVE_PROGRESS_STROKE = 2.dp
 private const val SAVE_DISABLED_ALPHA = 0.38f
