@@ -74,6 +74,12 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
         }
     }
 
+    LaunchedEffect(filePath) {
+        annotationRepository.load(filePath).getOrNull()?.forEach { (pageIndex, paths) ->
+            drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.currentPaths.addAll(paths)
+        }
+    }
+
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
 
         ScrollablePdfColumn(state = lazyListState, modifier = Modifier.fillMaxSize()) {
@@ -95,15 +101,15 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
 
                 Box(modifier = Modifier.size(width, height)) {
                     val pageIndex = page.pageNumber
-                    var imageBitmap by remember(scale) { mutableStateOf<ImageBitmap?>(null) }
+                    var imageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
                     LaunchedEffect(scale) {
-                        withContext(Dispatchers.IO) {
-                            imageBitmap = pagesCache[pageIndex] ?: pdfManager.renderPage(
+                        val newBitmap = withContext(Dispatchers.IO) {
+                            pagesCache[pageIndex] ?: pdfManager.renderPage(
                                 pageIndex,
                                 IntSize(targetWidthPx, targetHeightPx)
-                            )
-                                ?.also { pagesCache[pageIndex] = it }
+                            )?.also { pagesCache[pageIndex] = it }
                         }
+                        if (newBitmap != null) imageBitmap = newBitmap
                     }
 
                     val bm = imageBitmap

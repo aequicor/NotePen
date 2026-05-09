@@ -84,6 +84,7 @@ class PdfManagerJvm(private val filePath: String) : PdfManager {
         }
     }
 
+    @Synchronized
     override fun renderPage(pageIndex: Int, viewSize: IntSize): ImageBitmap? {
         return try {
             if (pageIndex < 0 || pageIndex >= document.numberOfPages) {

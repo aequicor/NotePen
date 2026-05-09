@@ -62,4 +62,31 @@ class AnnotationRepositoryJvmTest {
         val result = repo.save("/nonexistent_dir_abc123/sample.pdf", emptyMap())
         assertTrue(result.isFailure, "save must return failure for bad path")
     }
+
+    // load — missing file returns empty map (no error)
+    @Test
+    fun load_noFile_returnsEmptyMap() = runBlocking {
+        val dir = createTempDirectory("notepen_load_empty")
+        val result = repo.load(dir.resolve("missing.pdf").toString())
+        assertTrue(result.isSuccess)
+        assertEquals(emptyMap(), result.getOrNull())
+    }
+
+    // load — round-trip with save
+    @Test
+    fun load_afterSave_returnsOriginalAnnotations() = runBlocking {
+        val dir = createTempDirectory("notepen_load_rt")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        val original = mapOf(
+            0 to listOf(DrawingPath(color = Color.Red, strokeWidth = 3f)),
+            2 to listOf(DrawingPath(color = Color.Blue)),
+        )
+        repo.save(pdfPath, original)
+
+        val loaded = repo.load(pdfPath).getOrThrow()
+
+        assertEquals(2, loaded.size)
+        assertEquals(Color.Red, loaded[0]?.first()?.color)
+        assertEquals(Color.Blue, loaded[2]?.first()?.color)
+    }
 }

@@ -9,6 +9,7 @@ data class AnnotationData(
 
 interface AnnotationRepository {
     suspend fun save(pdfPath: String, annotations: Map<Int, List<DrawingPath>>): Result<Unit>
+    suspend fun load(pdfPath: String): Result<Map<Int, List<DrawingPath>>>
 }
 
 expect fun createAnnotationRepository(): AnnotationRepository

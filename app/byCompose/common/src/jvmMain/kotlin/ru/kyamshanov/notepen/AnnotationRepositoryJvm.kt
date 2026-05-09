@@ -8,7 +8,7 @@ actual fun createAnnotationRepository(): AnnotationRepository = AnnotationReposi
 
 class AnnotationRepositoryJvm : AnnotationRepository {
 
-    private val json = Json { encodeDefaults = true }
+    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
     override suspend fun save(pdfPath: String, annotations: Map<Int, List<DrawingPath>>): Result<Unit> {
         return try {
@@ -16,6 +16,17 @@ class AnnotationRepositoryJvm : AnnotationRepository {
             File("$pdfPath.notepen.json").writeText(json.encodeToString(AnnotationData.serializer(), data))
             Result.success(Unit)
         } catch (e: IOException) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun load(pdfPath: String): Result<Map<Int, List<DrawingPath>>> {
+        return try {
+            val file = File("$pdfPath.notepen.json")
+            if (!file.exists()) return Result.success(emptyMap())
+            val data = json.decodeFromString(AnnotationData.serializer(), file.readText())
+            Result.success(data.pages.mapKeys { it.key.toIntOrNull() ?: return Result.success(emptyMap()) })
+        } catch (e: Exception) {
             Result.failure(e)
         }
     }
