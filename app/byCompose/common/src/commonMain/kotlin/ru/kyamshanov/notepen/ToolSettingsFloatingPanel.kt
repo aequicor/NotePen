@@ -1,16 +1,17 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -25,8 +26,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.LineWeight
+import androidx.compose.material.icons.filled.Opacity
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PhotoSizeSelectLarge
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -43,12 +53,45 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
+
+/**
+ * Greedy left-to-right layout decision for adaptive settings rows.
+ *
+ * For each slot, determines whether it fits inline (true) or must collapse to
+ * an icon-button (false). Budget starts at `maxWidth - paddingPx` and is
+ * consumed slot by slot; a gap is counted before each slot except the first.
+ * A collapsing slot consumes only `iconButtonWidthPx` instead of its natural width.
+ */
+internal fun greedyFit(
+    naturalWidths: List<Int>,
+    maxWidth: Int,
+    gapPx: Int,
+    paddingPx: Int,
+    iconButtonWidthPx: Int,
+): BooleanArray {
+    val fits = BooleanArray(naturalWidths.size)
+    var budget = maxWidth - paddingPx
+    naturalWidths.forEachIndexed { i, w ->
+        val gap = if (i > 0) gapPx else 0
+        if (budget >= w + gap) {
+            fits[i] = true
+            budget -= w + gap
+        } else {
+            fits[i] = false
+            budget -= iconButtonWidthPx + gap
+        }
+    }
+    return fits
+}
 
 /**
  * Floating "glass" settings panel docked at the bottom-center of the screen.
@@ -91,10 +134,9 @@ fun ToolSettingsFloatingPanel(
     ) {
         Surface(
             shape = RoundedCornerShape(PANEL_CORNER_RADIUS),
-            color = MaterialTheme.colorScheme.surface.copy(alpha = PANEL_GLASS_ALPHA),
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = PANEL_GLASS_ALPHA),
             tonalElevation = PANEL_TONAL_ELEVATION,
-            shadowElevation = PANEL_SHADOW_ELEVATION,
-            border = androidx.compose.foundation.BorderStroke(
+            border = BorderStroke(
                 width = PANEL_BORDER_WIDTH,
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = PANEL_BORDER_ALPHA),
             ),
@@ -128,63 +170,58 @@ private fun PenSettingsRow(
     settings: PenSettings,
     onChange: (PenSettings) -> Unit,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
-        modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(
-                horizontal = PANEL_HORIZONTAL_PADDING,
-                vertical = PANEL_VERTICAL_PADDING,
+    AdaptiveSettingsRow(
+        slots = listOf(
+            SlotItem(
+                icon = Icons.Default.LineWeight,
+                contentDescription = "Толщина",
+                label = "Толщина",
+                content = {
+                    // Defect D: thumbTrackGapSize=0 keeps track visible at min/max.
+                    // Defect E: BasicTextField lets user type the value directly.
+                    SliderWithValueField(
+                        value = settings.strokeWidth,
+                        onValueChange = { onChange(settings.applyStrokeWidth(it)) },
+                        valueRange = PenSettings.MIN_STROKE_WIDTH..PenSettings.MAX_STROKE_WIDTH,
+                        formatDisplay = { it.roundToInt().toString() },
+                        parseInput = { it.trim().toIntOrNull()?.toFloat() },
+                        suffix = " dp",
+                    )
+                },
             ),
-    ) {
-        Text(
-            text = "Толщина",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        // Defect D: stock Slider hides track behind the thumb at min/max
-        // because Material 3 1.8.x draws a thumb-track gap. The slot overload
-        // with `thumbTrackGapSize = 0.dp` makes the inactive track run the
-        // full width so it stays visible at every thumb position.
-        // Defect E: BasicTextField shows the current value and lets the user
-        // type it directly; helpers `applyStrokeWidth` / `applyAlpha` already
-        // clamp to [min, max].
-        SliderWithValueField(
-            value = settings.strokeWidth,
-            onValueChange = { onChange(settings.applyStrokeWidth(it)) },
-            valueRange = PenSettings.MIN_STROKE_WIDTH..PenSettings.MAX_STROKE_WIDTH,
-            formatDisplay = { it.roundToInt().toString() },
-            parseInput = { it.trim().toIntOrNull()?.toFloat() },
-            suffix = " dp",
-        )
-
-        Text(
-            text = "Прозрачность",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        SliderWithValueField(
-            value = settings.alpha,
-            onValueChange = { onChange(settings.applyAlpha(it)) },
-            valueRange = 0f..1f,
-            formatDisplay = { (it * 100f).roundToInt().toString() },
-            parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
-            suffix = "%",
-        )
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(PRESET_GAP),
-        ) {
-            PenSettings.PRESET_COLORS.forEach { preset ->
-                ColorPresetDot(
-                    preset = preset,
-                    selected = preset.value == settings.color.copy(alpha = 1f).value,
-                    onClick = { onChange(settings.applyPreset(preset)) },
-                )
-            }
-        }
-    }
+            SlotItem(
+                icon = Icons.Default.Opacity,
+                contentDescription = "Прозрачность",
+                label = "Прозрачность",
+                content = {
+                    SliderWithValueField(
+                        value = settings.alpha,
+                        onValueChange = { onChange(settings.applyAlpha(it)) },
+                        valueRange = 0f..1f,
+                        formatDisplay = { (it * 100f).roundToInt().toString() },
+                        parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
+                        suffix = "%",
+                    )
+                },
+            ),
+            SlotItem(
+                icon = Icons.Default.Palette,
+                contentDescription = "Цвет",
+                label = null,
+                content = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(PRESET_GAP)) {
+                        PenSettings.PRESET_COLORS.forEach { preset ->
+                            ColorPresetDot(
+                                preset = preset,
+                                selected = preset.value == settings.color.copy(alpha = 1f).value,
+                                onClick = { onChange(settings.applyPreset(preset)) },
+                            )
+                        }
+                    }
+                },
+            ),
+        ),
+    )
 }
 
 @Composable
@@ -217,56 +254,157 @@ private fun EraserSettingsRow(
     settings: EraserSettings,
     onChange: (EraserSettings) -> Unit,
 ) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
-        modifier = Modifier
-            .horizontalScroll(rememberScrollState())
-            .padding(
-                horizontal = PANEL_HORIZONTAL_PADDING,
-                vertical = PANEL_VERTICAL_PADDING,
+    AdaptiveSettingsRow(
+        slots = listOf(
+            SlotItem(
+                icon = Icons.Default.Category,
+                contentDescription = "Форма",
+                label = "Форма",
+                content = {
+                    // shape=CircleShape — pill chip; avoids the square ripple of
+                    // Material 3 FilterChipDefaults.shape (RoundedCornerShape(8dp)).
+                    FilterChip(
+                        selected = settings.shape == EraserShape.CIRCLE,
+                        onClick = { onChange(settings.applyShape(EraserShape.CIRCLE)) },
+                        label = { Text("Круг") },
+                        shape = CircleShape,
+                        colors = chipColors(),
+                    )
+                    FilterChip(
+                        selected = settings.shape == EraserShape.SQUARE,
+                        onClick = { onChange(settings.applyShape(EraserShape.SQUARE)) },
+                        label = { Text("Квадрат") },
+                        shape = CircleShape,
+                        colors = chipColors(),
+                    )
+                },
             ),
-    ) {
-        Text(
-            text = "Форма",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        // shape = CircleShape — pill-форма у chip; hover/press-ripple одинаков
-        // в обоих состояниях (selected / unselected). Material 3
-        // FilterChipDefaults.shape — RoundedCornerShape(8dp), что воспринимается
-        // как «квадратное затемнение» при hover на неактивном элементе.
-        FilterChip(
-            selected = settings.shape == EraserShape.CIRCLE,
-            onClick = { onChange(settings.applyShape(EraserShape.CIRCLE)) },
-            label = { Text("Круг") },
-            shape = CircleShape,
-        )
-        FilterChip(
-            selected = settings.shape == EraserShape.SQUARE,
-            onClick = { onChange(settings.applyShape(EraserShape.SQUARE)) },
-            label = { Text("Квадрат") },
-            shape = CircleShape,
-        )
+            SlotItem(
+                icon = Icons.Default.PhotoSizeSelectLarge,
+                contentDescription = "Размер",
+                label = "Размер",
+                content = {
+                    // sizeNormalized ∈ [0.01..0.20] displayed as integer percent (1..20).
+                    SliderWithValueField(
+                        value = settings.sizeNormalized,
+                        onValueChange = { onChange(settings.applySize(it)) },
+                        valueRange = EraserSettings.MIN_SIZE_NORMALIZED..EraserSettings.MAX_SIZE_NORMALIZED,
+                        formatDisplay = { (it * 100f).roundToInt().toString() },
+                        parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
+                        suffix = "%",
+                    )
+                },
+            ),
+        ),
+    )
+}
 
+private class SlotItem(
+    val icon: ImageVector,
+    val contentDescription: String,
+    val label: String?,
+    val content: @Composable () -> Unit,
+)
+
+@Composable
+private fun FullSlotContent(slot: SlotItem) {
+    if (slot.label != null) {
         Text(
-            text = "Размер",
+            text = slot.label,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        // sizeNormalized ∈ [0.01..0.20] — отображаем как целый процент
-        // ширины canvas (1..20). Это ближе всего к "целому числу" из спека
-        // и согласуется со spec.md § 1, где Размер задан в нормализованных
-        // координатах от ширины canvas. Helper applySize ограничивает в
-        // [MIN_SIZE_NORMALIZED .. MAX_SIZE_NORMALIZED].
-        SliderWithValueField(
-            value = settings.sizeNormalized,
-            onValueChange = { onChange(settings.applySize(it)) },
-            valueRange = EraserSettings.MIN_SIZE_NORMALIZED..EraserSettings.MAX_SIZE_NORMALIZED,
-            formatDisplay = { (it * 100f).roundToInt().toString() },
-            parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
-            suffix = "%",
-        )
+    }
+    slot.content()
+}
+
+@Composable
+private fun CollapsedSlotContent(
+    slot: SlotItem,
+    isExpanded: Boolean,
+    onToggle: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(
+            onClick = onToggle,
+            modifier = Modifier.size(ADAPTIVE_ICON_BUTTON_SIZE),
+        ) {
+            Icon(
+                imageVector = slot.icon,
+                contentDescription = slot.contentDescription,
+                tint = if (isExpanded)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+        }
+        AnimatedVisibility(
+            visible = isExpanded,
+            enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
+            exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
+        ) {
+            slot.content()
+        }
+    }
+}
+
+/**
+ * Adaptive horizontal row that uses [SubcomposeLayout] to measure each slot's
+ * natural width in a first pass, then uses [greedyFit] to decide which slots
+ * render inline (label + content) and which collapse to an [IconButton].
+ *
+ * Tapping a collapsed icon expands its content with [expandHorizontally] +
+ * [fadeIn]; only one slot can be expanded at a time.
+ */
+@Composable
+private fun AdaptiveSettingsRow(
+    slots: List<SlotItem>,
+    modifier: Modifier = Modifier,
+) {
+    var expandedIndex by remember { mutableStateOf<Int?>(null) }
+
+    SubcomposeLayout(modifier) { constraints ->
+        val gapPx = PANEL_INNER_GAP.roundToPx()
+        val paddingPx = (PANEL_HORIZONTAL_PADDING * 2).roundToPx()
+        val iconButtonWidthPx = ADAPTIVE_ICON_BUTTON_SIZE.roundToPx()
+
+        val naturalWidths = slots.indices.map { i ->
+            subcompose("measure_$i") { FullSlotContent(slots[i]) }
+                .first()
+                .measure(Constraints())
+                .width
+        }
+
+        val fits = greedyFit(naturalWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
+
+        val placeable = subcompose("row") {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
+                modifier = Modifier.padding(
+                    horizontal = PANEL_HORIZONTAL_PADDING,
+                    vertical = PANEL_VERTICAL_PADDING,
+                ),
+            ) {
+                slots.forEachIndexed { i, slot ->
+                    if (fits[i]) {
+                        FullSlotContent(slot)
+                    } else {
+                        CollapsedSlotContent(
+                            slot = slot,
+                            isExpanded = expandedIndex == i,
+                            onToggle = {
+                                expandedIndex = if (expandedIndex == i) null else i
+                            },
+                        )
+                    }
+                }
+            }
+        }.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
+
+        layout(placeable.width, placeable.height) {
+            placeable.place(0, 0)
+        }
     }
 }
 
@@ -300,14 +438,19 @@ private fun SliderWithValueField(
     parseInput: (String) -> Float?,
     suffix: String,
 ) {
+    val sliderColors = SliderDefaults.colors(
+        inactiveTrackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f),
+    )
     Slider(
         value = value,
         onValueChange = onValueChange,
         valueRange = valueRange,
         modifier = Modifier.width(SLIDER_WIDTH),
+        colors = sliderColors,
         track = { sliderState ->
             SliderDefaults.Track(
                 sliderState = sliderState,
+                colors = sliderColors,
                 thumbTrackGapSize = 0.dp,
                 drawStopIndicator = null,
             )
@@ -354,6 +497,10 @@ private fun SliderWithValueField(
         Box(
             modifier = Modifier
                 .width(VALUE_FIELD_WIDTH)
+                .background(
+                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.08f),
+                    shape = RoundedCornerShape(VALUE_FIELD_CORNER_RADIUS),
+                )
                 .border(
                     width = VALUE_FIELD_BORDER_WIDTH,
                     color = outline,
@@ -385,9 +532,18 @@ private fun SliderWithValueField(
     }
 }
 
+@Composable
+private fun chipColors() = FilterChipDefaults.filterChipColors(
+    containerColor = Color.Transparent,
+    labelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+    selectedContainerColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.15f),
+    selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+)
+
+private val ADAPTIVE_ICON_BUTTON_SIZE = 40.dp
 private val PANEL_CORNER_RADIUS = 24.dp
-private val PANEL_TONAL_ELEVATION = 6.dp
-private val PANEL_SHADOW_ELEVATION = 8.dp
+private val PANEL_TONAL_ELEVATION = 0.dp
+private val PANEL_SHADOW_ELEVATION = 4.dp
 private val PANEL_BORDER_WIDTH = 1.dp
 private val PANEL_BOTTOM_PADDING = 16.dp
 private val PANEL_HORIZONTAL_PADDING = 16.dp
@@ -404,5 +560,5 @@ private val VALUE_FIELD_BORDER_WIDTH = 1.dp
 private val VALUE_FIELD_PADDING_H = 6.dp
 private val VALUE_FIELD_PADDING_V = 2.dp
 private val VALUE_FIELD_FONT_SIZE = 12.sp
-private const val PANEL_GLASS_ALPHA = 0.85f
+private const val PANEL_GLASS_ALPHA = 0.88f
 private const val PANEL_BORDER_ALPHA = 0.5f
