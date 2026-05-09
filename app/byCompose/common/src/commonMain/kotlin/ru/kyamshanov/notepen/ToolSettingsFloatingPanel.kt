@@ -1,10 +1,10 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
@@ -13,6 +13,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
@@ -176,7 +178,7 @@ private fun PenSettingsRow(
                 icon = Icons.Default.LineWeight,
                 contentDescription = "Толщина",
                 label = "Толщина",
-                content = {
+                content = { sliderWidth ->
                     // Defect D: thumbTrackGapSize=0 keeps track visible at min/max.
                     // Defect E: BasicTextField lets user type the value directly.
                     SliderWithValueField(
@@ -186,6 +188,7 @@ private fun PenSettingsRow(
                         formatDisplay = { it.roundToInt().toString() },
                         parseInput = { it.trim().toIntOrNull()?.toFloat() },
                         suffix = " dp",
+                        sliderWidth = sliderWidth,
                     )
                 },
             ),
@@ -193,7 +196,7 @@ private fun PenSettingsRow(
                 icon = Icons.Default.Opacity,
                 contentDescription = "Прозрачность",
                 label = "Прозрачность",
-                content = {
+                content = { sliderWidth ->
                     SliderWithValueField(
                         value = settings.alpha,
                         onValueChange = { onChange(settings.applyAlpha(it)) },
@@ -201,6 +204,7 @@ private fun PenSettingsRow(
                         formatDisplay = { (it * 100f).roundToInt().toString() },
                         parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
                         suffix = "%",
+                        sliderWidth = sliderWidth,
                     )
                 },
             ),
@@ -283,7 +287,7 @@ private fun EraserSettingsRow(
                 icon = Icons.Default.PhotoSizeSelectLarge,
                 contentDescription = "Размер",
                 label = "Размер",
-                content = {
+                content = { sliderWidth ->
                     // sizeNormalized ∈ [0.01..0.20] displayed as integer percent (1..20).
                     SliderWithValueField(
                         value = settings.sizeNormalized,
@@ -292,6 +296,7 @@ private fun EraserSettingsRow(
                         formatDisplay = { (it * 100f).roundToInt().toString() },
                         parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
                         suffix = "%",
+                        sliderWidth = sliderWidth,
                     )
                 },
             ),
@@ -299,11 +304,13 @@ private fun EraserSettingsRow(
     )
 }
 
+// SlotItem.content receives the resolved slider width so SliderWithValueField
+// can be rendered at the correct size in both the inline and vertical-expand paths.
 private class SlotItem(
     val icon: ImageVector,
     val contentDescription: String,
     val label: String?,
-    val content: @Composable () -> Unit,
+    val content: @Composable (sliderWidth: Dp) -> Unit,
 )
 
 // Wrapping in Row is required so the whole slot is a SINGLE layout node.
@@ -311,7 +318,7 @@ private class SlotItem(
 // without the Row wrapper, label Text and slot.content() would be separate nodes
 // and only the first (label) would be measured, producing incorrect natural widths.
 @Composable
-private fun FullSlotContent(slot: SlotItem) {
+private fun FullSlotContent(slot: SlotItem, sliderWidth: Dp) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
@@ -323,7 +330,7 @@ private fun FullSlotContent(slot: SlotItem) {
                 color = MaterialTheme.colorScheme.onSurface,
             )
         }
-        slot.content()
+        slot.content(sliderWidth)
     }
 }
 
@@ -333,43 +340,31 @@ private fun CollapsedSlotContent(
     isExpanded: Boolean,
     onToggle: () -> Unit,
 ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        IconButton(
-            onClick = onToggle,
-            modifier = Modifier.size(ADAPTIVE_ICON_BUTTON_SIZE),
-        ) {
-            Icon(
-                imageVector = slot.icon,
-                contentDescription = slot.contentDescription,
-                tint = if (isExpanded)
-                    MaterialTheme.colorScheme.primary
-                else
-                    MaterialTheme.colorScheme.onSecondaryContainer,
-            )
-        }
-        AnimatedVisibility(
-            visible = isExpanded,
-            enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
-            exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
-        ) {
-            // AnimatedVisibility requires a single child; Row wraps multi-node content.
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
-            ) {
-                slot.content()
-            }
-        }
+    IconButton(
+        onClick = onToggle,
+        modifier = Modifier.size(ADAPTIVE_ICON_BUTTON_SIZE),
+    ) {
+        Icon(
+            imageVector = slot.icon,
+            contentDescription = slot.contentDescription,
+            tint = if (isExpanded)
+                MaterialTheme.colorScheme.primary
+            else
+                MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }
 
 /**
  * Adaptive horizontal row that uses [SubcomposeLayout] to measure each slot's
- * natural width in a first pass, then uses [greedyFit] to decide which slots
- * render inline (label + content) and which collapse to an [IconButton].
+ * natural width in two passes, then uses [greedyFit] to decide rendering mode:
  *
- * Tapping a collapsed icon expands its content with [expandHorizontally] +
- * [fadeIn]; only one slot can be expanded at a time.
+ * - **Full**: slot fits at [SLIDER_WIDTH] → label + content inline.
+ * - **Compressed**: slot fits at [ADAPTIVE_MIN_SLIDER_WIDTH] but not at full
+ *   width → label + content inline with a narrower slider.
+ * - **Collapsed**: slot doesn't fit even compressed → [IconButton]. Tapping
+ *   opens the slot content **vertically above** the main row (panel grows
+ *   upward because it is anchored at BottomCenter); only one slot at a time.
  */
 @Composable
 private fun AdaptiveSettingsRow(
@@ -378,21 +373,13 @@ private fun AdaptiveSettingsRow(
 ) {
     var expandedIndex by remember { mutableStateOf<Int?>(null) }
 
-    SubcomposeLayout(modifier) { constraints ->
-        val gapPx = PANEL_INNER_GAP.roundToPx()
-        val paddingPx = (PANEL_HORIZONTAL_PADDING * 2).roundToPx()
-        val iconButtonWidthPx = ADAPTIVE_ICON_BUTTON_SIZE.roundToPx()
-
-        val naturalWidths = slots.indices.map { i ->
-            subcompose("measure_$i") { FullSlotContent(slots[i]) }
-                .first()
-                .measure(Constraints())
-                .width
-        }
-
-        val fits = greedyFit(naturalWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
-
-        val placeable = subcompose("row") {
+    Column(modifier) {
+        // Vertical expansion panel — grows upward because Surface is BottomCenter.
+        AnimatedVisibility(
+            visible = expandedIndex != null,
+            enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+            exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
@@ -401,24 +388,69 @@ private fun AdaptiveSettingsRow(
                     vertical = PANEL_VERTICAL_PADDING,
                 ),
             ) {
-                slots.forEachIndexed { i, slot ->
-                    if (fits[i]) {
-                        FullSlotContent(slot)
-                    } else {
-                        CollapsedSlotContent(
-                            slot = slot,
-                            isExpanded = expandedIndex == i,
-                            onToggle = {
-                                expandedIndex = if (expandedIndex == i) null else i
-                            },
-                        )
-                    }
+                val idx = expandedIndex
+                if (idx != null) slots[idx].content(SLIDER_WIDTH)
+            }
+        }
+
+        SubcomposeLayout { constraints ->
+            val gapPx = PANEL_INNER_GAP.roundToPx()
+            val paddingPx = (PANEL_HORIZONTAL_PADDING * 2).roundToPx()
+            val iconButtonWidthPx = ADAPTIVE_ICON_BUTTON_SIZE.roundToPx()
+
+            // Pass 1: measure each slot at full slider width.
+            val naturalWidths = slots.indices.map { i ->
+                subcompose("measure_nat_$i") { FullSlotContent(slots[i], SLIDER_WIDTH) }
+                    .first().measure(Constraints()).width
+            }
+            val naturalFits = greedyFit(naturalWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
+
+            // Pass 2: for slots that failed pass 1, try the compressed slider width.
+            val minWidths = slots.indices.map { i ->
+                if (naturalFits[i]) naturalWidths[i]
+                else subcompose("measure_min_$i") { FullSlotContent(slots[i], ADAPTIVE_MIN_SLIDER_WIDTH) }
+                    .first().measure(Constraints()).width
+            }
+            val minFits = greedyFit(minWidths, constraints.maxWidth, gapPx, paddingPx, iconButtonWidthPx)
+
+            // Resolve per-slot slider width: full, compressed, or null (collapsed).
+            val resolvedWidths: List<Dp?> = slots.indices.map { i ->
+                when {
+                    naturalFits[i] -> SLIDER_WIDTH
+                    minFits[i] -> ADAPTIVE_MIN_SLIDER_WIDTH
+                    else -> null
                 }
             }
-        }.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
 
-        layout(placeable.width, placeable.height) {
-            placeable.place(0, 0)
+            val placeable = subcompose("row") {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(PANEL_INNER_GAP),
+                    modifier = Modifier.padding(
+                        horizontal = PANEL_HORIZONTAL_PADDING,
+                        vertical = PANEL_VERTICAL_PADDING,
+                    ),
+                ) {
+                    slots.forEachIndexed { i, slot ->
+                        val sw = resolvedWidths[i]
+                        if (sw != null) {
+                            FullSlotContent(slot, sw)
+                        } else {
+                            CollapsedSlotContent(
+                                slot = slot,
+                                isExpanded = expandedIndex == i,
+                                onToggle = {
+                                    expandedIndex = if (expandedIndex == i) null else i
+                                },
+                            )
+                        }
+                    }
+                }
+            }.first().measure(constraints.copy(minWidth = 0, minHeight = 0))
+
+            layout(placeable.width, placeable.height) {
+                placeable.place(0, 0)
+            }
         }
     }
 }
@@ -452,6 +484,7 @@ private fun SliderWithValueField(
     formatDisplay: (Float) -> String,
     parseInput: (String) -> Float?,
     suffix: String,
+    sliderWidth: Dp = SLIDER_WIDTH,
 ) {
     val sliderColors = SliderDefaults.colors(
         inactiveTrackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f),
@@ -460,7 +493,7 @@ private fun SliderWithValueField(
         value = value,
         onValueChange = onValueChange,
         valueRange = valueRange,
-        modifier = Modifier.width(SLIDER_WIDTH),
+        modifier = Modifier.width(sliderWidth),
         colors = sliderColors,
         track = { sliderState ->
             SliderDefaults.Track(
@@ -556,6 +589,7 @@ private fun chipColors() = FilterChipDefaults.filterChipColors(
 )
 
 private val ADAPTIVE_ICON_BUTTON_SIZE = 40.dp
+private val ADAPTIVE_MIN_SLIDER_WIDTH = 80.dp
 private val PANEL_CORNER_RADIUS = 24.dp
 private val PANEL_TONAL_ELEVATION = 0.dp
 private val PANEL_SHADOW_ELEVATION = 4.dp
