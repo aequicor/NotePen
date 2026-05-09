@@ -42,7 +42,11 @@ fun DrawablePdfPage(
                             onDragStart = { offset ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    pdfDrawingState.startDrawing(offset.x / w, offset.y / h)
+                                    pdfDrawingState.startDrawing(
+                                        x = offset.x / w,
+                                        y = offset.y / h,
+                                        normalizedStrokeWidth = pdfDrawingState.strokeWidth.value / w,
+                                    )
                                 }
                             },
                             onDrag = { change, _ ->
@@ -77,7 +81,7 @@ fun DrawablePdfPage(
                         }
                     },
                     color = path.color,
-                    style = Stroke(width = path.strokeWidth),
+                    style = Stroke(width = path.strokeWidth * size.width),
                 )
             }
 
@@ -91,7 +95,7 @@ fun DrawablePdfPage(
                         }
                     },
                     color = pdfDrawingState.currentPath.value.color,
-                    style = Stroke(width = pdfDrawingState.currentPath.value.strokeWidth),
+                    style = Stroke(width = pdfDrawingState.currentPath.value.strokeWidth * size.width),
                 )
             }
         }

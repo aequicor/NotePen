@@ -27,12 +27,12 @@ class PdfDrawingState {
     var strokeWidth = mutableStateOf(10f)
     var strokeColor = mutableStateOf(Color.Black)
 
-    fun startDrawing(x: Float, y: Float) {
+    fun startDrawing(x: Float, y: Float, normalizedStrokeWidth: Float = strokeWidth.value) {
         isDrawing.value = true
         currentPath.value = DrawingPath(
             points = listOf(DrawingPoint(x, y, true)),
             color = strokeColor.value,
-            strokeWidth = strokeWidth.value
+            strokeWidth = normalizedStrokeWidth,
         )
     }
 
