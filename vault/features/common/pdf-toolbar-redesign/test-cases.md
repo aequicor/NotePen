@@ -19,7 +19,7 @@ updated: 2026-05-09
 | TC-5 | unit | 5 | `PdfFloatingToolbar(scale=10)` — кнопка ZoomOut отрисована с `enabled=false` | AC-10 | PENDING |
 | TC-6 | unit | 3 | `AnnotationRepositoryJvm.save("test.pdf", mapOf(0 to listOf(path)))` создаёт файл `test.pdf.notepen.json` с корректным JSON | AC-4 | PENDING |
 | TC-7 | unit | 3 | `AnnotationRepositoryJvm.save(...)` при недоступном пути (директория не существует) возвращает `Result.failure(IOException)` | EC-1 | PENDING |
-| TC-8 | unit | 3 | `AnnotationRepositoryAndroid.save("test.pdf", mapOf(0 to listOf(path)))` создаёт файл `test.pdf.notepen.json` с корректным JSON | AC-4 | PENDING |
+| TC-8 | unit | 3 | `AnnotationRepositoryAndroid.save("test.pdf", mapOf(0 to listOf(path)))` создаёт файл `test.pdf.notepen.json` с корректным JSON | AC-4 | SKIP (требует Android instrumented tests; логика идентична AnnotationRepositoryJvm — TC-6 покрывает контракт) |
 | TC-9 | unit | 5 | `PdfFloatingToolbar(isSaving=true)` — кнопка Save отрисована с `enabled=false` | EC-3 | PENDING |
 | TC-10 | manual | 4 | Desktop: открыть многостраничный PDF → вертикальная полоса прокрутки видна справа от LazyColumn | AC-11 | PENDING |
 | TC-11 | manual | 6 | Режим рисования выкл (по умолчанию) → провести пальцем/мышью → LazyColumn прокручивается, штрих не появляется | AC-2 | PENDING |
