@@ -4,12 +4,17 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -45,8 +50,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Описание кнопки «Назад» для экранных чтецов (accessibility — AC-4). */
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
+private val SCROLL_BOTTOM_EXTRA = 240.dp
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -102,7 +107,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
 
         ScrollablePdfColumn(state = lazyListState, modifier = Modifier.fillMaxSize()) {
-            items(items = pages, { it.pageNumber }) { page ->
+            items(items = pages, key = { it.pageNumber }) { page ->
                 val screenWidthPx = windowSizeInPx.width
                 val maxTargetWidthPx = screenWidthPx * 4 / 5
                 val targetWidthPx = ((screenWidthPx * 2 / 3) * (scale / 100f)).toInt()
@@ -149,10 +154,13 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                     }
                 }
             }
+            item {
+                Spacer(modifier = Modifier.height(SCROLL_BOTTOM_EXTRA))
+            }
         }
 
         AnimatedVisibility(
-            visible = !isCompact || toolMode == ToolMode.NONE,
+            visible = true,
             enter = slideInHorizontally { -it } + fadeIn(),
             exit = slideOutHorizontally { -it } + fadeOut(),
             modifier = Modifier
@@ -189,16 +197,16 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
             )
         }
 
-        // Floating "glass" tool-settings panel — separate from the right-side
-        // vertical toolbar; docked at BottomCenter and only visible when a
-        // tool is active. Slides up + fades in / out on toolMode change.
+        val panelMaxWidth = with(LocalDensity.current) { windowSizeInPx.width.toDp() - 32.dp }
         ToolSettingsFloatingPanel(
             toolMode = toolMode,
             penSettings = penSettings,
             onPenSettingsChange = { penSettings = it },
             eraserSettings = eraserSettings,
             onEraserSettingsChange = { eraserSettings = it },
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .widthIn(max = panelMaxWidth),
         )
 
         SnackbarHost(
@@ -206,13 +214,17 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 
-        if (pages.isNotEmpty()) {
+        AnimatedVisibility(
+            visible = pages.isNotEmpty(),
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 8.dp),
+        ) {
             PageIndicatorAirbar(
                 currentPage = firstVisiblePage + 1,
                 totalPages = pages.size,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 8.dp),
             )
         }
 

@@ -10,15 +10,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-/**
- * Floating glass pill displaying "Страница X / N" at the top of the PDF viewer.
- *
- * Glass style matches [ToolSettingsFloatingPanel]: semi-transparent surface (0.85α),
- * outlineVariant border, tonalElevation = 6.dp.
- *
- * Positioning is the caller's responsibility (Alignment.TopCenter in DetailsContent).
- * The composable must not be shown when [totalPages] == 0 — caller guards this (AC-4, EC-2).
- */
 @Composable
 fun PageIndicatorAirbar(
     currentPage: Int,
