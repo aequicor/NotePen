@@ -55,3 +55,4 @@ bin/
 /local.properties
 /java_pid34416.hprof
 /.claude/settings.local.json
+.aikit/bin/

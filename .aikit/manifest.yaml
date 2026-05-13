@@ -1,0 +1,99 @@
+manifest_version: "3.0.0"
+language_code: ru
+
+project:
+  name: "NotePen"
+  slug: "notepen"
+  description: "Приложение для аннотирования PDF с бесконечным холстом (Android + Desktop)"
+
+stack:
+  languages: [kotlin]
+  frameworks: [kotlin-multiplatform, compose-multiplatform]
+  build_command: "./gradlew build"
+  test_command:  "./gradlew test"
+  lint_command:  "./gradlew lint"
+  format_command: ""
+  run_command:   "./gradlew runDesktop"
+
+modules:
+  - name: shared
+    source_root: shared/src/commonMain
+    test_root:   shared/src/commonTest
+    responsibility: "Бизнес-логика: доменные модели, use cases, общий KMP-код"
+  - name: app-common
+    source_root: app/byCompose/common/src/commonMain
+    test_root:   app/byCompose/common/src/commonTest
+    responsibility: "Общий Compose UI: экраны, навигация (Decompose), работа с PDF"
+  - name: app-android
+    source_root: app/byCompose/android/src/main
+    test_root:   ""
+    responsibility: "Android-таргет: Activity, точка входа приложения"
+  - name: app-desktop
+    source_root: app/byCompose/desktop/src/main
+    test_root:   ""
+    responsibility: "Desktop JVM-таргет: main(), конфигурация окна"
+  - name: app-theme
+    source_root: app/byCompose/theme/src/commonMain
+    test_root:   ""
+    responsibility: "Дизайн-токены: цвета, типографика, spacing"
+  - name: app-uikit
+    source_root: app/byCompose/uikit/src/commonMain
+    test_root:   ""
+    responsibility: "Переиспользуемые UI-компоненты (кнопки, glassmorphism и др.)"
+
+targets:
+  - id: claude-code
+    native_provider: anthropic
+    adapter: claude-code
+
+render_targets: [claude-code]
+
+providers:
+  - id: anthropic
+    kind: anthropic
+    auth: subscription
+
+models:
+  - id: sonnet-4-6
+    provider: anthropic
+    family: anthropic
+    model: claude-sonnet-4-6
+    tier: balanced
+    priority: 100
+
+prompt_dialects:
+  - id: anthropic
+    path: dialects/anthropic
+
+target_adapters:
+  - id: claude-code
+    path: target_adapters/claude-code
+
+agents:
+  - id: Main
+    role: orchestrator
+    description: "AI-Kit v4 pipeline driver — runs Session 1/2/3 of /kit, /kit-do, /kit-fix"
+    prompt: { include: prompts/Main.md }
+    tools: [Read, Edit, Write, Glob, Grep, Bash]
+  - id: Researcher
+    description: "Session 1 Stage 1 helper — returns one focused digest, never writes code"
+    prompt: { include: prompts/Researcher.md }
+    tools: [Read, Glob, Grep, WebFetch]
+
+policies:
+  profiles: [solid, clean-architecture]
+  forbidden_patterns:
+    - "Не использовать expect/actual без явной необходимости межплатформенной специфики"
+    - "Не добавлять JVM-only зависимости в commonMain"
+    - "Не использовать магические числа — выносить в именованные константы"
+    - "Не использовать напрямую Dispatchers — пробрасывать через DI или параметры"
+  optional_skills:
+    - tdd-cycle
+    - security-checklist
+    - doubt-driven-review
+    - simplification-pass
+    - adr-on-decision
+
+knowledge:
+  - id: knowledge-os
+    path: knowledge-docker-compose.yml
