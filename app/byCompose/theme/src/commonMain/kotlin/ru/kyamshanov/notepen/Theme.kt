@@ -14,5 +14,9 @@ object AppTheme {
     val shapes: AppShapes
         @Composable
         get() = LocalAppShapes.current
+
+    val spacing: AppSpacing
+        @Composable
+        get() = LocalAppSpacing.current
 }
 
