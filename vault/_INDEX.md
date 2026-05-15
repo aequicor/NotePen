@@ -71,3 +71,5 @@ v4 used five Diátaxis subtrees (one file per concern → 7–10 files per featu
 - Lint: `./gradlew detekt ktlintCheck`
 - Architecture: `reference/common/architecture.md`
 - **PDF Editor Roadmap (M1–M8):** `concepts/common/plans/pdf-editor-roadmap.md`
+- **ADR-001 — PDF rendering strategy:** `reference/shared/spec/adr-001-pdf-rendering.md`
+- **M1 smoke-test report:** `guidelines/common/reports/test-runs/m1-pdf-infrastructure-run-01.md`
