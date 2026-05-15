@@ -1,0 +1,16 @@
+{
+    "mcpServers": {
+        "github": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "@modelcontextprotocol/server-github"
+            ]
+        },
+        "knowledge-os": {
+            "transport": "sse",
+            "url": "http://localhost:8081/sse"
+        }
+    }
+}

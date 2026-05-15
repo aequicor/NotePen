@@ -1,0 +1,86 @@
+{
+    "includeCoAuthoredBy": false,
+    "permissions": {
+        "defaultMode": "acceptEdits",
+        "allow": [
+            {
+                "value": "Read(./**)"
+            },
+            {
+                "value": "Bash(./gradlew:*)"
+            },
+            {
+                "value": "Bash(git status)"
+            },
+            {
+                "value": "Bash(git diff:*)"
+            },
+            {
+                "value": "Bash(git log:*)"
+            }
+        ],
+        "deny": [
+            {
+                "value": "Read(./.env)"
+            },
+            {
+                "value": "Read(./secrets/**)"
+            },
+            {
+                "value": "Read(./local.properties)"
+            },
+            {
+                "value": "Bash(rm -rf:*)"
+            },
+            {
+                "value": "Bash(git push --force:*)"
+            }
+        ]
+    },
+    "hooks": {
+        "SessionStart": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/hooks/session-start.sh"
+                    }
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/strict/hooks/block-dangerous.sh"
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/hooks/post-edit-ktlint.sh"
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/hooks/stop-detekt.sh"
+                    }
+                ]
+            }
+        ]
+    }
+}
