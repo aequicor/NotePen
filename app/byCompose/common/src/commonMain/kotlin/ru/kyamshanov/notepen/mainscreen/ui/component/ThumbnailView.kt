@@ -31,19 +31,19 @@ fun ThumbnailView(
     state: ThumbnailState,
     modifier: Modifier = Modifier,
 ) {
+    val bgColor = when (state) {
+        is ThumbnailState.Error -> MaterialTheme.colorScheme.errorContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
     Box(
+        contentAlignment = Alignment.Center,
         modifier = modifier
             .aspectRatio(0.707f)
-            .clip(MaterialTheme.shapes.medium),
+            .clip(MaterialTheme.shapes.medium)
+            .background(bgColor),
     ) {
         when (state) {
-            is ThumbnailState.Loading -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                )
-            }
+            is ThumbnailState.Loading -> Unit
             is ThumbnailState.Ready -> {
                 val painter = rememberPdfThumbnailPainter(state.imageData)
                 if (painter != null) {
@@ -53,30 +53,15 @@ fun ThumbnailView(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize(),
                     )
-                } else {
-                    // Shimmer while bytes are still decoding asynchronously (DEF-003)
-                    Box(
-                        Modifier
-                            .fillMaxSize()
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                    )
                 }
             }
             is ThumbnailState.Error -> {
-                Box(
-                    Modifier
-                        .fillMaxSize()
-                        .background(MaterialTheme.colorScheme.errorContainer),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.BrokenImage,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(32.dp),
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Outlined.BrokenImage,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.size(32.dp),
+                )
             }
         }
     }

@@ -45,6 +45,11 @@ import java.net.InetAddress
 import java.util.UUID
 
 fun main() {
+    // On Windows, AWT DropTarget registration (via dragAndDropTarget) conflicts with
+    // Skia's DirectX/ANGLE swap chain and breaks ImageBitmap rendering.
+    // Switching to OpenGL avoids the conflict while keeping hardware acceleration.
+    System.setProperty("skiko.renderApi", "OPENGL")
+
     val lifecycle = LifecycleRegistry()
     val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 

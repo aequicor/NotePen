@@ -3,7 +3,9 @@ package ru.kyamshanov.notepen.mainscreen.infrastructure
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.pdfbox.Loader
+import org.apache.pdfbox.rendering.ImageType
 import org.apache.pdfbox.rendering.PDFRenderer
+import org.apache.pdfbox.rendering.RenderDestination
 import ru.kyamshanov.notepen.mainscreen.domain.exception.ThumbnailGenerationException
 import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
 import java.awt.image.BufferedImage
@@ -31,7 +33,8 @@ class PdfThumbnailGeneratorDesktop : PdfThumbnailGenerator {
                     val renderer = PDFRenderer(doc)
                     val page = doc.pages[0]
                     val scale = widthPx.toFloat() / page.mediaBox.width
-                    val raw: BufferedImage = renderer.renderImage(0, scale)
+                    // EXPORT avoids screen-dependent Java2D pipeline on Windows (DirectX/D3D)
+                    val raw: BufferedImage = renderer.renderImage(0, scale, ImageType.RGB, RenderDestination.EXPORT)
                     val image = if (raw.type == BufferedImage.TYPE_INT_ARGB) raw else {
                         val converted = BufferedImage(raw.width, raw.height, BufferedImage.TYPE_INT_ARGB)
                         val g = converted.createGraphics()

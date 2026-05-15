@@ -202,7 +202,10 @@ class MainScreenViewModel(
                             thumbnailRepository.put(file.uri, data, file.fileMtime)
                             updateThumbnail(file.id, ThumbnailState.Ready(data))
                         },
-                        onFailure = { updateThumbnail(file.id, ThumbnailState.Error) },
+                        onFailure = { cause ->
+                            logger.warn { "Thumbnail generation failed for ${file.id}: ${cause::class.simpleName}: ${cause.message}" }
+                            updateThumbnail(file.id, ThumbnailState.Error)
+                        },
                     )
                 }
             }
