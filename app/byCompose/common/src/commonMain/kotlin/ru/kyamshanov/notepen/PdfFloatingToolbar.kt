@@ -3,6 +3,10 @@ package ru.kyamshanov.notepen
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
@@ -183,10 +187,16 @@ private fun ToolToggleButton(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    IconButton(onClick = onClick) {
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier.semantics {
+            role = Role.Button
+            this.selected = selected
+        },
+    ) {
         Icon(
             imageVector = icon,
-            contentDescription = contentDescription,
+            contentDescription = if (selected) "$contentDescription (активен)" else contentDescription,
             tint = if (selected) {
                 MaterialTheme.colorScheme.primary
             } else {

@@ -6,6 +6,14 @@
 -keep class kotlinx.coroutines.swing.*
 -keep class com.arkivanov.decompose.**
 -keep class io.ktor.** { *; }
+-keep class ru.kyamshanov.notepen.sync.domain.model.** { *; }
+-keep class ru.kyamshanov.notepen.annotation.domain.model.** { *; }
+-keepclassmembers class ru.kyamshanov.notepen.** {
+    *** Companion;
+}
+-keepclasseswithmembers class ru.kyamshanov.notepen.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
 
 -keepattributes Annotation, InnerClasses
 -dontnote kotlinx.serialization.AnnotationsKt

@@ -89,7 +89,7 @@ fun DetailsContent(
     val pages by remember { derivedStateOf { pdfDocument?.info?.pages ?: emptyList() } }
 
     var scale by remember { mutableStateOf(100) }
-    val pagesCache = remember(pdfDocument, scale) { mutableMapOf<Int, ImageBitmap>() }
+    val pagesCache = remember(pdfDocument, scale) { LruCache<Int, ImageBitmap>(maxSize = 8) }
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     var penSettings by remember { mutableStateOf(PenSettings()) }
