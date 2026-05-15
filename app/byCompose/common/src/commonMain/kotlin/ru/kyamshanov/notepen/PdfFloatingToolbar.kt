@@ -9,6 +9,7 @@ import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -44,7 +45,9 @@ fun PdfFloatingToolbar(
     onToolModeChange: (ToolMode) -> Unit,
     hasAnnotations: Boolean,
     isSaving: Boolean,
+    isExporting: Boolean,
     onSave: () -> Unit,
+    onExport: () -> Unit,
     scale: Int,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
@@ -110,6 +113,29 @@ fun PdfFloatingToolbar(
                     Icon(
                         imageVector = Icons.Default.Save,
                         contentDescription = "Сохранить аннотации",
+                        tint = if (hasAnnotations) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SAVE_DISABLED_ALPHA)
+                        },
+                    )
+                }
+            }
+
+            IconButton(
+                onClick = onExport,
+                enabled = hasAnnotations && !isExporting,
+            ) {
+                if (isExporting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(SAVE_PROGRESS_SIZE),
+                        strokeWidth = SAVE_PROGRESS_STROKE,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.PictureAsPdf,
+                        contentDescription = "Экспортировать в PDF",
                         tint = if (hasAnnotations) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {

@@ -97,6 +97,7 @@ fun DetailsContent(
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
     var showThumbnails by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
     val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
     val hasAnnotations by remember {
         derivedStateOf { drawingStates.values.any { it.currentPaths.isNotEmpty() } }
@@ -108,6 +109,7 @@ fun DetailsContent(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
+    val pdfExporter = remember { createPdfExporter() }
     val focusRequester = remember { FocusRequester() }
     var shiftHeld by remember { mutableStateOf(false) }
 
@@ -273,6 +275,7 @@ fun DetailsContent(
                 onToolModeChange = { toolMode = it },
                 hasAnnotations = hasAnnotations,
                 isSaving = isSaving,
+                isExporting = isExporting,
                 showThumbnails = showThumbnails,
                 onToggleThumbnails = { showThumbnails = !showThumbnails },
                 onSave = {
@@ -293,6 +296,27 @@ fun DetailsContent(
                         )
                         isSaving = false
                         val message = if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
+                        snackbarHostState.showSnackbar(message)
+                    }
+                },
+                onExport = {
+                    isExporting = true
+                    coroutineScope.launch {
+                        val annotations = drawingStates.mapValues { (_, state) ->
+                            state.currentPaths.toList()
+                        }
+                        val outputPath = filePath.removeSuffix(".pdf") + "_annotated.pdf"
+                        val result = pdfExporter.export(
+                            sourcePdfPath = filePath,
+                            annotations = annotations,
+                            outputPath = outputPath,
+                        )
+                        isExporting = false
+                        val message = if (result.isSuccess) {
+                            "Экспорт завершён: $outputPath"
+                        } else {
+                            "Ошибка экспорта"
+                        }
                         snackbarHostState.showSnackbar(message)
                     }
                 },
