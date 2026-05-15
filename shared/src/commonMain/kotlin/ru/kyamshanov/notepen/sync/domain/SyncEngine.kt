@@ -28,13 +28,14 @@ import ru.kyamshanov.notepen.sync.domain.port.SyncClient
  * apply to [PdfDrawingState].
  */
 class SyncEngine(
-    private val deviceId: String,
+    val deviceId: String,
     private val scope: CoroutineScope,
     private val server: PeerServer? = null,
     private val client: SyncClient? = null,
 ) {
     private val clocks = mutableMapOf<String, Long>() // strokeId → last seen clock
     private val _merged = MutableSharedFlow<StrokeDelta>(extraBufferCapacity = 128)
+    private var strokeSeq = 0L
 
     /** Incoming deltas after merge — presentation layer subscribes here. */
     val mergedDeltas: SharedFlow<StrokeDelta> = _merged.asSharedFlow()
@@ -76,6 +77,9 @@ class SyncEngine(
     }
 
     fun clearPending() = pendingDeltas.clear()
+
+    /** Generates a stroke ID that is unique within this device's session. */
+    fun newStrokeId(): String = "$deviceId#${++strokeSeq}"
 }
 
 private fun StrokeDelta.withClock(clock: Long): StrokeDelta = when (this) {

@@ -34,7 +34,9 @@ import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
 import ru.kyamshanov.notepen.server.KtorPeerServer
 import ru.kyamshanov.notepen.sync.HostViewModel
 import ru.kyamshanov.notepen.sync.SyncViewModel
+import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.infrastructure.JmDnsDeviceDiscovery
 import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
@@ -65,6 +67,8 @@ fun main() {
     val httpClient = HttpClient(CIO) { install(WebSockets) }
     val syncClient = KtorSyncClient(httpClient)
 
+    val syncEngine = SyncEngine(deviceId = selfId, scope = appScope, server = peerServer, client = syncClient)
+
     val hostViewModel = HostViewModel(server = peerServer, scope = appScope)
     val syncViewModel = SyncViewModel(
         discovery = discovery,
@@ -72,6 +76,18 @@ fun main() {
         selfInfo = selfInfo,
         scope = appScope,
     )
+
+    // Feed incoming peer deltas into the sync engine.
+    appScope.launch {
+        peerServer.incomingMessages.collect { msg ->
+            if (msg is NetworkMessage.StrokeDeltaMessage) syncEngine.processPeer(msg.delta)
+        }
+    }
+    appScope.launch {
+        syncClient.incomingMessages.collect { msg ->
+            if (msg is NetworkMessage.StrokeDeltaMessage) syncEngine.processPeer(msg.delta)
+        }
+    }
 
     // Register/unregister mDNS service as the server lifecycle changes.
     appScope.launch {
@@ -132,6 +148,7 @@ fun main() {
                 pdfPageRenderer = pdfPageRenderer,
                 hostViewModel = hostViewModel,
                 syncViewModel = syncViewModel,
+                syncEngine = syncEngine,
             )
         }
     }

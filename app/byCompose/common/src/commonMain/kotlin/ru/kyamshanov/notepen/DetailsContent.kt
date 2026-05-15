@@ -66,6 +66,10 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
+import ru.kyamshanov.notepen.sync.SyncBridge
+import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
+import ru.kyamshanov.notepen.sync.domain.model.toDto
 
 private val logger = KotlinLogging.logger {}
 
@@ -78,6 +82,7 @@ fun DetailsContent(
     component: DetailsComponent,
     loader: PdfDocumentLoader,
     renderer: PdfPageRenderer,
+    syncEngine: SyncEngine? = null,
     modifier: Modifier = Modifier,
 ) {
     val localWindowInfo = LocalWindowInfo.current
@@ -112,6 +117,14 @@ fun DetailsContent(
     val pdfExporter = remember { createPdfExporter() }
     val focusRequester = remember { FocusRequester() }
     var shiftHeld by remember { mutableStateOf(false) }
+
+    val syncBridge = remember(syncEngine) {
+        syncEngine?.let { engine ->
+            SyncBridge(engine = engine, drawingStates = drawingStates, scope = coroutineScope)
+        }
+    }
+
+    LaunchedEffect(syncBridge) { syncBridge?.start() }
 
     LaunchedEffect(filePath) {
         pdfDocument?.close()
@@ -230,6 +243,22 @@ fun DetailsContent(
                             onGestureStart = { snapshot ->
                                 globalUndoStack.addLast(pageIndex to snapshot)
                                 globalRedoStack.clear()
+                            },
+                            onStrokeFinished = { path ->
+                                val engine = syncEngine ?: return@DrawablePdfPage
+                                val id = engine.newStrokeId()
+                                val stamped = path.copy(strokeId = id)
+                                val idx = pdfDrawingState.currentPaths.lastIndex
+                                if (idx >= 0) pdfDrawingState.currentPaths[idx] = stamped
+                                engine.applyLocal(
+                                    StrokeDelta.Added(
+                                        strokeId = id,
+                                        pageIndex = pageIndex,
+                                        authorDeviceId = engine.deviceId,
+                                        clock = 0,
+                                        path = stamped.toDto(id),
+                                    ),
+                                )
                             },
                             modifier = Modifier.size(width, height),
                         )

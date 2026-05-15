@@ -27,6 +27,7 @@ import ru.kyamshanov.notepen.sync.HostScreen
 import ru.kyamshanov.notepen.sync.HostViewModel
 import ru.kyamshanov.notepen.sync.SyncScreen
 import ru.kyamshanov.notepen.sync.SyncViewModel
+import ru.kyamshanov.notepen.sync.domain.SyncEngine
 
 @Composable
 fun App(
@@ -35,6 +36,7 @@ fun App(
     pdfPageRenderer: PdfPageRenderer,
     hostViewModel: HostViewModel? = null,
     syncViewModel: SyncViewModel? = null,
+    syncEngine: SyncEngine? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     var showSyncPanel by remember { mutableStateOf(false) }
@@ -46,6 +48,7 @@ fun App(
                     component = rootComponent,
                     pdfDocumentLoader = pdfDocumentLoader,
                     pdfPageRenderer = pdfPageRenderer,
+                    syncEngine = syncEngine,
                     modifier = Modifier.fillMaxSize(),
                 )
 

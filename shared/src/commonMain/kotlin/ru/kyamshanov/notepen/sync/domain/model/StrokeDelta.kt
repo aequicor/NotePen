@@ -67,4 +67,5 @@ fun DrawingPathDto.toDomain(): DrawingPath =
         },
         colorArgb = colorArgb,
         strokeWidth = strokeWidth,
+        strokeId = strokeId,
     )

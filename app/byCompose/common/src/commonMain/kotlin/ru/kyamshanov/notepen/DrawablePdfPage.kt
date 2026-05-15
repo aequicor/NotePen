@@ -40,6 +40,7 @@ fun DrawablePdfPage(
     markerSettings: MarkerSettings,
     eraserSettings: EraserSettings,
     onGestureStart: (snapshot: List<DrawingPath>) -> Unit = {},
+    onStrokeFinished: (path: DrawingPath) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -101,7 +102,10 @@ fun DrawablePdfPage(
                                     )
                                 }
                             },
-                            onDragEnd = { pdfDrawingState.finishDrawing() },
+                            onDragEnd = {
+                                val completed = pdfDrawingState.finishDrawing()
+                                if (completed != null) onStrokeFinished(completed)
+                            },
                         )
                     }
 
@@ -129,7 +133,10 @@ fun DrawablePdfPage(
                                     )
                                 }
                             },
-                            onDragEnd = { pdfDrawingState.finishDrawing() },
+                            onDragEnd = {
+                                val completed = pdfDrawingState.finishDrawing()
+                                if (completed != null) onStrokeFinished(completed)
+                            },
                         )
                     }
 

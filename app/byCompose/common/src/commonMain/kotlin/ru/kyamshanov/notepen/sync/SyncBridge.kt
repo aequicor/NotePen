@@ -16,18 +16,17 @@ import ru.kyamshanov.notepen.sync.domain.model.toDomain
  */
 class SyncBridge(
     private val engine: SyncEngine,
-    private val drawingStates: Map<Int, PdfDrawingState>,
+    private val drawingStates: MutableMap<Int, PdfDrawingState>,
     private val scope: CoroutineScope,
 ) {
     fun start() {
         scope.launch {
             engine.mergedDeltas.collect { delta ->
-                val state = drawingStates[delta.pageIndex] ?: return@collect
+                val state = drawingStates.getOrPut(delta.pageIndex) { PdfDrawingState() }
                 when (delta) {
                     is StrokeDelta.Added -> {
-                        val path = delta.path.toDomain()
-                        if (state.currentPaths.none { it === path }) {
-                            state.currentPaths.add(path)
+                        if (state.currentPaths.none { it.strokeId == delta.strokeId }) {
+                            state.currentPaths.add(delta.path.toDomain())
                         }
                     }
                     is StrokeDelta.Removed -> {

@@ -32,12 +32,17 @@ class PdfDrawingState {
         }
     }
 
-    fun finishDrawing() {
-        if (isDrawing.value && currentPath.value.points.size > 1) {
-            currentPaths.add(currentPath.value)
+    fun finishDrawing(): DrawingPath? {
+        val completed = if (isDrawing.value && currentPath.value.points.size > 1) {
+            val path = currentPath.value
+            currentPaths.add(path)
+            path
+        } else {
+            null
         }
         isDrawing.value = false
         currentPath.value = DrawingPath()
+        return completed
     }
 
     fun clearDrawing() {

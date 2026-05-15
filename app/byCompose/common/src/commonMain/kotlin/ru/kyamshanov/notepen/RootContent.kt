@@ -13,12 +13,14 @@ import ru.kyamshanov.notepen.mainscreen.ui.screen.MainContent
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.sync.domain.SyncEngine
 
 @Composable
 fun RootContent(
     component: RootComponent,
     pdfDocumentLoader: PdfDocumentLoader,
     pdfPageRenderer: PdfPageRenderer,
+    syncEngine: SyncEngine? = null,
     modifier: Modifier = Modifier,
 ) {
     Children(
@@ -67,6 +69,7 @@ fun RootContent(
                 component = child.component,
                 loader = pdfDocumentLoader,
                 renderer = pdfPageRenderer,
+                syncEngine = syncEngine,
                 modifier = modifier,
             )
         }
