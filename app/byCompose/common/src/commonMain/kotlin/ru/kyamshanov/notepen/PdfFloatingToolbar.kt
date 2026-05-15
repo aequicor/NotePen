@@ -165,8 +165,8 @@ fun nextToolModeOnToggle(current: ToolMode, requested: ToolMode): ToolMode = whe
     else -> requested
 }
 
-internal const val MIN_SCALE = 10
-internal const val MAX_SCALE = 200
+internal const val MIN_SCALE = 25
+internal const val MAX_SCALE = 800
 
 private val TOOLBAR_CORNER_RADIUS = 16.dp
 private val TOOLBAR_TONAL_ELEVATION = 3.dp

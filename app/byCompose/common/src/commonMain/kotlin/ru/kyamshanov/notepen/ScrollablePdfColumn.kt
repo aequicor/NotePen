@@ -9,5 +9,6 @@ import androidx.compose.ui.Modifier
 expect fun ScrollablePdfColumn(
     state: LazyListState,
     modifier: Modifier = Modifier,
+    onScale: (Float) -> Unit = {},
     content: LazyListScope.() -> Unit,
 )

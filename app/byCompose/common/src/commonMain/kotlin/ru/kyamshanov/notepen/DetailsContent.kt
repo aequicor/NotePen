@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import kotlin.math.roundToInt
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -167,7 +168,13 @@ fun DetailsContent(
             },
     ) {
 
-        ScrollablePdfColumn(state = lazyListState, modifier = Modifier.fillMaxSize()) {
+        ScrollablePdfColumn(
+            state = lazyListState,
+            modifier = Modifier.fillMaxSize(),
+            onScale = { factor ->
+                scale = (scale * factor).roundToInt().coerceIn(MIN_SCALE, MAX_SCALE)
+            },
+        ) {
             items(items = pages, key = { it.pageIndex }) { page ->
                 val screenWidthPx = windowSizeInPx.width
                 val maxTargetWidthPx = screenWidthPx * 4 / 5
