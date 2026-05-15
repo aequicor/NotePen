@@ -153,13 +153,7 @@ fun DrawablePdfPage(
         Canvas(modifier = Modifier.fillMaxSize()) {
             pdfDrawingState.currentPaths.forEach { path ->
                 drawPath(
-                    path = Path().apply {
-                        path.points.forEachIndexed { index, point ->
-                            val x = point.x * size.width
-                            val y = point.y * size.height
-                            if (index == 0 || point.isNewPath) moveTo(x, y) else lineTo(x, y)
-                        }
-                    },
+                    path = path.points.toCatmullRomPath(size.width, size.height),
                     color = Color(path.colorArgb.toInt()),
                     style = Stroke(
                         width = path.strokeWidth * size.width,
@@ -170,17 +164,12 @@ fun DrawablePdfPage(
             }
 
             if (pdfDrawingState.isDrawing.value && pdfDrawingState.currentPath.value.points.size > 1) {
+                val livePath = pdfDrawingState.currentPath.value
                 drawPath(
-                    path = Path().apply {
-                        pdfDrawingState.currentPath.value.points.forEachIndexed { index, point ->
-                            val x = point.x * size.width
-                            val y = point.y * size.height
-                            if (index == 0 || point.isNewPath) moveTo(x, y) else lineTo(x, y)
-                        }
-                    },
-                    color = Color(pdfDrawingState.currentPath.value.colorArgb.toInt()),
+                    path = livePath.points.toCatmullRomPath(size.width, size.height),
+                    color = Color(livePath.colorArgb.toInt()),
                     style = Stroke(
-                        width = pdfDrawingState.currentPath.value.strokeWidth * size.width,
+                        width = livePath.strokeWidth * size.width,
                         cap = StrokeCap.Round,
                         join = StrokeJoin.Round,
                     ),
@@ -226,6 +215,50 @@ fun DrawablePdfPage(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Converts a list of normalised [DrawingPoint]s to a smooth Compose [Path] using
+ * a Catmull-Rom → cubic-Bézier approximation.
+ *
+ * Sub-strokes (points with [DrawingPoint.isNewPath] == true) are drawn as
+ * independent smooth curves.  Segments shorter than 3 points fall back to
+ * straight lines so every recorded point is still included.
+ */
+private fun List<DrawingPoint>.toCatmullRomPath(w: Float, h: Float): Path = Path().apply {
+    if (isEmpty()) return@apply
+
+    // Collect segment start indices (index 0 is always a start).
+    val starts = indices.filter { i -> i == 0 || get(i).isNewPath }
+
+    starts.forEachIndexed { si, start ->
+        val end = if (si + 1 < starts.size) starts[si + 1] else size
+        val seg = subList(start, end)
+
+        moveTo(seg[0].x * w, seg[0].y * h)
+        if (seg.size < 2) return@forEachIndexed
+        if (seg.size == 2) {
+            lineTo(seg[1].x * w, seg[1].y * h)
+            return@forEachIndexed
+        }
+
+        // Catmull-Rom: for segment i→i+1 use ghost endpoints at the boundaries.
+        for (i in 0 until seg.size - 1) {
+            val p0 = if (i > 0) seg[i - 1] else seg[0]
+            val p1 = seg[i]
+            val p2 = seg[i + 1]
+            val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
+
+            val x1 = p1.x * w; val y1 = p1.y * h
+            val x2 = p2.x * w; val y2 = p2.y * h
+
+            cubicTo(
+                x1 + (p2.x - p0.x) * w / 6f, y1 + (p2.y - p0.y) * h / 6f,
+                x2 - (p3.x - p1.x) * w / 6f, y2 - (p3.y - p1.y) * h / 6f,
+                x2, y2,
+            )
         }
     }
 }
