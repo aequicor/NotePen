@@ -67,6 +67,33 @@ sealed class NetworkMessage {
     @SerialName("stroke_delta")
     data class StrokeDeltaMessage(val delta: StrokeDelta) : NetworkMessage()
 
+    /**
+     * Broadcast from host to viewer: current viewport and optional pointer position.
+     *
+     * Sent at ≤30 fps via `conflate()` to avoid flooding the WebSocket.
+     * [pointerX] / [pointerY] are normalised [0..1] within the page, or null if
+     * the pointer is not active.
+     */
+    @Serializable
+    @SerialName("projection_frame")
+    data class ProjectionFrame(
+        val page: Int,
+        val viewportOffsetY: Float,
+        val viewportScale: Float,
+        val pointerX: Float? = null,
+        val pointerY: Float? = null,
+    ) : NetworkMessage()
+
+    /** Viewer sends this to request detaching from the host's viewport ("free scroll"). */
+    @Serializable
+    @SerialName("projection_detach")
+    data object ProjectionDetach : NetworkMessage()
+
+    /** Viewer sends this to re-attach to the host's viewport. */
+    @Serializable
+    @SerialName("projection_attach")
+    data object ProjectionAttach : NetworkMessage()
+
     /** Notifies the remote side that the connection will be closed gracefully. */
     @Serializable
     @SerialName("disconnect")
