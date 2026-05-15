@@ -24,6 +24,15 @@ kotlin {
 
     sourceSets {
 
+        val jvmAndroidMain by creating {
+            dependsOn(commonMain.get())
+            jvmMain.get().dependsOn(this)
+            androidMain.get().dependsOn(this)
+            dependencies {
+                implementation(libs.kotlinx.serialization.json)
+            }
+        }
+
         commonMain.dependencies {
             //module with logic
             implementation(projects.shared)
@@ -61,7 +70,6 @@ kotlin {
             implementation(libs.kotlin.logging.android)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
-            implementation(libs.kotlinx.serialization.json)
         }
 
         jvmMain.dependencies {
@@ -70,7 +78,6 @@ kotlin {
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.apache.pdfbox)
-            implementation(libs.kotlinx.serialization.json)
         }
     }
 }

@@ -11,7 +11,7 @@ import kotlin.test.assertTrue
 
 class AnnotationRepositoryJvmTest {
 
-    private val repo = AnnotationRepositoryJvm()
+    private val repo = AnnotationRepositoryJvmAndroid()
     private val json = Json { ignoreUnknownKeys = true }
 
     // TC-6 (legacy): save creates .notepen.json with correct structure

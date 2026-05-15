@@ -43,9 +43,7 @@ class PdfDrawingState {
     }
 
     fun finishDrawing() {
-        println("finishDrawing")
         if (isDrawing.value && currentPath.value.points.size > 1) {
-            println("addPoint: ${currentPath.value.points.size}")
             currentPaths.add(currentPath.value)
         }
         isDrawing.value = false
