@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -21,6 +22,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
@@ -79,8 +82,7 @@ fun DrawablePdfPage(
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
                                     onGestureStart(pdfDrawingState.currentPaths.toList())
-                                    pdfDrawingState.strokeColor.value =
-                                        penSettings.color.copy(alpha = penSettings.alpha)
+                                    pdfDrawingState.strokeColorArgb.value = penSettings.colorArgb
                                     pdfDrawingState.strokeWidth.value = penSettings.strokeWidth
                                     pdfDrawingState.startDrawing(
                                         x = offset.x / w,
@@ -158,7 +160,7 @@ fun DrawablePdfPage(
                             if (index == 0 || point.isNewPath) moveTo(x, y) else lineTo(x, y)
                         }
                     },
-                    color = path.color,
+                    color = Color(path.colorArgb.toInt()),
                     style = Stroke(
                         width = path.strokeWidth * size.width,
                         cap = StrokeCap.Round,
@@ -176,7 +178,7 @@ fun DrawablePdfPage(
                             if (index == 0 || point.isNewPath) moveTo(x, y) else lineTo(x, y)
                         }
                     },
-                    color = pdfDrawingState.currentPath.value.color,
+                    color = Color(pdfDrawingState.currentPath.value.colorArgb.toInt()),
                     style = Stroke(
                         width = pdfDrawingState.currentPath.value.strokeWidth * size.width,
                         cap = StrokeCap.Round,

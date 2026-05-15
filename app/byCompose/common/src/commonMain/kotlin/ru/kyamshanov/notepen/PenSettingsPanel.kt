@@ -18,7 +18,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
+import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
+import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 
 /**
  * Panel with thickness slider, alpha slider and a horizontal lane of color presets
@@ -72,8 +76,9 @@ fun PenSettingsPanel(
             horizontalArrangement = Arrangement.spacedBy(PEN_PRESET_GAP),
             modifier = Modifier.padding(top = PEN_PRESET_TOP_PADDING),
         ) {
-            items(PenSettings.PRESET_COLORS) { preset ->
-                val isSelected = preset.value == settings.color.copy(alpha = 1f).value
+            items(PenSettings.PRESET_COLORS) { presetArgb ->
+                val presetColor = Color(presetArgb.toInt())
+                val isSelected = (presetArgb and 0x00FFFFFFL) == (settings.colorArgb and 0x00FFFFFFL)
                 val borderColor = if (isSelected) {
                     MaterialTheme.colorScheme.primary
                 } else {
@@ -83,13 +88,13 @@ fun PenSettingsPanel(
                     modifier = Modifier
                         .size(PEN_PRESET_SIZE)
                         .clip(CircleShape)
-                        .background(preset)
+                        .background(presetColor)
                         .border(
                             width = if (isSelected) PEN_PRESET_BORDER_SELECTED else PEN_PRESET_BORDER_DEFAULT,
                             color = borderColor,
                             shape = CircleShape,
                         )
-                        .clickable { onChange(settings.applyPreset(preset)) },
+                        .clickable { onChange(settings.applyPreset(presetArgb)) },
                 )
             }
         }

@@ -2,35 +2,24 @@ package ru.kyamshanov.notepen
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.graphics.Color
-import kotlinx.serialization.Serializable
-
-@Serializable
-data class DrawingPoint(
-    val x: Float,
-    val y: Float,
-    val isNewPath: Boolean = false,
-)
-
-@Serializable
-data class DrawingPath(
-    val points: List<DrawingPoint> = emptyList(),
-    @Serializable(with = ColorAsLongSerializer::class)
-    val color: Color = Color.Black,
-    val strokeWidth: Float = 10f,
-)
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
+import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 
 class PdfDrawingState {
     var currentPaths = mutableStateListOf<DrawingPath>()
     var currentPath = mutableStateOf(DrawingPath())
     var isDrawing = mutableStateOf(false)
-    var strokeWidth = mutableStateOf(10f)
-    var strokeColor = mutableStateOf(Color.Black)
+    var strokeWidth = mutableStateOf(DrawingPath.DEFAULT_STROKE_WIDTH)
+    /** ARGB-packed color of the active stroke; kept in sync with [PenSettings.colorArgb]. */
+    var strokeColorArgb = mutableStateOf(DrawingPath.BLACK_ARGB)
+
     fun startDrawing(x: Float, y: Float, normalizedStrokeWidth: Float = strokeWidth.value) {
         isDrawing.value = true
         currentPath.value = DrawingPath(
             points = listOf(DrawingPoint(x, y, true)),
-            color = strokeColor.value,
+            colorArgb = strokeColorArgb.value,
             strokeWidth = normalizedStrokeWidth,
         )
     }
@@ -62,19 +51,17 @@ class PdfDrawingState {
 }
 
 /**
- * Точечное стирание (EC-3..EC-7, AC-10/AC-13).
+ * Point-based erase within a zone.
  *
- * Для каждого штриха в [PdfDrawingState.currentPaths]:
- *   1. Точки, попавшие в зону `(centerX, centerY, halfSizeNormalized)` по метрике [shape],
- *      удаляются.
- *   2. Подряд идущие выжившие точки группируются в подштрихи; первая точка каждого
- *      подштриха получает `isNewPath = true`.
- *   3. Подштрихи с `points.size < 2` отбрасываются (EC-7).
- *   4. Цвет и `strokeWidth` исходного штриха наследуются всеми подштрихами.
+ * For each stroke in [PdfDrawingState.currentPaths]:
+ *  1. Points inside the zone (by [shape] metric) are removed.
+ *  2. Consecutive surviving points are grouped into sub-strokes;
+ *     the first point of each sub-stroke gets `isNewPath = true`.
+ *  3. Sub-strokes with fewer than 2 points are discarded.
+ *  4. Color and strokeWidth are inherited from the original stroke.
  *
- * Все координаты — нормализованные `[0..1]` относительно canvas.
- *
- * Возвращает `true`, если хотя бы один штрих был изменён или удалён.
+ * All coordinates are normalised [0..1] relative to the canvas.
+ * Returns `true` if at least one stroke was modified or removed.
  */
 fun PdfDrawingState.erasePointsInZone(
     centerX: Float,

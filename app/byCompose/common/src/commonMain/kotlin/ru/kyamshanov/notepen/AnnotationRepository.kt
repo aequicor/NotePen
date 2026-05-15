@@ -1,48 +1,5 @@
 package ru.kyamshanov.notepen
 
-import kotlinx.serialization.Serializable
-
-@Serializable
-data class AnnotationData(
-    val pages: Map<String, List<DrawingPath>>,
-    val scale: Int = 100,
-    /**
-     * Сериализованные настройки инструментов. `null` для совместимости с файлами
-     * аннотаций старого формата (AC-19): при загрузке такого файла
-     * `AnnotationBundle` получает дефолтные `PenSettings()` / `EraserSettings()`.
-     */
-    val tools: ToolsBundle? = null,
-    val currentPage: Int = 0,
-    val currentPageOffset: Int = 0,
-)
-
-@Serializable
-data class ToolsBundle(
-    val pen: PenSettings = PenSettings(),
-    val eraser: EraserSettings = EraserSettings(),
-)
-
-data class AnnotationBundle(
-    val pages: Map<Int, List<DrawingPath>> = emptyMap(),
-    val scale: Int = 100,
-    val pen: PenSettings = PenSettings(),
-    val eraser: EraserSettings = EraserSettings(),
-    val currentPage: Int = 0,
-    val currentPageOffset: Int = 0,
-)
-
-interface AnnotationRepository {
-    suspend fun save(
-        pdfPath: String,
-        annotations: Map<Int, List<DrawingPath>>,
-        scale: Int,
-        pen: PenSettings = PenSettings(),
-        eraser: EraserSettings = EraserSettings(),
-        currentPage: Int = 0,
-        currentPageOffset: Int = 0,
-    ): Result<Unit>
-
-    suspend fun load(pdfPath: String): Result<AnnotationBundle>
-}
+import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 
 expect fun createAnnotationRepository(): AnnotationRepository

@@ -1,7 +1,9 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.ui.graphics.Color
 import kotlinx.serialization.json.Json
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
+import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -12,24 +14,22 @@ class PenSettingsTest {
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
-    // TC-10: PenSettings defaults: color=Black, strokeWidth=10f, alpha=1f
+    // TC-10: PenSettings defaults: colorArgb=BLACK, strokeWidth=10f, alpha=1f
     @Test
     fun penSettings_defaults_areBlackTenAndOne() {
-        // covers TC-10
         val s = PenSettings()
-        assertEquals(Color.Black, s.color, "default color must be Black")
+        assertEquals(DrawingPath.BLACK_ARGB, s.colorArgb, "default color must be Black (ARGB)")
         assertEquals(10f, s.strokeWidth, "default strokeWidth must be 10f")
         assertEquals(1f, s.alpha, "default alpha must be 1f")
         assertEquals(10f, PenSettings.DEFAULT_STROKE_WIDTH)
         assertTrue(PenSettings.PRESET_COLORS.isNotEmpty(), "PRESET_COLORS must not be empty")
     }
 
-    // TC-13: PenSettings round-trip serialization preserves alpha
+    // TC-13: PenSettings round-trip serialization preserves colorArgb and alpha
     @Test
     fun penSettings_roundTripSerialization_preservesAlpha() {
-        // covers TC-13
         val original = PenSettings(
-            color = Color(red = 1f, green = 0f, blue = 0f, alpha = 0.5f),
+            colorArgb = 0x80FF0000L,
             strokeWidth = 25f,
             alpha = 0.5f,
         )
@@ -39,13 +39,12 @@ class PenSettingsTest {
 
         assertEquals(original.strokeWidth, decoded.strokeWidth)
         assertEquals(original.alpha, decoded.alpha)
-        assertEquals(original.color.value, decoded.color.value, "ARGB Long must round-trip including alpha channel")
+        assertEquals(original.colorArgb, decoded.colorArgb, "ARGB Long must round-trip including alpha channel")
     }
 
     // TC-11: EraserSettings defaults: shape=CIRCLE, sizeNormalized=DEFAULT_SIZE_NORMALIZED
     @Test
     fun eraserSettings_defaults_areCircleAndDefaultSize() {
-        // covers TC-11
         val s = EraserSettings()
         assertEquals(EraserShape.CIRCLE, s.shape)
         assertEquals(EraserSettings.DEFAULT_SIZE_NORMALIZED, s.sizeNormalized)
@@ -58,7 +57,6 @@ class PenSettingsTest {
     // TC-14: EraserSettings round-trip serialization
     @Test
     fun eraserSettings_roundTripSerialization() {
-        // covers TC-14
         val original = EraserSettings(shape = EraserShape.SQUARE, sizeNormalized = 0.1f)
 
         val text = json.encodeToString(EraserSettings.serializer(), original)

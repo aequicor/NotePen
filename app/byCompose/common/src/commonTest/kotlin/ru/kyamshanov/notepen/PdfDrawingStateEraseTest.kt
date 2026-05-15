@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.ui.graphics.Color
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -24,11 +25,11 @@ class PdfDrawingStateEraseTest {
     private fun straightLineX(
         y: Float,
         xs: List<Float>,
-        color: Color = Color.Red,
+        colorArgb: Long = 0xFFFF0000L,
         stroke: Float = 7f,
     ): DrawingPath {
         val pts = xs.mapIndexed { idx, x -> DrawingPoint(x, y, isNewPath = idx == 0) }
-        return DrawingPath(points = pts, color = color, strokeWidth = stroke)
+        return DrawingPath(points = pts, colorArgb = colorArgb, strokeWidth = stroke)
     }
 
     // TC-3 / EC-3: middle erase splits into two sub-strokes; first point of each has isNewPath=true
@@ -125,9 +126,9 @@ class PdfDrawingStateEraseTest {
     fun erasePointsInZone_multipleStrokes_processedIndependently() {
         // Stroke A — entirely outside zone. Stroke B — middle erased (split).
         // Stroke C — fully inside zone (removed).
-        val a = straightLineX(y = 0.10f, xs = listOf(0.10f, 0.20f, 0.30f), color = Color.Red, stroke = 5f)
-        val b = straightLineX(y = 0.50f, xs = listOf(0.10f, 0.20f, 0.50f, 0.80f, 0.90f), color = Color.Blue, stroke = 7f)
-        val c = straightLineX(y = 0.50f, xs = listOf(0.49f, 0.50f, 0.51f), color = Color.Green, stroke = 3f)
+        val a = straightLineX(y = 0.10f, xs = listOf(0.10f, 0.20f, 0.30f), colorArgb = 0xFFFF0000L, stroke = 5f)
+        val b = straightLineX(y = 0.50f, xs = listOf(0.10f, 0.20f, 0.50f, 0.80f, 0.90f), colorArgb = 0xFF0000FFL, stroke = 7f)
+        val c = straightLineX(y = 0.50f, xs = listOf(0.49f, 0.50f, 0.51f), colorArgb = 0xFF00FF00L, stroke = 3f)
         val state = newStateWith(a, b, c)
 
         state.erasePointsInZone(
@@ -140,11 +141,11 @@ class PdfDrawingStateEraseTest {
         // A intact (1) + B split (2) + C removed (0) = 3 paths.
         assertEquals(3, state.currentPaths.size)
         // A first.
-        assertEquals(Color.Red, state.currentPaths[0].color)
+        assertEquals(0xFFFF0000L, state.currentPaths[0].colorArgb)
         assertEquals(listOf(0.10f, 0.20f, 0.30f), state.currentPaths[0].points.map { it.x })
         // B halves.
-        assertEquals(Color.Blue, state.currentPaths[1].color)
-        assertEquals(Color.Blue, state.currentPaths[2].color)
+        assertEquals(0xFF0000FFL, state.currentPaths[1].colorArgb)
+        assertEquals(0xFF0000FFL, state.currentPaths[2].colorArgb)
         assertEquals(listOf(0.10f, 0.20f), state.currentPaths[1].points.map { it.x })
         assertEquals(listOf(0.80f, 0.90f), state.currentPaths[2].points.map { it.x })
     }
@@ -182,7 +183,7 @@ class PdfDrawingStateEraseTest {
                 DrawingPoint(0.575f, 0.575f, isNewPath = true),
                 DrawingPoint(0.580f, 0.580f),
             ),
-            color = Color.Black,
+            colorArgb = 0xFF000000L,
             strokeWidth = 5f,
         )
         val state = newStateWith(path)
@@ -207,7 +208,7 @@ class PdfDrawingStateEraseTest {
                 DrawingPoint(0.575f, 0.575f, isNewPath = true),
                 DrawingPoint(0.580f, 0.580f),
             ),
-            color = Color.Black,
+            colorArgb = 0xFF000000L,
             strokeWidth = 5f,
         )
         val state = newStateWith(path)
@@ -234,7 +235,7 @@ class PdfDrawingStateEraseTest {
                 DrawingPoint(0.80f, 0.50f),
                 DrawingPoint(0.90f, 0.50f),
             ),
-            color = Color(0xFFAABBCC),
+            colorArgb = 0xFFAABBCCL,
             strokeWidth = 23.5f,
         )
         val state = newStateWith(path)
@@ -248,7 +249,7 @@ class PdfDrawingStateEraseTest {
 
         assertEquals(2, state.currentPaths.size)
         for (p in state.currentPaths) {
-            assertEquals(Color(0xFFAABBCC).value, p.color.value, "color preserved")
+            assertEquals(0xFFAABBCCL, p.colorArgb, "color preserved")
             assertEquals(23.5f, p.strokeWidth, "strokeWidth preserved")
         }
     }

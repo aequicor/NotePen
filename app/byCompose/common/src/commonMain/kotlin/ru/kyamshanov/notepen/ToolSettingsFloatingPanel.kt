@@ -54,6 +54,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
+import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
+import ru.kyamshanov.notepen.annotation.domain.model.applyShape
+import ru.kyamshanov.notepen.annotation.domain.model.applySize
+import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.text.input.ImeAction
@@ -214,11 +219,11 @@ private fun PenSettingsRow(
                 label = null,
                 content = {
                     Row(horizontalArrangement = Arrangement.spacedBy(PRESET_GAP)) {
-                        PenSettings.PRESET_COLORS.forEach { preset ->
+                        PenSettings.PRESET_COLORS.forEach { presetArgb ->
                             ColorPresetDot(
-                                preset = preset,
-                                selected = preset.value == settings.color.copy(alpha = 1f).value,
-                                onClick = { onChange(settings.applyPreset(preset)) },
+                                presetArgb = presetArgb,
+                                selected = (presetArgb and 0x00FFFFFFL) == (settings.colorArgb and 0x00FFFFFFL),
+                                onClick = { onChange(settings.applyPreset(presetArgb)) },
                             )
                         }
                     }
@@ -230,7 +235,7 @@ private fun PenSettingsRow(
 
 @Composable
 private fun ColorPresetDot(
-    preset: Color,
+    presetArgb: Long,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -243,7 +248,7 @@ private fun ColorPresetDot(
         modifier = Modifier
             .size(PRESET_SIZE)
             .clip(CircleShape)
-            .background(preset)
+            .background(Color(presetArgb.toInt()))
             .border(
                 width = if (selected) PRESET_BORDER_SELECTED else PRESET_BORDER_DEFAULT,
                 color = borderColor,

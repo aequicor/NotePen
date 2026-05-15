@@ -1,7 +1,8 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.ui.graphics.Color
 import kotlinx.serialization.json.Json
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -22,8 +23,8 @@ class DrawingSerializationTest {
     fun drawingPath_roundTrip_preservesColorAndStroke() {
         val original = DrawingPath(
             points = listOf(DrawingPoint(1f, 2f, true), DrawingPoint(3f, 4f)),
-            color = Color.Red,
-            strokeWidth = 5f
+            colorArgb = 0xFFE53935L,
+            strokeWidth = 5f,
         )
         val encoded = json.encodeToString(DrawingPath.serializer(), original)
         val decoded = json.decodeFromString(DrawingPath.serializer(), encoded)
@@ -31,17 +32,17 @@ class DrawingSerializationTest {
     }
 
     @Test
-    fun drawingPath_nonDefaultColor_encodesColorKey() {
-        val path = DrawingPath(color = Color.Blue)
+    fun drawingPath_nonDefaultColor_encodesColorArgbKey() {
+        val path = DrawingPath(colorArgb = 0xFF1E88E5L)
         val encoded = json.encodeToString(DrawingPath.serializer(), path)
-        assertTrue(encoded.contains("\"color\""), "JSON must contain color key: $encoded")
+        assertTrue(encoded.contains("\"colorArgb\""), "JSON must contain colorArgb key: $encoded")
     }
 
     @Test
-    fun colorAsLongSerializer_transparentColor_roundTrip() {
-        val original = Color(0x80FF0000.toInt())
-        val encoded = json.encodeToString(ColorAsLongSerializer, original)
-        val decoded = json.decodeFromString(ColorAsLongSerializer, encoded)
+    fun drawingPath_transparentColor_roundTrip() {
+        val original = DrawingPath(colorArgb = 0x80FF0000L)
+        val encoded = json.encodeToString(DrawingPath.serializer(), original)
+        val decoded = json.decodeFromString(DrawingPath.serializer(), encoded)
         assertEquals(original, decoded)
     }
 }

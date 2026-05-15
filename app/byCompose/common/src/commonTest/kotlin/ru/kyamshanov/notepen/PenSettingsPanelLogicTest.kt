@@ -1,6 +1,13 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.ui.graphics.Color
+import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
+import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
+import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
+import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
+import ru.kyamshanov.notepen.annotation.domain.model.applyShape
+import ru.kyamshanov.notepen.annotation.domain.model.applySize
+import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
+import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -16,30 +23,33 @@ class PenSettingsPanelLogicTest {
     @Test
     fun `applyPreset replaces RGB but preserves current alpha`() {
         // Verifies AC-8 + EC-9: switching a preset must keep the alpha slider value.
-        val current = PenSettings(color = Color.Black.copy(alpha = 0.5f), alpha = 0.5f)
-        val red = Color(0xFFE53935)
+        // 0x80000000L = black with alpha 0x80 (128/255 ≈ 0.5)
+        val current = PenSettings(colorArgb = 0x80000000L, alpha = 0.5f)
+        val presetArgb = 0xFFE53935L
 
-        val updated = current.applyPreset(red)
+        val updated = current.applyPreset(presetArgb)
 
-        assertEquals(red.copy(alpha = 0.5f), updated.color)
+        // RGB should be E53935, alpha byte preserved (0x80)
+        assertEquals(0x80E53935L, updated.colorArgb)
         assertEquals(0.5f, updated.alpha)
         assertEquals(current.strokeWidth, updated.strokeWidth)
     }
 
     @Test
-    fun `applyAlpha rebuilds color with new alpha and stores alpha verbatim`() {
+    fun `applyAlpha rebuilds colorArgb with new alpha and stores alpha verbatim`() {
         // Verifies AC-7: alpha slider drives both PenSettings.alpha and the
-        // alpha channel of PenSettings.color.
-        val current = PenSettings(color = Color(0xFFE53935), alpha = 1f)
+        // alpha channel of PenSettings.colorArgb.
+        val current = PenSettings(colorArgb = 0xFFE53935L, alpha = 1f)
 
         val updated = current.applyAlpha(0.3f)
 
         assertEquals(0.3f, updated.alpha)
-        assertEquals(0.3f, updated.color.alpha, absoluteTolerance = 0.01f)
-        // Red / green / blue components untouched.
-        assertEquals(current.color.red, updated.color.red, absoluteTolerance = 0.01f)
-        assertEquals(current.color.green, updated.color.green, absoluteTolerance = 0.01f)
-        assertEquals(current.color.blue, updated.color.blue, absoluteTolerance = 0.01f)
+        // Alpha byte in colorArgb must match the clamped alpha
+        val alphaByte = (updated.colorArgb shr 24) and 0xFFL
+        val expectedAlphaByte = (0.3f * 255).roundToInt().toLong()
+        assertEquals(expectedAlphaByte, alphaByte)
+        // RGB channels untouched
+        assertEquals(0xE53935L, updated.colorArgb and 0x00FFFFFFL)
     }
 
     @Test
@@ -93,10 +103,12 @@ class PenSettingsPanelLogicTest {
     @Test
     fun `PRESET_COLORS are all fully opaque`() {
         // Spec § 1: presets are fully opaque; alpha is applied separately.
-        for (preset in PenSettings.PRESET_COLORS) {
-            assertTrue(
-                preset.alpha == 1f,
-                "Preset $preset must be fully opaque so the alpha slider stays the single source of truth for transparency",
+        for (presetArgb in PenSettings.PRESET_COLORS) {
+            val alphaByte = (presetArgb shr 24) and 0xFFL
+            assertEquals(
+                0xFFL,
+                alphaByte,
+                "Preset 0x${presetArgb.toString(16)} must be fully opaque so the alpha slider stays the single source of truth for transparency",
             )
         }
     }
