@@ -1,0 +1,76 @@
+{
+  "lockVersion": "1",
+  "aikitVersion": "0.1.4",
+  "generatedAt": "",
+  "applications": [
+    {
+      "id": "root",
+      "path": ".",
+      "targets": {
+        "claude": {
+          "bundle": "modern-kit@0.0.1",
+          "source": "internal",
+          "files": [
+            {
+              "path": "CLAUDE.md",
+              "sha256": "87efbf6d2b23db6c635c0380a4dbf3aefd928d001dff7302e2a297a7a514355f"
+            },
+            {
+              "path": ".claude/agents/kotlin-specialist.md",
+              "sha256": "2056d37d6215bedf2e9c4e906069e6e93c063e382a9f7ecd4b660617a82fb36e"
+            },
+            {
+              "path": ".claude/agents/gradle-troubleshooter.md",
+              "sha256": "a07407ffa89fad568848870a60bf88ab7b1cee2c8fd95ebe23dc8cb5dcfc6548"
+            },
+            {
+              "path": ".claude/agents/code-reviewer.md",
+              "sha256": "6ae352a771325e1c81b6e318d1bc4b5433dbffe7038147fbb3a204e2ed8f773b"
+            },
+            {
+              "path": ".claude/commands/build-check.md",
+              "sha256": "15617a5c6788e7a38a323b724baff464b0fdeb7080098da4c6bb3da24075fd6f"
+            },
+            {
+              "path": ".claude/commands/review.md",
+              "sha256": "75f0ae8f48614ab44a724e5f99ec7bf09cbe7603ae4c03462ebff4a54d1f149a"
+            },
+            {
+              "path": ".claude/skills/review/SKILL.md",
+              "sha256": "cabecac1cce05e5443485577498a10b79d472de4f6d7ddcf554175d592577a97"
+            },
+            {
+              "path": ".claude/skills/kotlin-build/SKILL.md",
+              "sha256": "8834c2005b7629dc5328a1e272882b981ba9a33e598ee8e1ea028359d8d2b3bc"
+            },
+            {
+              "path": ".claude/hooks/session-start.sh",
+              "sha256": "61d79617e61dadda72a06b40a6046b98644e505156a9020a76e954943fa7dd43"
+            },
+            {
+              "path": ".claude/strict/hooks/block-dangerous.sh",
+              "sha256": "475997959ba5c88eb7559fe6b753c0f9f1ef46035d8bbdbe078c6d01f4a90737"
+            },
+            {
+              "path": ".claude/hooks/post-edit-ktlint.sh",
+              "sha256": "afe8833fabf47d7b893fd63ae72bb4ee9e12d593ff79f8143062384036d8c171"
+            },
+            {
+              "path": ".claude/hooks/stop-detekt.sh",
+              "sha256": "cd84949eda73772ba6589be243c33103d88d0924cd2503cb0f4dd49e140dc873"
+            },
+            {
+              "path": ".claude/settings.json",
+              "sha256": "8760e58db9b1cce25563f67c37d96ce9bd1bda5daeeeb9c42636e27222b8e2da"
+            },
+            {
+              "path": ".mcp.json",
+              "sha256": "6da7aa32736fe9b600ff3427e3bb68b72ee68932e50672904fdfdfde6f7b477b"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "manifestRef": ".aikit/manifest.json"
+}
