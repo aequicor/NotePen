@@ -1,28 +1,23 @@
 package ru.kyamshanov.notepen.mainscreen.platform
 
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.toComposeImageBitmap
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import org.jetbrains.skia.Image as SkiaImage
 
 /**
  * Desktop (JVM)-реализация [rememberPdfThumbnailPainter].
  *
- * Декодирует [imageData] через [javax.imageio.ImageIO] на [Dispatchers.IO].
- * Возвращает null пока декодирование не завершено (DEF-003).
+ * Skia декодирует PNG синхронно и нативно — быстро даже на главном потоке.
+ * Асинхронный produceState не используется: на Desktop обновление состояния
+ * из фоновой корутины не всегда триггерит рекомпозицию после навигации.
  */
 @Composable
-actual fun rememberPdfThumbnailPainter(imageData: ByteArray): Painter? {
-    val bitmap by produceState<ImageBitmap?>(null, imageData) {
-        value = withContext(Dispatchers.IO) {
-            javax.imageio.ImageIO.read(java.io.ByteArrayInputStream(imageData))
-                ?.toComposeImageBitmap()
-        }
+actual fun rememberPdfThumbnailPainter(imageData: ByteArray): Painter? =
+    remember(imageData) {
+        runCatching {
+            SkiaImage.makeFromEncoded(imageData).toComposeImageBitmap()
+        }.getOrNull()?.let { BitmapPainter(it) }
     }
-    return bitmap?.let { BitmapPainter(it) }
-}
