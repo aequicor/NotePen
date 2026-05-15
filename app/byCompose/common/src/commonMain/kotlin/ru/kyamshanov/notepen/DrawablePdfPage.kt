@@ -37,6 +37,7 @@ fun DrawablePdfPage(
     pdfDrawingState: PdfDrawingState,
     toolMode: ToolMode,
     penSettings: PenSettings,
+    markerSettings: MarkerSettings,
     eraserSettings: EraserSettings,
     onGestureStart: (snapshot: List<DrawingPath>) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -50,7 +51,7 @@ fun DrawablePdfPage(
     // EC-1 / EC-2: при смене инструмента финализируем незавершённый штрих и
     // сбрасываем активную сессию стирания.
     LaunchedEffect(toolMode) {
-        if (toolMode != ToolMode.PEN && pdfDrawingState.isDrawing.value) {
+        if (toolMode != ToolMode.PEN && toolMode != ToolMode.MARKER && pdfDrawingState.isDrawing.value) {
             pdfDrawingState.finishDrawing()
         }
         if (toolMode != ToolMode.ERASER) {
@@ -88,6 +89,34 @@ fun DrawablePdfPage(
                                         x = offset.x / w,
                                         y = offset.y / h,
                                         normalizedStrokeWidth = penSettings.strokeWidth / w,
+                                    )
+                                }
+                            },
+                            onDrag = { change, _ ->
+                                val (w, h) = canvasSize.value
+                                if (w > 0 && h > 0) {
+                                    pdfDrawingState.addPoint(
+                                        change.position.x / w,
+                                        change.position.y / h,
+                                    )
+                                }
+                            },
+                            onDragEnd = { pdfDrawingState.finishDrawing() },
+                        )
+                    }
+
+                    ToolMode.MARKER -> Modifier.pointerInput(toolMode, markerSettings) {
+                        detectDragGestures(
+                            onDragStart = { offset ->
+                                val (w, h) = canvasSize.value
+                                if (w > 0 && h > 0) {
+                                    onGestureStart(pdfDrawingState.currentPaths.toList())
+                                    pdfDrawingState.strokeColorArgb.value = markerSettings.colorArgb
+                                    pdfDrawingState.strokeWidth.value = markerSettings.strokeWidth
+                                    pdfDrawingState.startDrawing(
+                                        x = offset.x / w,
+                                        y = offset.y / h,
+                                        normalizedStrokeWidth = markerSettings.strokeWidth / w,
                                     )
                                 }
                             },

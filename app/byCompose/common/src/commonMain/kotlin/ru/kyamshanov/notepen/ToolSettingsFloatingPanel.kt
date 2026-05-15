@@ -54,6 +54,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
 import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
 import ru.kyamshanov.notepen.annotation.domain.model.applyShape
@@ -125,11 +126,13 @@ fun ToolSettingsFloatingPanel(
     toolMode: ToolMode,
     penSettings: PenSettings,
     onPenSettingsChange: (PenSettings) -> Unit,
+    markerSettings: MarkerSettings,
+    onMarkerSettingsChange: (MarkerSettings) -> Unit,
     eraserSettings: EraserSettings,
     onEraserSettingsChange: (EraserSettings) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val visible = toolMode == ToolMode.PEN || toolMode == ToolMode.ERASER
+    val visible = toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER || toolMode == ToolMode.ERASER
 
     AnimatedVisibility(
         visible = visible,
@@ -155,6 +158,11 @@ fun ToolSettingsFloatingPanel(
                 ToolMode.PEN -> PenSettingsRow(
                     settings = penSettings,
                     onChange = onPenSettingsChange,
+                )
+
+                ToolMode.MARKER -> MarkerSettingsRow(
+                    settings = markerSettings,
+                    onChange = onMarkerSettingsChange,
                 )
 
                 ToolMode.ERASER -> EraserSettingsRow(
@@ -255,6 +263,49 @@ private fun ColorPresetDot(
                 shape = CircleShape,
             )
             .clickable(onClick = onClick),
+    )
+}
+
+@Composable
+private fun MarkerSettingsRow(
+    settings: MarkerSettings,
+    onChange: (MarkerSettings) -> Unit,
+) {
+    AdaptiveSettingsRow(
+        slots = listOf(
+            SlotItem(
+                icon = Icons.Default.LineWeight,
+                contentDescription = "Толщина",
+                label = "Толщина",
+                content = { sliderWidth ->
+                    SliderWithValueField(
+                        value = settings.strokeWidth,
+                        onValueChange = { onChange(settings.applyStrokeWidth(it)) },
+                        valueRange = MarkerSettings.MIN_STROKE_WIDTH..MarkerSettings.MAX_STROKE_WIDTH,
+                        formatDisplay = { it.roundToInt().toString() },
+                        parseInput = { it.trim().toIntOrNull()?.toFloat() },
+                        suffix = " dp",
+                        sliderWidth = sliderWidth,
+                    )
+                },
+            ),
+            SlotItem(
+                icon = Icons.Default.Palette,
+                contentDescription = "Цвет",
+                label = null,
+                content = {
+                    Row(horizontalArrangement = Arrangement.spacedBy(PRESET_GAP)) {
+                        MarkerSettings.PRESET_COLORS.forEach { presetArgb ->
+                            ColorPresetDot(
+                                presetArgb = presetArgb,
+                                selected = presetArgb == settings.colorArgb,
+                                onClick = { onChange(settings.applyPreset(presetArgb)) },
+                            )
+                        }
+                    }
+                },
+            ),
+        ),
     )
 }
 

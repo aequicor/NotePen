@@ -59,6 +59,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
+import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository as SharedAnnotationRepository
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -92,6 +93,7 @@ fun DetailsContent(
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     var penSettings by remember { mutableStateOf(PenSettings()) }
+    var markerSettings by remember { mutableStateOf(MarkerSettings()) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
     var isSaving by remember { mutableStateOf(false) }
     val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
@@ -126,6 +128,7 @@ fun DetailsContent(
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
             scale = bundle.scale
             penSettings = bundle.pen
+            markerSettings = bundle.marker
             eraserSettings = bundle.eraser
             bundle.pages.forEach { (pageIndex, paths) ->
                 drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.currentPaths.addAll(paths)
@@ -219,6 +222,7 @@ fun DetailsContent(
                             pdfDrawingState = pdfDrawingState,
                             toolMode = toolMode,
                             penSettings = penSettings,
+                            markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
                             onGestureStart = { snapshot ->
                                 globalUndoStack.addLast(pageIndex to snapshot)
@@ -260,6 +264,7 @@ fun DetailsContent(
                             annotations = annotations,
                             scale = scale,
                             pen = penSettings,
+                            marker = markerSettings,
                             eraser = eraserSettings,
                             currentPage = lazyListState.firstVisibleItemIndex,
                             currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
@@ -280,6 +285,8 @@ fun DetailsContent(
             toolMode = toolMode,
             penSettings = penSettings,
             onPenSettingsChange = { penSettings = it },
+            markerSettings = markerSettings,
+            onMarkerSettingsChange = { markerSettings = it },
             eraserSettings = eraserSettings,
             onEraserSettingsChange = { eraserSettings = it },
             modifier = Modifier
@@ -317,6 +324,7 @@ fun DetailsContent(
                         annotations = annotations,
                         scale = scale,
                         pen = penSettings,
+                        marker = markerSettings,
                         eraser = eraserSettings,
                         currentPage = lazyListState.firstVisibleItemIndex,
                         currentPageOffset = lazyListState.firstVisibleItemScrollOffset,

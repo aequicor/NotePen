@@ -7,4 +7,4 @@ package ru.kyamshanov.notepen
  * в момент времени. [NONE] означает, что ни один инструмент не активен
  * (жесты на canvas интерпретируются как pan / zoom).
  */
-enum class ToolMode { NONE, PEN, ERASER }
+enum class ToolMode { NONE, PEN, MARKER, ERASER }

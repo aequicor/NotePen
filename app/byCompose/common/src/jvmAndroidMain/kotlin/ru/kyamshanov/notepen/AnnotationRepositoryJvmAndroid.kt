@@ -7,6 +7,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
+import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import java.io.File
@@ -41,10 +42,17 @@ private data class EraserSettingsDto(
 )
 
 @Serializable
+private data class MarkerSettingsDto(
+    val colorArgb: Long = MarkerSettings.PRESET_COLORS[0],
+    val strokeWidth: Float = MarkerSettings.DEFAULT_STROKE_WIDTH,
+)
+
+@Serializable
 private data class AnnotationDataDto(
     val pages: Map<String, List<DrawingPathDto>>,
     val scale: Int = 100,
     val pen: PenSettingsDto? = null,
+    val marker: MarkerSettingsDto? = null,
     val eraser: EraserSettingsDto? = null,
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
@@ -63,6 +71,8 @@ private fun DrawingPath.toDto() = DrawingPathDto(points.map { it.toDto() }, colo
 private fun PenSettings.toDto() = PenSettingsDto(colorArgb, strokeWidth, alpha)
 private fun EraserShape.toDto() = if (this == EraserShape.CIRCLE) EraserShapeDto.CIRCLE else EraserShapeDto.SQUARE
 private fun EraserSettings.toDto() = EraserSettingsDto(shape.toDto(), sizeNormalized)
+private fun MarkerSettings.toDto() = MarkerSettingsDto(colorArgb, strokeWidth)
+private fun MarkerSettingsDto.toDomain() = MarkerSettings(colorArgb, strokeWidth)
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
@@ -75,6 +85,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
         annotations: Map<Int, List<DrawingPath>>,
         scale: Int,
         pen: PenSettings,
+        marker: MarkerSettings,
         eraser: EraserSettings,
         currentPage: Int,
         currentPageOffset: Int,
@@ -84,6 +95,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
                 .mapValues { (_, paths) -> paths.map { it.toDto() } },
             scale = scale,
             pen = pen.toDto(),
+            marker = marker.toDto(),
             eraser = eraser.toDto(),
             currentPage = currentPage,
             currentPageOffset = currentPageOffset,
@@ -107,6 +119,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
                     pages = pages,
                     scale = dto.scale,
                     pen = dto.pen?.toDomain() ?: PenSettings(),
+                    marker = dto.marker?.toDomain() ?: MarkerSettings(),
                     eraser = dto.eraser?.toDomain() ?: EraserSettings(),
                     currentPage = dto.currentPage,
                     currentPageOffset = dto.currentPageOffset,

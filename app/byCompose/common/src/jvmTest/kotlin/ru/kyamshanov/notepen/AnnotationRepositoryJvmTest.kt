@@ -173,7 +173,7 @@ class AnnotationRepositoryJvmTest {
         val eraser = EraserSettings(shape = EraserShape.SQUARE, sizeNormalized = 0.15f)
         val scale = 140
 
-        val saveResult = repo.save(pdfPath, annotations, scale, pen, eraser)
+        val saveResult = repo.save(pdfPath, annotations, scale, pen = pen, eraser = eraser)
         assertTrue(saveResult.isSuccess, "save must succeed for the full DetailsContent flow")
 
         val bundle = repo.load(pdfPath).getOrThrow()
