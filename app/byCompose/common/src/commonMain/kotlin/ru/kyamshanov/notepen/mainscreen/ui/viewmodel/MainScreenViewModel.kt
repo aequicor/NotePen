@@ -244,7 +244,16 @@ class MainScreenViewModel(
         result.fold(
             onSuccess = { addResult ->
                 when (addResult) {
-                    is AddHistoryResult.Added, is AddHistoryResult.Moved -> {
+                    is AddHistoryResult.Added -> {
+                        _state.update { s ->
+                            s.copy(
+                                recentFiles = listOf(addResult.record.toUiModel()) + s.recentFiles,
+                                navigationTarget = NavigationTarget.Editor(uri, 0),
+                            )
+                        }
+                        launchThumbnailGeneration(listOf(addResult.record))
+                    }
+                    is AddHistoryResult.Moved -> {
                         _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, 0)) }
                     }
                     is AddHistoryResult.SafFuzzyMatchDetected -> {
