@@ -10,7 +10,6 @@ confidence: high
 source: human
 updated: 2026-05-07T17:37:42Z
 ---
-
 # NotePen — Knowledge Vault
 
 > **Entry point for AI agents.** Search this vault before any action.
@@ -33,6 +32,7 @@ vault/
 │   ├── test-cases.md                 ← live test state
 │   └── retro.md                      ← optional, accumulates bug retros
 │
+├── reference/common/architecture.md  ← архитектура проекта (модули, слои, зависимости)
 ├── guidelines/<module>/<topic>.md    ← coding patterns (optional, project-specific)
 ├── guidelines/libs/<lib>-<version>.md ← cached external API documentation
 │
@@ -69,3 +69,4 @@ v4 used five Diátaxis subtrees (one file per concern → 7–10 files per featu
 - Compile: `./gradlew compileKotlin`
 - Test: `./gradlew :[module]:test`
 - Lint: `./gradlew detekt ktlintCheck`
+- Architecture: `reference/common/architecture.md`
