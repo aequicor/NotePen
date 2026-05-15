@@ -5,10 +5,17 @@ import androidx.compose.ui.window.rememberWindowState
 import com.arkivanov.decompose.DefaultComponentContext
 import com.arkivanov.decompose.extensions.compose.lifecycle.LifecycleController
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
-import org.jetbrains.compose.resources.painterResource
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.WebSockets
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import notepen.app.bycompose.desktop.generated.resources.Res
 import notepen.app.bycompose.desktop.generated.resources.app_icon
-import kotlinx.coroutines.Dispatchers
+import org.jetbrains.compose.resources.painterResource
 import ru.kyamshanov.notepen.App
 import ru.kyamshanov.notepen.DefaultRootComponent
 import ru.kyamshanov.notepen.RootComponent
@@ -24,10 +31,24 @@ import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
-
+import ru.kyamshanov.notepen.server.KtorPeerServer
+import ru.kyamshanov.notepen.sync.HostViewModel
+import ru.kyamshanov.notepen.sync.SyncViewModel
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.PairingState
+import ru.kyamshanov.notepen.sync.infrastructure.JmDnsDeviceDiscovery
+import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
+import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
+import java.net.InetAddress
+import java.util.UUID
 
 fun main() {
     val lifecycle = LifecycleRegistry()
+    val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+    val selfId = UUID.randomUUID().toString()
+    val selfName = runCatching { InetAddress.getLocalHost().hostName }.getOrDefault("NotePen Desktop")
+    val selfInfo = DeviceInfo(id = selfId, name = selfName, host = "", port = 0)
 
     val pdfDocumentLoader = JvmPdfDocumentLoader(Dispatchers.IO)
     val pdfPageRenderer = JvmPdfPageRenderer(Dispatchers.IO)
@@ -37,6 +58,34 @@ fun main() {
     val availabilityChecker = FileAvailabilityCheckerDesktop()
     val thumbnailRepo = ThumbnailRepositoryDesktop()
     val thumbnailGenerator = PdfThumbnailGeneratorDesktop()
+
+    val peerServer = KtorPeerServer(selfInfo = selfInfo, ioDispatcher = Dispatchers.IO)
+    val serviceRegistrar = JmDnsServiceRegistrar()
+    val discovery = JmDnsDeviceDiscovery(Dispatchers.IO)
+    val httpClient = HttpClient(CIO) { install(WebSockets) }
+    val syncClient = KtorSyncClient(httpClient)
+
+    val hostViewModel = HostViewModel(server = peerServer, scope = appScope)
+    val syncViewModel = SyncViewModel(
+        discovery = discovery,
+        client = syncClient,
+        selfInfo = selfInfo,
+        scope = appScope,
+    )
+
+    // Register/unregister mDNS service as the server lifecycle changes.
+    appScope.launch {
+        peerServer.state.collect { state ->
+            withContext(Dispatchers.IO) {
+                when (state) {
+                    is PairingState.AwaitingConnection ->
+                        serviceRegistrar.register(selfInfo.copy(host = state.host, port = state.port))
+                    is PairingState.Idle -> serviceRegistrar.unregister()
+                    else -> Unit
+                }
+            }
+        }
+    }
 
     // Always create the root component outside Compose on the UI thread
     val root: RootComponent =
@@ -69,15 +118,20 @@ fun main() {
         LifecycleController(lifecycle, windowState)
 
         Window(
-            onCloseRequest = ::exitApplication,
+            onCloseRequest = {
+                serviceRegistrar.unregister()
+                exitApplication()
+            },
             state = windowState,
             title = "NotePen",
-            icon = painterResource(Res.drawable.app_icon) //for generate Res class use `gradle :app:byCompose:desktop:generateComposeResClass`
+            icon = painterResource(Res.drawable.app_icon),
         ) {
             App(
                 rootComponent = root,
                 pdfDocumentLoader = pdfDocumentLoader,
                 pdfPageRenderer = pdfPageRenderer,
+                hostViewModel = hostViewModel,
+                syncViewModel = syncViewModel,
             )
         }
     }

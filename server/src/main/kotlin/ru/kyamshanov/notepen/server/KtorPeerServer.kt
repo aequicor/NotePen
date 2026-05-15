@@ -65,12 +65,14 @@ class KtorPeerServer(
 
     private var engine: EmbeddedServer<*, *>? = null
     private var serverPort: Int = 0
+    private var serverHost: String = ""
     private var activeSession: DefaultWebSocketServerSession? = null
     private val serverScope = CoroutineScope(ioDispatcher + Job())
 
     override suspend fun start(): Result<String> = runCatching {
         val code = pairing.generateCode()
         val host = InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
+        serverHost = host
         val port = findFreePort()
         serverPort = port
 
@@ -101,11 +103,7 @@ class KtorPeerServer(
             val first = session.receiveDeserialized<NetworkMessage>()
             if (first !is NetworkMessage.PairRequest) {
                 session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "expected pair_request"))
-                _state.value = PairingState.AwaitingConnection(
-                    code = pairing.generateCode(),
-                    host = ((_state.value as? PairingState.AwaitingConnection)?.host ?: ""),
-                    port = ((_state.value as? PairingState.AwaitingConnection)?.port ?: 0),
-                )
+                resetToAwaitingConnection()
                 return
             }
 
@@ -121,12 +119,10 @@ class KtorPeerServer(
             _state.value = PairingState.Connected(first.device)
             logger.info { "Paired with ${first.device.name}" }
 
-            for (frame in session.incoming) {
-                runCatching {
-                    val msg = session.receiveDeserialized<NetworkMessage>()
-                    if (msg is NetworkMessage.Disconnect) return@runCatching
-                    _incoming.emit(msg)
-                }
+            while (true) {
+                val msg = session.receiveDeserialized<NetworkMessage>()
+                if (msg is NetworkMessage.Disconnect) break
+                _incoming.emit(msg)
             }
         } catch (e: Exception) {
             logger.warn { "Session ended: ${e.message}" }
@@ -142,8 +138,7 @@ class KtorPeerServer(
         serverScope.launch {
             if (engine == null) return@launch
             val code = pairing.generateCode()
-            val host = InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
-            _state.value = PairingState.AwaitingConnection(code = code, host = host, port = serverPort)
+            _state.value = PairingState.AwaitingConnection(code = code, host = serverHost, port = serverPort)
         }
     }
 

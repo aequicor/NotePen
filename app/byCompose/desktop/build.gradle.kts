@@ -20,10 +20,14 @@ kotlin {
         }
 
         desktopMain.dependencies {
+            implementation(projects.server)
             implementation(projects.shared)
             implementation(projects.app.byCompose.common)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.swing)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.websockets)
 
             //decompose
             implementation(libs.decompose)

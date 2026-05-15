@@ -11,6 +11,7 @@ import io.ktor.websocket.close
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +39,9 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
     private val _incoming = MutableSharedFlow<NetworkMessage>(extraBufferCapacity = 64)
     override val incomingMessages: Flow<NetworkMessage> = _incoming.asSharedFlow()
 
+    /** Buffered outgoing queue; consumed by the active WebSocket session's forward coroutine. */
+    private val _outgoing = Channel<NetworkMessage>(Channel.BUFFERED)
+
     private var sessionScope: CoroutineScope? = null
 
     override suspend fun connect(server: DeviceInfo, pairingCode: String, selfInfo: DeviceInfo) {
@@ -64,12 +68,17 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
                         }
                     }
 
-                    for (frame in incoming) {
-                        runCatching {
-                            val msg = receiveDeserialized<NetworkMessage>()
-                            if (msg is NetworkMessage.Disconnect) return@runCatching
-                            _incoming.emit(msg)
+                    // Forward outgoing messages from the shared channel to this session.
+                    launch {
+                        for (msg in _outgoing) {
+                            sendSerialized<NetworkMessage>(msg)
                         }
+                    }
+
+                    while (true) {
+                        val msg = receiveDeserialized<NetworkMessage>()
+                        if (msg is NetworkMessage.Disconnect) break
+                        _incoming.emit(msg)
                     }
                 }
             }.onFailure { e ->
@@ -80,9 +89,7 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
     }
 
     override suspend fun send(message: NetworkMessage) {
-        // Sending requires the active session — for now messages are sent via server's incoming only.
-        // Full bidirectional send tracked in M6.
-        logger.debug { "send() not yet routed to session: $message" }
+        _outgoing.trySend(message)
     }
 
     override suspend fun disconnect() {
