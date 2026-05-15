@@ -54,8 +54,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
+import ru.kyamshanov.notepen.annotation.domain.model.applyMode
 import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
 import ru.kyamshanov.notepen.annotation.domain.model.applyShape
 import ru.kyamshanov.notepen.annotation.domain.model.applySize
@@ -318,11 +320,30 @@ private fun EraserSettingsRow(
         slots = listOf(
             SlotItem(
                 icon = Icons.Default.Category,
+                contentDescription = "Режим",
+                label = "Режим",
+                content = {
+                    FilterChip(
+                        selected = settings.mode == EraserMode.POINT,
+                        onClick = { onChange(settings.applyMode(EraserMode.POINT)) },
+                        label = { Text("Точки") },
+                        shape = CircleShape,
+                        colors = chipColors(),
+                    )
+                    FilterChip(
+                        selected = settings.mode == EraserMode.OBJECT,
+                        onClick = { onChange(settings.applyMode(EraserMode.OBJECT)) },
+                        label = { Text("Штрих") },
+                        shape = CircleShape,
+                        colors = chipColors(),
+                    )
+                },
+            ),
+            SlotItem(
+                icon = Icons.Default.Category,
                 contentDescription = "Форма",
                 label = "Форма",
                 content = {
-                    // shape=CircleShape — pill chip; avoids the square ripple of
-                    // Material 3 FilterChipDefaults.shape (RoundedCornerShape(8dp)).
                     FilterChip(
                         selected = settings.shape == EraserShape.CIRCLE,
                         onClick = { onChange(settings.applyShape(EraserShape.CIRCLE)) },

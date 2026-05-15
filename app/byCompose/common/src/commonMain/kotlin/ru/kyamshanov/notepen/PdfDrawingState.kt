@@ -4,6 +4,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 
@@ -121,4 +122,49 @@ fun PdfDrawingState.erasePointsInZone(
         currentPaths.addAll(rebuilt)
     }
     return anyChange
+}
+
+/**
+ * Object-mode erase: removes any stroke that has at least one point inside the zone.
+ *
+ * Unlike [erasePointsInZone], the whole stroke is deleted — not just the intersecting points.
+ * Returns `true` if at least one stroke was removed.
+ */
+fun PdfDrawingState.eraseStrokesInZone(
+    centerX: Float,
+    centerY: Float,
+    halfSizeNormalized: Float,
+    shape: EraserShape,
+): Boolean {
+    if (currentPaths.isEmpty()) return false
+
+    val r2 = halfSizeNormalized * halfSizeNormalized
+    val before = currentPaths.size
+
+    currentPaths.removeAll { path ->
+        path.points.any { pt ->
+            val dx = pt.x - centerX
+            val dy = pt.y - centerY
+            when (shape) {
+                EraserShape.CIRCLE -> dx * dx + dy * dy <= r2
+                EraserShape.SQUARE -> kotlin.math.abs(dx) <= halfSizeNormalized &&
+                    kotlin.math.abs(dy) <= halfSizeNormalized
+            }
+        }
+    }
+
+    return currentPaths.size != before
+}
+
+/**
+ * Dispatches to [erasePointsInZone] or [eraseStrokesInZone] based on [EraserSettings.mode].
+ */
+fun PdfDrawingState.eraseInZone(
+    centerX: Float,
+    centerY: Float,
+    halfSizeNormalized: Float,
+    settings: EraserSettings,
+): Boolean = when (settings.mode) {
+    EraserMode.POINT -> erasePointsInZone(centerX, centerY, halfSizeNormalized, settings.shape)
+    EraserMode.OBJECT -> eraseStrokesInZone(centerX, centerY, halfSizeNormalized, settings.shape)
 }

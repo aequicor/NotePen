@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationBundle
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
@@ -36,9 +37,13 @@ private data class PenSettingsDto(
 private enum class EraserShapeDto { CIRCLE, SQUARE }
 
 @Serializable
+private enum class EraserModeDto { POINT, OBJECT }
+
+@Serializable
 private data class EraserSettingsDto(
     val shape: EraserShapeDto = EraserShapeDto.CIRCLE,
     val sizeNormalized: Float = EraserSettings.DEFAULT_SIZE_NORMALIZED,
+    val mode: EraserModeDto = EraserModeDto.POINT,
 )
 
 @Serializable
@@ -64,13 +69,15 @@ private fun DrawingPointDto.toDomain() = DrawingPoint(x, y, isNewPath)
 private fun DrawingPathDto.toDomain() = DrawingPath(points.map { it.toDomain() }, colorArgb, strokeWidth)
 private fun PenSettingsDto.toDomain() = PenSettings(colorArgb, strokeWidth, alpha)
 private fun EraserShapeDto.toDomain() = if (this == EraserShapeDto.CIRCLE) EraserShape.CIRCLE else EraserShape.SQUARE
-private fun EraserSettingsDto.toDomain() = EraserSettings(shape.toDomain(), sizeNormalized)
+private fun EraserModeDto.toDomain() = if (this == EraserModeDto.OBJECT) EraserMode.OBJECT else EraserMode.POINT
+private fun EraserSettingsDto.toDomain() = EraserSettings(shape.toDomain(), sizeNormalized, mode.toDomain())
 
 private fun DrawingPoint.toDto() = DrawingPointDto(x, y, isNewPath)
 private fun DrawingPath.toDto() = DrawingPathDto(points.map { it.toDto() }, colorArgb, strokeWidth)
 private fun PenSettings.toDto() = PenSettingsDto(colorArgb, strokeWidth, alpha)
 private fun EraserShape.toDto() = if (this == EraserShape.CIRCLE) EraserShapeDto.CIRCLE else EraserShapeDto.SQUARE
-private fun EraserSettings.toDto() = EraserSettingsDto(shape.toDto(), sizeNormalized)
+private fun EraserMode.toDto() = if (this == EraserMode.OBJECT) EraserModeDto.OBJECT else EraserModeDto.POINT
+private fun EraserSettings.toDto() = EraserSettingsDto(shape.toDto(), sizeNormalized, mode.toDto())
 private fun MarkerSettings.toDto() = MarkerSettingsDto(colorArgb, strokeWidth)
 private fun MarkerSettingsDto.toDomain() = MarkerSettings(colorArgb, strokeWidth)
 

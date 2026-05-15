@@ -142,11 +142,11 @@ fun DrawablePdfPage(
                                     val nx = offset.x / w
                                     val ny = offset.y / h
                                     eraserPos.value = Offset(nx, ny)
-                                    pdfDrawingState.erasePointsInZone(
+                                    pdfDrawingState.eraseInZone(
                                         centerX = nx,
                                         centerY = ny,
                                         halfSizeNormalized = eraserSettings.sizeNormalized / 2f,
-                                        shape = eraserSettings.shape,
+                                        settings = eraserSettings,
                                     )
                                 }
                             },
@@ -156,11 +156,11 @@ fun DrawablePdfPage(
                                     val nx = change.position.x / w
                                     val ny = change.position.y / h
                                     eraserPos.value = Offset(nx, ny)
-                                    pdfDrawingState.erasePointsInZone(
+                                    pdfDrawingState.eraseInZone(
                                         centerX = nx,
                                         centerY = ny,
                                         halfSizeNormalized = eraserSettings.sizeNormalized / 2f,
-                                        shape = eraserSettings.shape,
+                                        settings = eraserSettings,
                                     )
                                 }
                             },
