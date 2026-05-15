@@ -15,6 +15,8 @@ data class DrawingPath(
     val points: List<DrawingPoint> = emptyList(),
     val colorArgb: Long = BLACK_ARGB,
     val strokeWidth: Float = DEFAULT_STROKE_WIDTH,
+    /** Stable identifier for sync; empty string means local-only (not yet assigned). */
+    val strokeId: String = "",
 ) {
     companion object {
         const val BLACK_ARGB = 0xFF000000L

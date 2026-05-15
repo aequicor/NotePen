@@ -62,6 +62,11 @@ sealed class NetworkMessage {
         val chunkIndex: Int,
     ) : NetworkMessage()
 
+    /** Broadcasts a stroke addition or removal to the peer. */
+    @Serializable
+    @SerialName("stroke_delta")
+    data class StrokeDeltaMessage(val delta: StrokeDelta) : NetworkMessage()
+
     /** Notifies the remote side that the connection will be closed gracefully. */
     @Serializable
     @SerialName("disconnect")
