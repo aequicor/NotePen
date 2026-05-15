@@ -95,6 +95,7 @@ fun DetailsContent(
     var penSettings by remember { mutableStateOf(PenSettings()) }
     var markerSettings by remember { mutableStateOf(MarkerSettings()) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
+    var showThumbnails by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
     val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
     val hasAnnotations by remember {
@@ -241,6 +242,25 @@ fun DetailsContent(
         }
 
         AnimatedVisibility(
+            visible = showThumbnails && pages.isNotEmpty(),
+            enter = slideInHorizontally { -it } + fadeIn(),
+            exit = slideOutHorizontally { -it } + fadeOut(),
+            modifier = Modifier.align(Alignment.CenterStart),
+        ) {
+            PageThumbnailsSidebar(
+                pages = pages,
+                pdfDocument = pdfDocument,
+                renderer = renderer,
+                currentPage = firstVisiblePage,
+                onPageClick = { pageIndex ->
+                    coroutineScope.launch {
+                        lazyListState.animateScrollToItem(pageIndex)
+                    }
+                },
+            )
+        }
+
+        AnimatedVisibility(
             visible = true,
             enter = slideInHorizontally { -it } + fadeIn(),
             exit = slideOutHorizontally { -it } + fadeOut(),
@@ -253,6 +273,8 @@ fun DetailsContent(
                 onToolModeChange = { toolMode = it },
                 hasAnnotations = hasAnnotations,
                 isSaving = isSaving,
+                showThumbnails = showThumbnails,
+                onToggleThumbnails = { showThumbnails = !showThumbnails },
                 onSave = {
                     isSaving = true
                     coroutineScope.launch {

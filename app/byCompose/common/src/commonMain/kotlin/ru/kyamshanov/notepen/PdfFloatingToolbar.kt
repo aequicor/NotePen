@@ -8,6 +8,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -47,6 +48,8 @@ fun PdfFloatingToolbar(
     scale: Int,
     onZoomIn: () -> Unit,
     onZoomOut: () -> Unit,
+    showThumbnails: Boolean,
+    onToggleThumbnails: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -84,6 +87,13 @@ fun PdfFloatingToolbar(
                 onClick = {
                     onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER))
                 },
+            )
+
+            ToolToggleButton(
+                icon = Icons.Default.GridView,
+                contentDescription = "Миниатюры страниц",
+                selected = showThumbnails,
+                onClick = onToggleThumbnails,
             )
 
             IconButton(
