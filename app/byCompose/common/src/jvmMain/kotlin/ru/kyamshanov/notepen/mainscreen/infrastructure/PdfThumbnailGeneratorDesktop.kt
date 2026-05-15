@@ -31,9 +31,18 @@ class PdfThumbnailGeneratorDesktop : PdfThumbnailGenerator {
                     val renderer = PDFRenderer(doc)
                     val page = doc.pages[0]
                     val scale = widthPx.toFloat() / page.mediaBox.width
-                    val image: BufferedImage = renderer.renderImage(0, scale)
+                    val raw: BufferedImage = renderer.renderImage(0, scale)
+                    val image = if (raw.type == BufferedImage.TYPE_INT_ARGB) raw else {
+                        val converted = BufferedImage(raw.width, raw.height, BufferedImage.TYPE_INT_ARGB)
+                        val g = converted.createGraphics()
+                        g.drawImage(raw, 0, 0, null)
+                        g.dispose()
+                        converted
+                    }
                     val stream = ByteArrayOutputStream()
-                    ImageIO.write(image, "PNG", stream)
+                    if (!ImageIO.write(image, "PNG", stream)) {
+                        throw ThumbnailGenerationException("No PNG writer for image type ${raw.type}")
+                    }
                     stream.toByteArray()
                 }
             }.mapFailure { cause ->
