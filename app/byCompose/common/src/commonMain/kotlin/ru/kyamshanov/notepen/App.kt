@@ -4,14 +4,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import org.jetbrains.compose.ui.tooling.preview.Preview
+import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
+import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 
 @Composable
-@Preview
-fun App(rootComponent: RootComponent, modifier: Modifier = Modifier.fillMaxSize()) {
+fun App(
+    rootComponent: RootComponent,
+    pdfDocumentLoader: PdfDocumentLoader,
+    pdfPageRenderer: PdfPageRenderer,
+    modifier: Modifier = Modifier.fillMaxSize(),
+) {
     ComposableAppTheme {
         Surface {
-            RootContent(component = rootComponent, modifier = Modifier.fillMaxSize())
+            RootContent(
+                component = rootComponent,
+                pdfDocumentLoader = pdfDocumentLoader,
+                pdfPageRenderer = pdfPageRenderer,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }

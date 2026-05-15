@@ -11,9 +11,16 @@ import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainContent
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
+import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
+import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 
 @Composable
-fun RootContent(component: RootComponent, modifier: Modifier = Modifier) {
+fun RootContent(
+    component: RootComponent,
+    pdfDocumentLoader: PdfDocumentLoader,
+    pdfPageRenderer: PdfPageRenderer,
+    modifier: Modifier = Modifier,
+) {
     Children(
         stack = component.stack,
         modifier = modifier,
@@ -58,6 +65,8 @@ fun RootContent(component: RootComponent, modifier: Modifier = Modifier) {
             }
             is RootComponent.Child.DetailsChild -> DetailsContent(
                 component = child.component,
+                loader = pdfDocumentLoader,
+                renderer = pdfPageRenderer,
                 modifier = modifier,
             )
         }

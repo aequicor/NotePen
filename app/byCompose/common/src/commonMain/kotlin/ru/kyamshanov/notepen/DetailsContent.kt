@@ -52,13 +52,14 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
+import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
+import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 
 private val logger = KotlinLogging.logger {}
 
@@ -67,21 +68,23 @@ private val SCROLL_BOTTOM_EXTRA = 240.dp
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
+fun DetailsContent(
+    component: DetailsComponent,
+    loader: PdfDocumentLoader,
+    renderer: PdfPageRenderer,
+    modifier: Modifier = Modifier,
+) {
     val localWindowInfo = LocalWindowInfo.current
     val windowSizeInPx = localWindowInfo.containerSize
-    val isCompact = with(LocalDensity.current) { windowSizeInPx.width.toDp() < 600.dp }
     val model by component.model.subscribeAsState()
     val filePath = remember(model.title) { model.title }
-    val pdfManager = remember(filePath) { PdfManager(filePath) }
-    val metadata = remember(pdfManager.metadata) { pdfManager.metadata }
-    val pages = remember(metadata.pages) { metadata.pages }
-    var scale by remember { mutableStateOf(100) }
-    val pagesCache = remember(pages, scale) { mutableMapOf<Int, ImageBitmap>() }
 
-    // Step 6 wiring: toolMode is now first-class state driven by the toolbar's
-    // Pen / Eraser toggles. penSettings / eraserSettings are local state until
-    // Step 7 wires them into AnnotationRepository.load / save (persistence).
+    var pdfDocument by remember(filePath) { mutableStateOf<PdfDocument?>(null) }
+    val pages by remember { derivedStateOf { pdfDocument?.info?.pages ?: emptyList() } }
+
+    var scale by remember { mutableStateOf(100) }
+    val pagesCache = remember(pdfDocument, scale) { mutableMapOf<Int, ImageBitmap>() }
+
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     var penSettings by remember { mutableStateOf(PenSettings()) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
@@ -100,10 +103,18 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     val focusRequester = remember { FocusRequester() }
     var shiftHeld by remember { mutableStateOf(false) }
 
-    DisposableEffect(pdfManager) {
-        onDispose {
-            pdfManager.close()
+    LaunchedEffect(filePath) {
+        pdfDocument?.close()
+        pdfDocument = try {
+            loader.load(filePath)
+        } catch (e: Exception) {
+            logger.warn { "Failed to open PDF: ${e::class.simpleName}" }
+            null
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { pdfDocument?.close() }
     }
 
     LaunchedEffect(filePath) {
@@ -148,7 +159,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                     if (globalRedoStack.isNotEmpty()) {
                         val (pageIndex, snapshot) = globalRedoStack.removeLast()
                         val current = drawingStates[pageIndex]?.currentPaths?.toList() ?: emptyList()
-                        globalUndoStack.addLast(pageIndex to current)
+                        globalUndoStack.addLast(pageIndex to snapshot)
                         drawingStates[pageIndex]?.restoreSnapshot(snapshot)
                     }
                     true
@@ -157,7 +168,7 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
     ) {
 
         ScrollablePdfColumn(state = lazyListState, modifier = Modifier.fillMaxSize()) {
-            items(items = pages, key = { it.pageNumber }) { page ->
+            items(items = pages, key = { it.pageIndex }) { page ->
                 val screenWidthPx = windowSizeInPx.width
                 val maxTargetWidthPx = screenWidthPx * 4 / 5
                 val targetWidthPx = ((screenWidthPx * 2 / 3) * (scale / 100f)).toInt()
@@ -174,16 +185,17 @@ fun DetailsContent(component: DetailsComponent, modifier: Modifier = Modifier) {
                 }
 
                 Box(modifier = Modifier.size(width, height)) {
-                    val pageIndex = page.pageNumber
+                    val pageIndex = page.pageIndex
                     var imageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-                    LaunchedEffect(scale) {
-                        val newBitmap = withContext(Dispatchers.IO) {
-                            pagesCache[pageIndex] ?: pdfManager.renderPage(
-                                pageIndex,
-                                IntSize(targetWidthPx, targetHeightPx)
-                            )?.also { pagesCache[pageIndex] = it }
-                        }
-                        if (newBitmap != null) imageBitmap = newBitmap
+                    LaunchedEffect(pdfDocument, scale) {
+                        val doc = pdfDocument ?: return@LaunchedEffect
+                        val bitmap = pagesCache[pageIndex] ?: renderer.renderPage(
+                            document = doc,
+                            pageIndex = pageIndex,
+                            widthPx = targetWidthPx,
+                            heightPx = targetHeightPx,
+                        ).toImageBitmap().also { pagesCache[pageIndex] = it }
+                        imageBitmap = bitmap
                     }
 
                     val bm = imageBitmap

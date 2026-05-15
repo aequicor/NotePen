@@ -7,6 +7,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import com.arkivanov.decompose.defaultComponentContext
+import kotlinx.coroutines.Dispatchers
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -16,6 +17,8 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroid
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
+import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
+import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -23,6 +26,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val context = applicationContext
+        val pdfDocumentLoader = AndroidPdfDocumentLoader(Dispatchers.IO)
+        val pdfPageRenderer = AndroidPdfPageRenderer(Dispatchers.IO)
         val historyRepo = FileHistoryRepositoryAndroid(context)
         val folderRepo = FolderRepositoryAndroid(context)
         val availabilityChecker = FileAvailabilityCheckerAndroid(context)
@@ -43,7 +48,7 @@ class MainActivity : ComponentActivity() {
                     thumbnailRepository = thumbnailRepo,
                     thumbnailGenerator = thumbnailGenerator,
                     onOpenEditor = onOpenEditor,
-                    onOpenFilePicker = {},
+                    onOpenFilePicker = { null },
                 )
             },
         )
@@ -53,7 +58,11 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(isSystemInDarkTheme()) {
                 enableEdgeToEdge()
             }
-            App(root)
+            App(
+                rootComponent = root,
+                pdfDocumentLoader = pdfDocumentLoader,
+                pdfPageRenderer = pdfPageRenderer,
+            )
         }
     }
 }

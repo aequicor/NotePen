@@ -8,6 +8,7 @@ import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import org.jetbrains.compose.resources.painterResource
 import notepen.app.bycompose.desktop.generated.resources.Res
 import notepen.app.bycompose.desktop.generated.resources.app_icon
+import kotlinx.coroutines.Dispatchers
 import ru.kyamshanov.notepen.App
 import ru.kyamshanov.notepen.DefaultRootComponent
 import ru.kyamshanov.notepen.RootComponent
@@ -21,10 +22,15 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesk
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
+import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
+import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
 
 
 fun main() {
     val lifecycle = LifecycleRegistry()
+
+    val pdfDocumentLoader = JvmPdfDocumentLoader(Dispatchers.IO)
+    val pdfPageRenderer = JvmPdfPageRenderer(Dispatchers.IO)
 
     val historyRepo = FileHistoryRepositoryDesktop()
     val folderRepo = FolderRepositoryDesktop()
@@ -68,7 +74,11 @@ fun main() {
             title = "NotePen",
             icon = painterResource(Res.drawable.app_icon) //for generate Res class use `gradle :app:byCompose:desktop:generateComposeResClass`
         ) {
-            App(root)
+            App(
+                rootComponent = root,
+                pdfDocumentLoader = pdfDocumentLoader,
+                pdfPageRenderer = pdfPageRenderer,
+            )
         }
     }
 }
