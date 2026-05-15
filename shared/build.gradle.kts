@@ -19,12 +19,13 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            //decompose
             implementation(libs.decompose)
             implementation(libs.lifecycle.coroutines)
             implementation(libs.kotlin.logging.common)
             implementation(libs.kotlinx.serialization.core)
             implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.websockets)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -34,11 +35,13 @@ kotlin {
             implementation(libs.kotlin.logging.android)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
+            implementation(libs.ktor.client.cio)
         }
         jvmMain.dependencies {
             implementation(libs.kotlin.logging.jvm)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
+            implementation(libs.ktor.client.cio)
         }
     }
 }
