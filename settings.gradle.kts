@@ -37,4 +37,5 @@ include(":app:byCompose:common")
 include(":app:byCompose:theme")
 include(":app:byCompose:uikit")
 include(":shared")
+include(":server")
 

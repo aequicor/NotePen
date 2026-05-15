@@ -7,6 +7,7 @@ plugins {
     alias(libs.plugins.composeMultiplatform) apply false
     alias(libs.plugins.kotlinMultiplatform) apply false
     alias(libs.plugins.kotlinSerialization) apply false
+    kotlin("jvm") version "2.1.0" apply false
 }
 
 // task for easy run
