@@ -8,8 +8,12 @@ import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import com.sun.jna.Native
+import com.sun.jna.Platform
 import com.sun.jna.platform.win32.WinDef.HWND
+import ru.kyamshanov.notepen.tablet.CocoaTabletInputController
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tablet.NoOpTabletInputController
+import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.WinTabTabletInputController
 import ru.kyamshanov.notepen.tablet.WindowsPenFix
 import com.arkivanov.decompose.DefaultComponentContext
@@ -157,19 +161,38 @@ fun main() {
             title = "NotePen",
             icon = painterResource(Res.drawable.app_icon),
         ) {
-            val tabletController = remember { WinTabTabletInputController() }
+            val tabletController: TabletInputController = remember {
+                when {
+                    Platform.isWindows() -> WinTabTabletInputController()
+                    Platform.isMac() -> CocoaTabletInputController()
+                    else -> NoOpTabletInputController
+                }
+            }
             val composeWindow: ComposeWindow = window
 
-            // Attach Wintab + disable Windows press-and-hold gesture after the
-            // window peer exists. `window.isDisplayable` is guaranteed by the
-            // time the first composition runs inside `Window {}`.
+            // Attach the platform-specific tablet input after the window peer
+            // exists. `window.isDisplayable` is guaranteed by the time the
+            // first composition runs inside `Window {}`. On Windows we also
+            // disable the press-and-hold gesture (spiral-defect fix) here.
             LaunchedEffect(composeWindow) {
-                val hwnd = HWND(Native.getComponentPointer(composeWindow))
-                WindowsPenFix.apply(hwnd)
-                tabletController.attach(hwnd)
+                when (val c = tabletController) {
+                    is WinTabTabletInputController -> {
+                        val hwnd = HWND(Native.getComponentPointer(composeWindow))
+                        WindowsPenFix.apply(hwnd)
+                        c.attach(hwnd)
+                    }
+                    is CocoaTabletInputController -> c.attach()
+                    else -> Unit
+                }
             }
             DisposableEffect(Unit) {
-                onDispose { tabletController.stop() }
+                onDispose {
+                    when (val c = tabletController) {
+                        is WinTabTabletInputController -> c.stop()
+                        is CocoaTabletInputController -> c.stop()
+                        else -> Unit
+                    }
+                }
             }
 
             CompositionLocalProvider(LocalTabletInputController provides tabletController) {
