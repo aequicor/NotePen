@@ -1,7 +1,17 @@
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import com.sun.jna.Native
+import com.sun.jna.platform.win32.WinDef.HWND
+import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tablet.WinTabTabletInputController
+import ru.kyamshanov.notepen.tablet.WindowsPenFix
 import com.arkivanov.decompose.DefaultComponentContext
 import com.arkivanov.decompose.extensions.compose.lifecycle.LifecycleController
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
@@ -147,14 +157,31 @@ fun main() {
             title = "NotePen",
             icon = painterResource(Res.drawable.app_icon),
         ) {
-            App(
-                rootComponent = root,
-                pdfDocumentLoader = pdfDocumentLoader,
-                pdfPageRenderer = pdfPageRenderer,
-                hostViewModel = hostViewModel,
-                syncViewModel = syncViewModel,
-                syncEngine = syncEngine,
-            )
+            val tabletController = remember { WinTabTabletInputController() }
+            val composeWindow: ComposeWindow = window
+
+            // Attach Wintab + disable Windows press-and-hold gesture after the
+            // window peer exists. `window.isDisplayable` is guaranteed by the
+            // time the first composition runs inside `Window {}`.
+            LaunchedEffect(composeWindow) {
+                val hwnd = HWND(Native.getComponentPointer(composeWindow))
+                WindowsPenFix.apply(hwnd)
+                tabletController.attach(hwnd)
+            }
+            DisposableEffect(Unit) {
+                onDispose { tabletController.stop() }
+            }
+
+            CompositionLocalProvider(LocalTabletInputController provides tabletController) {
+                App(
+                    rootComponent = root,
+                    pdfDocumentLoader = pdfDocumentLoader,
+                    pdfPageRenderer = pdfPageRenderer,
+                    hostViewModel = hostViewModel,
+                    syncViewModel = syncViewModel,
+                    syncEngine = syncEngine,
+                )
+            }
         }
     }
 }

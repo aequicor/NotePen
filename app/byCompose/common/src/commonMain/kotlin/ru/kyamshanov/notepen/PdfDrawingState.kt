@@ -16,18 +16,23 @@ class PdfDrawingState {
     /** ARGB-packed color of the active stroke; kept in sync with [PenSettings.colorArgb]. */
     var strokeColorArgb = mutableStateOf(DrawingPath.BLACK_ARGB)
 
-    fun startDrawing(x: Float, y: Float, normalizedStrokeWidth: Float = strokeWidth.value) {
+    fun startDrawing(
+        x: Float,
+        y: Float,
+        normalizedStrokeWidth: Float = strokeWidth.value,
+        pressure: Float = 1f,
+    ) {
         isDrawing.value = true
         currentPath.value = DrawingPath(
-            points = listOf(DrawingPoint(x, y, true)),
+            points = listOf(DrawingPoint(x, y, isNewPath = true, pressure = pressure)),
             colorArgb = strokeColorArgb.value,
             strokeWidth = normalizedStrokeWidth,
         )
     }
 
-    fun addPoint(x: Float, y: Float) {
+    fun addPoint(x: Float, y: Float, pressure: Float = 1f) {
         if (isDrawing.value) {
-            val newPoints = currentPath.value.points + DrawingPoint(x, y)
+            val newPoints = currentPath.value.points + DrawingPoint(x, y, pressure = pressure)
             currentPath.value = currentPath.value.copy(points = newPoints)
         }
     }

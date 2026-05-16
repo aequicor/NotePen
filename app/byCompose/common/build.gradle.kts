@@ -79,6 +79,8 @@ kotlin {
             implementation(libs.slf4j.simple)
             implementation(libs.apache.pdfbox)
             implementation(libs.jmdns)
+            implementation(libs.jna)
+            implementation(libs.jna.platform)
         }
     }
 }

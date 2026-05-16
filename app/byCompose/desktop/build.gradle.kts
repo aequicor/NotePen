@@ -24,6 +24,8 @@ kotlin {
             implementation(projects.shared)
             implementation(projects.app.byCompose.common)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.jna)
+            implementation(libs.jna.platform)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.cio)

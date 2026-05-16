@@ -15,11 +15,19 @@ data class PenSettings(
     val colorArgb: Long = DrawingPath.BLACK_ARGB,
     val strokeWidth: Float = DEFAULT_STROKE_WIDTH,
     val alpha: Float = 1f,
+    /**
+     * Minimum line width as a fraction of [strokeWidth] when stylus pressure
+     * approaches zero. Final per-segment width is interpolated linearly:
+     * `width = strokeWidth * (minWidthFactor + pressure * (1 - minWidthFactor))`.
+     * `1f` disables pressure modulation entirely.
+     */
+    val minWidthFactor: Float = DEFAULT_MIN_WIDTH_FACTOR,
 ) {
     companion object {
         const val DEFAULT_STROKE_WIDTH = 10f
         const val MIN_STROKE_WIDTH = 1f
         const val MAX_STROKE_WIDTH = 60f
+        const val DEFAULT_MIN_WIDTH_FACTOR = 0.2f
 
         /**
          * Preset colours as packed ARGB Longs (fully opaque).

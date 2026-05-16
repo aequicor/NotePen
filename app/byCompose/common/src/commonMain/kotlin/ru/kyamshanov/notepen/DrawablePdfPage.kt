@@ -18,12 +18,14 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
@@ -44,6 +46,7 @@ fun DrawablePdfPage(
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
+    val tablet = LocalTabletInputController.current
 
     // Позиция пальца ластика в нормализованных координатах [0..1] относительно canvas.
     // null → жест ластика не активен (палец не на экране) → индикатор не отрисовывается.
@@ -90,6 +93,7 @@ fun DrawablePdfPage(
                                         x = offset.x / w,
                                         y = offset.y / h,
                                         normalizedStrokeWidth = penSettings.strokeWidth / w,
+                                        pressure = tablet.latestPressure.value,
                                     )
                                 }
                             },
@@ -97,8 +101,9 @@ fun DrawablePdfPage(
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
                                     pdfDrawingState.addPoint(
-                                        change.position.x / w,
-                                        change.position.y / h,
+                                        x = change.position.x / w,
+                                        y = change.position.y / h,
+                                        pressure = tablet.latestPressure.value,
                                     )
                                 }
                             },
@@ -188,28 +193,11 @@ fun DrawablePdfPage(
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             pdfDrawingState.currentPaths.forEach { path ->
-                drawPath(
-                    path = path.points.toCatmullRomPath(size.width, size.height),
-                    color = Color(path.colorArgb.toInt()),
-                    style = Stroke(
-                        width = path.strokeWidth * size.width,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                    ),
-                )
+                drawStrokeWithPressure(path, size.width, size.height)
             }
 
             if (pdfDrawingState.isDrawing.value && pdfDrawingState.currentPath.value.points.size > 1) {
-                val livePath = pdfDrawingState.currentPath.value
-                drawPath(
-                    path = livePath.points.toCatmullRomPath(size.width, size.height),
-                    color = Color(livePath.colorArgb.toInt()),
-                    style = Stroke(
-                        width = livePath.strokeWidth * size.width,
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                    ),
-                )
+                drawStrokeWithPressure(pdfDrawingState.currentPath.value, size.width, size.height)
             }
 
             // Индикатор зоны ластика (AC-12). Отрисовывается только если палец на экране
@@ -251,6 +239,83 @@ fun DrawablePdfPage(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Renders [stroke] with per-segment width modulated by [DrawingPoint.pressure].
+ *
+ * When every point has the same pressure (typical mouse / marker stroke), the
+ * whole stroke is painted as a single Catmull-Rom-smoothed path — cheap and
+ * visually identical to the legacy renderer. When pressure varies (tablet),
+ * each segment is painted as its own short cubic with width derived from the
+ * average pressure of its two endpoints; this trades one draw call for N but
+ * gives the smooth taper users expect from pressure-sensitive pens.
+ *
+ * Segments are joined with [StrokeCap.Round] so the width steps are invisible.
+ */
+private fun DrawScope.drawStrokeWithPressure(
+    stroke: DrawingPath,
+    w: Float,
+    h: Float,
+) {
+    val points = stroke.points
+    if (points.size < 2) return
+
+    val color = Color(stroke.colorArgb.toInt())
+    val baseWidth = stroke.strokeWidth * w
+
+    val uniformPressure = points.first().pressure
+    val pressureVaries = points.any { it.pressure != uniformPressure }
+
+    if (!pressureVaries) {
+        drawPath(
+            path = points.toCatmullRomPath(w, h),
+            color = color,
+            style = Stroke(
+                width = baseWidth * uniformPressure,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+        )
+        return
+    }
+
+    // Per-segment render: split on sub-paths first so erased gaps stay gaps.
+    val starts = points.indices.filter { i -> i == 0 || points[i].isNewPath }
+    starts.forEachIndexed { si, start ->
+        val end = if (si + 1 < starts.size) starts[si + 1] else points.size
+        val seg = points.subList(start, end)
+        if (seg.size < 2) return@forEachIndexed
+
+        for (i in 0 until seg.size - 1) {
+            val p0 = if (i > 0) seg[i - 1] else seg[0]
+            val p1 = seg[i]
+            val p2 = seg[i + 1]
+            val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
+
+            val x1 = p1.x * w; val y1 = p1.y * h
+            val x2 = p2.x * w; val y2 = p2.y * h
+
+            val segPath = Path().apply {
+                moveTo(x1, y1)
+                cubicTo(
+                    x1 + (p2.x - p0.x) * w / 6f, y1 + (p2.y - p0.y) * h / 6f,
+                    x2 - (p3.x - p1.x) * w / 6f, y2 - (p3.y - p1.y) * h / 6f,
+                    x2, y2,
+                )
+            }
+            val avgPressure = (p1.pressure + p2.pressure) * 0.5f
+            drawPath(
+                path = segPath,
+                color = color,
+                style = Stroke(
+                    width = baseWidth * avgPressure,
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
+            )
         }
     }
 }

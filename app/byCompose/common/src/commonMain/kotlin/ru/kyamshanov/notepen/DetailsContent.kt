@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -70,6 +71,7 @@ import ru.kyamshanov.notepen.sync.SyncBridge
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.model.toDto
+import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 
 private val logger = KotlinLogging.logger {}
 
@@ -97,6 +99,14 @@ fun DetailsContent(
     val pagesCache = remember(pdfDocument, scale) { LruCache<Int, ImageBitmap>(maxSize = 8) }
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
+    val tabletController = LocalTabletInputController.current
+    val barrelPressed by tabletController.barrelPressed.collectAsState()
+    // Hold-to-erase: while the pen's barrel button is pressed, override the active
+    // tool with ERASER. Releasing it returns to the user-selected tool. Because
+    // `toolMode` is a key of `pointerInput` in DrawablePdfPage, the gesture
+    // handler restarts on the override flip — any in-flight stroke is finalised
+    // cleanly via the existing `LaunchedEffect(toolMode)` path.
+    val effectiveToolMode = if (barrelPressed && toolMode != ToolMode.NONE) ToolMode.ERASER else toolMode
     var penSettings by remember { mutableStateOf(PenSettings()) }
     var markerSettings by remember { mutableStateOf(MarkerSettings()) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
@@ -236,7 +246,7 @@ fun DetailsContent(
                         DrawablePdfPage(
                             bitmap = bm,
                             pdfDrawingState = pdfDrawingState,
-                            toolMode = toolMode,
+                            toolMode = effectiveToolMode,
                             penSettings = penSettings,
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
