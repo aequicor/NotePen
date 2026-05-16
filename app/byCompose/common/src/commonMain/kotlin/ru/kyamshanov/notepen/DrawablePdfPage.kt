@@ -31,6 +31,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
@@ -55,6 +56,19 @@ private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
 
 /** Множитель «расширения» штриха при сильном наклоне пера (0..1 → ×(1..1+gain)). */
 private const val TILT_WIDTH_GAIN = 0.5f
+
+/**
+ * Hard ceiling on either dimension of the off-screen ink-cache bitmap.
+ *
+ * The completed-strokes layer is rasterised at `canvasSize`; at 4–8× zoom the
+ * page Box can grow past 5000 px, which on Android trips
+ * `RecordingCanvas.throwIfCannotDraw` (≈ 100 MB per bitmap). Strokes are
+ * normalised, so we rasterise at a capped resolution and let
+ * `drawImage(dstSize = canvas)` upscale — visually indistinguishable from a
+ * native-resolution cache once the user is already looking at a stretched
+ * PDF page bitmap underneath.
+ */
+private const val INK_CACHE_MAX_DIMENSION_PX = 3072
 
 @Composable
 fun DrawablePdfPage(
@@ -121,7 +135,13 @@ fun DrawablePdfPage(
     ) {
         val (w, h) = canvasSize.value
         if (w <= 0 || h <= 0 || pdfDrawingState.currentPaths.isEmpty()) return@remember null
-        val bmp = ImageBitmap(w, h)
+        val longest = maxOf(w, h)
+        val downscale = if (longest > INK_CACHE_MAX_DIMENSION_PX) {
+            INK_CACHE_MAX_DIMENSION_PX.toFloat() / longest
+        } else 1f
+        val bw = (w * downscale).toInt().coerceAtLeast(1)
+        val bh = (h * downscale).toInt().coerceAtLeast(1)
+        val bmp = ImageBitmap(bw, bh)
         val gCanvas = GraphicsCanvas(bmp)
         val scope = CanvasDrawScope()
         val scratch = Path()
@@ -129,10 +149,10 @@ fun DrawablePdfPage(
             density = density,
             layoutDirection = layoutDirection,
             canvas = gCanvas,
-            size = Size(w.toFloat(), h.toFloat()),
+            size = Size(bw.toFloat(), bh.toFloat()),
         ) {
             pdfDrawingState.currentPaths.forEach { path ->
-                drawStrokeWithPressure(path, w.toFloat(), h.toFloat(), scratch)
+                drawStrokeWithPressure(path, bw.toFloat(), bh.toFloat(), scratch)
             }
         }
         bmp
@@ -335,8 +355,18 @@ fun DrawablePdfPage(
 
         Canvas(modifier = Modifier.fillMaxSize()) {
             // Completed strokes — bitmap blit, single draw call regardless of
-            // how much ink is on the page.
-            completedLayer?.let { drawImage(it) }
+            // how much ink is on the page. Cache may be rasterised at a lower
+            // resolution than the canvas (see INK_CACHE_MAX_DIMENSION_PX), so
+            // stretch via dstSize.
+            completedLayer?.let { cache ->
+                drawImage(
+                    image = cache,
+                    srcOffset = IntOffset.Zero,
+                    srcSize = IntSize(cache.width, cache.height),
+                    dstOffset = IntOffset.Zero,
+                    dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+                )
+            }
 
             // Live stroke. Rendered with a single drawPath at uniform width
             // (average pressure of the existing samples × base) for minimum

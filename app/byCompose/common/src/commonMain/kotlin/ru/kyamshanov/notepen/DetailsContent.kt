@@ -14,10 +14,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -46,6 +48,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -94,6 +97,71 @@ private val logger = KotlinLogging.logger {}
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 private val SCROLL_BOTTOM_EXTRA = 240.dp
 
+/** Toolbar `+` button zoom factor (matches Ctrl+wheel zoom-in). */
+private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
+
+/** Toolbar `−` button zoom factor (matches Ctrl+wheel zoom-out). */
+private const val TOOLBAR_ZOOM_STEP_OUT = 1f / TOOLBAR_ZOOM_STEP_IN
+
+/**
+ * Maximum pixel count for a rendered page bitmap (ARGB → 4 bytes/pixel).
+ * 4 MP → ~16 MB per page, safely under Android's per-bitmap draw ceiling
+ * (~100 MB) even with several pages cached. The Box can still grow beyond
+ * this; `Image.fillMaxSize` stretches a capped bitmap.
+ */
+private const val MAX_RENDER_PIXELS = 4_000_000
+
+/** Result of [computeCursorAnchoredZoom]: the new graphicsLayer state. */
+internal data class ZoomResult(val panOffset: Offset, val gestureScale: Float)
+
+/**
+ * Pure math for a cursor-anchored zoom step on the desktop / pinch pipeline.
+ *
+ * The PDF viewport renders through a single `graphicsLayer` on the LazyColumn:
+ *     viewport = panOffset + lazyP * gestureScale       (origin = top-left)
+ * where `lazyP` is a point in LazyColumn render-box coordinates (which already
+ * incorporate `committedScale` — it drives item width and horizontal
+ * centering via `horizontalAlignment = CenterHorizontally`).
+ *
+ * Inverse: `lazyP = (viewport − panOffset) / gestureScale`.
+ *
+ * Invariant: the LazyColumn pixel that was under [centroid] before the zoom
+ * is under [centroid] after the zoom. From the forward formula:
+ *     centroid = panOffset_new + lazyP * gestureScale_new
+ *  ⇒ panOffset_new = centroid − lazyP * gestureScale_new
+ *
+ * [committedScale] does not appear: it is layout-side state and never enters
+ * the graphicsLayer transform. Mixing it in (the previous implementation) is
+ * what made the focal point drift whenever the document was rendered at a
+ * non-100 % committed scale.
+ *
+ * [pan] is added on top of the cursor-anchored result for combined pinch+pan
+ * gestures.
+ */
+internal fun computeCursorAnchoredZoom(
+    centroid: Offset,
+    pan: Offset,
+    zoom: Float,
+    committedScale: Int,
+    gestureScale: Float,
+    panOffset: Offset,
+    minScale: Int = MIN_SCALE,
+    maxScale: Int = MAX_SCALE,
+): ZoomResult {
+    val minGesture = minScale.toFloat() / committedScale
+    val maxGesture = maxScale.toFloat() / committedScale
+    val gOld = gestureScale
+    val gNew = (gOld * zoom).coerceIn(minGesture, maxGesture)
+    if (gNew == gOld || gOld <= 0f) {
+        return ZoomResult(panOffset = panOffset + pan, gestureScale = gOld)
+    }
+    val lazyP = (centroid - panOffset) / gOld
+    return ZoomResult(
+        panOffset = centroid - lazyP * gNew + pan,
+        gestureScale = gNew,
+    )
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun DetailsContent(
@@ -113,8 +181,21 @@ fun DetailsContent(
     var pdfDocument by remember(filePath) { mutableStateOf<PdfDocument?>(null) }
     val pages by remember { derivedStateOf { pdfDocument?.info?.pages ?: emptyList() } }
 
-    var scale by remember { mutableStateOf(100) }
-    val pagesCache = remember(pdfDocument, scale) { LruCache<Int, ImageBitmap>(maxSize = 8) }
+    // Split scale into a committed value (drives bitmap render resolution and
+    // is what gets persisted / synced) and a gesture multiplier that's applied
+    // visually via `graphicsLayer` on the LazyColumn. During a pinch only
+    // `gestureScale` updates → bitmap and strokes scale through the same
+    // matrix every frame, eliminating the "strokes jump ahead of bitmap"
+    // effect. After a short debounce we bake `gestureScale` into
+    // `committedScale` and trigger a single re-render at the new resolution.
+    var committedScale by remember { mutableStateOf(100) }
+    var gestureScale by remember { mutableStateOf(1f) }
+    // Viewport-pixel translation applied via the LazyColumn's `graphicsLayer`.
+    // X is persistent (LazyColumn has no native horizontal scroll); Y is kept
+    // at 0 — vertical pan is delegated to `lazyListState.scrollBy` so
+    // virtualisation continues to work.
+    var panOffset by remember { mutableStateOf(Offset.Zero) }
+    val pagesCache = remember(pdfDocument, committedScale) { LruCache<Int, ImageBitmap>(maxSize = 8) }
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     val tabletController = LocalTabletInputController.current
@@ -196,7 +277,7 @@ fun DetailsContent(
         snapshotFlow {
             Triple(
                 lazyListState.firstVisibleItemIndex,
-                scale,
+                committedScale,
                 lazyListState.firstVisibleItemScrollOffset,
             )
         }.collect { (page, sc, offset) ->
@@ -214,7 +295,7 @@ fun DetailsContent(
             val targetPage = if (pages.isEmpty()) remote.page
             else remote.page.coerceIn(0, pages.size - 1)
             lastAppliedRemote = Triple(targetPage, remote.scale, remote.pageScrollOffsetPx)
-            if (scale != remote.scale) scale = remote.scale
+            if (committedScale != remote.scale) committedScale = remote.scale
             if (lazyListState.firstVisibleItemIndex != targetPage ||
                 lazyListState.firstVisibleItemScrollOffset != remote.pageScrollOffsetPx
             ) {
@@ -239,7 +320,7 @@ fun DetailsContent(
                 }
                 viewStateSync?.publish(
                     page = lazyListState.firstVisibleItemIndex,
-                    scale = scale,
+                    scale = committedScale,
                     pageScrollOffsetPx = lazyListState.firstVisibleItemScrollOffset,
                 )
             }
@@ -252,7 +333,7 @@ fun DetailsContent(
         annotationRepository.save(
             pdfPath = filePath,
             annotations = annotations,
-            scale = scale,
+            scale = committedScale,
             pen = penSettings,
             marker = markerSettings,
             eraser = eraserSettings,
@@ -361,7 +442,7 @@ fun DetailsContent(
 
     LaunchedEffect(filePath) {
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
-            scale = bundle.scale
+            committedScale = bundle.scale
             penSettings = bundle.pen
             markerSettings = bundle.marker
             eraserSettings = bundle.eraser
@@ -412,39 +493,112 @@ fun DetailsContent(
             },
     ) {
 
+        // Cursor-anchored zoom: see `computeCursorAnchoredZoom` for the
+        // derivation and invariant. `committedScale` is intentionally NOT in
+        // the formula — it sits inside the LazyColumn layout (item width,
+        // horizontal centering) and is invisible to the `graphicsLayer`
+        // transform that this math inverts.
+        val applyTransform: (Offset, Offset, Float) -> Unit = { centroid, pan, zoom ->
+            val result = computeCursorAnchoredZoom(
+                centroid = centroid,
+                pan = pan,
+                zoom = zoom,
+                committedScale = committedScale,
+                gestureScale = gestureScale,
+                panOffset = panOffset,
+            )
+            panOffset = result.panOffset
+            gestureScale = result.gestureScale
+        }
+
+        // Debounce: 150 ms after the last `gestureScale` change (gesture
+        // released or paused) bake the multiplier into `committedScale` so a
+        // single bitmap re-render at the new resolution kicks in.
+        //
+        // panOffset.x has to be compensated at the same time: LazyColumn
+        // centres each page at `viewportWidth / 2` in layout coordinates, so
+        // when item width grows from C_old → C_new the centreline stays put
+        // in layout, but the graphicsLayer transform (scaleX = g, origin
+        // top-left) used to map it to viewport x = V/2 * g. After the bake
+        // we drop g back to 1, so without compensation the centreline jumps
+        // to V/2 — visible as the content sliding left at every commit.
+        LaunchedEffect(gestureScale) {
+            if (gestureScale == 1f) return@LaunchedEffect
+            delay(150)
+            val cOld = committedScale
+            val gOld = gestureScale
+            val cNew = (cOld * gOld).roundToInt().coerceIn(MIN_SCALE, MAX_SCALE)
+            // Skip the bake once a page at the new scale would exceed
+            // viewport width. `Modifier.size` on the page Box gets capped to
+            // LazyColumn's max width — the item then stops growing while
+            // `committedScale` (notionally) still grew, which breaks the
+            // `panAdjustX` derivation below (it assumes item width grew by
+            // exactly `gOld`) and causes the focal point to jump. Leaving
+            // `gestureScale` un-baked keeps `graphicsLayer` doing the visual
+            // zoom uniformly, and the gesture-time cursor anchor stays
+            // exact. The cost is bitmap-stretch blur at extreme zoom — an
+            // acceptable trade for not losing the focal point.
+            val viewportWidth = windowSizeInPx.width.toFloat()
+            val pageBaseWidth = viewportWidth * 2f / 3f
+            val itemWidthAtNew = pageBaseWidth * cNew / 100f
+            if (itemWidthAtNew > viewportWidth) return@LaunchedEffect
+            // X: items re-centre at V/2 in layout when committedScale grows;
+            // graphicsLayer scale drops back to 1. Compensate so the
+            // centreline stays where it was visually.
+            val panAdjustX = viewportWidth / 2f * (gOld - 1f)
+            // Y: native LazyColumn scroll. firstVisibleItem's scrollOffset is
+            // a raw-pixel value that does NOT auto-scale when items grow, so
+            // we have to scrollBy `soOld * (gOld - 1)` to keep the same
+            // fraction-within-item. Then add `-panOffset.y` to bake the
+            // graphicsLayer Y-translation (the centroid-tracking component
+            // from the gesture) into native scroll. Combined delta is in
+            // post-commit (C_new) layout pixels — see derivation in the diff.
+            val soOld = lazyListState.firstVisibleItemScrollOffset.toFloat()
+            val scrollDeltaY = soOld * (gOld - 1f) - panOffset.y
+
+            committedScale = cNew
+            gestureScale = 1f
+            panOffset = Offset(panOffset.x + panAdjustX, 0f)
+            if (scrollDeltaY != 0f) {
+                runCatching { lazyListState.scrollBy(scrollDeltaY) }
+            }
+        }
+
         ScrollablePdfColumn(
             state = lazyListState,
+            gestureScale = gestureScale,
+            panOffset = panOffset,
             modifier = Modifier.fillMaxSize(),
-            onScale = { factor ->
-                scale = (scale * factor).roundToInt().coerceIn(MIN_SCALE, MAX_SCALE)
-            },
+            onTransform = applyTransform,
         ) {
             items(items = pages, key = { it.pageIndex }) { page ->
                 val screenWidthPx = windowSizeInPx.width
-                val maxTargetWidthPx = screenWidthPx * 4 / 5
-                val targetWidthPx = ((screenWidthPx * 2 / 3) * (scale / 100f)).toInt()
-
+                // Box size scales with the full committed scale — pages can
+                // (and should) exceed the viewport at high zoom; horizontal
+                // pan brings off-screen detail back into view.
+                val targetWidthPx = ((screenWidthPx * 2 / 3) * (committedScale / 100f)).toInt()
                 val aspectRatio = page.aspectRatio
                 val targetHeightPx = (targetWidthPx / aspectRatio).toInt()
-                val maxTargetHeightPx = (maxTargetWidthPx / aspectRatio).toInt()
 
-                val width = with(LocalDensity.current) {
-                    minOf(targetWidthPx, maxTargetWidthPx).toDp()
-                }
-                val height = with(LocalDensity.current) {
-                    minOf(targetHeightPx, maxTargetHeightPx).toDp()
-                }
+                // Render the bitmap at a capped pixel count and let
+                // `Image.fillMaxSize` stretch it. Pixel-count cap is
+                // aspect-ratio-aware: a tall narrow page gets a similarly
+                // bounded buffer to a wide short one, so even at 4–8× zoom we
+                // never trip Android's per-bitmap draw ceiling (~100 MB).
+                val targetPixels = targetWidthPx.toLong() * targetHeightPx.toLong()
+                val downscale = if (targetPixels > MAX_RENDER_PIXELS) {
+                    kotlin.math.sqrt(MAX_RENDER_PIXELS.toFloat() / targetPixels.toFloat())
+                } else 1f
+                val renderWidthPx = (targetWidthPx * downscale).toInt().coerceAtLeast(1)
+                val renderHeightPx = (targetHeightPx * downscale).toInt().coerceAtLeast(1)
+
+                val width = with(LocalDensity.current) { targetWidthPx.toDp() }
+                val height = with(LocalDensity.current) { targetHeightPx.toDp() }
 
                 Box(modifier = Modifier.size(width, height)) {
                     val pageIndex = page.pageIndex
                     var imageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
-                    // Rendering above the displayed pixel size is wasted memory
-                    // (Box size is capped at maxTargetWidthPx) and on Android
-                    // a large scale combined with high-DPI screens easily blows
-                    // past the per-process heap (OOM at ~50M-pixel bitmaps).
-                    val renderWidthPx = minOf(targetWidthPx, maxTargetWidthPx)
-                    val renderHeightPx = minOf(targetHeightPx, maxTargetHeightPx)
-                    LaunchedEffect(pdfDocument, scale) {
+                    LaunchedEffect(pdfDocument, committedScale) {
                         val doc = pdfDocument ?: return@LaunchedEffect
                         val bitmap = pagesCache[pageIndex] ?: renderer.renderPage(
                             document = doc,
@@ -612,7 +766,7 @@ fun DetailsContent(
                             val result = annotationRepository.save(
                                 pdfPath = filePath,
                                 annotations = annotations,
-                                scale = scale,
+                                scale = committedScale,
                                 pen = penSettings,
                                 marker = markerSettings,
                                 eraser = eraserSettings,
@@ -646,9 +800,21 @@ fun DetailsContent(
                         snackbarHostState.showSnackbar(message)
                     }
                 },
-                scale = scale,
-                onZoomIn = { scale = minOf(MAX_SCALE, scale + 10) },
-                onZoomOut = { scale = maxOf(MIN_SCALE, scale - 10) },
+                scale = committedScale,
+                onZoomIn = {
+                    val centre = Offset(
+                        windowSizeInPx.width / 2f,
+                        windowSizeInPx.height / 2f,
+                    )
+                    applyTransform(centre, Offset.Zero, TOOLBAR_ZOOM_STEP_IN)
+                },
+                onZoomOut = {
+                    val centre = Offset(
+                        windowSizeInPx.width / 2f,
+                        windowSizeInPx.height / 2f,
+                    )
+                    applyTransform(centre, Offset.Zero, TOOLBAR_ZOOM_STEP_OUT)
+                },
             )
         }
 
@@ -700,7 +866,7 @@ fun DetailsContent(
                             val result = annotationRepository.save(
                                 pdfPath = filePath,
                                 annotations = annotations,
-                                scale = scale,
+                                scale = committedScale,
                                 pen = penSettings,
                                 marker = markerSettings,
                                 eraser = eraserSettings,
@@ -727,7 +893,7 @@ fun DetailsContent(
                     annotationRepository.save(
                         pdfPath = filePath,
                         annotations = annotations,
-                        scale = scale,
+                        scale = committedScale,
                         pen = penSettings,
                         marker = markerSettings,
                         eraser = eraserSettings,
