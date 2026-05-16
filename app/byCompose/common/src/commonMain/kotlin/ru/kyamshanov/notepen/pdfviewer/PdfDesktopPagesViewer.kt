@@ -34,6 +34,7 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -51,6 +52,13 @@ private const val MAX_CACHE_ENTRIES = 6
 private const val MAX_RENDER_DIM_PX = 4000
 private const val BUFFER_PAGES = 1
 private const val ZOOM_BURST_RESET_PX = 8f
+
+/**
+ * Off-screen битмап с масштабом > 2× или < 0.5× от текущего считается
+ * "устаревшим" и выкидывается из кэша сразу же — не дожидаясь LRU.
+ * Освобождает 64-МБ битмапы для GC при резком zoom-out от 800 % к 50 %.
+ */
+private const val STALE_SCALE_RATIO_THRESHOLD = 2f
 
 /**
  * Накопитель wheel-zoom тиков для применения раз в кадр. Один Ctrl+wheel
@@ -167,12 +175,27 @@ fun PdfDesktopPagesViewer(
         }
             .distinctUntilChanged()
             .debounce(RENDER_DEBOUNCE_MS)
-            .collect { snap ->
+            .collectLatest { snap ->
+                // collectLatest (не collect) — при новом emission (продолжение
+                // зума или скролла) текущий блок и все его дочерние `launch`
+                // отменяются. Без этого при серии "зум — пауза — зум — пауза"
+                // накапливаются параллельные high-res рендеры устаревших
+                // масштабов: они конкурируют за renderDispatcher и сожирают
+                // память.
                 if (snap.viewportSize.width <= 0 || snap.first < 0 || snap.last < snap.first) {
-                    return@collect
+                    return@collectLatest
                 }
                 val basePageWidthPx = snap.basePageWidthPx
-                if (basePageWidthPx <= 0f) return@collect
+                if (basePageWidthPx <= 0f) return@collectLatest
+                // Освобождаем устаревшие битмапы off-screen страниц сразу,
+                // не дожидаясь LRU. Видимые страницы защищены — их битмап
+                // остаётся, чтобы было что показать пока новый рендерится.
+                val visible = (snap.first..snap.last).toSet()
+                cache.evictStaleScale(
+                    visibleIndices = visible,
+                    currentScale = snap.scalePercent,
+                    maxScaleRatio = STALE_SCALE_RATIO_THRESHOLD,
+                )
                 for (i in snap.first..snap.last) {
                     val cached = cache.get(i)
                     if (cached != null && cached.renderedAtScalePercent == snap.scalePercent) continue

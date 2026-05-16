@@ -7,26 +7,30 @@ import androidx.compose.ui.graphics.ImageBitmap
  * LRU-кэш отрендеренных страниц PDF, ключ — индекс страницы. Хранит
  * последний доступный битмап независимо от текущего масштаба — он
  * показывается мгновенно, пока фоновый рендер готовит более резкий
- * вариант. Эвикция по числу записей, чтобы не тянуть платформенный
- * API для измерения байт.
+ * вариант.
  *
- * Используется как backing-store для [SnapshotStateMap], так что
- * Compose автоматически перекомпонует страницу при появлении нового
- * битмапа.
+ * Эвикция по двум лимитам: число записей ([maxEntries]) и суммарный
+ * объём в пикселях ([maxTotalPixels]). Второй лимит критичен при
+ * резкой смене масштаба: 4000×4000 битмап = 64 МБ, и накопить даже
+ * 6 таких — уже под 400 МБ. Дополнительно [evictStaleScale]
+ * проактивно выкидывает off-screen битмапы с давно неактуальным
+ * масштабом.
+ *
+ * [SnapshotStateMap] как backing-store: запись триггерит рекомпозицию
+ * страницы, в которой битмап сменился.
  */
 internal data class RenderedPage(
     val bitmap: ImageBitmap,
     val renderedAtScalePercent: Int,
 )
 
-internal class PdfBitmapCache(private val maxEntries: Int) {
+internal class PdfBitmapCache(
+    private val maxEntries: Int,
+    private val maxTotalPixels: Long = DEFAULT_MAX_PIXELS,
+) {
 
     private val accessOrder = ArrayDeque<Int>()
 
-    /**
-     * Снапшот-стейт, на который подписан UI: запись в него тут же
-     * триггерит рекомпозицию страниц, в которых битмап сменился.
-     */
     val entries: SnapshotStateMap<Int, RenderedPage> = SnapshotStateMap()
 
     fun get(pageIndex: Int): RenderedPage? {
@@ -39,11 +43,41 @@ internal class PdfBitmapCache(private val maxEntries: Int) {
         if (entries.containsKey(pageIndex)) {
             entries[pageIndex] = rendered
             touch(pageIndex)
-            return
+        } else {
+            entries[pageIndex] = rendered
+            accessOrder.addLast(pageIndex)
         }
-        entries[pageIndex] = rendered
-        accessOrder.addLast(pageIndex)
-        evictIfNeeded()
+        evictIfNeeded(protect = setOf(pageIndex))
+    }
+
+    /**
+     * Активно вытесняет off-screen записи, у которых отрисованный масштаб
+     * сильно отличается от [currentScale] ([maxScaleRatio]× и больше). На
+     * резком zoom-out от 800 % к 50 % обычная LRU оставляет огромные
+     * 64-МБ битмапы в памяти до GC pause; этот метод освобождает их
+     * сразу.
+     *
+     * Видимые страницы ([visibleIndices]) защищены — их битмап
+     * продолжает показываться, пока новый не отрендерится.
+     */
+    fun evictStaleScale(
+        visibleIndices: Set<Int>,
+        currentScale: Int,
+        maxScaleRatio: Float,
+    ) {
+        if (currentScale <= 0) return
+        val toRemove = mutableListOf<Int>()
+        for ((idx, rendered) in entries) {
+            if (idx in visibleIndices) continue
+            val a = rendered.renderedAtScalePercent.toFloat()
+            val b = currentScale.toFloat()
+            val ratio = if (a > b) a / b else b / a
+            if (ratio >= maxScaleRatio) toRemove.add(idx)
+        }
+        for (idx in toRemove) {
+            entries.remove(idx)
+            accessOrder.remove(idx)
+        }
     }
 
     private fun touch(pageIndex: Int) {
@@ -51,15 +85,37 @@ internal class PdfBitmapCache(private val maxEntries: Int) {
         accessOrder.addLast(pageIndex)
     }
 
-    private fun evictIfNeeded() {
+    /**
+     * Эвикция до удовлетворения обоих лимитов. [protect] — индексы,
+     * которые нельзя удалять (как минимум только что положенная запись,
+     * чтобы не вытеснить саму себя сразу после put).
+     */
+    private fun evictIfNeeded(protect: Set<Int>) {
         while (accessOrder.size > maxEntries) {
-            val evicted = accessOrder.removeFirst()
+            val evicted = accessOrder.firstOrNull { it !in protect } ?: break
+            accessOrder.remove(evicted)
             entries.remove(evicted)
         }
+        while (totalPixels() > maxTotalPixels) {
+            val evicted = accessOrder.firstOrNull { it !in protect } ?: break
+            accessOrder.remove(evicted)
+            entries.remove(evicted)
+        }
+    }
+
+    private fun totalPixels(): Long {
+        var total = 0L
+        for ((_, r) in entries) total += r.bitmap.width.toLong() * r.bitmap.height
+        return total
     }
 
     fun clear() {
         accessOrder.clear()
         entries.clear()
+    }
+
+    companion object {
+        /** ≈256 МБ при 4 байт/пиксель — комфортный потолок для desktop. */
+        const val DEFAULT_MAX_PIXELS: Long = 64_000_000L
     }
 }
