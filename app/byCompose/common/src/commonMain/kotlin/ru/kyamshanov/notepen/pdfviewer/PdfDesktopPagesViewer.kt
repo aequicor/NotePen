@@ -134,11 +134,16 @@ fun PdfDesktopPagesViewer(
     val pendingZoom = remember { PendingZoom() }
 
     // Прокидываем входные `pages` в state — он держит layout в derivedStateOf.
-    // После загрузки страниц (когда viewport уже измерен) повторно вызываем
-    // `applyPendingInitialScrollIfNeeded` — это даёт начальное центрирование
-    // и применяет отложенный bundle-scroll.
     LaunchedEffect(pages) {
         state.pages = pages
+        state.applyPendingInitialScrollIfNeeded()
+    }
+    // Дублирующий триггер: страховка от того, что pages и viewportSize
+    // приходят в разном порядке (PDF может загрузиться раньше или позже
+    // первого layout-pass'а). One-shot флаг внутри
+    // `applyPendingInitialScrollIfNeeded` гарантирует, что центрирование
+    // сработает ровно один раз, в момент когда оба источника валидны.
+    LaunchedEffect(state.viewportSize, pages.size) {
         state.applyPendingInitialScrollIfNeeded()
     }
 

@@ -86,6 +86,13 @@ class PdfViewerState internal constructor(
     private var pendingInitialPage: Int? = initialPageIndex.takeIf { it > 0 || initialPageOffsetPx > 0 }
     private var pendingInitialOffset: Int = initialPageOffsetPx
     private var pendingInitialScalePercent: Int? = null
+    // One-shot флаг: гарантирует, что начальное центрирование выполняется
+    // ровно один раз, в момент когда viewport и pages впервые оба валидны.
+    // Не зависит от текущего значения pan (раньше использовалось
+    // `pan == Offset.Zero`, что не срабатывало если pan успел сдвинуться
+    // — например, через annotation-bundle scrollToPage до того, как
+    // viewport получил размер).
+    private var hasInitialCentered: Boolean = false
 
     internal fun applyPendingInitialScrollIfNeeded() {
         pendingInitialScalePercent?.let { sc ->
@@ -94,16 +101,16 @@ class PdfViewerState internal constructor(
                 pendingInitialScalePercent = null
             }
         }
-        // При первой готовности viewport + pages: центрируем pan по X в
-        // целочисленной арифметике, чтобы левый и правый пиксельные
-        // зазоры были равны (с разницей не более 1 px при нечётной
-        // суммарной величине). Float-центрирование через ` / 2f` + последующий
-        // `roundToInt()` при placement даёт visible смещение ~1 px.
-        // pan.y оставляем 0 — показываем top документа.
-        if (viewportSize.width > 0 && pages.isNotEmpty() && pan == Offset.Zero) {
+        // Один раз: центрируем pan по X в целочисленной арифметике, чтобы
+        // левый и правый пиксельные зазоры были равны (с разницей не
+        // более 1 px при нечётной суммарной величине). Float-центрирование
+        // через ` / 2f` + последующий `roundToInt()` при placement давало
+        // visible смещение. pan.y оставляем 0 — показываем top документа.
+        if (!hasInitialCentered && viewportSize.width > 0 && pages.isNotEmpty()) {
             val pageW = (layout.basePageWidthPx * zoom).roundToInt()
             val centerX = (viewportSize.width - pageW) / 2
             pan = Offset(centerX.toFloat(), 0f)
+            hasInitialCentered = true
         }
         val page = pendingInitialPage ?: return
         if (viewportSize.width <= 0 || pages.isEmpty()) return
