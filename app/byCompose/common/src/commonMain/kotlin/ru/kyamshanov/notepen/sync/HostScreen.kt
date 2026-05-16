@@ -86,6 +86,20 @@ fun HostScreen(
                 )
                 Button(onClick = viewModel::startServer) { Text("Повторить") }
             }
+
+            is PairingState.Reconnecting -> {
+                val s = state as PairingState.Reconnecting
+                CircularProgressIndicator()
+                Text("Переподключение... ${s.secondsRemaining}s", style = MaterialTheme.typography.bodyMedium)
+            }
+
+            is PairingState.LostConnection -> {
+                Text(
+                    "Соединение потеряно",
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Button(onClick = viewModel::startServer) { Text("Запустить заново") }
+            }
         }
     }
 }

@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.IntSize
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tablet.effectivePressure
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
@@ -103,7 +104,7 @@ fun DrawablePdfPage(
                                     pdfDrawingState.addPoint(
                                         x = change.position.x / w,
                                         y = change.position.y / h,
-                                        pressure = tablet.latestPressure.value,
+                                        pressure = change.effectivePressure(tablet.latestPressure.value),
                                     )
                                 }
                             },

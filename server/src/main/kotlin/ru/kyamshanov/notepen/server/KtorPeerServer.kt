@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen.server
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
@@ -31,7 +32,9 @@ import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
+import java.net.Inet4Address
 import java.net.InetAddress
+import java.net.NetworkInterface
 import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
@@ -71,14 +74,17 @@ class KtorPeerServer(
 
     override suspend fun start(): Result<String> = runCatching {
         val code = pairing.generateCode()
-        val host = InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
+        val host = pickLanIpv4Address() ?: InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
         serverHost = host
         val port = findFreePort()
         serverPort = port
 
         engine = embeddedServer(CIO, port = port) {
             install(ContentNegotiation) { json(json) }
-            install(WebSockets) { pingPeriod = 30.seconds }
+            install(WebSockets) {
+                pingPeriod = 30.seconds
+                contentConverter = KotlinxWebsocketSerializationConverter(json)
+            }
             routing {
                 webSocket("/ws") { handleSession(this) }
             }
@@ -90,6 +96,40 @@ class KtorPeerServer(
     }
 
     private fun findFreePort(): Int = java.net.ServerSocket(0).use { it.localPort }
+
+    /**
+     * Picks the most likely LAN-facing IPv4 address, skipping loopback, link-local,
+     * down interfaces, and common VPN / virtual adapters (TAP/TUN, WireGuard,
+     * Hyper-V, WSL, VirtualBox). Falls back to `null` when nothing matches —
+     * caller then uses [InetAddress.getLocalHost] as a last resort.
+     */
+    @Suppress("ReturnCount")
+    private fun pickLanIpv4Address(): String? {
+        val vpnHints = listOf("tun", "tap", "wg", "ppp", "wsl", "vmnet", "vbox", "hyper-v", "vethernet", "loopback")
+        val candidates = mutableListOf<Pair<Int, String>>()
+        val interfaces = runCatching { NetworkInterface.getNetworkInterfaces() }.getOrNull() ?: return null
+        for (nif in interfaces) {
+            if (!nif.isUp || nif.isLoopback || nif.isVirtual || nif.isPointToPoint) continue
+            val displayLower = (nif.displayName ?: "").lowercase()
+            val nameLower = (nif.name ?: "").lowercase()
+            val looksVpn = vpnHints.any { it in displayLower || it in nameLower }
+            for (addr in nif.inetAddresses) {
+                if (addr !is Inet4Address) continue
+                if (addr.isLoopbackAddress || addr.isLinkLocalAddress || addr.isAnyLocalAddress) continue
+                val host = addr.hostAddress ?: continue
+                // Prefer RFC1918 over public IPs; skip VPN interfaces unless nothing else is left.
+                val rank = when {
+                    looksVpn -> 100
+                    host.startsWith("192.168.") -> 0
+                    host.startsWith("10.") -> 1
+                    host.startsWith("172.") -> 2
+                    else -> 50
+                }
+                candidates += rank to host
+            }
+        }
+        return candidates.minByOrNull { it.first }?.second
+    }
 
     private suspend fun handleSession(session: DefaultWebSocketServerSession) {
         if (activeSession != null) {

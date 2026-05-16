@@ -57,7 +57,13 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
@@ -69,9 +75,16 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 import ru.kyamshanov.notepen.sync.SyncBridge
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
+import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.model.toDto
+import ru.kyamshanov.notepen.sync.domain.port.PeerServer
+import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.sync.infrastructure.WebSocketFileTransfer
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
 
@@ -85,6 +98,8 @@ fun DetailsContent(
     loader: PdfDocumentLoader,
     renderer: PdfPageRenderer,
     syncEngine: SyncEngine? = null,
+    peerServer: PeerServer? = null,
+    peerClient: SyncClient? = null,
     modifier: Modifier = Modifier,
 ) {
     val localWindowInfo = LocalWindowInfo.current
@@ -135,6 +150,61 @@ fun DetailsContent(
     }
 
     LaunchedEffect(syncBridge) { syncBridge?.start() }
+
+    // Host side: stream the open PDF to the tablet as soon as a peer pairs.
+    LaunchedEffect(peerServer, filePath) {
+        val server = peerServer ?: return@LaunchedEffect
+        server.state.collect { st ->
+            if (st is PairingState.Connected) {
+                val transferId = "tx-${Random.nextLong().toString(16)}"
+                runCatching {
+                    WebSocketFileTransfer(server = server)
+                        .send(sourcePath = filePath, transferId = transferId)
+                        .collect { /* progress ignored on host */ }
+                }.onFailure { e ->
+                    logger.warn { "Failed to stream PDF to peer: ${e::class.simpleName}" }
+                }
+            }
+        }
+    }
+
+    // Host side: react to a SaveRequest from the tablet and persist locally.
+    val performHostSave: suspend () -> Result<Unit> = {
+        val annotations = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
+        annotationRepository.save(
+            pdfPath = filePath,
+            annotations = annotations,
+            scale = scale,
+            pen = penSettings,
+            marker = markerSettings,
+            eraser = eraserSettings,
+            currentPage = lazyListState.firstVisibleItemIndex,
+            currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
+        )
+    }
+
+    LaunchedEffect(peerServer) {
+        val server = peerServer ?: return@LaunchedEffect
+        server.incomingMessages.filterIsInstance<NetworkMessage.SaveRequest>().collect { req ->
+            val result = performHostSave()
+            server.send(
+                NetworkMessage.SaveResult(
+                    requestId = req.requestId,
+                    success = result.isSuccess,
+                    errorMessage = result.exceptionOrNull()?.message,
+                ),
+            )
+        }
+    }
+
+    // Tablet side: surface connection loss.
+    var showLostConnectionDialog by remember { mutableStateOf(false) }
+    LaunchedEffect(peerClient) {
+        val client = peerClient ?: return@LaunchedEffect
+        client.state.collect { st ->
+            showLostConnectionDialog = st is PairingState.LostConnection
+        }
+    }
 
     LaunchedEffect(filePath) {
         pdfDocument?.close()
@@ -320,21 +390,37 @@ fun DetailsContent(
                 onSave = {
                     isSaving = true
                     coroutineScope.launch {
-                        val annotations = drawingStates.mapValues { (_, state) ->
-                            state.currentPaths.toList()
+                        val message = if (peerClient != null) {
+                            val requestId = "save-${Random.nextLong().toString(16)}"
+                            peerClient.send(NetworkMessage.SaveRequest(requestId))
+                            val reply = withTimeoutOrNull(5.seconds) {
+                                peerClient.incomingMessages
+                                    .filterIsInstance<NetworkMessage.SaveResult>()
+                                    .filter { it.requestId == requestId }
+                                    .first()
+                            }
+                            when {
+                                reply == null -> "Нет ответа от ПК"
+                                reply.success -> "Сохранено на ПК"
+                                else -> "Ошибка на ПК: ${reply.errorMessage.orEmpty()}"
+                            }
+                        } else {
+                            val annotations = drawingStates.mapValues { (_, state) ->
+                                state.currentPaths.toList()
+                            }
+                            val result = annotationRepository.save(
+                                pdfPath = filePath,
+                                annotations = annotations,
+                                scale = scale,
+                                pen = penSettings,
+                                marker = markerSettings,
+                                eraser = eraserSettings,
+                                currentPage = lazyListState.firstVisibleItemIndex,
+                                currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
+                            )
+                            if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
                         }
-                        val result = annotationRepository.save(
-                            pdfPath = filePath,
-                            annotations = annotations,
-                            scale = scale,
-                            pen = penSettings,
-                            marker = markerSettings,
-                            eraser = eraserSettings,
-                            currentPage = lazyListState.firstVisibleItemIndex,
-                            currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
-                        )
                         isSaving = false
-                        val message = if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
                         snackbarHostState.showSnackbar(message)
                     }
                 },
@@ -395,6 +481,39 @@ fun DetailsContent(
             PageIndicatorAirbar(
                 currentPage = firstVisiblePage + 1,
                 totalPages = pages.size,
+            )
+        }
+
+        if (showLostConnectionDialog) {
+            AlertDialog(
+                onDismissRequest = { showLostConnectionDialog = false },
+                title = { Text("Соединение потеряно") },
+                text = { Text("Не удалось переподключиться к ПК за 10 секунд. Сохранить аннотации локально?") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showLostConnectionDialog = false
+                        coroutineScope.launch {
+                            val annotations = drawingStates.mapValues { (_, state) ->
+                                state.currentPaths.toList()
+                            }
+                            val result = annotationRepository.save(
+                                pdfPath = filePath,
+                                annotations = annotations,
+                                scale = scale,
+                                pen = penSettings,
+                                marker = markerSettings,
+                                eraser = eraserSettings,
+                                currentPage = lazyListState.firstVisibleItemIndex,
+                                currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
+                            )
+                            val msg = if (result.isSuccess) "Сохранено локально" else "Ошибка локального сохранения"
+                            snackbarHostState.showSnackbar(msg)
+                        }
+                    }) { Text("Сохранить локально") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showLostConnectionDialog = false }) { Text("Отмена") }
+                },
             )
         }
 

@@ -29,7 +29,9 @@ class SyncViewModel(
 
     fun startDiscovery() {
         scope.launch {
-            discovery.peers.collect { _peers.value = it }
+            discovery.peers.collect { found ->
+                _peers.value = found.filter { it.id != selfInfo.id && it.name != selfInfo.name }
+            }
         }
     }
 

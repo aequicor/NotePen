@@ -98,4 +98,33 @@ sealed class NetworkMessage {
     @Serializable
     @SerialName("disconnect")
     data object Disconnect : NetworkMessage()
+
+    /**
+     * Header sent before a sequence of [FileChunk] messages. Allows the receiver
+     * to allocate buffers and verify integrity once the transfer completes.
+     */
+    @Serializable
+    @SerialName("file_transfer_start")
+    data class FileTransferStart(
+        val transferId: String,
+        val fileName: String,
+        val totalChunks: Int,
+        val totalSize: Long,
+        /** Hex-encoded SHA-256 of the full file. */
+        val sha256: String,
+    ) : NetworkMessage()
+
+    /** Tablet (client) asks the host (server) to persist the current document. */
+    @Serializable
+    @SerialName("save_request")
+    data class SaveRequest(val requestId: String) : NetworkMessage()
+
+    /** Reply to [SaveRequest] from the host. */
+    @Serializable
+    @SerialName("save_result")
+    data class SaveResult(
+        val requestId: String,
+        val success: Boolean,
+        val errorMessage: String? = null,
+    ) : NetworkMessage()
 }

@@ -17,4 +17,17 @@ sealed class PairingState {
 
     /** An error occurred (server failed to start, connection dropped, etc.). */
     data class Error(val message: String) : PairingState()
+
+    /**
+     * Transient state on the client side: the session has dropped and the client
+     * is retrying the connection. [secondsRemaining] counts down to the
+     * reconnect deadline (10 s). After that the state moves to [LostConnection].
+     */
+    data class Reconnecting(val secondsRemaining: Int) : PairingState()
+
+    /**
+     * Reconnect deadline elapsed without a successful reattach. The client UI
+     * should offer the user a local-save fallback.
+     */
+    data object LostConnection : PairingState()
 }

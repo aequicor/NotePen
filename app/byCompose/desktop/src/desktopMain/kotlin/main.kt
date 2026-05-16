@@ -22,6 +22,8 @@ import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
+import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -83,7 +85,12 @@ fun main() {
     val peerServer = KtorPeerServer(selfInfo = selfInfo, ioDispatcher = Dispatchers.IO)
     val serviceRegistrar = JmDnsServiceRegistrar()
     val discovery = JmDnsDeviceDiscovery(Dispatchers.IO)
-    val httpClient = HttpClient(CIO) { install(WebSockets) }
+    val wsJson = Json { classDiscriminator = "type" }
+    val httpClient = HttpClient(CIO) {
+        install(WebSockets) {
+            contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
+        }
+    }
     val syncClient = KtorSyncClient(httpClient)
 
     val syncEngine = SyncEngine(deviceId = selfId, scope = appScope, server = peerServer, client = syncClient)
@@ -203,6 +210,9 @@ fun main() {
                     hostViewModel = hostViewModel,
                     syncViewModel = syncViewModel,
                     syncEngine = syncEngine,
+                    peerServer = peerServer,
+                    peerClient = syncClient,
+                    receivedPdfDir = System.getProperty("java.io.tmpdir") + "/notepen-sync",
                 )
             }
         }

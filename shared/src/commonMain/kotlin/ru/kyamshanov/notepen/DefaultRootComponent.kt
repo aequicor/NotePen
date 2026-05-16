@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.decompose.DelicateDecomposeApi
 import com.arkivanov.decompose.router.stack.ChildStack
 import com.arkivanov.decompose.router.stack.StackNavigation
 import com.arkivanov.decompose.router.stack.childStack
@@ -63,6 +64,11 @@ class DefaultRootComponent(
 
     override fun onBackClicked(toIndex: Int) {
         navigation.popTo(index = toIndex)
+    }
+
+    @OptIn(DelicateDecomposeApi::class)
+    override fun openDetailsExternally(uri: String) {
+        navigation.push(Config.Details(uri = uri, lastPageIndex = 0))
     }
 
     @Serializable

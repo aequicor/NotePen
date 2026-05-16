@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.sync.infrastructure
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import java.net.InetAddress
 import javax.jmdns.JmDNS
 import javax.jmdns.ServiceInfo
 
@@ -19,7 +20,13 @@ class JmDnsServiceRegistrar {
     private var jmdns: JmDNS? = null
     private var registered: ServiceInfo? = null
 
-    /** Registers the local server described by [device] on the LAN. */
+    /**
+     * Registers the local server described by [device] on the LAN.
+     *
+     * Binds JmDNS explicitly to [DeviceInfo.host] so the announcement goes
+     * out on the LAN interface and not on a VPN / virtual adapter that JmDNS
+     * would otherwise pick by default.
+     */
     fun register(device: DeviceInfo) {
         val props = mapOf("id" to device.id, "name" to device.name)
         val serviceInfo = ServiceInfo.create(
@@ -29,11 +36,12 @@ class JmDnsServiceRegistrar {
             0, 0,
             props,
         )
-        val jm = JmDNS.create()
+        val bindAddress = runCatching { InetAddress.getByName(device.host) }.getOrNull()
+        val jm = if (bindAddress != null) JmDNS.create(bindAddress, device.name) else JmDNS.create()
         jmdns = jm
         jm.registerService(serviceInfo)
         registered = serviceInfo
-        logger.info { "mDNS registered: ${device.name} port=${device.port}" }
+        logger.info { "mDNS registered: ${device.name} port=${device.port} bind=${bindAddress?.hostAddress ?: "default"}" }
     }
 
     /** Unregisters the service and releases resources. */

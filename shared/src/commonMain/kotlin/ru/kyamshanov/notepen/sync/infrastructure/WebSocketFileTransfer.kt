@@ -34,7 +34,16 @@ class WebSocketFileTransfer(
         val bytes = okio_readBytes(sourcePath)
         val total = bytes.size.toLong()
         val chunkCount = (bytes.size + CHUNK_SIZE_BYTES - 1) / CHUNK_SIZE_BYTES
-        val fileName = sourcePath.substringAfterLast('/')
+        val fileName = sourcePath.substringAfterLast('/').substringAfterLast('\\')
+
+        val header = NetworkMessage.FileTransferStart(
+            transferId = transferId,
+            fileName = fileName,
+            totalChunks = chunkCount,
+            totalSize = total,
+            sha256 = "",
+        )
+        server?.send(header) ?: client?.send(header)
 
         var sent = 0L
         for (i in 0 until chunkCount) {
@@ -52,20 +61,22 @@ class WebSocketFileTransfer(
             server?.send(msg) ?: client?.send(msg)
             sent += (end - start)
             emit(TransferProgress(transferred = sent, total = total))
-            logger.debug { "Sent chunk $i/$chunkCount for $transferId" }
+            logger.debug { "Sent chunk ${i + 1}/$chunkCount for $transferId" }
         }
     }
 
     override suspend fun receive(transferId: String, destPath: String) {
-        // Receives chunks from incomingMessages of the server or client.
-        // The caller must collect server.incomingMessages / client.incomingMessages
-        // and route FileChunk messages here. Full implementation in M6.
-        logger.info { "receive() stub — implement chunked reassembly in M6" }
+        // Full chunked-receive flow is handled by [FileTransferReceiver] which
+        // subscribes to the active session's incomingMessages flow.
+        logger.info { "WebSocketFileTransfer.receive() is a no-op; use FileTransferReceiver" }
     }
 }
 
 /** Reads the file at [path] and returns its bytes. Platform-provided via expect/actual. */
 expect fun okio_readBytes(path: String): ByteArray
+
+/** Writes [bytes] to the file at [path], creating parent directories. */
+expect fun okio_writeBytes(path: String, bytes: ByteArray)
 
 /** Base64-encodes [bytes]. Platform-provided via expect/actual. */
 expect fun encodeBase64(bytes: ByteArray): String

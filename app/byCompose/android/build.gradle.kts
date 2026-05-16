@@ -25,6 +25,10 @@ kotlin {
             implementation(libs.androidx.compose.ui.tooling.preview)
             implementation(libs.androidx.activity.compose)
             implementation(libs.kotlinx.serialization.json)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.websockets)
+            implementation(libs.ktor.serialization.kotlinx.json)
         }
         commonMain.dependencies {
             implementation(compose.runtime)

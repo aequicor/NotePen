@@ -7,7 +7,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.LaunchedEffect
 import com.arkivanov.decompose.defaultComponentContext
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
+import kotlinx.serialization.json.Json
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -19,6 +27,13 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroi
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
+import ru.kyamshanov.notepen.sync.SyncViewModel
+import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
+import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
+import ru.kyamshanov.notepen.sync.infrastructure.NsdDeviceDiscovery
+import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,6 +48,41 @@ class MainActivity : ComponentActivity() {
         val availabilityChecker = FileAvailabilityCheckerAndroid(context)
         val thumbnailRepo = ThumbnailRepositoryAndroid(context)
         val thumbnailGenerator = PdfThumbnailGeneratorAndroid(context)
+
+        val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
+        val selfId = UUID.randomUUID().toString()
+        val selfInfo = DeviceInfo(
+            id = selfId,
+            name = android.os.Build.MODEL ?: "NotePen Tablet",
+            host = "",
+            port = 0,
+        )
+        val wsJson = Json { classDiscriminator = "type" }
+        val httpClient = HttpClient(CIO) {
+            install(WebSockets) {
+                contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
+            }
+        }
+        val syncClient = KtorSyncClient(httpClient)
+        val discovery = NsdDeviceDiscovery(context)
+        val syncEngine = SyncEngine(deviceId = selfId, scope = appScope, server = null, client = syncClient)
+        val syncViewModel = SyncViewModel(
+            discovery = discovery,
+            client = syncClient,
+            selfInfo = selfInfo,
+            scope = appScope,
+        )
+
+        // Feed peer-originated stroke deltas into the engine so SyncBridge can
+        // mirror them onto the local drawing state once DetailsContent opens.
+        appScope.launch {
+            syncClient.incomingMessages.collect { msg ->
+                if (msg is NetworkMessage.StrokeDeltaMessage) syncEngine.processPeer(msg.delta)
+            }
+        }
+
+        val receivedDir = java.io.File(context.cacheDir, "sync").absolutePath
 
         val root = DefaultRootComponent(
             componentContext = defaultComponentContext(),
@@ -62,6 +112,10 @@ class MainActivity : ComponentActivity() {
                 rootComponent = root,
                 pdfDocumentLoader = pdfDocumentLoader,
                 pdfPageRenderer = pdfPageRenderer,
+                syncViewModel = syncViewModel,
+                syncEngine = syncEngine,
+                peerClient = syncClient,
+                receivedPdfDir = receivedDir,
             )
         }
     }

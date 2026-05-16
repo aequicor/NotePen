@@ -14,6 +14,8 @@ import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.port.PeerServer
+import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 @Composable
 fun RootContent(
@@ -21,6 +23,8 @@ fun RootContent(
     pdfDocumentLoader: PdfDocumentLoader,
     pdfPageRenderer: PdfPageRenderer,
     syncEngine: SyncEngine? = null,
+    peerServer: PeerServer? = null,
+    peerClient: SyncClient? = null,
     modifier: Modifier = Modifier,
 ) {
     Children(
@@ -70,6 +74,8 @@ fun RootContent(
                 loader = pdfDocumentLoader,
                 renderer = pdfPageRenderer,
                 syncEngine = syncEngine,
+                peerServer = peerServer,
+                peerClient = peerClient,
                 modifier = modifier,
             )
         }
