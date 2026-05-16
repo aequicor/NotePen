@@ -90,6 +90,8 @@ fun DrawablePdfPage(
      * restart `pointerInput` and lose the in-flight DOWN event).
      */
     eraserOverride: () -> Boolean = { false },
+    /** When `true`, finger touches are blocked from drawing — only stylus/eraser-tip input is accepted. */
+    stylusOnly: () -> Boolean = { false },
     /**
      * Текущий зум-фактор страницы относительно её базового размера (zoom = 1).
      * Используется для нормализации stroke width в document-anchored семантике:
@@ -182,7 +184,7 @@ fun DrawablePdfPage(
                         var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { stylusSeen.value },
+                            isPalmRejectionActive = { stylusSeen.value || stylusOnly() },
                             onStylusSeen = { stylusSeen.value = true },
                             onDown = { off, pressure, tilt ->
                                 val (w, h) = canvasSize.value
@@ -256,7 +258,7 @@ fun DrawablePdfPage(
                         var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { stylusSeen.value },
+                            isPalmRejectionActive = { stylusSeen.value || stylusOnly() },
                             onStylusSeen = { stylusSeen.value = true },
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
@@ -320,7 +322,7 @@ fun DrawablePdfPage(
                         var session: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { stylusSeen.value },
+                            isPalmRejectionActive = { stylusSeen.value || stylusOnly() },
                             onStylusSeen = { stylusSeen.value = true },
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value

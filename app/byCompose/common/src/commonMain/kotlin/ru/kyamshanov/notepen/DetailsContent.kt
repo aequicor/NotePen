@@ -207,6 +207,7 @@ fun DetailsContent(
     val pagesCache = remember(pdfDocument) { LruCache<Int, ImageBitmap>(maxSize = 8) }
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
+    var stylusOnly by remember { mutableStateOf(false) }
     val tabletController = LocalTabletInputController.current
     val barrelPressed by tabletController.barrelPressed.collectAsState()
     val eraserTipActive by tabletController.eraserTipActive.collectAsState()
@@ -439,6 +440,23 @@ fun DetailsContent(
             }
     }
 
+    // Host side: merge strokes that the client (tablet) holds locally.
+    LaunchedEffect(peerServer) {
+        val server = peerServer ?: return@LaunchedEffect
+        server.incomingMessages
+            .filterIsInstance<NetworkMessage.AnnotationSnapshotFromClient>()
+            .collect { snapshot ->
+                logger.info { "Received client annotation snapshot: ${snapshot.strokes.size} strokes" }
+                snapshot.strokes.forEach { added ->
+                    val state = drawingStates.getOrPut(added.pageIndex) { PdfDrawingState() }
+                    if (state.currentPaths.none { it.strokeId == added.strokeId }) {
+                        state.currentPaths.add(added.path.toDomain())
+                        state.markHistoryChanged()
+                    }
+                }
+            }
+    }
+
     // Tablet side: after the local bundle load, ask the host for its snapshot
     // and merge it into drawingStates (dedup by strokeId).
     LaunchedEffect(peerClient, filePath) {
@@ -505,6 +523,39 @@ fun DetailsContent(
                 val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
                 state.currentPaths.addAll(paths)
                 state.markHistoryChanged()
+            }
+            val client = peerClient
+            val engine = syncEngine
+            if (client != null) {
+                val clientStrokes = mutableListOf<StrokeDelta.Added>()
+                val deviceId = engine?.deviceId ?: "client"
+                drawingStates.forEach { (pageIndex, state) ->
+                    val paths = state.currentPaths
+                    for (i in paths.indices) {
+                        val original = paths[i]
+                        val id = original.strokeId.ifEmpty {
+                            engine?.newStrokeId() ?: "$deviceId#local-$pageIndex-$i"
+                        }
+                        if (original.strokeId.isEmpty()) {
+                            paths[i] = original.copy(strokeId = id)
+                        }
+                        clientStrokes.add(
+                            StrokeDelta.Added(
+                                strokeId = id,
+                                pageIndex = pageIndex,
+                                authorDeviceId = deviceId,
+                                clock = 0,
+                                path = paths[i].toDto(id),
+                            ),
+                        )
+                    }
+                }
+                if (clientStrokes.isNotEmpty()) {
+                    runCatching { client.send(NetworkMessage.AnnotationSnapshotFromClient(clientStrokes)) }
+                        .onFailure { e ->
+                            logger.warn { "Failed to push client annotation snapshot: ${e::class.simpleName}" }
+                        }
+                }
             }
             if (!isJvmDesktop && pages.isNotEmpty() &&
                 (bundle.currentPage > 0 || bundle.currentPageOffset > 0)
@@ -632,6 +683,7 @@ fun DetailsContent(
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
                             eraserOverride = { eraserOverride },
+                            stylusOnly = { stylusOnly },
                             currentZoomFactor = currentZoomFactor,
                             onGestureStart = { snapshot ->
                                 globalUndoStack.addLast(pageIndex to snapshot)
@@ -736,6 +788,7 @@ fun DetailsContent(
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
                             eraserOverride = { eraserOverride },
+                            stylusOnly = { stylusOnly },
                             currentZoomFactor = currentZoomFactor,
                             onGestureStart = { snapshot ->
                                 globalUndoStack.addLast(pageIndex to snapshot)
@@ -853,6 +906,8 @@ fun DetailsContent(
                 hasAnnotations = hasAnnotations,
                 isSaving = isSaving,
                 isExporting = isExporting,
+                stylusOnly = stylusOnly,
+                onStylusOnlyChange = { stylusOnly = it },
                 showThumbnails = showThumbnails,
                 onToggleThumbnails = { showThumbnails = !showThumbnails },
                 onSave = {
