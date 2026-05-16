@@ -1,22 +1,16 @@
 package ru.kyamshanov.notepen.pdfviewer
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
@@ -24,12 +18,10 @@ import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -47,7 +39,16 @@ import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 private const val WHEEL_SCROLL_PX_PER_TICK = 60f
 private const val ZOOM_IN_FACTOR = 1.1f
 private const val ZOOM_OUT_FACTOR = 1f / ZOOM_IN_FACTOR
-private const val RENDER_DEBOUNCE_MS = 120L
+
+/**
+ * Дебаунс между остановкой пользователя и запуском high-res рендера.
+ * Должен быть БОЛЬШЕ типичного интервала между wheel-тиками при
+ * медленном зуме (~200–250 мс), иначе render запускается между тиками
+ * → cache.put на main → рекомпозиция всей видимой страницы → cascade.
+ * При 300 мс рендер триггерится только когда пользователь по-настоящему
+ * перестал зумить.
+ */
+private const val RENDER_DEBOUNCE_MS = 300L
 private const val MAX_CACHE_ENTRIES = 6
 private const val MAX_RENDER_DIM_PX = 4000
 private const val BUFFER_PAGES = 1
@@ -86,7 +87,6 @@ private class PendingZoom {
         return f to p
     }
 }
-private val SCROLLBAR_WIDTH = 8.dp
 
 /**
  * Desktop-only PDF viewer.
@@ -198,7 +198,13 @@ fun PdfDesktopPagesViewer(
                 )
                 for (i in snap.first..snap.last) {
                     val cached = cache.get(i)
-                    if (cached != null && cached.renderedAtScalePercent == snap.scalePercent) continue
+                    // Пропускаем re-render если кэшированный масштаб уже
+                    // >= текущему: высокое разрешение прекрасно
+                    // downsample'ится Skia при отображении на меньшем зуме,
+                    // и битмап остаётся готовым к следующему zoom-in без
+                    // долгой растеризации. Re-render запускаем только если
+                    // кэш blurry для текущего вью.
+                    if (cached != null && cached.renderedAtScalePercent >= snap.scalePercent) continue
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
                     val targetWidthPx = (basePageWidthPx * snap.scalePercent / 100f * density.density)
@@ -302,10 +308,6 @@ fun PdfDesktopPagesViewer(
                 items.forEach { it.placeable.place(it.placeableX, it.placeableY) }
             }
         }
-        PdfVerticalScrollbar(
-            state = state,
-            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight().width(SCROLLBAR_WIDTH),
-        )
     }
 }
 
@@ -328,43 +330,6 @@ private data class ImmutablePdfPageScope(
     override val visualWidth: androidx.compose.ui.unit.Dp,
     override val visualHeight: androidx.compose.ui.unit.Dp,
 ) : PdfPageScope
-
-/** Простой полупрозрачный thumb справа: ширина [SCROLLBAR_WIDTH]. */
-@Composable
-private fun PdfVerticalScrollbar(state: PdfViewerState, modifier: Modifier = Modifier) {
-    val vp = state.viewportSize
-    val layout = state.layout
-    if (vp.height <= 0 || layout.totalHeightPx <= 0f) return
-    val contentH = layout.totalHeightPx * state.zoom
-    if (contentH <= vp.height) return
-    val ratioVisible = vp.height / contentH
-    val thumbHeightFrac = ratioVisible.coerceIn(0.05f, 1f)
-    val thumbTopFrac = ((-state.pan.y) / contentH).coerceIn(0f, 1f - thumbHeightFrac)
-    Box(modifier = modifier) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Transparent),
-        )
-        Box(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .width(SCROLLBAR_WIDTH)
-                .background(Color.Black.copy(alpha = 0.25f))
-                .layoutThumb(thumbTopFrac, thumbHeightFrac),
-        )
-    }
-}
-
-private fun Modifier.layoutThumb(topFrac: Float, heightFrac: Float): Modifier = this.then(
-    Modifier.layout { measurable, constraints ->
-        val parentH = constraints.maxHeight
-        val thumbH = (parentH * heightFrac).toInt().coerceAtLeast(1)
-        val thumbY = (parentH * topFrac).toInt().coerceIn(0, parentH - thumbH)
-        val p = measurable.measure(constraints.copy(minHeight = thumbH, maxHeight = thumbH))
-        layout(p.width, parentH) { p.placeRelative(0, thumbY) }
-    },
-)
 
 /**
  * Pointer-input десктоп-вьювера: zoom вокруг курсора, скролл колесом,

@@ -94,17 +94,16 @@ class PdfViewerState internal constructor(
                 pendingInitialScalePercent = null
             }
         }
-        // При первой готовности viewport + pages: центрируем pan, чтобы
-        // страница не прилипала к левому верху. Делаем ДО применения
-        // pending-scroll, чтобы scrollToPage поверх него работал
-        // относительно центрированного X.
+        // При первой готовности viewport + pages: центрируем pan по X в
+        // целочисленной арифметике, чтобы левый и правый пиксельные
+        // зазоры были равны (с разницей не более 1 px при нечётной
+        // суммарной величине). Float-центрирование через ` / 2f` + последующий
+        // `roundToInt()` при placement даёт visible смещение ~1 px.
+        // pan.y оставляем 0 — показываем top документа.
         if (viewportSize.width > 0 && pages.isNotEmpty() && pan == Offset.Zero) {
-            pan = PdfViewerMath.centeringClamp(
-                pan = pan,
-                layout = layout,
-                zoom = zoom,
-                viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
-            )
+            val pageW = (layout.basePageWidthPx * zoom).roundToInt()
+            val centerX = (viewportSize.width - pageW) / 2
+            pan = Offset(centerX.toFloat(), 0f)
         }
         val page = pendingInitialPage ?: return
         if (viewportSize.width <= 0 || pages.isEmpty()) return

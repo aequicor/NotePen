@@ -52,10 +52,14 @@ internal class PdfBitmapCache(
 
     /**
      * Активно вытесняет off-screen записи, у которых отрисованный масштаб
-     * сильно отличается от [currentScale] ([maxScaleRatio]× и больше). На
-     * резком zoom-out от 800 % к 50 % обычная LRU оставляет огромные
-     * 64-МБ битмапы в памяти до GC pause; этот метод освобождает их
-     * сразу.
+     * значительно МЕНЬШЕ текущего ([currentScale] / [maxScaleRatio] или
+     * меньше). Эти битмапы при zoom-in покажут blurry картинку → их
+     * можно безопасно удалить и перерендерить.
+     *
+     * Битмапы с масштабом БОЛЬШЕ текущего НЕ вытесняются — Skia downsample
+     * прекрасно работает, и сохранённый high-res вариант пригодится при
+     * следующем zoom-in без долгой растеризации. Их объём ограничивается
+     * pixel-ceiling LRU отдельно.
      *
      * Видимые страницы ([visibleIndices]) защищены — их битмап
      * продолжает показываться, пока новый не отрендерится.
@@ -69,10 +73,10 @@ internal class PdfBitmapCache(
         val toRemove = mutableListOf<Int>()
         for ((idx, rendered) in entries) {
             if (idx in visibleIndices) continue
-            val a = rendered.renderedAtScalePercent.toFloat()
-            val b = currentScale.toFloat()
-            val ratio = if (a > b) a / b else b / a
-            if (ratio >= maxScaleRatio) toRemove.add(idx)
+            val cachedScale = rendered.renderedAtScalePercent.toFloat()
+            // Удаляем только "too low-res" варианты. cachedScale большой →
+            // оставляем (он годится для отображения при любом меньшем зуме).
+            if (cachedScale * maxScaleRatio < currentScale) toRemove.add(idx)
         }
         for (idx in toRemove) {
             entries.remove(idx)

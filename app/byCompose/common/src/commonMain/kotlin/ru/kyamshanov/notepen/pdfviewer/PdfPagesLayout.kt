@@ -213,10 +213,16 @@ internal object PdfViewerMath {
     }
 
     /**
-     * Полный кламп [pan] для интерактивного панорамирования
-     * ([PdfViewerState.panBy]): держит документ всегда хотя бы частично в
-     * вьюпорте; если он целиком меньше вьюпорта по какой-либо оси —
-     * центрирует.
+     * Edge-clamp [pan] для интерактивного панорамирования
+     * ([PdfViewerState.panBy]): держит документ хотя бы частично в
+     * вьюпорте, когда он больше вьюпорта по оси. Если контент целиком
+     * меньше вьюпорта, [pan] по этой оси НЕ трогаем — иначе любой scroll
+     * (даже только вертикальный) затирает горизонтальное смещение,
+     * выставленное cursor-anchored zoom'ом не по центру.
+     *
+     * Начальное центрирование делается отдельно в
+     * [PdfViewerState.applyPendingInitialScrollIfNeeded] при первом
+     * измерении viewport.
      */
     fun clampPan(
         pan: Offset,
@@ -227,13 +233,13 @@ internal object PdfViewerMath {
         val contentW = layout.basePageWidthPx * zoom
         val contentH = layout.totalHeightPx * zoom
         val x = if (contentW <= viewportSize.width) {
-            (viewportSize.width - contentW) / 2f
+            pan.x
         } else {
             val minX = viewportSize.width - contentW
             pan.x.coerceIn(minX, 0f)
         }
         val y = if (contentH <= viewportSize.height) {
-            (viewportSize.height - contentH) / 2f
+            pan.y
         } else {
             val minY = viewportSize.height - contentH
             pan.y.coerceIn(minY, 0f)

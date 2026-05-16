@@ -102,31 +102,34 @@ class PdfPagesLayoutTest {
     }
 
     @Test
-    fun `clampPan centres content shorter than viewport`() {
+    fun `clampPan leaves pan untouched on axis where content fits`() {
         val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 100f)
+        // Контент 100×100 в 400×400 — обе оси помещаются, pan не трогаем
+        // (иначе scroll будет затирать пользовательское горизонтальное
+        // смещение от cursor-anchored zoom не по центру).
         val clamped = PdfViewerMath.clampPan(
-            pan = Offset(999f, 999f),
+            pan = Offset(40f, 70f),
             layout = layout,
             zoom = 1f,
             viewportSize = FloatSize(400f, 400f),
         )
-        // Контент 100×100 в 400×400 центрируется в (150, 150).
-        assertEquals(150f, clamped.x)
-        assertEquals(150f, clamped.y)
+        assertEquals(40f, clamped.x)
+        assertEquals(70f, clamped.y)
     }
 
     @Test
-    fun `clampPan keeps tall content scrollable within bounds`() {
+    fun `clampPan keeps tall content scrollable within bounds and leaves X free`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f) // total 300
         val clamped = PdfViewerMath.clampPan(
-            pan = Offset(999f, 999f),
+            pan = Offset(40f, 999f),
             layout = layout,
             zoom = 1f,
             viewportSize = FloatSize(400f, 200f),
         )
-        // Контент 100×300 при viewport 400×200 — X центрируется (150), Y клампится в [200-300, 0] = [-100, 0].
-        // 999 в Y → клампится к 0.
-        assertEquals(150f, clamped.x)
+        // Контент 100×300 при viewport 400×200 — X помещается (pan.x не
+        // трогаем, остаётся 40), Y overflow → клампим в [200-300, 0] = [-100, 0],
+        // 999 → 0.
+        assertEquals(40f, clamped.x)
         assertEquals(0f, clamped.y)
     }
 
