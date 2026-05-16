@@ -252,8 +252,18 @@ fun DetailsContent(
     // платформе.
     val currentScalePercent: Int by remember {
         derivedStateOf {
-            if (isJvmDesktop) pdfViewerState.scalePercent else committedScale
+            if (isJvmDesktop) pdfViewerState.scalePercent
+            else (committedScale * gestureScale).roundToInt()
         }
+    }
+    // Эффективный зум-фактор страницы (относительно её базового размера при
+    // zoom = 1). Используется в `DrawablePdfPage` для document-anchored
+    // нормализации толщины пера: один и тот же slider даёт одинаковую
+    // документную толщину независимо от того, на каком зуме рисовали.
+    val currentZoomFactor: () -> Float = if (isJvmDesktop) {
+        { pdfViewerState.zoom }
+    } else {
+        { committedScale / 100f * gestureScale }
     }
     val currentPageOffsetPx: Int by remember {
         derivedStateOf {
@@ -622,6 +632,7 @@ fun DetailsContent(
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
                             eraserOverride = { eraserOverride },
+                            currentZoomFactor = currentZoomFactor,
                             onGestureStart = { snapshot ->
                                 globalUndoStack.addLast(pageIndex to snapshot)
                                 globalRedoStack.clear()
@@ -725,6 +736,7 @@ fun DetailsContent(
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
                             eraserOverride = { eraserOverride },
+                            currentZoomFactor = currentZoomFactor,
                             onGestureStart = { snapshot ->
                                 globalUndoStack.addLast(pageIndex to snapshot)
                                 globalRedoStack.clear()

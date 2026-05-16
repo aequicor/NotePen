@@ -90,6 +90,14 @@ fun DrawablePdfPage(
      * restart `pointerInput` and lose the in-flight DOWN event).
      */
     eraserOverride: () -> Boolean = { false },
+    /**
+     * Текущий зум-фактор страницы относительно её базового размера (zoom = 1).
+     * Используется для нормализации stroke width в document-anchored семантике:
+     * slider value → одна и та же документная толщина независимо от текущего
+     * зума на момент рисования. Передаётся как лямбда, чтобы рекомпозиция при
+     * изменении зума не пере-запускала `pointerInput(...)`.
+     */
+    currentZoomFactor: () -> Float = { 1f },
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -196,7 +204,8 @@ fun DrawablePdfPage(
                                         pdfDrawingState.startDrawing(
                                             x = nx,
                                             y = ny,
-                                            normalizedStrokeWidth = penSettings.strokeWidth / w,
+                                            normalizedStrokeWidth = penSettings.strokeWidth *
+                                                currentZoomFactor() / w,
                                             pressure = pressure,
                                             tilt = tilt,
                                         )
@@ -269,7 +278,8 @@ fun DrawablePdfPage(
                                         pdfDrawingState.startDrawing(
                                             x = nx,
                                             y = ny,
-                                            normalizedStrokeWidth = markerSettings.strokeWidth / w,
+                                            normalizedStrokeWidth = markerSettings.strokeWidth *
+                                                currentZoomFactor() / w,
                                         )
                                     }
                                 }
