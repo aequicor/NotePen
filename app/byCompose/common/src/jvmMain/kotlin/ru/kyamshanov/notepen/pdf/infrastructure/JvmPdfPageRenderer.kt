@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.pdf.infrastructure
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -34,8 +35,13 @@ class JvmPdfPageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfPag
         val pageInfo = document.info.pages[pageIndex]
         val dpi = calculateDpi(pageInfo.widthPt, pageInfo.heightPt, widthPx, heightPx, pageInfo.rotation)
 
-        val rendered: BufferedImage = synchronized(jvmDoc.renderer) {
-            jvmDoc.renderer.renderImageWithDPI(pageIndex, dpi)
+        if (!jvmDoc.beginRender()) throw CancellationException("PDF document is closed")
+        val rendered: BufferedImage = try {
+            synchronized(jvmDoc.renderer) {
+                jvmDoc.renderer.renderImageWithDPI(pageIndex, dpi)
+            }
+        } finally {
+            jvmDoc.endRender()
         }
 
         val pixels = scaleToTarget(rendered, widthPx, heightPx)

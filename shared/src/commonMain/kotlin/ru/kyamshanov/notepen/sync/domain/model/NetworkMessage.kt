@@ -150,6 +150,17 @@ sealed class NetworkMessage {
     ) : NetworkMessage()
 
     /**
+     * Tablet → host: full set of annotations the client holds locally.
+     * Sent once at bootstrap, after the local annotation bundle is loaded.
+     * Host must de-duplicate by [StrokeDelta.Added.strokeId].
+     */
+    @Serializable
+    @SerialName("annotation_snapshot_from_client")
+    data class AnnotationSnapshotFromClient(
+        val strokes: List<StrokeDelta.Added>,
+    ) : NetworkMessage()
+
+    /**
      * Symmetric viewport state broadcast between peers.
      *
      * Either side emits this on local zoom / page-scroll changes; the receiving
