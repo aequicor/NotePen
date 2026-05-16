@@ -28,6 +28,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -346,6 +347,14 @@ fun DrawablePdfPage(
             bitmap = bitmap,
             contentDescription = "PDF Page",
             modifier = Modifier.fillMaxSize(),
+            // FillBounds (не Fit) — Box и bitmap могут иметь aspect-ratio,
+            // отличающиеся на доли пикселя из-за rounding при вычислении
+            // визуальной высоты / target render-resolution. С Fit это даёт
+            // letterbox-полосу сверху или снизу страницы — выглядит как
+            // зазор между страницами при continuous-зуме. FillBounds
+            // растягивает битмап точно по Box (sub-pixel искажение
+            // незаметно), стыки идеально совпадают.
+            contentScale = ContentScale.FillBounds,
         )
 
         // Scratch Path reused across frames for the live stroke. The cached

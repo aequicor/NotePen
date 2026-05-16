@@ -14,8 +14,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import kotlin.math.roundToInt
@@ -88,6 +88,10 @@ import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.sync.domain.viewstate.ViewStateSync
 import ru.kyamshanov.notepen.sync.infrastructure.WebSocketFileTransfer
+import ru.kyamshanov.notepen.pdfviewer.PdfDesktopPagesViewer
+import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
+import ru.kyamshanov.notepen.pdfviewer.isJvmDesktop
+import ru.kyamshanov.notepen.pdfviewer.rememberPdfViewerState
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
@@ -195,7 +199,12 @@ fun DetailsContent(
     // at 0 — vertical pan is delegated to `lazyListState.scrollBy` so
     // virtualisation continues to work.
     var panOffset by remember { mutableStateOf(Offset.Zero) }
-    val pagesCache = remember(pdfDocument, committedScale) { LruCache<Int, ImageBitmap>(maxSize = 8) }
+    // Cache survives `committedScale` changes: on bake we re-render at a
+    // higher resolution, but the old bitmap is kept as a fallback so newly
+    // composed page slots (those scrolled into view by the bake) start with
+    // *something* instead of "Loading", which is what produces the visible
+    // jump when zooming towards a neighbour page.
+    val pagesCache = remember(pdfDocument) { LruCache<Int, ImageBitmap>(maxSize = 8) }
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     val tabletController = LocalTabletInputController.current
@@ -227,7 +236,39 @@ fun DetailsContent(
         derivedStateOf { drawingStates.values.any { it.currentPaths.isNotEmpty() } }
     }
     val lazyListState = rememberLazyListState()
-    val firstVisiblePage by remember { derivedStateOf { lazyListState.firstVisibleItemIndex } }
+    // Desktop путь: единственный источник правды по позиции + зуму. На
+    // Android этот state существует, но не подключён — Android-ветка
+    // продолжает использовать `lazyListState` + `committedScale` /
+    // `gestureScale` / `panOffset` напрямую.
+    val pdfViewerState: PdfViewerState = rememberPdfViewerState()
+    val firstVisiblePage by remember {
+        derivedStateOf {
+            if (isJvmDesktop) pdfViewerState.firstVisiblePageIndex
+            else lazyListState.firstVisibleItemIndex
+        }
+    }
+    // Унифицированные читалки текущей позиции / масштаба — sync-код,
+    // сохранение и индикаторы работают через них и не должны знать о
+    // платформе.
+    val currentScalePercent: Int by remember {
+        derivedStateOf {
+            if (isJvmDesktop) pdfViewerState.scalePercent else committedScale
+        }
+    }
+    val currentPageOffsetPx: Int by remember {
+        derivedStateOf {
+            if (isJvmDesktop) pdfViewerState.firstVisiblePageOffsetPx
+            else lazyListState.firstVisibleItemScrollOffset
+        }
+    }
+    suspend fun scrollToPageUnified(pageIndex: Int, offsetPx: Int) {
+        if (isJvmDesktop) pdfViewerState.scrollToPage(pageIndex, offsetPx)
+        else lazyListState.scrollToItem(pageIndex, offsetPx)
+    }
+    fun setScalePercentUnified(scale: Int) {
+        if (isJvmDesktop) pdfViewerState.setScalePercent(scale)
+        else committedScale = scale
+    }
     val globalUndoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
     val globalRedoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -271,15 +312,11 @@ fun DetailsContent(
     }
 
     // Publisher: react to local scale / page / in-page offset changes.
-    LaunchedEffect(viewStateSync, lazyListState, pages.size) {
+    LaunchedEffect(viewStateSync, pages.size) {
         val bus = viewStateSync ?: return@LaunchedEffect
         if (pages.isEmpty()) return@LaunchedEffect
         snapshotFlow {
-            Triple(
-                lazyListState.firstVisibleItemIndex,
-                committedScale,
-                lazyListState.firstVisibleItemScrollOffset,
-            )
+            Triple(firstVisiblePage, currentScalePercent, currentPageOffsetPx)
         }.collect { (page, sc, offset) ->
             val snapshot = Triple(page, sc, offset)
             if (snapshot == lastAppliedRemote) return@collect
@@ -288,18 +325,18 @@ fun DetailsContent(
     }
 
     // Consumer: apply remote viewport changes to local scroll / zoom.
-    LaunchedEffect(viewStateSync, lazyListState, pages.size) {
+    LaunchedEffect(viewStateSync, pages.size) {
         val bus = viewStateSync ?: return@LaunchedEffect
         bus.remoteState.collect { remote ->
             if (remote == null) return@collect
             val targetPage = if (pages.isEmpty()) remote.page
             else remote.page.coerceIn(0, pages.size - 1)
             lastAppliedRemote = Triple(targetPage, remote.scale, remote.pageScrollOffsetPx)
-            if (committedScale != remote.scale) committedScale = remote.scale
-            if (lazyListState.firstVisibleItemIndex != targetPage ||
-                lazyListState.firstVisibleItemScrollOffset != remote.pageScrollOffsetPx
+            if (currentScalePercent != remote.scale) setScalePercentUnified(remote.scale)
+            if (firstVisiblePage != targetPage ||
+                currentPageOffsetPx != remote.pageScrollOffsetPx
             ) {
-                lazyListState.scrollToItem(targetPage, remote.pageScrollOffsetPx)
+                scrollToPageUnified(targetPage, remote.pageScrollOffsetPx)
             }
         }
     }
@@ -319,9 +356,9 @@ fun DetailsContent(
                     logger.warn { "Failed to stream PDF to peer: ${e::class.simpleName}" }
                 }
                 viewStateSync?.publish(
-                    page = lazyListState.firstVisibleItemIndex,
-                    scale = committedScale,
-                    pageScrollOffsetPx = lazyListState.firstVisibleItemScrollOffset,
+                    page = firstVisiblePage,
+                    scale = currentScalePercent,
+                    pageScrollOffsetPx = currentPageOffsetPx,
                 )
             }
         }
@@ -333,12 +370,12 @@ fun DetailsContent(
         annotationRepository.save(
             pdfPath = filePath,
             annotations = annotations,
-            scale = committedScale,
+            scale = currentScalePercent,
             pen = penSettings,
             marker = markerSettings,
             eraser = eraserSettings,
-            currentPage = lazyListState.firstVisibleItemIndex,
-            currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
+            currentPage = firstVisiblePage,
+            currentPageOffset = currentPageOffsetPx,
         )
     }
 
@@ -442,7 +479,15 @@ fun DetailsContent(
 
     LaunchedEffect(filePath) {
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
-            committedScale = bundle.scale
+            if (isJvmDesktop) {
+                pdfViewerState.applyInitialState(
+                    scalePercent = bundle.scale,
+                    pageIndex = bundle.currentPage,
+                    pageOffsetPx = bundle.currentPageOffset,
+                )
+            } else {
+                committedScale = bundle.scale
+            }
             penSettings = bundle.pen
             markerSettings = bundle.marker
             eraserSettings = bundle.eraser
@@ -451,7 +496,9 @@ fun DetailsContent(
                 state.currentPaths.addAll(paths)
                 state.markHistoryChanged()
             }
-            if (pages.isNotEmpty() && (bundle.currentPage > 0 || bundle.currentPageOffset > 0)) {
+            if (!isJvmDesktop && pages.isNotEmpty() &&
+                (bundle.currentPage > 0 || bundle.currentPageOffset > 0)
+            ) {
                 lazyListState.scrollToItem(
                     index = bundle.currentPage.coerceIn(0, pages.size - 1),
                     scrollOffset = bundle.currentPageOffset,
@@ -493,11 +540,9 @@ fun DetailsContent(
             },
     ) {
 
-        // Cursor-anchored zoom: see `computeCursorAnchoredZoom` for the
-        // derivation and invariant. `committedScale` is intentionally NOT in
-        // the formula — it sits inside the LazyColumn layout (item width,
-        // horizontal centering) and is invisible to the `graphicsLayer`
-        // transform that this math inverts.
+        // Cursor-anchored zoom для Android-ветки (ScrollablePdfColumn).
+        // Desktop использует [PdfDesktopPagesViewer], где zoom-якорь
+        // математически встроен в [PdfViewerState.zoomTo].
         val applyTransform: (Offset, Offset, Float) -> Unit = { centroid, pan, zoom ->
             val result = computeCursorAnchoredZoom(
                 centroid = centroid,
@@ -511,18 +556,10 @@ fun DetailsContent(
             gestureScale = result.gestureScale
         }
 
-        // Debounce: 150 ms after the last `gestureScale` change (gesture
-        // released or paused) bake the multiplier into `committedScale` so a
-        // single bitmap re-render at the new resolution kicks in.
-        //
-        // panOffset.x has to be compensated at the same time: LazyColumn
-        // centres each page at `viewportWidth / 2` in layout coordinates, so
-        // when item width grows from C_old → C_new the centreline stays put
-        // in layout, but the graphicsLayer transform (scaleX = g, origin
-        // top-left) used to map it to viewport x = V/2 * g. After the bake
-        // we drop g back to 1, so without compensation the centreline jumps
-        // to V/2 — visible as the content sliding left at every commit.
+        // Bake gestureScale → committedScale (только Android-путь). Desktop
+        // не использует двухуровневую модель — там один `zoom`.
         LaunchedEffect(gestureScale) {
+            if (isJvmDesktop) return@LaunchedEffect
             if (gestureScale == 1f) return@LaunchedEffect
             delay(150)
             val cOld = committedScale
@@ -551,8 +588,7 @@ fun DetailsContent(
             // we have to scrollBy `soOld * (gOld - 1)` to keep the same
             // fraction-within-item. Then add `-panOffset.y` to bake the
             // graphicsLayer Y-translation (the centroid-tracking component
-            // from the gesture) into native scroll. Combined delta is in
-            // post-commit (C_new) layout pixels — see derivation in the diff.
+            // from the gesture) into native scroll.
             val soOld = lazyListState.firstVisibleItemScrollOffset.toFloat()
             val scrollDeltaY = soOld * (gOld - 1f) - panOffset.y
 
@@ -564,7 +600,56 @@ fun DetailsContent(
             }
         }
 
-        ScrollablePdfColumn(
+        if (isJvmDesktop) {
+            PdfDesktopPagesViewer(
+                state = pdfViewerState,
+                pdfDocument = pdfDocument,
+                pages = pages,
+                renderer = renderer,
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                val bm = bitmap
+                Box(modifier = Modifier.size(visualWidth, visualHeight)) {
+                    if (bm != null) {
+                        val pdfDrawingState = remember(pageIndex) {
+                            drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
+                        }
+                        DrawablePdfPage(
+                            bitmap = bm,
+                            pdfDrawingState = pdfDrawingState,
+                            toolMode = effectiveToolMode,
+                            penSettings = penSettings,
+                            markerSettings = markerSettings,
+                            eraserSettings = eraserSettings,
+                            eraserOverride = { eraserOverride },
+                            onGestureStart = { snapshot ->
+                                globalUndoStack.addLast(pageIndex to snapshot)
+                                globalRedoStack.clear()
+                            },
+                            onEraseFinished = { before, _ ->
+                                handleEraseFinished(
+                                    pdfDrawingState = pdfDrawingState,
+                                    pageIndex = pageIndex,
+                                    before = before,
+                                    engine = syncEngine,
+                                )
+                            },
+                            onStrokeFinished = { path ->
+                                handleStrokeFinished(
+                                    pdfDrawingState = pdfDrawingState,
+                                    pageIndex = pageIndex,
+                                    path = path,
+                                    engine = syncEngine,
+                                )
+                            },
+                            modifier = Modifier.size(visualWidth, visualHeight),
+                        )
+                    } else {
+                        Text("Loading")
+                    }
+                }
+            }
+        } else ScrollablePdfColumn(
             state = lazyListState,
             gestureScale = gestureScale,
             panOffset = panOffset,
@@ -597,15 +682,33 @@ fun DetailsContent(
 
                 Box(modifier = Modifier.size(width, height)) {
                     val pageIndex = page.pageIndex
-                    var imageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+                    // Seed from the persistent cache so a slot composed for
+                    // the first time (e.g. scrolled into view at bake) shows
+                    // the previously-rendered bitmap immediately, before the
+                    // LaunchedEffect's re-render at the new resolution
+                    // completes.
+                    var imageBitmap by remember {
+                        mutableStateOf<ImageBitmap?>(pagesCache[pageIndex])
+                    }
                     LaunchedEffect(pdfDocument, committedScale) {
                         val doc = pdfDocument ?: return@LaunchedEffect
-                        val bitmap = pagesCache[pageIndex] ?: renderer.renderPage(
+                        val cached = pagesCache[pageIndex]
+                        // Keep the old bitmap on screen while the new one
+                        // renders — `Image.fillMaxSize` stretches it to the
+                        // new Box size; visually identical to the gestureScale
+                        // path, no flash.
+                        if (cached != null) imageBitmap = cached
+                        val matchesTarget = cached != null &&
+                            cached.width == renderWidthPx &&
+                            cached.height == renderHeightPx
+                        if (matchesTarget) return@LaunchedEffect
+                        val bitmap = renderer.renderPage(
                             document = doc,
                             pageIndex = pageIndex,
                             widthPx = renderWidthPx,
                             heightPx = renderHeightPx,
-                        ).toImageBitmap().also { pagesCache[pageIndex] = it }
+                        ).toImageBitmap()
+                        pagesCache[pageIndex] = bitmap
                         imageBitmap = bitmap
                     }
 
@@ -719,9 +822,7 @@ fun DetailsContent(
                 renderer = renderer,
                 currentPage = firstVisiblePage,
                 onPageClick = { pageIndex ->
-                    coroutineScope.launch {
-                        lazyListState.animateScrollToItem(pageIndex)
-                    }
+                    coroutineScope.launch { scrollToPageUnified(pageIndex, 0) }
                 },
             )
         }
@@ -766,12 +867,12 @@ fun DetailsContent(
                             val result = annotationRepository.save(
                                 pdfPath = filePath,
                                 annotations = annotations,
-                                scale = committedScale,
+                                scale = currentScalePercent,
                                 pen = penSettings,
                                 marker = markerSettings,
                                 eraser = eraserSettings,
-                                currentPage = lazyListState.firstVisibleItemIndex,
-                                currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
+                                currentPage = firstVisiblePage,
+                                currentPageOffset = currentPageOffsetPx,
                             )
                             if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
                         }
@@ -800,20 +901,22 @@ fun DetailsContent(
                         snackbarHostState.showSnackbar(message)
                     }
                 },
-                scale = committedScale,
+                scale = currentScalePercent,
                 onZoomIn = {
                     val centre = Offset(
                         windowSizeInPx.width / 2f,
                         windowSizeInPx.height / 2f,
                     )
-                    applyTransform(centre, Offset.Zero, TOOLBAR_ZOOM_STEP_IN)
+                    if (isJvmDesktop) pdfViewerState.zoomBy(TOOLBAR_ZOOM_STEP_IN, centre)
+                    else applyTransform(centre, Offset.Zero, TOOLBAR_ZOOM_STEP_IN)
                 },
                 onZoomOut = {
                     val centre = Offset(
                         windowSizeInPx.width / 2f,
                         windowSizeInPx.height / 2f,
                     )
-                    applyTransform(centre, Offset.Zero, TOOLBAR_ZOOM_STEP_OUT)
+                    if (isJvmDesktop) pdfViewerState.zoomBy(TOOLBAR_ZOOM_STEP_OUT, centre)
+                    else applyTransform(centre, Offset.Zero, TOOLBAR_ZOOM_STEP_OUT)
                 },
             )
         }
@@ -866,12 +969,12 @@ fun DetailsContent(
                             val result = annotationRepository.save(
                                 pdfPath = filePath,
                                 annotations = annotations,
-                                scale = committedScale,
+                                scale = currentScalePercent,
                                 pen = penSettings,
                                 marker = markerSettings,
                                 eraser = eraserSettings,
-                                currentPage = lazyListState.firstVisibleItemIndex,
-                                currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
+                                currentPage = firstVisiblePage,
+                                currentPageOffset = currentPageOffsetPx,
                             )
                             val msg = if (result.isSuccess) "Сохранено локально" else "Ошибка локального сохранения"
                             snackbarHostState.showSnackbar(msg)
@@ -893,16 +996,16 @@ fun DetailsContent(
                     annotationRepository.save(
                         pdfPath = filePath,
                         annotations = annotations,
-                        scale = committedScale,
+                        scale = currentScalePercent,
                         pen = penSettings,
                         marker = markerSettings,
                         eraser = eraserSettings,
-                        currentPage = lazyListState.firstVisibleItemIndex,
-                        currentPageOffset = lazyListState.firstVisibleItemScrollOffset,
+                        currentPage = firstVisiblePage,
+                        currentPageOffset = currentPageOffsetPx,
                     ).onFailure { e ->
                         logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
                     }
-                    component.saveLastPageIndex(lazyListState.firstVisibleItemIndex)
+                    component.saveLastPageIndex(firstVisiblePage)
                     component.onBack()
                 }
             },
@@ -919,4 +1022,87 @@ fun DetailsContent(
             )
         }
     }
+}
+
+/**
+ * Общая логика sync-уведомления после удаления / частичного стирания
+ * штрихов. Используется как desktop, так и Android-ветками viewer'а.
+ */
+private fun handleEraseFinished(
+    pdfDrawingState: PdfDrawingState,
+    pageIndex: Int,
+    before: List<DrawingPath>,
+    engine: SyncEngine?,
+) {
+    if (engine == null) return
+    val beforeIds = before.mapNotNull { it.strokeId.ifEmpty { null } }.toSet()
+    val beforeById = before.associateBy { it.strokeId }
+    val intactIds = mutableSetOf<String>()
+    for (p in pdfDrawingState.currentPaths) {
+        val orig = beforeById[p.strokeId] ?: continue
+        if (orig.points == p.points && p.strokeId.isNotEmpty()) {
+            intactIds.add(p.strokeId)
+        }
+    }
+    val removedOrModified = beforeIds - intactIds
+    if (removedOrModified.isEmpty()) return
+    val newAdded = mutableListOf<DrawingPath>()
+    for (i in pdfDrawingState.currentPaths.indices) {
+        val p = pdfDrawingState.currentPaths[i]
+        val needsId = p.strokeId.isEmpty() || p.strokeId in removedOrModified
+        if (needsId) {
+            val newId = engine.newStrokeId()
+            val stamped = p.copy(strokeId = newId)
+            pdfDrawingState.currentPaths[i] = stamped
+            newAdded.add(stamped)
+        }
+    }
+    val batch = buildList<StrokeDelta> {
+        for (id in removedOrModified) add(
+            StrokeDelta.Removed(
+                strokeId = id,
+                pageIndex = pageIndex,
+                authorDeviceId = engine.deviceId,
+                clock = 0,
+            ),
+        )
+        for (p in newAdded) add(
+            StrokeDelta.Added(
+                strokeId = p.strokeId,
+                pageIndex = pageIndex,
+                authorDeviceId = engine.deviceId,
+                clock = 0,
+                path = p.toDto(p.strokeId),
+            ),
+        )
+    }
+    engine.applyLocalBatch(batch)
+}
+
+/**
+ * Общая логика проштамповки strokeId и публикации нового штриха в sync.
+ */
+private fun handleStrokeFinished(
+    pdfDrawingState: PdfDrawingState,
+    pageIndex: Int,
+    path: DrawingPath,
+    engine: SyncEngine?,
+) {
+    if (engine == null) return
+    val id = engine.newStrokeId()
+    val stamped = path.copy(strokeId = id)
+    val idx = pdfDrawingState.currentPaths.lastIndex
+    if (idx >= 0) {
+        pdfDrawingState.currentPaths[idx] = stamped
+        pdfDrawingState.markHistoryChanged()
+    }
+    engine.applyLocal(
+        StrokeDelta.Added(
+            strokeId = id,
+            pageIndex = pageIndex,
+            authorDeviceId = engine.deviceId,
+            clock = 0,
+            path = stamped.toDto(id),
+        ),
+    )
 }
