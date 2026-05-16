@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -78,9 +79,11 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
+import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.sync.domain.viewstate.ViewStateSync
 import ru.kyamshanov.notepen.sync.infrastructure.WebSocketFileTransfer
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import kotlin.random.Random
@@ -116,12 +119,15 @@ fun DetailsContent(
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     val tabletController = LocalTabletInputController.current
     val barrelPressed by tabletController.barrelPressed.collectAsState()
-    // Hold-to-erase: while the pen's barrel button is pressed, override the active
-    // tool with ERASER. Releasing it returns to the user-selected tool. Because
+    val eraserTipActive by tabletController.eraserTipActive.collectAsState()
+    // Hold-to-erase: while the pen's barrel button is held *or* the eraser tip
+    // is touching the screen (e.g. flipped S-Pen), override the active tool
+    // with ERASER. Releasing either returns to the user-selected tool. Because
     // `toolMode` is a key of `pointerInput` in DrawablePdfPage, the gesture
     // handler restarts on the override flip — any in-flight stroke is finalised
     // cleanly via the existing `LaunchedEffect(toolMode)` path.
-    val effectiveToolMode = if (barrelPressed && toolMode != ToolMode.NONE) ToolMode.ERASER else toolMode
+    val eraserOverride = barrelPressed || eraserTipActive
+    val effectiveToolMode = if (eraserOverride && toolMode != ToolMode.NONE) ToolMode.ERASER else toolMode
     var penSettings by remember { mutableStateOf(PenSettings()) }
     var markerSettings by remember { mutableStateOf(MarkerSettings()) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
@@ -151,8 +157,68 @@ fun DetailsContent(
 
     LaunchedEffect(syncBridge) { syncBridge?.start() }
 
-    // Host side: stream the open PDF to the tablet as soon as a peer pairs.
-    LaunchedEffect(peerServer, filePath) {
+    // Symmetric viewport sync: page + zoom + in-page offset travel both ways.
+    // Bound to whichever peer endpoint is present (host has server, tablet has
+    // client; never both on one device in practice).
+    val viewStateSync = remember(peerServer, peerClient, coroutineScope) {
+        when {
+            peerServer != null -> ViewStateSync(
+                incoming = peerServer.incomingMessages,
+                send = peerServer::send,
+                scope = coroutineScope,
+            )
+            peerClient != null -> ViewStateSync(
+                incoming = peerClient.incomingMessages,
+                send = peerClient::send,
+                scope = coroutineScope,
+            )
+            else -> null
+        }
+    }
+
+    // Last viewport snapshot we *applied* from the remote — used by the
+    // publisher to suppress the immediate echo back to the peer.
+    var lastAppliedRemote by remember(viewStateSync) {
+        mutableStateOf<Triple<Int, Int, Int>?>(null)
+    }
+
+    // Publisher: react to local scale / page / in-page offset changes.
+    LaunchedEffect(viewStateSync, lazyListState, pages.size) {
+        val bus = viewStateSync ?: return@LaunchedEffect
+        if (pages.isEmpty()) return@LaunchedEffect
+        snapshotFlow {
+            Triple(
+                lazyListState.firstVisibleItemIndex,
+                scale,
+                lazyListState.firstVisibleItemScrollOffset,
+            )
+        }.collect { (page, sc, offset) ->
+            val snapshot = Triple(page, sc, offset)
+            if (snapshot == lastAppliedRemote) return@collect
+            bus.publish(page = page, scale = sc, pageScrollOffsetPx = offset)
+        }
+    }
+
+    // Consumer: apply remote viewport changes to local scroll / zoom.
+    LaunchedEffect(viewStateSync, lazyListState, pages.size) {
+        val bus = viewStateSync ?: return@LaunchedEffect
+        bus.remoteState.collect { remote ->
+            if (remote == null) return@collect
+            val targetPage = if (pages.isEmpty()) remote.page
+            else remote.page.coerceIn(0, pages.size - 1)
+            lastAppliedRemote = Triple(targetPage, remote.scale, remote.pageScrollOffsetPx)
+            if (scale != remote.scale) scale = remote.scale
+            if (lazyListState.firstVisibleItemIndex != targetPage ||
+                lazyListState.firstVisibleItemScrollOffset != remote.pageScrollOffsetPx
+            ) {
+                lazyListState.scrollToItem(targetPage, remote.pageScrollOffsetPx)
+            }
+        }
+    }
+
+    // Host side: stream the open PDF to the tablet as soon as a peer pairs,
+    // then push the current viewport so the tablet opens at the same page/zoom.
+    LaunchedEffect(peerServer, filePath, viewStateSync) {
         val server = peerServer ?: return@LaunchedEffect
         server.state.collect { st ->
             if (st is PairingState.Connected) {
@@ -164,6 +230,11 @@ fun DetailsContent(
                 }.onFailure { e ->
                     logger.warn { "Failed to stream PDF to peer: ${e::class.simpleName}" }
                 }
+                viewStateSync?.publish(
+                    page = lazyListState.firstVisibleItemIndex,
+                    scale = scale,
+                    pageScrollOffsetPx = lazyListState.firstVisibleItemScrollOffset,
+                )
             }
         }
     }
@@ -197,6 +268,67 @@ fun DetailsContent(
         }
     }
 
+    // Host side: on tablet's snapshot request, send all current strokes.
+    // Backfills missing strokeIds in-place so future erase/sync operations
+    // can target the same stroke by id.
+    LaunchedEffect(peerServer, syncEngine) {
+        val server = peerServer ?: return@LaunchedEffect
+        server.incomingMessages
+            .filterIsInstance<NetworkMessage.AnnotationSnapshotRequest>()
+            .collect {
+                val deviceId = syncEngine?.deviceId ?: "host"
+                val collected = mutableListOf<StrokeDelta.Added>()
+                drawingStates.forEach { (pageIndex, state) ->
+                    val paths = state.currentPaths
+                    for (i in paths.indices) {
+                        val original = paths[i]
+                        val id = original.strokeId.ifEmpty {
+                            syncEngine?.newStrokeId() ?: "$deviceId#legacy-$pageIndex-$i"
+                        }
+                        if (original.strokeId.isEmpty()) {
+                            paths[i] = original.copy(strokeId = id)
+                        }
+                        collected.add(
+                            StrokeDelta.Added(
+                                strokeId = id,
+                                pageIndex = pageIndex,
+                                authorDeviceId = deviceId,
+                                clock = 0,
+                                path = paths[i].toDto(id),
+                            ),
+                        )
+                    }
+                }
+                logger.info { "Sending annotation snapshot: ${collected.size} strokes" }
+                server.send(NetworkMessage.AnnotationSnapshot(strokes = collected))
+            }
+    }
+
+    // Tablet side: after the local bundle load, ask the host for its snapshot
+    // and merge it into drawingStates (dedup by strokeId).
+    LaunchedEffect(peerClient, filePath) {
+        val client = peerClient ?: return@LaunchedEffect
+        // Give the LaunchedEffect(filePath) annotation-load a chance to populate
+        // drawingStates before requesting — the dedup later filters duplicates,
+        // so order is not strictly required, but this keeps logs cleaner.
+        runCatching { client.send(NetworkMessage.AnnotationSnapshotRequest) }
+            .onFailure { e ->
+                logger.warn { "Failed to request annotation snapshot: ${e::class.simpleName}" }
+            }
+        client.incomingMessages
+            .filterIsInstance<NetworkMessage.AnnotationSnapshot>()
+            .collect { snapshot ->
+                logger.info { "Received annotation snapshot: ${snapshot.strokes.size} strokes" }
+                snapshot.strokes.forEach { added ->
+                    val state = drawingStates.getOrPut(added.pageIndex) { PdfDrawingState() }
+                    if (state.currentPaths.none { it.strokeId == added.strokeId }) {
+                        state.currentPaths.add(added.path.toDomain())
+                        state.markHistoryChanged()
+                    }
+                }
+            }
+    }
+
     // Tablet side: surface connection loss.
     var showLostConnectionDialog by remember { mutableStateOf(false) }
     LaunchedEffect(peerClient) {
@@ -227,7 +359,9 @@ fun DetailsContent(
             markerSettings = bundle.marker
             eraserSettings = bundle.eraser
             bundle.pages.forEach { (pageIndex, paths) ->
-                drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.currentPaths.addAll(paths)
+                val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
+                state.currentPaths.addAll(paths)
+                state.markHistoryChanged()
             }
             if (pages.isNotEmpty() && (bundle.currentPage > 0 || bundle.currentPageOffset > 0)) {
                 lazyListState.scrollToItem(
@@ -297,13 +431,19 @@ fun DetailsContent(
                 Box(modifier = Modifier.size(width, height)) {
                     val pageIndex = page.pageIndex
                     var imageBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+                    // Rendering above the displayed pixel size is wasted memory
+                    // (Box size is capped at maxTargetWidthPx) and on Android
+                    // a large scale combined with high-DPI screens easily blows
+                    // past the per-process heap (OOM at ~50M-pixel bitmaps).
+                    val renderWidthPx = minOf(targetWidthPx, maxTargetWidthPx)
+                    val renderHeightPx = minOf(targetHeightPx, maxTargetHeightPx)
                     LaunchedEffect(pdfDocument, scale) {
                         val doc = pdfDocument ?: return@LaunchedEffect
                         val bitmap = pagesCache[pageIndex] ?: renderer.renderPage(
                             document = doc,
                             pageIndex = pageIndex,
-                            widthPx = targetWidthPx,
-                            heightPx = targetHeightPx,
+                            widthPx = renderWidthPx,
+                            heightPx = renderHeightPx,
                         ).toImageBitmap().also { pagesCache[pageIndex] = it }
                         imageBitmap = bitmap
                     }
@@ -329,7 +469,14 @@ fun DetailsContent(
                                 val id = engine.newStrokeId()
                                 val stamped = path.copy(strokeId = id)
                                 val idx = pdfDrawingState.currentPaths.lastIndex
-                                if (idx >= 0) pdfDrawingState.currentPaths[idx] = stamped
+                                if (idx >= 0) {
+                                    pdfDrawingState.currentPaths[idx] = stamped
+                                    pdfDrawingState.markHistoryChanged()
+                                }
+                                logger.info {
+                                    "Stroke out: page=$pageIndex width=${stamped.strokeWidth} " +
+                                        "points=${stamped.points.size} color=${stamped.colorArgb}"
+                                }
                                 engine.applyLocal(
                                     StrokeDelta.Added(
                                         strokeId = id,

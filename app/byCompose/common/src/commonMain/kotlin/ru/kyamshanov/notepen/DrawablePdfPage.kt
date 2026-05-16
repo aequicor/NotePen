@@ -2,37 +2,59 @@ package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.IntSize
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.lowlatency.LowLatencyStrokeOverlay
+import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.effectivePressure
+import ru.kyamshanov.notepen.tablet.stylusEventSink
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
 
 /** Толщина обводки индикатора зоны ластика, в пикселях canvas. */
 private const val ERASER_INDICATOR_STROKE_WIDTH_PX = 2f
+
+/** Прозрачность контура hover-индикатора кончика пера. */
+private const val HOVER_INDICATOR_ALPHA = 0.5f
+
+/** Минимальный радиус hover-индикатора в пикселях канваса. */
+private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
+
+/** Множитель «расширения» штриха при сильном наклоне пера (0..1 → ×(1..1+gain)). */
+private const val TILT_WIDTH_GAIN = 0.5f
 
 @Composable
 fun DrawablePdfPage(
@@ -49,9 +71,17 @@ fun DrawablePdfPage(
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
     val tablet = LocalTabletInputController.current
 
+    // Becomes `true` after the first stylus / eraser-tip event is seen in this
+    // composition. Once set, finger touches stop drawing (palm rejection) and
+    // are passed through to parent gestures (pan / zoom). Stays `false` on
+    // devices without a stylus so the app remains usable with fingers only.
+    val stylusSeen = remember { mutableStateOf(false) }
+
     // Позиция пальца ластика в нормализованных координатах [0..1] относительно canvas.
     // null → жест ластика не активен (палец не на экране) → индикатор не отрисовывается.
     val eraserPos = remember { mutableStateOf<Offset?>(null) }
+
+    val hoverPos by tablet.hoverPosition.collectAsState()
 
     // EC-1 / EC-2: при смене инструмента финализируем незавершённый штрих и
     // сбрасываем активную сессию стирания.
@@ -65,95 +95,128 @@ fun DrawablePdfPage(
     }
 
     val indicatorColor = MaterialTheme.colorScheme.outline
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val lowLatencyOverlayActive = rememberLowLatencyOverlayAvailable()
+
+    // Cache of all completed strokes rasterised to an off-screen ImageBitmap.
+    // Rebuilt only when canvas size changes or `historyVersion` is bumped
+    // (finishDrawing, undo / redo, eraser, sync). Without this cache, every
+    // frame iterated `currentPaths.forEach { drawStrokeWithPressure }` —
+    // for varying-pressure strokes this is hundreds of `drawPath` calls per
+    // frame per stroke on screen, which dominates the input-to-pixel latency
+    // budget once the page has any ink on it.
+    val completedLayer: ImageBitmap? = remember(
+        canvasSize.value,
+        pdfDrawingState.historyVersion.value,
+    ) {
+        val (w, h) = canvasSize.value
+        if (w <= 0 || h <= 0 || pdfDrawingState.currentPaths.isEmpty()) return@remember null
+        val bmp = ImageBitmap(w, h)
+        val gCanvas = GraphicsCanvas(bmp)
+        val scope = CanvasDrawScope()
+        val scratch = Path()
+        scope.draw(
+            density = density,
+            layoutDirection = layoutDirection,
+            canvas = gCanvas,
+            size = Size(w.toFloat(), h.toFloat()),
+        ) {
+            pdfDrawingState.currentPaths.forEach { path ->
+                drawStrokeWithPressure(path, w.toFloat(), h.toFloat(), scratch)
+            }
+        }
+        bmp
+    }
 
     Box(
         modifier = modifier
             .onSizeChanged { canvasSize.value = it }
+            .stylusEventSink(tablet)
             .then(
                 when (toolMode) {
-                    // ПРИМЕЧАНИЕ к ключам pointerInput:
-                    // pointerInput кэширует suspending-block по ключам и НЕ перезапускает
-                    // его, пока ключи неизменны. Если в ключе только `toolMode`, замыкание
-                    // onDragStart захватывает старое значение `penSettings` (или
-                    // `eraserSettings`), и при движении слайдеров «Толщина» / «Прозрачность» /
-                    // выборе нового цвета-пресета следующий штрих использует устаревшие
-                    // значения. Поэтому ключи включают и сами settings — при их изменении
-                    // gesture-handler перезапускается с актуальным замыканием. EC-1/EC-2
-                    // (финализация незавершённого штриха) обрабатываются LaunchedEffect выше
-                    // по `toolMode`, поэтому риск частичных штрихов при перезапуске
-                    // pointerInput на лету покрыт.
                     ToolMode.PEN -> Modifier.pointerInput(toolMode, penSettings) {
-                        detectDragGestures(
-                            onDragStart = { offset ->
+                        detectStylusAwareDrag(
+                            tablet = tablet,
+                            isPalmRejectionActive = { stylusSeen.value },
+                            onStylusSeen = { stylusSeen.value = true },
+                            onDown = { off, pressure, tilt ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
                                     onGestureStart(pdfDrawingState.currentPaths.toList())
                                     pdfDrawingState.strokeColorArgb.value = penSettings.colorArgb
                                     pdfDrawingState.strokeWidth.value = penSettings.strokeWidth
                                     pdfDrawingState.startDrawing(
-                                        x = offset.x / w,
-                                        y = offset.y / h,
+                                        x = off.x / w,
+                                        y = off.y / h,
                                         normalizedStrokeWidth = penSettings.strokeWidth / w,
-                                        pressure = tablet.latestPressure.value,
+                                        pressure = pressure,
+                                        tilt = tilt,
                                     )
                                 }
                             },
-                            onDrag = { change, _ ->
+                            onMove = { off, pressure, tilt ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
                                     pdfDrawingState.addPoint(
-                                        x = change.position.x / w,
-                                        y = change.position.y / h,
-                                        pressure = change.effectivePressure(tablet.latestPressure.value),
+                                        x = off.x / w,
+                                        y = off.y / h,
+                                        pressure = pressure,
+                                        tilt = tilt,
                                     )
                                 }
                             },
-                            onDragEnd = {
+                            onUp = {
                                 val completed = pdfDrawingState.finishDrawing()
                                 if (completed != null) onStrokeFinished(completed)
                             },
+                            onCancel = { pdfDrawingState.finishDrawing() },
                         )
                     }
 
                     ToolMode.MARKER -> Modifier.pointerInput(toolMode, markerSettings) {
-                        detectDragGestures(
-                            onDragStart = { offset ->
+                        detectStylusAwareDrag(
+                            tablet = tablet,
+                            isPalmRejectionActive = { stylusSeen.value },
+                            onStylusSeen = { stylusSeen.value = true },
+                            onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
                                     onGestureStart(pdfDrawingState.currentPaths.toList())
                                     pdfDrawingState.strokeColorArgb.value = markerSettings.colorArgb
                                     pdfDrawingState.strokeWidth.value = markerSettings.strokeWidth
                                     pdfDrawingState.startDrawing(
-                                        x = offset.x / w,
-                                        y = offset.y / h,
+                                        x = off.x / w,
+                                        y = off.y / h,
                                         normalizedStrokeWidth = markerSettings.strokeWidth / w,
                                     )
                                 }
                             },
-                            onDrag = { change, _ ->
+                            onMove = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    pdfDrawingState.addPoint(
-                                        change.position.x / w,
-                                        change.position.y / h,
-                                    )
+                                    pdfDrawingState.addPoint(off.x / w, off.y / h)
                                 }
                             },
-                            onDragEnd = {
+                            onUp = {
                                 val completed = pdfDrawingState.finishDrawing()
                                 if (completed != null) onStrokeFinished(completed)
                             },
+                            onCancel = { pdfDrawingState.finishDrawing() },
                         )
                     }
 
                     ToolMode.ERASER -> Modifier.pointerInput(toolMode, eraserSettings) {
-                        detectDragGestures(
-                            onDragStart = { offset ->
+                        detectStylusAwareDrag(
+                            tablet = tablet,
+                            isPalmRejectionActive = { stylusSeen.value },
+                            onStylusSeen = { stylusSeen.value = true },
+                            onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
                                     onGestureStart(pdfDrawingState.currentPaths.toList())
-                                    val nx = offset.x / w
-                                    val ny = offset.y / h
+                                    val nx = off.x / w
+                                    val ny = off.y / h
                                     eraserPos.value = Offset(nx, ny)
                                     pdfDrawingState.eraseInZone(
                                         centerX = nx,
@@ -163,11 +226,11 @@ fun DrawablePdfPage(
                                     )
                                 }
                             },
-                            onDrag = { change, _ ->
+                            onMove = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    val nx = change.position.x / w
-                                    val ny = change.position.y / h
+                                    val nx = off.x / w
+                                    val ny = off.y / h
                                     eraserPos.value = Offset(nx, ny)
                                     pdfDrawingState.eraseInZone(
                                         centerX = nx,
@@ -177,8 +240,8 @@ fun DrawablePdfPage(
                                     )
                                 }
                             },
-                            onDragEnd = { eraserPos.value = null },
-                            onDragCancel = { eraserPos.value = null },
+                            onUp = { eraserPos.value = null },
+                            onCancel = { eraserPos.value = null },
                         )
                     }
 
@@ -192,25 +255,42 @@ fun DrawablePdfPage(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // One reusable Path instance captured by the Canvas draw lambda.
-        // Per-segment rendering reset()s it instead of allocating a new Path
-        // for every cubic — at 200+ points per stroke × 240 fps this eliminates
-        // the GC pressure that caused EDT stalls and AWT mouse-event coalescing
-        // (the visible "lag → straight line" artefact during long pen strokes).
-        val scratchPath = remember { Path() }
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            pdfDrawingState.currentPaths.forEach { path ->
-                drawStrokeWithPressure(path, size.width, size.height, scratchPath)
-            }
+        // Scratch Path reused across frames for the live stroke. The cached
+        // `completedLayer` already holds all finished strokes; we only need a
+        // single Path per frame for the in-flight stroke.
+        val livePath = remember { Path() }
 
-            if (pdfDrawingState.isDrawing.value && pdfDrawingState.currentPath.value.points.size > 1) {
-                drawStrokeWithPressure(
-                    pdfDrawingState.currentPath.value, size.width, size.height, scratchPath,
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            // Completed strokes — bitmap blit, single draw call regardless of
+            // how much ink is on the page.
+            completedLayer?.let { drawImage(it) }
+
+            // Live stroke. Rendered with a single drawPath at uniform width
+            // (average pressure of the existing samples × base) for minimum
+            // per-frame cost. On `finishDrawing` the stroke is re-rasterised
+            // into `completedLayer` with full per-segment varying-width fidelity
+            // (`drawStrokeWithPressure`), so the user sees the higher-quality
+            // render exactly when they lift the pen.
+            //
+            // Skipped when a low-latency overlay is in charge of the live
+            // stroke on this platform (Android API 29+) — otherwise the
+            // stroke would be drawn twice (once with frame-bound latency,
+            // once with sub-frame latency).
+            if (!lowLatencyOverlayActive &&
+                pdfDrawingState.isDrawing.value &&
+                pdfDrawingState.livePoints.size > 1
+            ) {
+                drawLiveStroke(
+                    points = pdfDrawingState.livePoints,
+                    colorArgb = pdfDrawingState.liveColorArgb.value,
+                    normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
+                    canvasWidth = size.width,
+                    canvasHeight = size.height,
+                    scratch = livePath,
                 )
             }
 
-            // Индикатор зоны ластика (AC-12). Отрисовывается только если палец на экране
-            // и выбран ластик. Заливка полупрозрачная; обводка — сплошная.
+            // Индикатор зоны ластика (AC-12).
             val pos = eraserPos.value
             if (toolMode == ToolMode.ERASER && pos != null) {
                 val cx = pos.x * size.width
@@ -248,19 +328,157 @@ fun DrawablePdfPage(
                     }
                 }
             }
+
+            // Hover-индикатор кончика пера. Показывается только пока перо не касается
+            // экрана, только для рисующих инструментов.
+            val hover = hoverPos
+            if (hover != null && (toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER)) {
+                val cx = hover.x * size.width
+                val cy = hover.y * size.height
+                val toolStrokePx = when (toolMode) {
+                    ToolMode.PEN -> penSettings.strokeWidth
+                    ToolMode.MARKER -> markerSettings.strokeWidth
+                    else -> 0f
+                } * size.width
+                val radiusPx = kotlin.math.max(HOVER_INDICATOR_MIN_RADIUS_PX, toolStrokePx * 0.5f)
+                drawCircle(
+                    color = indicatorColor.copy(alpha = HOVER_INDICATOR_ALPHA),
+                    radius = radiusPx,
+                    center = Offset(cx, cy),
+                    style = Stroke(width = ERASER_INDICATOR_STROKE_WIDTH_PX),
+                )
+            }
+        }
+
+        // Low-latency front-buffered overlay for the live stroke on platforms
+        // that support it (Android API 29+). Sits above the Compose Canvas; on
+        // platforms where it is a no-op, the Compose Canvas above still
+        // renders the live stroke itself (`drawLiveStroke` above).
+        if (lowLatencyOverlayActive) {
+            LowLatencyStrokeOverlay(
+                drawingState = pdfDrawingState,
+                modifier = Modifier.fillMaxSize(),
+            )
         }
     }
 }
 
 /**
- * Renders [stroke] with per-segment width modulated by [DrawingPoint.pressure].
+ * Stylus-aware drag gesture used by all three drawing tools. See KDoc on
+ * earlier revisions for the full rationale; key invariants:
+ *  - no touch-slop wait (fixes the "spiral defect" — initial fast curves
+ *    used to be silently swallowed for ~24dp);
+ *  - drains `PointerInputChange.historical` for sub-frame stylus samples;
+ *  - palm rejection once a stylus event has been seen;
+ *  - cancel-safe via try / finally.
+ */
+private suspend fun PointerInputScope.detectStylusAwareDrag(
+    tablet: TabletInputController,
+    isPalmRejectionActive: () -> Boolean,
+    onStylusSeen: () -> Unit,
+    onDown: (position: Offset, pressure: Float, tilt: Float) -> Unit,
+    onMove: (position: Offset, pressure: Float, tilt: Float) -> Unit,
+    onUp: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        val downIsStylus = down.type == PointerType.Stylus || down.type == PointerType.Eraser
+        if (downIsStylus) onStylusSeen()
+        if (!downIsStylus && isPalmRejectionActive()) {
+            return@awaitEachGesture
+        }
+
+        onDown(
+            down.position,
+            down.effectivePressure(tablet.latestPressure.value),
+            tablet.tilt.value,
+        )
+        down.consume()
+        var ended = false
+        try {
+            while (!ended) {
+                val event = awaitPointerEvent()
+                val change = event.changes.firstOrNull { it.id == down.id } ?: continue
+                if (!change.pressed) {
+                    onUp()
+                    change.consume()
+                    ended = true
+                    break
+                }
+                val pressureNow = change.effectivePressure(tablet.latestPressure.value)
+                val tiltNow = tablet.tilt.value
+                for (h in change.historical) {
+                    onMove(h.position, pressureNow, tiltNow)
+                }
+                onMove(change.position, pressureNow, tiltNow)
+                change.consume()
+            }
+        } finally {
+            if (!ended) onCancel()
+        }
+    }
+}
+
+/**
+ * Cheap renderer for the in-flight live stroke. Builds a single
+ * Catmull-Rom-smoothed Path from [points] and draws it once with a uniform
+ * width derived from the average pressure × tilt-boost of the most recent
+ * samples. Trades pressure-fidelity for latency — the canonical varying-width
+ * render is performed in `drawStrokeWithPressure` when the stroke is committed
+ * to the completed-strokes bitmap cache.
+ */
+private fun DrawScope.drawLiveStroke(
+    points: List<DrawingPoint>,
+    colorArgb: Long,
+    normalizedStrokeWidth: Float,
+    canvasWidth: Float,
+    canvasHeight: Float,
+    scratch: Path,
+) {
+    if (points.size < 2) return
+
+    // Average pressure / tilt over the most recent tail (up to 8 samples) so
+    // the live width responds to recent pen state without flickering on each
+    // sample.
+    val tailStart = (points.size - PRESSURE_AVG_WINDOW).coerceAtLeast(0)
+    var pressureSum = 0f
+    var tiltSum = 0f
+    for (i in tailStart until points.size) {
+        pressureSum += points[i].pressure
+        tiltSum += points[i].tilt
+    }
+    val n = points.size - tailStart
+    val avgPressure = pressureSum / n
+    val avgTilt = tiltSum / n
+    val width = normalizedStrokeWidth * canvasWidth *
+        avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt)
+
+    scratch.reset()
+    points.appendCatmullRomTo(scratch, canvasWidth, canvasHeight)
+    drawPath(
+        path = scratch,
+        color = Color(colorArgb.toInt()),
+        style = Stroke(
+            width = width,
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round,
+        ),
+    )
+}
+
+private const val PRESSURE_AVG_WINDOW = 8
+
+/**
+ * Renders [stroke] with per-segment width modulated by [DrawingPoint.pressure]
+ * and [DrawingPoint.tilt]. Used to bake completed strokes into the off-screen
+ * cache bitmap.
  *
- * When every point has the same pressure (typical mouse / marker stroke), the
- * whole stroke is painted as a single Catmull-Rom-smoothed path — cheap and
- * visually identical to the legacy renderer. When pressure varies (tablet),
- * each segment is painted as its own short cubic with width derived from the
- * average pressure of its two endpoints; this trades one draw call for N but
- * gives the smooth taper users expect from pressure-sensitive pens.
+ * When every point has the same pressure **and** tilt (typical mouse / marker
+ * stroke), the whole stroke is painted as a single Catmull-Rom-smoothed path —
+ * cheap and visually identical to the legacy renderer. When pressure or tilt
+ * varies (tablet), each segment is painted as its own short cubic with width
+ * derived from the average pressure × tilt-boost of its two endpoints.
  *
  * Segments are joined with [StrokeCap.Round] so the width steps are invisible.
  */
@@ -277,16 +495,18 @@ private fun DrawScope.drawStrokeWithPressure(
     val baseWidth = stroke.strokeWidth * w
 
     val uniformPressure = points.first().pressure
+    val uniformTilt = points.first().tilt
     val pressureVaries = points.any { it.pressure != uniformPressure }
+    val tiltVaries = points.any { it.tilt != uniformTilt }
 
-    if (!pressureVaries) {
+    if (!pressureVaries && !tiltVaries) {
         scratch.reset()
         points.appendCatmullRomTo(scratch, w, h)
         drawPath(
             path = scratch,
             color = color,
             style = Stroke(
-                width = baseWidth * uniformPressure,
+                width = baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt),
                 cap = StrokeCap.Round,
                 join = StrokeJoin.Round,
             ),
@@ -318,11 +538,12 @@ private fun DrawScope.drawStrokeWithPressure(
                 x2, y2,
             )
             val avgPressure = (p1.pressure + p2.pressure) * 0.5f
+            val avgTilt = (p1.tilt + p2.tilt) * 0.5f
             drawPath(
                 path = scratch,
                 color = color,
                 style = Stroke(
-                    width = baseWidth * avgPressure,
+                    width = baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt),
                     cap = StrokeCap.Round,
                     join = StrokeJoin.Round,
                 ),

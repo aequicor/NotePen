@@ -16,6 +16,7 @@ kotlin-logging = "7.0.13"
 slf4j = "2.0.17"
 apache-pdfbox = "3.0.5"
 jna = "5.14.0"
+androidx-graphics-core = "1.0.3"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
@@ -46,6 +47,7 @@ ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.re
 jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+androidx-graphics-core = { module = "androidx.graphics:graphics-core", version.ref = "androidx-graphics-core" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }

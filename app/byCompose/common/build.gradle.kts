@@ -70,6 +70,7 @@ kotlin {
             implementation(libs.kotlin.logging.android)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
+            implementation(libs.androidx.graphics.core)
         }
 
         jvmMain.dependencies {

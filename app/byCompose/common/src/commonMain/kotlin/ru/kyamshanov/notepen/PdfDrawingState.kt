@@ -10,54 +10,94 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 
 class PdfDrawingState {
     var currentPaths = mutableStateListOf<DrawingPath>()
-    var currentPath = mutableStateOf(DrawingPath())
+
+    /**
+     * Live (still-being-drawn) stroke samples. Append-only during a stroke;
+     * cleared on [finishDrawing]. Backed by a [SnapshotStateList] so each
+     * `add` is amortised O(1) and recomposition of readers (the live-stroke
+     * renderer / front-buffered overlay) is incremental rather than re-copying
+     * the whole point list per sample — the latter caused GC stalls visible
+     * as stutter during long pen strokes.
+     */
+    val livePoints = mutableStateListOf<DrawingPoint>()
+
     var isDrawing = mutableStateOf(false)
     var strokeWidth = mutableStateOf(DrawingPath.DEFAULT_STROKE_WIDTH)
     /** ARGB-packed color of the active stroke; kept in sync with [PenSettings.colorArgb]. */
     var strokeColorArgb = mutableStateOf(DrawingPath.BLACK_ARGB)
+
+    /** Color of the currently-live stroke. Snapshotted at [startDrawing]. */
+    val liveColorArgb = mutableStateOf(DrawingPath.BLACK_ARGB)
+
+    /** Normalised stroke width of the currently-live stroke. Snapshotted at [startDrawing]. */
+    val liveStrokeWidth = mutableStateOf(DrawingPath.DEFAULT_STROKE_WIDTH)
+
+    /**
+     * Monotonic counter bumped whenever [currentPaths] changes through one of
+     * the public mutators ([finishDrawing], [clearDrawing], [restoreSnapshot],
+     * `eraseInZone` and friends). Consumers that cache rendered output of
+     * completed strokes (e.g. the `completedLayer` bitmap in `DrawablePdfPage`)
+     * read it as an invalidation signal — bumping it is cheaper than diffing
+     * the list contents, and avoids re-rendering finished strokes every frame.
+     *
+     * Code that mutates [currentPaths] directly (sync engine, tests) should
+     * call [markHistoryChanged] afterwards.
+     */
+    val historyVersion = mutableStateOf(0)
+
+    /** Bump [historyVersion] to invalidate caches keyed on completed-stroke content. */
+    fun markHistoryChanged() {
+        historyVersion.value++
+    }
 
     fun startDrawing(
         x: Float,
         y: Float,
         normalizedStrokeWidth: Float = strokeWidth.value,
         pressure: Float = 1f,
+        tilt: Float = 0f,
     ) {
         isDrawing.value = true
-        currentPath.value = DrawingPath(
-            points = listOf(DrawingPoint(x, y, isNewPath = true, pressure = pressure)),
-            colorArgb = strokeColorArgb.value,
-            strokeWidth = normalizedStrokeWidth,
-        )
+        liveColorArgb.value = strokeColorArgb.value
+        liveStrokeWidth.value = normalizedStrokeWidth
+        livePoints.clear()
+        livePoints.add(DrawingPoint(x, y, isNewPath = true, pressure = pressure, tilt = tilt))
     }
 
-    fun addPoint(x: Float, y: Float, pressure: Float = 1f) {
+    fun addPoint(x: Float, y: Float, pressure: Float = 1f, tilt: Float = 0f) {
         if (isDrawing.value) {
-            val newPoints = currentPath.value.points + DrawingPoint(x, y, pressure = pressure)
-            currentPath.value = currentPath.value.copy(points = newPoints)
+            livePoints.add(DrawingPoint(x, y, pressure = pressure, tilt = tilt))
         }
     }
 
     fun finishDrawing(): DrawingPath? {
-        val completed = if (isDrawing.value && currentPath.value.points.size > 1) {
-            val path = currentPath.value
+        val completed = if (isDrawing.value && livePoints.size > 1) {
+            val path = DrawingPath(
+                points = livePoints.toList(),
+                colorArgb = liveColorArgb.value,
+                strokeWidth = liveStrokeWidth.value,
+            )
             currentPaths.add(path)
+            markHistoryChanged()
             path
         } else {
             null
         }
         isDrawing.value = false
-        currentPath.value = DrawingPath()
+        livePoints.clear()
         return completed
     }
 
     fun clearDrawing() {
         currentPaths.clear()
-        currentPath.value = DrawingPath()
+        livePoints.clear()
+        markHistoryChanged()
     }
 
     fun restoreSnapshot(snapshot: List<DrawingPath>) {
         currentPaths.clear()
         currentPaths.addAll(snapshot)
+        markHistoryChanged()
     }
 }
 
@@ -130,6 +170,7 @@ fun PdfDrawingState.erasePointsInZone(
     if (anyChange) {
         currentPaths.clear()
         currentPaths.addAll(rebuilt)
+        markHistoryChanged()
     }
     return anyChange
 }
@@ -163,7 +204,9 @@ fun PdfDrawingState.eraseStrokesInZone(
         }
     }
 
-    return currentPaths.size != before
+    val changed = currentPaths.size != before
+    if (changed) markHistoryChanged()
+    return changed
 }
 
 /**

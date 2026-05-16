@@ -15,4 +15,10 @@ data class DrawingPoint(
      * compatibility with strokes serialised before this field existed.
      */
     val pressure: Float = 1f,
+    /**
+     * Stylus tilt normalised to [0..1] where `0f` is perpendicular to the
+     * screen and `1f` is fully parallel. Defaults to `0f` for sources without
+     * tilt info; older serialised strokes load with this default.
+     */
+    val tilt: Float = 0f,
 )

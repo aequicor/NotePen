@@ -66,6 +66,10 @@ class CocoaTabletInputController : TabletInputController {
 
     override val latestPressure: StateFlow<Float> = pressureFlow.asStateFlow()
     override val barrelPressed: StateFlow<Boolean> = buttonFlow.asStateFlow()
+    override val eraserTipActive: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
+    override val tilt: StateFlow<Float> = MutableStateFlow(0f).asStateFlow()
+    override val hoverPosition: StateFlow<androidx.compose.ui.geometry.Offset?> =
+        MutableStateFlow<androidx.compose.ui.geometry.Offset?>(null).asStateFlow()
 
     private var bridge: NotepenTabletBridge? = null
     private var callbackRef: NotepenTabletBridge.OnSample? = null

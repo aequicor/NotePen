@@ -5,7 +5,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import ru.kyamshanov.notepen.tablet.AndroidTabletInputController
+import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import com.arkivanov.decompose.defaultComponentContext
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -108,15 +112,21 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(isSystemInDarkTheme()) {
                 enableEdgeToEdge()
             }
-            App(
-                rootComponent = root,
-                pdfDocumentLoader = pdfDocumentLoader,
-                pdfPageRenderer = pdfPageRenderer,
-                syncViewModel = syncViewModel,
-                syncEngine = syncEngine,
-                peerClient = syncClient,
-                receivedPdfDir = receivedDir,
-            )
+            // Side-channel for stylus state (barrel button, eraser tip, tilt,
+            // hover) that Compose's commonMain pointer pipeline doesn't expose.
+            // Fed via `Modifier.stylusEventSink` attached inside DrawablePdfPage.
+            val tabletController = remember { AndroidTabletInputController() }
+            CompositionLocalProvider(LocalTabletInputController provides tabletController) {
+                App(
+                    rootComponent = root,
+                    pdfDocumentLoader = pdfDocumentLoader,
+                    pdfPageRenderer = pdfPageRenderer,
+                    syncViewModel = syncViewModel,
+                    syncEngine = syncEngine,
+                    peerClient = syncClient,
+                    receivedPdfDir = receivedDir,
+                )
+            }
         }
     }
 }
