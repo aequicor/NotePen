@@ -15,12 +15,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -34,6 +36,7 @@ import ru.kyamshanov.notepen.sync.HostViewModel
 import ru.kyamshanov.notepen.sync.SyncScreen
 import ru.kyamshanov.notepen.sync.SyncViewModel
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.FileTransferReceiver
@@ -91,17 +94,20 @@ fun App(
                 )
 
                 if (hostViewModel != null || syncViewModel != null) {
+                    val hostState = hostViewModel?.serverState?.collectAsState()?.value
+                    val clientState = syncViewModel?.connectionState?.collectAsState()?.value
+                    val indicator = syncIndicatorColors(hostState, clientState)
                     FloatingActionButton(
                         onClick = { showSyncPanel = true },
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(bottom = 88.dp, end = 16.dp),
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        containerColor = indicator.container,
                     ) {
                         Icon(
                             imageVector = Icons.Default.Sync,
                             contentDescription = "Синхронизация",
-                            tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                            tint = indicator.icon,
                         )
                     }
                 }
@@ -138,5 +144,37 @@ fun App(
                 }
             }
         }
+    }
+}
+
+private data class SyncIndicatorColors(val container: Color, val icon: Color)
+
+private val SyncConnectedGreen = Color(0xFF2E7D32)
+private val SyncUnstableYellow = Color(0xFFF9A825)
+
+/**
+ * Aggregates host- and client-side [PairingState] into a colour pair for the
+ * sync FAB.
+ *
+ * - **Green** — any side reports [PairingState.Connected].
+ * - **Yellow** — any side reports [PairingState.Reconnecting] or
+ *   [PairingState.Error] (and no green).
+ * - **Gray** (theme default) — idle / pairing / lost / both null.
+ */
+@Composable
+private fun syncIndicatorColors(
+    host: PairingState?,
+    client: PairingState?,
+): SyncIndicatorColors {
+    val states = listOfNotNull(host, client)
+    val anyConnected = states.any { it is PairingState.Connected }
+    val anyUnstable = states.any { it is PairingState.Reconnecting || it is PairingState.Error }
+    return when {
+        anyConnected -> SyncIndicatorColors(SyncConnectedGreen, Color.White)
+        anyUnstable -> SyncIndicatorColors(SyncUnstableYellow, Color.Black)
+        else -> SyncIndicatorColors(
+            container = MaterialTheme.colorScheme.secondaryContainer,
+            icon = MaterialTheme.colorScheme.onSecondaryContainer,
+        )
     }
 }

@@ -24,7 +24,7 @@ class NsdDeviceDiscovery(private val context: Context) : DeviceDiscovery {
         val nsdManager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
         val known = mutableMapOf<String, DeviceInfo>()
 
-        val resolveListener = object : NsdManager.ResolveListener {
+        fun newResolveListener(): NsdManager.ResolveListener = object : NsdManager.ResolveListener {
             override fun onResolveFailed(info: NsdServiceInfo, code: Int) {
                 logger.warn { "NSD resolve failed: $code for ${info.serviceName}" }
             }
@@ -57,7 +57,7 @@ class NsdDeviceDiscovery(private val context: Context) : DeviceDiscovery {
             }
 
             override fun onServiceFound(info: NsdServiceInfo) {
-                nsdManager.resolveService(info, resolveListener)
+                nsdManager.resolveService(info, newResolveListener())
             }
 
             override fun onServiceLost(info: NsdServiceInfo) {

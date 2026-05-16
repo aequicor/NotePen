@@ -127,7 +127,14 @@ fun DetailsContent(
     // handler restarts on the override flip — any in-flight stroke is finalised
     // cleanly via the existing `LaunchedEffect(toolMode)` path.
     val eraserOverride = barrelPressed || eraserTipActive
-    val effectiveToolMode = if (eraserOverride && toolMode != ToolMode.NONE) ToolMode.ERASER else toolMode
+    // Do NOT remap `toolMode` to ERASER on override — that flip restarts the
+    // `pointerInput` block mid-gesture, and the new ERASER block's
+    // `awaitFirstDown` misses the still-held stylus DOWN, so the stylus
+    // eraser tip / barrel button silently does nothing until the user lifts
+    // and re-presses. Instead, `DrawablePdfPage` reads `eraserOverride`
+    // dynamically at gesture start (see its `eraserOverride` parameter) and
+    // routes the gesture to the erase pipeline without restarting.
+    val effectiveToolMode = toolMode
     var penSettings by remember { mutableStateOf(PenSettings()) }
     var markerSettings by remember { mutableStateOf(MarkerSettings()) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
@@ -460,9 +467,60 @@ fun DetailsContent(
                             penSettings = penSettings,
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
+                            eraserOverride = { eraserOverride },
                             onGestureStart = { snapshot ->
                                 globalUndoStack.addLast(pageIndex to snapshot)
                                 globalRedoStack.clear()
+                            },
+                            onEraseFinished = { before, _ ->
+                                val engine = syncEngine ?: return@DrawablePdfPage
+                                val beforeIds = before
+                                    .mapNotNull { it.strokeId.ifEmpty { null } }
+                                    .toSet()
+                                val beforeById = before.associateBy { it.strokeId }
+                                val intactIds = mutableSetOf<String>()
+                                for (p in pdfDrawingState.currentPaths) {
+                                    val orig = beforeById[p.strokeId] ?: continue
+                                    if (orig.points == p.points && p.strokeId.isNotEmpty()) {
+                                        intactIds.add(p.strokeId)
+                                    }
+                                }
+                                val removedOrModified = beforeIds - intactIds
+                                if (removedOrModified.isEmpty()) return@DrawablePdfPage
+                                val newAdded = mutableListOf<DrawingPath>()
+                                for (i in pdfDrawingState.currentPaths.indices) {
+                                    val p = pdfDrawingState.currentPaths[i]
+                                    val needsId = p.strokeId.isEmpty() ||
+                                        p.strokeId in removedOrModified
+                                    if (needsId) {
+                                        val newId = engine.newStrokeId()
+                                        val stamped = p.copy(strokeId = newId)
+                                        pdfDrawingState.currentPaths[i] = stamped
+                                        newAdded.add(stamped)
+                                    }
+                                }
+                                // Single ordered burst — see SyncEngine.applyLocalBatch KDoc
+                                // for why this matters with many deltas at once.
+                                val batch = buildList<StrokeDelta> {
+                                    for (id in removedOrModified) add(
+                                        StrokeDelta.Removed(
+                                            strokeId = id,
+                                            pageIndex = pageIndex,
+                                            authorDeviceId = engine.deviceId,
+                                            clock = 0,
+                                        ),
+                                    )
+                                    for (p in newAdded) add(
+                                        StrokeDelta.Added(
+                                            strokeId = p.strokeId,
+                                            pageIndex = pageIndex,
+                                            authorDeviceId = engine.deviceId,
+                                            clock = 0,
+                                            path = p.toDto(p.strokeId),
+                                        ),
+                                    )
+                                }
+                                engine.applyLocalBatch(batch)
                             },
                             onStrokeFinished = { path ->
                                 val engine = syncEngine ?: return@DrawablePdfPage
@@ -472,10 +530,6 @@ fun DetailsContent(
                                 if (idx >= 0) {
                                     pdfDrawingState.currentPaths[idx] = stamped
                                     pdfDrawingState.markHistoryChanged()
-                                }
-                                logger.info {
-                                    "Stroke out: page=$pageIndex width=${stamped.strokeWidth} " +
-                                        "points=${stamped.points.size} color=${stamped.colorArgb}"
                                 }
                                 engine.applyLocal(
                                     StrokeDelta.Added(

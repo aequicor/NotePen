@@ -119,6 +119,7 @@ fun PdfDrawingState.erasePointsInZone(
     centerY: Float,
     halfSizeNormalized: Float,
     shape: EraserShape,
+    bumpHistory: Boolean = true,
 ): Boolean {
     if (currentPaths.isEmpty()) return false
 
@@ -168,11 +169,36 @@ fun PdfDrawingState.erasePointsInZone(
     }
 
     if (anyChange) {
-        currentPaths.clear()
-        currentPaths.addAll(rebuilt)
-        markHistoryChanged()
+        replaceContentsInPlace(currentPaths, rebuilt)
+        if (bumpHistory) markHistoryChanged()
     }
     return anyChange
+}
+
+/**
+ * In-place diff-replacement that minimises SnapshotStateList write churn.
+ *
+ * `clear()` + `addAll(...)` fires snapshot writes for every observer of every
+ * index on every call. When the eraser brushes one stroke on a 100-stroke page,
+ * 99 of those writes are redundant. We compare instances (`!==`) and only write
+ * differing slots, then extend/truncate the tail. Visible result: erase no
+ * longer chokes the UI when many strokes are present.
+ */
+private fun replaceContentsInPlace(
+    target: androidx.compose.runtime.snapshots.SnapshotStateList<DrawingPath>,
+    source: List<DrawingPath>,
+) {
+    val oldSize = target.size
+    val newSize = source.size
+    val min = if (oldSize < newSize) oldSize else newSize
+    for (i in 0 until min) {
+        if (target[i] !== source[i]) target[i] = source[i]
+    }
+    if (newSize > oldSize) {
+        for (i in oldSize until newSize) target.add(source[i])
+    } else if (newSize < oldSize) {
+        for (i in oldSize - 1 downTo newSize) target.removeAt(i)
+    }
 }
 
 /**
@@ -186,6 +212,7 @@ fun PdfDrawingState.eraseStrokesInZone(
     centerY: Float,
     halfSizeNormalized: Float,
     shape: EraserShape,
+    bumpHistory: Boolean = true,
 ): Boolean {
     if (currentPaths.isEmpty()) return false
 
@@ -205,19 +232,30 @@ fun PdfDrawingState.eraseStrokesInZone(
     }
 
     val changed = currentPaths.size != before
-    if (changed) markHistoryChanged()
+    if (changed && bumpHistory) markHistoryChanged()
     return changed
 }
 
 /**
  * Dispatches to [erasePointsInZone] or [eraseStrokesInZone] based on [EraserSettings.mode].
+ *
+ * [bumpHistory] forwards to the underlying functions. Callers that perform many
+ * rapid-fire calls (e.g. eraser dragging on a stroke-dense page) can pass
+ * `false` and bump [PdfDrawingState.markHistoryChanged] themselves at a
+ * throttled rate to avoid repeatedly rebuilding the cached completedLayer
+ * bitmap on every pointer sample — the dominant cost of mass erase.
  */
 fun PdfDrawingState.eraseInZone(
     centerX: Float,
     centerY: Float,
     halfSizeNormalized: Float,
     settings: EraserSettings,
+    bumpHistory: Boolean = true,
 ): Boolean = when (settings.mode) {
-    EraserMode.POINT -> erasePointsInZone(centerX, centerY, halfSizeNormalized, settings.shape)
-    EraserMode.OBJECT -> eraseStrokesInZone(centerX, centerY, halfSizeNormalized, settings.shape)
+    EraserMode.POINT -> erasePointsInZone(
+        centerX, centerY, halfSizeNormalized, settings.shape, bumpHistory,
+    )
+    EraserMode.OBJECT -> eraseStrokesInZone(
+        centerX, centerY, halfSizeNormalized, settings.shape, bumpHistory,
+    )
 }

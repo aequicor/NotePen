@@ -186,7 +186,11 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
     }
 
     override suspend fun send(message: NetworkMessage) {
-        _outgoing.trySend(message)
+        // Suspending send: applies back-pressure when the buffered outgoing
+        // channel (capacity 64) is full. The earlier `trySend` silently
+        // dropped overflow, which corrupted erase batches that emit
+        // hundreds of deltas in one burst.
+        _outgoing.send(message)
     }
 
     override suspend fun disconnect() {

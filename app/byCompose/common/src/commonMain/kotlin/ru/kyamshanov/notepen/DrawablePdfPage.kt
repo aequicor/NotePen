@@ -66,6 +66,15 @@ fun DrawablePdfPage(
     eraserSettings: EraserSettings,
     onGestureStart: (snapshot: List<DrawingPath>) -> Unit = {},
     onStrokeFinished: (path: DrawingPath) -> Unit = {},
+    onEraseFinished: (before: List<DrawingPath>, after: List<DrawingPath>) -> Unit = { _, _ -> },
+    /**
+     * Read at gesture start: when `true`, the gesture is routed to the erase
+     * pipeline even though the user-selected [toolMode] is PEN or MARKER.
+     * Lets the stylus eraser tip / barrel button trigger erase without
+     * relying on Compose recomposition to swap [toolMode] (which would
+     * restart `pointerInput` and lose the in-flight DOWN event).
+     */
+    eraserOverride: () -> Boolean = { false },
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -135,7 +144,13 @@ fun DrawablePdfPage(
             .stylusEventSink(tablet)
             .then(
                 when (toolMode) {
-                    ToolMode.PEN -> Modifier.pointerInput(toolMode, penSettings) {
+                    ToolMode.PEN -> Modifier.pointerInput(toolMode, penSettings, eraserSettings) {
+                        // Per-gesture eraser-override session: non-null while
+                        // the current stylus gesture started with the eraser
+                        // tip / barrel button down. Routes onMove/onUp to the
+                        // erase pipeline so the user doesn't have to switch
+                        // tools manually.
+                        var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
                             isPalmRejectionActive = { stylusSeen.value },
@@ -143,38 +158,72 @@ fun DrawablePdfPage(
                             onDown = { off, pressure, tilt ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    onGestureStart(pdfDrawingState.currentPaths.toList())
-                                    pdfDrawingState.strokeColorArgb.value = penSettings.colorArgb
-                                    pdfDrawingState.strokeWidth.value = penSettings.strokeWidth
-                                    pdfDrawingState.startDrawing(
-                                        x = off.x / w,
-                                        y = off.y / h,
-                                        normalizedStrokeWidth = penSettings.strokeWidth / w,
-                                        pressure = pressure,
-                                        tilt = tilt,
-                                    )
+                                    val nx = off.x / w
+                                    val ny = off.y / h
+                                    if (eraserOverride()) {
+                                        activeErase = EraseGesture(
+                                            pdfDrawingState = pdfDrawingState,
+                                            eraserSettings = eraserSettings,
+                                            eraserPos = eraserPos,
+                                            onGestureStart = onGestureStart,
+                                            onEraseFinished = onEraseFinished,
+                                        ).also { it.start(nx, ny) }
+                                    } else {
+                                        onGestureStart(pdfDrawingState.currentPaths.toList())
+                                        pdfDrawingState.strokeColorArgb.value = penSettings.colorArgb
+                                        pdfDrawingState.strokeWidth.value = penSettings.strokeWidth
+                                        pdfDrawingState.startDrawing(
+                                            x = nx,
+                                            y = ny,
+                                            normalizedStrokeWidth = penSettings.strokeWidth / w,
+                                            pressure = pressure,
+                                            tilt = tilt,
+                                        )
+                                    }
                                 }
                             },
                             onMove = { off, pressure, tilt ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    pdfDrawingState.addPoint(
-                                        x = off.x / w,
-                                        y = off.y / h,
-                                        pressure = pressure,
-                                        tilt = tilt,
-                                    )
+                                    val nx = off.x / w
+                                    val ny = off.y / h
+                                    val erase = activeErase
+                                    if (erase != null) {
+                                        erase.move(nx, ny)
+                                    } else {
+                                        pdfDrawingState.addPoint(
+                                            x = nx,
+                                            y = ny,
+                                            pressure = pressure,
+                                            tilt = tilt,
+                                        )
+                                    }
                                 }
                             },
                             onUp = {
-                                val completed = pdfDrawingState.finishDrawing()
-                                if (completed != null) onStrokeFinished(completed)
+                                val erase = activeErase
+                                if (erase != null) {
+                                    erase.end()
+                                    activeErase = null
+                                } else {
+                                    val completed = pdfDrawingState.finishDrawing()
+                                    if (completed != null) onStrokeFinished(completed)
+                                }
                             },
-                            onCancel = { pdfDrawingState.finishDrawing() },
+                            onCancel = {
+                                val erase = activeErase
+                                if (erase != null) {
+                                    erase.cancel()
+                                    activeErase = null
+                                } else {
+                                    pdfDrawingState.finishDrawing()
+                                }
+                            },
                         )
                     }
 
-                    ToolMode.MARKER -> Modifier.pointerInput(toolMode, markerSettings) {
+                    ToolMode.MARKER -> Modifier.pointerInput(toolMode, markerSettings, eraserSettings) {
+                        var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
                             isPalmRejectionActive = { stylusSeen.value },
@@ -182,31 +231,62 @@ fun DrawablePdfPage(
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    onGestureStart(pdfDrawingState.currentPaths.toList())
-                                    pdfDrawingState.strokeColorArgb.value = markerSettings.colorArgb
-                                    pdfDrawingState.strokeWidth.value = markerSettings.strokeWidth
-                                    pdfDrawingState.startDrawing(
-                                        x = off.x / w,
-                                        y = off.y / h,
-                                        normalizedStrokeWidth = markerSettings.strokeWidth / w,
-                                    )
+                                    val nx = off.x / w
+                                    val ny = off.y / h
+                                    if (eraserOverride()) {
+                                        activeErase = EraseGesture(
+                                            pdfDrawingState = pdfDrawingState,
+                                            eraserSettings = eraserSettings,
+                                            eraserPos = eraserPos,
+                                            onGestureStart = onGestureStart,
+                                            onEraseFinished = onEraseFinished,
+                                        ).also { it.start(nx, ny) }
+                                    } else {
+                                        onGestureStart(pdfDrawingState.currentPaths.toList())
+                                        pdfDrawingState.strokeColorArgb.value = markerSettings.colorArgb
+                                        pdfDrawingState.strokeWidth.value = markerSettings.strokeWidth
+                                        pdfDrawingState.startDrawing(
+                                            x = nx,
+                                            y = ny,
+                                            normalizedStrokeWidth = markerSettings.strokeWidth / w,
+                                        )
+                                    }
                                 }
                             },
                             onMove = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    pdfDrawingState.addPoint(off.x / w, off.y / h)
+                                    val nx = off.x / w
+                                    val ny = off.y / h
+                                    val erase = activeErase
+                                    if (erase != null) erase.move(nx, ny)
+                                    else pdfDrawingState.addPoint(nx, ny)
                                 }
                             },
                             onUp = {
-                                val completed = pdfDrawingState.finishDrawing()
-                                if (completed != null) onStrokeFinished(completed)
+                                val erase = activeErase
+                                if (erase != null) {
+                                    erase.end()
+                                    activeErase = null
+                                } else {
+                                    val completed = pdfDrawingState.finishDrawing()
+                                    if (completed != null) onStrokeFinished(completed)
+                                }
                             },
-                            onCancel = { pdfDrawingState.finishDrawing() },
+                            onCancel = {
+                                val erase = activeErase
+                                if (erase != null) {
+                                    erase.cancel()
+                                    activeErase = null
+                                } else {
+                                    pdfDrawingState.finishDrawing()
+                                }
+                            },
                         )
                     }
 
                     ToolMode.ERASER -> Modifier.pointerInput(toolMode, eraserSettings) {
+                        var session: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
                             isPalmRejectionActive = { stylusSeen.value },
@@ -214,34 +294,27 @@ fun DrawablePdfPage(
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
-                                    onGestureStart(pdfDrawingState.currentPaths.toList())
-                                    val nx = off.x / w
-                                    val ny = off.y / h
-                                    eraserPos.value = Offset(nx, ny)
-                                    pdfDrawingState.eraseInZone(
-                                        centerX = nx,
-                                        centerY = ny,
-                                        halfSizeNormalized = eraserSettings.sizeNormalized / 2f,
-                                        settings = eraserSettings,
-                                    )
+                                    session = EraseGesture(
+                                        pdfDrawingState = pdfDrawingState,
+                                        eraserSettings = eraserSettings,
+                                        eraserPos = eraserPos,
+                                        onGestureStart = onGestureStart,
+                                        onEraseFinished = onEraseFinished,
+                                    ).also { it.start(off.x / w, off.y / h) }
                                 }
                             },
                             onMove = { off, _, _ ->
                                 val (w, h) = canvasSize.value
-                                if (w > 0 && h > 0) {
-                                    val nx = off.x / w
-                                    val ny = off.y / h
-                                    eraserPos.value = Offset(nx, ny)
-                                    pdfDrawingState.eraseInZone(
-                                        centerX = nx,
-                                        centerY = ny,
-                                        halfSizeNormalized = eraserSettings.sizeNormalized / 2f,
-                                        settings = eraserSettings,
-                                    )
-                                }
+                                if (w > 0 && h > 0) session?.move(off.x / w, off.y / h)
                             },
-                            onUp = { eraserPos.value = null },
-                            onCancel = { eraserPos.value = null },
+                            onUp = {
+                                session?.end()
+                                session = null
+                            },
+                            onCancel = {
+                                session?.cancel()
+                                session = null
+                            },
                         )
                     }
 
@@ -562,6 +635,92 @@ private fun DrawScope.drawStrokeWithPressure(
  * independent smooth curves. Segments shorter than 3 points fall back to
  * straight lines so every recorded point is still included.
  */
+/**
+ * Per-gesture eraser state machine, reused by the ERASER pointer-input branch
+ * and by the PEN/MARKER branches when the stylus eraser-override is detected
+ * at gesture start. Encapsulates:
+ *  - the pre-gesture snapshot used for sync diffing,
+ *  - the distance gate (skip mutation if pointer hasn't moved enough), and
+ *  - the bitmap-rebuild throttle (visual refresh ≤ ~12 fps during the gesture
+ *    to keep the main thread responsive on dense pages).
+ */
+private class EraseGesture(
+    private val pdfDrawingState: PdfDrawingState,
+    private val eraserSettings: EraserSettings,
+    private val eraserPos: androidx.compose.runtime.MutableState<Offset?>,
+    private val onGestureStart: (snapshot: List<DrawingPath>) -> Unit,
+    private val onEraseFinished: (before: List<DrawingPath>, after: List<DrawingPath>) -> Unit,
+) {
+    private var preEraseSnapshot: List<DrawingPath> = emptyList()
+    private var lastEraseX = Float.NaN
+    private var lastEraseY = Float.NaN
+    private val halfSize = eraserSettings.sizeNormalized / 2f
+    private val moveThresholdSq = (halfSize * 0.25f).let { it * it }
+    private var lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
+    private var pendingBump = false
+
+    fun start(nx: Float, ny: Float) {
+        preEraseSnapshot = pdfDrawingState.currentPaths.toList()
+        onGestureStart(preEraseSnapshot)
+        eraserPos.value = Offset(nx, ny)
+        lastEraseX = nx
+        lastEraseY = ny
+        val changed = pdfDrawingState.eraseInZone(
+            centerX = nx,
+            centerY = ny,
+            halfSizeNormalized = halfSize,
+            settings = eraserSettings,
+            bumpHistory = false,
+        )
+        if (changed) {
+            pdfDrawingState.markHistoryChanged()
+            lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
+            pendingBump = false
+        }
+    }
+
+    fun move(nx: Float, ny: Float) {
+        eraserPos.value = Offset(nx, ny)
+        val dx = nx - lastEraseX
+        val dy = ny - lastEraseY
+        if (dx * dx + dy * dy < moveThresholdSq) return
+        lastEraseX = nx
+        lastEraseY = ny
+        val changed = pdfDrawingState.eraseInZone(
+            centerX = nx,
+            centerY = ny,
+            halfSizeNormalized = halfSize,
+            settings = eraserSettings,
+            bumpHistory = false,
+        )
+        if (changed) {
+            pendingBump = true
+            if (lastHistoryBump.elapsedNow().inWholeMilliseconds >= 80L) {
+                pdfDrawingState.markHistoryChanged()
+                lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
+                pendingBump = false
+            }
+        }
+    }
+
+    fun end() {
+        eraserPos.value = null
+        if (pendingBump) {
+            pdfDrawingState.markHistoryChanged()
+            pendingBump = false
+        }
+        onEraseFinished(preEraseSnapshot, pdfDrawingState.currentPaths.toList())
+    }
+
+    fun cancel() {
+        eraserPos.value = null
+        if (pendingBump) {
+            pdfDrawingState.markHistoryChanged()
+            pendingBump = false
+        }
+    }
+}
+
 private fun List<DrawingPoint>.appendCatmullRomTo(target: Path, w: Float, h: Float) {
     if (isEmpty()) return
 

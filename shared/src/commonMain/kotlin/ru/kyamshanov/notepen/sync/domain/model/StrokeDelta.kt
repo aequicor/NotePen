@@ -50,20 +50,41 @@ data class DrawingPathDto(
 )
 
 @Serializable
-data class PointDto(val x: Float, val y: Float, val isNewPath: Boolean = false)
+data class PointDto(
+    val x: Float,
+    val y: Float,
+    val isNewPath: Boolean = false,
+    /**
+     * Stylus pressure normalised to [0..1]. Default `1f` preserves
+     * backward-compat with strokes serialised before this field existed
+     * (and with sources lacking pressure, e.g. mouse input).
+     */
+    val pressure: Float = 1f,
+    /**
+     * Stylus tilt normalised to [0..1] (`0f` perpendicular, `1f` parallel).
+     * Default `0f` for sources without tilt; older payloads deserialise the same.
+     */
+    val tilt: Float = 0f,
+)
 
 fun DrawingPath.toDto(strokeId: String): DrawingPathDto =
     DrawingPathDto(
         strokeId = strokeId,
         colorArgb = colorArgb,
         strokeWidth = strokeWidth,
-        points = points.map { PointDto(it.x, it.y, it.isNewPath) },
+        points = points.map { PointDto(it.x, it.y, it.isNewPath, it.pressure, it.tilt) },
     )
 
 fun DrawingPathDto.toDomain(): DrawingPath =
     DrawingPath(
         points = points.map {
-            ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint(it.x, it.y, it.isNewPath)
+            ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint(
+                x = it.x,
+                y = it.y,
+                isNewPath = it.isNewPath,
+                pressure = it.pressure,
+                tilt = it.tilt,
+            )
         },
         colorArgb = colorArgb,
         strokeWidth = strokeWidth,

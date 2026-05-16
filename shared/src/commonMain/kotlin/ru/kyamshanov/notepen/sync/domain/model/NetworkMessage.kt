@@ -127,4 +127,40 @@ sealed class NetworkMessage {
         val success: Boolean,
         val errorMessage: String? = null,
     ) : NetworkMessage()
+
+    /**
+     * Tablet → host: request the full set of annotations the host currently
+     * holds for the open document. Used at bootstrap, after the PDF has been
+     * received and the local annotation bundle (if any) has been loaded.
+     */
+    @Serializable
+    @SerialName("annotation_snapshot_request")
+    data object AnnotationSnapshotRequest : NetworkMessage()
+
+    /**
+     * Host → tablet: full annotation snapshot. Each entry is a stroke that
+     * already exists on the host (loaded from disk and/or drawn earlier).
+     * Receiver must de-duplicate by [StrokeDelta.Added.strokeId] against any
+     * strokes already known locally.
+     */
+    @Serializable
+    @SerialName("annotation_snapshot")
+    data class AnnotationSnapshot(
+        val strokes: List<StrokeDelta.Added>,
+    ) : NetworkMessage()
+
+    /**
+     * Symmetric viewport state broadcast between peers.
+     *
+     * Either side emits this on local zoom / page-scroll changes; the receiving
+     * peer applies it to keep the document view in sync. Conflated upstream so
+     * fast pinch-zoom or fling doesn't flood the socket.
+     */
+    @Serializable
+    @SerialName("view_state")
+    data class ViewStateMessage(
+        val page: Int,
+        val scale: Int,
+        val pageScrollOffsetPx: Int = 0,
+    ) : NetworkMessage()
 }

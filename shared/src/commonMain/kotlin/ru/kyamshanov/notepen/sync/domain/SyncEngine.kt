@@ -56,6 +56,33 @@ class SyncEngine(
         }
     }
 
+    /**
+     * Sends a batch of local deltas as a single, ordered burst.
+     *
+     * Unlike calling [applyLocal] N times — which fires N independent
+     * fire-and-forget coroutines whose ordering at the wire is undefined —
+     * this method stamps every delta synchronously and sends them all from
+     * one coroutine sequentially. Required for erase gestures that produce
+     * many [StrokeDelta.Removed] + [StrokeDelta.Added] in one shot: the
+     * receiver must apply them in a predictable order, and individual sends
+     * mustn't be lost to scheduling races on a saturated dispatcher.
+     */
+    fun applyLocalBatch(deltas: List<StrokeDelta>) {
+        if (deltas.isEmpty()) return
+        val stamped = deltas.map {
+            logicalClock++
+            val s = it.withClock(logicalClock)
+            pendingDeltas.addLast(s)
+            s
+        }
+        scope.launch {
+            for (d in stamped) {
+                val msg = NetworkMessage.StrokeDeltaMessage(d)
+                server?.send(msg) ?: client?.send(msg)
+            }
+        }
+    }
+
     /** Call for each [NetworkMessage.StrokeDeltaMessage] received from the peer. */
     fun processPeer(delta: StrokeDelta) {
         logicalClock = maxOf(logicalClock, delta.clock) + 1
