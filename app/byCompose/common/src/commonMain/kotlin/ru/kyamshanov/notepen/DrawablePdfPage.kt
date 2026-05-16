@@ -191,13 +191,21 @@ fun DrawablePdfPage(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // One reusable Path instance captured by the Canvas draw lambda.
+        // Per-segment rendering reset()s it instead of allocating a new Path
+        // for every cubic — at 200+ points per stroke × 240 fps this eliminates
+        // the GC pressure that caused EDT stalls and AWT mouse-event coalescing
+        // (the visible "lag → straight line" artefact during long pen strokes).
+        val scratchPath = remember { Path() }
         Canvas(modifier = Modifier.fillMaxSize()) {
             pdfDrawingState.currentPaths.forEach { path ->
-                drawStrokeWithPressure(path, size.width, size.height)
+                drawStrokeWithPressure(path, size.width, size.height, scratchPath)
             }
 
             if (pdfDrawingState.isDrawing.value && pdfDrawingState.currentPath.value.points.size > 1) {
-                drawStrokeWithPressure(pdfDrawingState.currentPath.value, size.width, size.height)
+                drawStrokeWithPressure(
+                    pdfDrawingState.currentPath.value, size.width, size.height, scratchPath,
+                )
             }
 
             // Индикатор зоны ластика (AC-12). Отрисовывается только если палец на экране
@@ -259,6 +267,7 @@ private fun DrawScope.drawStrokeWithPressure(
     stroke: DrawingPath,
     w: Float,
     h: Float,
+    scratch: Path,
 ) {
     val points = stroke.points
     if (points.size < 2) return
@@ -270,8 +279,10 @@ private fun DrawScope.drawStrokeWithPressure(
     val pressureVaries = points.any { it.pressure != uniformPressure }
 
     if (!pressureVaries) {
+        scratch.reset()
+        points.appendCatmullRomTo(scratch, w, h)
         drawPath(
-            path = points.toCatmullRomPath(w, h),
+            path = scratch,
             color = color,
             style = Stroke(
                 width = baseWidth * uniformPressure,
@@ -298,17 +309,16 @@ private fun DrawScope.drawStrokeWithPressure(
             val x1 = p1.x * w; val y1 = p1.y * h
             val x2 = p2.x * w; val y2 = p2.y * h
 
-            val segPath = Path().apply {
-                moveTo(x1, y1)
-                cubicTo(
-                    x1 + (p2.x - p0.x) * w / 6f, y1 + (p2.y - p0.y) * h / 6f,
-                    x2 - (p3.x - p1.x) * w / 6f, y2 - (p3.y - p1.y) * h / 6f,
-                    x2, y2,
-                )
-            }
+            scratch.reset()
+            scratch.moveTo(x1, y1)
+            scratch.cubicTo(
+                x1 + (p2.x - p0.x) * w / 6f, y1 + (p2.y - p0.y) * h / 6f,
+                x2 - (p3.x - p1.x) * w / 6f, y2 - (p3.y - p1.y) * h / 6f,
+                x2, y2,
+            )
             val avgPressure = (p1.pressure + p2.pressure) * 0.5f
             drawPath(
-                path = segPath,
+                path = scratch,
                 color = color,
                 style = Stroke(
                     width = baseWidth * avgPressure,
@@ -321,15 +331,17 @@ private fun DrawScope.drawStrokeWithPressure(
 }
 
 /**
- * Converts a list of normalised [DrawingPoint]s to a smooth Compose [Path] using
- * a Catmull-Rom → cubic-Bézier approximation.
+ * Appends a smooth Catmull-Rom → cubic-Bézier approximation of the receiver's
+ * points to [target]. Caller is responsible for [Path.reset]ting [target] first
+ * if a fresh path is wanted — passing an existing Path lets callers reuse one
+ * scratch instance across many strokes instead of allocating per frame.
  *
- * Sub-strokes (points with [DrawingPoint.isNewPath] == true) are drawn as
- * independent smooth curves.  Segments shorter than 3 points fall back to
+ * Sub-strokes (points with [DrawingPoint.isNewPath] == true) are appended as
+ * independent smooth curves. Segments shorter than 3 points fall back to
  * straight lines so every recorded point is still included.
  */
-private fun List<DrawingPoint>.toCatmullRomPath(w: Float, h: Float): Path = Path().apply {
-    if (isEmpty()) return@apply
+private fun List<DrawingPoint>.appendCatmullRomTo(target: Path, w: Float, h: Float) {
+    if (isEmpty()) return
 
     // Collect segment start indices (index 0 is always a start).
     val starts = indices.filter { i -> i == 0 || get(i).isNewPath }
@@ -338,10 +350,10 @@ private fun List<DrawingPoint>.toCatmullRomPath(w: Float, h: Float): Path = Path
         val end = if (si + 1 < starts.size) starts[si + 1] else size
         val seg = subList(start, end)
 
-        moveTo(seg[0].x * w, seg[0].y * h)
+        target.moveTo(seg[0].x * w, seg[0].y * h)
         if (seg.size < 2) return@forEachIndexed
         if (seg.size == 2) {
-            lineTo(seg[1].x * w, seg[1].y * h)
+            target.lineTo(seg[1].x * w, seg[1].y * h)
             return@forEachIndexed
         }
 
@@ -355,7 +367,7 @@ private fun List<DrawingPoint>.toCatmullRomPath(w: Float, h: Float): Path = Path
             val x1 = p1.x * w; val y1 = p1.y * h
             val x2 = p2.x * w; val y2 = p2.y * h
 
-            cubicTo(
+            target.cubicTo(
                 x1 + (p2.x - p0.x) * w / 6f, y1 + (p2.y - p0.y) * h / 6f,
                 x2 - (p3.x - p1.x) * w / 6f, y2 - (p3.y - p1.y) * h / 6f,
                 x2, y2,

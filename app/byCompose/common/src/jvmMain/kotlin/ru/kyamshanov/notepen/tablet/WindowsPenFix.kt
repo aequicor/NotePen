@@ -17,17 +17,15 @@ private val logger = KotlinLogging.logger {}
  */
 private const val TABLET_SERVICE_PROPERTY = "MicrosoftTabletPenServiceProperty"
 
+// Canonical "disable everything that delays or steals pen events" set per
+// Microsoft Tablet PC SDK. Earlier we OR'd extra ENABLE_* bits as well —
+// removed because mixing ENABLE bits with DISABLE bits in the same property
+// gave the Tablet Input Service ambiguous signals and brought back partial
+// gesture recognition on some drivers.
 private const val TABLET_DISABLE_PRESSANDHOLD: Long = 0x00000001
 private const val TABLET_DISABLE_PENTAPFEEDBACK: Long = 0x00000008
 private const val TABLET_DISABLE_PENBARRELFEEDBACK: Long = 0x00000010
-private const val TABLET_DISABLE_TOUCHUIFORCEON: Long = 0x00000100
-private const val TABLET_DISABLE_TOUCHUIFORCEOFF: Long = 0x00000200
-private const val TABLET_DISABLE_TOUCHSWITCH: Long = 0x00008000
 private const val TABLET_DISABLE_FLICKS: Long = 0x00010000
-private const val TABLET_ENABLE_FLICKSONCONTEXT: Long = 0x00020000
-private const val TABLET_ENABLE_FLICKLEARNINGMODE: Long = 0x00040000
-private const val TABLET_DISABLE_SMOOTHSCROLLING: Long = 0x00080000
-private const val TABLET_DISABLE_FLICKFALLBACKKEYS: Long = 0x00100000
 
 /**
  * Disables Windows' "press-and-hold → right-click" and flick gestures for the
@@ -75,19 +73,17 @@ object WindowsPenFix {
         val flags = TABLET_DISABLE_PRESSANDHOLD or
             TABLET_DISABLE_PENTAPFEEDBACK or
             TABLET_DISABLE_PENBARRELFEEDBACK or
-            TABLET_DISABLE_FLICKS or
-            TABLET_DISABLE_TOUCHUIFORCEON or
-            TABLET_DISABLE_TOUCHUIFORCEOFF or
-            TABLET_DISABLE_TOUCHSWITCH or
-            TABLET_ENABLE_FLICKSONCONTEXT or
-            TABLET_ENABLE_FLICKLEARNINGMODE or
-            TABLET_DISABLE_SMOOTHSCROLLING or
-            TABLET_DISABLE_FLICKFALLBACKKEYS
+            TABLET_DISABLE_FLICKS
         try {
-            lib.SetPropA(hwnd, TABLET_SERVICE_PROPERTY, Pointer.createConstant(flags))
-            logger.info { "WindowsPenFix: tablet press-and-hold gestures disabled for window" }
+            val ok = lib.SetPropA(hwnd, TABLET_SERVICE_PROPERTY, Pointer.createConstant(flags))
+            if (ok) {
+                logger.info { "WindowsPenFix: applied (SetPropA returned true)" }
+            } else {
+                val err = Native.getLastError()
+                logger.warn { "WindowsPenFix: SetPropA returned false (GetLastError=$err); pen-stroke start may lag" }
+            }
         } catch (t: Throwable) {
-            logger.warn(t) { "WindowsPenFix: SetProp failed; pen-stroke start may lag" }
+            logger.warn(t) { "WindowsPenFix: SetProp threw; pen-stroke start may lag" }
         }
     }
 }
