@@ -34,8 +34,8 @@ class JvmPdfPageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfPag
         val pageInfo = document.info.pages[pageIndex]
         val dpi = calculateDpi(pageInfo.widthPt, pageInfo.heightPt, widthPx, heightPx, pageInfo.rotation)
 
-        val rendered: BufferedImage = synchronized(jvmDoc.renderer) {
-            jvmDoc.renderer.renderImageWithDPI(pageIndex, dpi)
+        val rendered: BufferedImage = jvmDoc.useRenderer { renderer ->
+            renderer.renderImageWithDPI(pageIndex, dpi)
         }
 
         val pixels = scaleToTarget(rendered, widthPx, heightPx)

@@ -70,6 +70,7 @@ class CocoaTabletInputController : TabletInputController {
     override val tilt: StateFlow<Float> = MutableStateFlow(0f).asStateFlow()
     override val hoverPosition: StateFlow<androidx.compose.ui.geometry.Offset?> =
         MutableStateFlow<androidx.compose.ui.geometry.Offset?>(null).asStateFlow()
+    override val stylusEverSeen: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
 
     private var bridge: NotepenTabletBridge? = null
     private var callbackRef: NotepenTabletBridge.OnSample? = null

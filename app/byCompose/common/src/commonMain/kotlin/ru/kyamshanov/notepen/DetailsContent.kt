@@ -135,6 +135,20 @@ fun DetailsContent(
     var penSettings by remember { mutableStateOf(PenSettings()) }
     var markerSettings by remember { mutableStateOf(MarkerSettings()) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
+    // Pencil Mode: пока активен — palm-rejection форсирован, рисует только
+    // стилус, палец проходит сквозь на pan / pinch.
+    var pencilModeEnabled by remember { mutableStateOf(false) }
+    // Авто-включение по первому stylus-событию срабатывает один раз за
+    // композицию. Ручной off также взводит этот флаг — повторного авто-on
+    // в той же сессии не будет.
+    var pencilModeAutoApplied by remember { mutableStateOf(false) }
+    val stylusEverSeen by tabletController.stylusEverSeen.collectAsState()
+    LaunchedEffect(stylusEverSeen) {
+        if (stylusEverSeen && !pencilModeAutoApplied) {
+            pencilModeAutoApplied = true
+            pencilModeEnabled = true
+        }
+    }
     var showThumbnails by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
@@ -206,8 +220,14 @@ fun DetailsContent(
 
     LaunchedEffect(peerServer) {
         val server = peerServer ?: return@LaunchedEffect
+        logger.info { "[save-diag host] SaveRequest collector subscribed (peerServer=$server)" }
         server.incomingMessages.filterIsInstance<NetworkMessage.SaveRequest>().collect { req ->
+            logger.info { "[save-diag host] received SaveRequest id=${req.requestId}" }
             val result = performHostSave()
+            logger.info {
+                "[save-diag host] performHostSave id=${req.requestId} " +
+                    "success=${result.isSuccess} err=${result.exceptionOrNull()?.message}"
+            }
             server.send(
                 NetworkMessage.SaveResult(
                     requestId = req.requestId,
@@ -215,6 +235,7 @@ fun DetailsContent(
                     errorMessage = result.exceptionOrNull()?.message,
                 ),
             )
+            logger.info { "[save-diag host] SaveResult id=${req.requestId} dispatched" }
         }
     }
 
@@ -279,11 +300,15 @@ fun DetailsContent(
             }
     }
 
-    // Tablet side: surface connection loss.
+    // Tablet side: surface connection loss; also expose the latest pairing
+    // state so the Save action can decide between remote (send SaveRequest
+    // to host) and local (host has no remote host of its own).
     var showLostConnectionDialog by remember { mutableStateOf(false) }
+    var clientPairingState by remember { mutableStateOf<PairingState?>(null) }
     LaunchedEffect(peerClient) {
         val client = peerClient ?: return@LaunchedEffect
         client.state.collect { st ->
+            clientPairingState = st
             showLostConnectionDialog = st is PairingState.LostConnection
         }
     }
@@ -421,6 +446,7 @@ fun DetailsContent(
                         markerSettings = markerSettings,
                         eraserSettings = eraserSettings,
                         eraserOverride = eraserOverrideProvider,
+                        pencilModeEnabled = pencilModeEnabled,
                         onGestureStart = onGestureStart,
                         onEraseFinished = onEraseFinished,
                         onStrokeFinished = onStrokeFinished,
@@ -465,18 +491,34 @@ fun DetailsContent(
                 isExporting = isExporting,
                 showThumbnails = showThumbnails,
                 onToggleThumbnails = { showThumbnails = !showThumbnails },
+                showPencilModeButton = SupportsPencilMode,
+                pencilModeEnabled = pencilModeEnabled,
+                onPencilModeChange = { enabled ->
+                    pencilModeEnabled = enabled
+                    // Ручной toggle (в т.ч. выкл) подавляет дальнейшее
+                    // авто-включение по stylus-событиям в этой сессии —
+                    // иначе off сразу же отменялся бы.
+                    pencilModeAutoApplied = true
+                },
                 onSave = {
                     isSaving = true
                     coroutineScope.launch {
-                        val message = if (peerClient != null) {
+                        // Remote save (через peerClient) имеет смысл только если этот
+                        // девайс реально подключён как клиент к чужому host-у.
+                        // На host-инстансе (PC) peerClient тоже не null, но не
+                        // подключён ни к кому — в этом случае сохраняем локально.
+                        val message = if (peerClient != null && clientPairingState is PairingState.Connected) {
                             val requestId = "save-${Random.nextLong().toString(16)}"
+                            logger.info { "[save-diag tablet] sending SaveRequest id=$requestId" }
                             peerClient.send(NetworkMessage.SaveRequest(requestId))
+                            logger.info { "[save-diag tablet] SaveRequest id=$requestId dispatched, awaiting SaveResult (5s)" }
                             val reply = withTimeoutOrNull(5.seconds) {
                                 peerClient.incomingMessages
                                     .filterIsInstance<NetworkMessage.SaveResult>()
                                     .filter { it.requestId == requestId }
                                     .first()
                             }
+                            logger.info { "[save-diag tablet] await done id=$requestId reply=$reply" }
                             when {
                                 reply == null -> "Нет ответа от ПК"
                                 reply.success -> "Сохранено на ПК"

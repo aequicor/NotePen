@@ -12,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
@@ -57,6 +58,9 @@ fun PdfFloatingToolbar(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showPencilModeButton: Boolean,
+    pencilModeEnabled: Boolean,
+    onPencilModeChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -95,6 +99,15 @@ fun PdfFloatingToolbar(
                     onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER))
                 },
             )
+
+            if (showPencilModeButton) {
+                ToolToggleButton(
+                    icon = Icons.Default.Gesture,
+                    contentDescription = "Режим стилуса",
+                    selected = pencilModeEnabled,
+                    onClick = { onPencilModeChange(!pencilModeEnabled) },
+                )
+            }
 
             ToolToggleButton(
                 icon = Icons.Default.GridView,

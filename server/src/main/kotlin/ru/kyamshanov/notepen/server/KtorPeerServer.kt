@@ -162,7 +162,13 @@ class KtorPeerServer(
             while (true) {
                 val msg = session.receiveDeserialized<NetworkMessage>()
                 if (msg is NetworkMessage.Disconnect) break
+                if (msg is NetworkMessage.SaveRequest) {
+                    logger.info { "[save-diag host-ws] received SaveRequest id=${msg.requestId} on session" }
+                }
                 _incoming.emit(msg)
+                if (msg is NetworkMessage.SaveRequest) {
+                    logger.info { "[save-diag host-ws] SaveRequest id=${msg.requestId} emitted to _incoming" }
+                }
             }
         } catch (e: Exception) {
             logger.warn { "Session ended: ${e.message}" }

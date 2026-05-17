@@ -14,6 +14,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -121,10 +122,27 @@ fun DrawablePdfPage(
      * restart `pointerInput` and lose the in-flight DOWN event).
      */
     eraserOverride: () -> Boolean = { false },
+    /**
+     * When `true`, palm-rejection is forced active regardless of whether a
+     * stylus has been seen yet — finger gestures are not consumed and fall
+     * through to the parent viewer (single-finger pan, two-finger pinch).
+     * Only stylus / eraser-tip events draw. Surfaced on Android via the
+     * "Режим стилуса" toolbar toggle (see [PencilModeSupport]).
+     */
+    pencilModeEnabled: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
     val tablet = LocalTabletInputController.current
+
+    // Read pencilModeEnabled через rememberUpdatedState, чтобы лямбда
+    // isPalmRejectionActive внутри pointerInput видела актуальное значение
+    // без пересоздания самого pointerInput. Если включить флаг в ключи
+    // pointerInput, авто-on по первому stylus-событию (LaunchedEffect в
+    // DetailsContent) рекомпонует страницу и отменит активный жест:
+    // EraseGesture.cancel() не отправляет onEraseFinished → стёртые
+    // штрихи остаются на ПК, синхронизация ластика «теряет» дельты.
+    val pencilModeState = rememberUpdatedState(pencilModeEnabled)
 
     // Becomes `true` after the first stylus / eraser-tip event is seen in this
     // composition. Once set, finger touches stop drawing (palm rejection) and
@@ -240,7 +258,7 @@ fun DrawablePdfPage(
                         var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { stylusSeen.value },
+                            isPalmRejectionActive = { pencilModeState.value || stylusSeen.value },
                             onStylusSeen = { stylusSeen.value = true },
                             onDown = { off, pressure, tilt ->
                                 val (w, h) = canvasSize.value
@@ -313,7 +331,7 @@ fun DrawablePdfPage(
                         var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { stylusSeen.value },
+                            isPalmRejectionActive = { pencilModeState.value || stylusSeen.value },
                             onStylusSeen = { stylusSeen.value = true },
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
@@ -376,7 +394,7 @@ fun DrawablePdfPage(
                         var session: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { stylusSeen.value },
+                            isPalmRejectionActive = { pencilModeState.value || stylusSeen.value },
                             onStylusSeen = { stylusSeen.value = true },
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
@@ -599,12 +617,19 @@ private suspend fun PointerInputScope.detectStylusAwareDrag(
 }
 
 /**
- * Cheap renderer for the in-flight live stroke. Builds a single
- * Catmull-Rom-smoothed Path from [points] and draws it once with a uniform
- * width derived from the average pressure × tilt-boost of the most recent
- * samples. Trades pressure-fidelity for latency — the canonical varying-width
- * render is performed in `drawStrokeWithPressure` when the stroke is committed
- * to the completed-strokes bitmap cache.
+ * Renderer for the in-flight live stroke. Mirrors the per-segment width
+ * modulation used by [drawStrokeWithPressure] when baking finished strokes —
+ * without this, varying pressure during the gesture would repaint the *whole*
+ * stroke at a single averaged width every frame, so pressing harder made the
+ * already-drawn part visually thicken until lift-off.
+ *
+ * Fast path: when every point shares the same pressure and tilt (mouse /
+ * marker without pressure data) the stroke is painted as a single
+ * Catmull-Rom-smoothed path — identical cost to the previous renderer.
+ *
+ * [points] is the receiver's `livePoints` list and is guaranteed to contain
+ * a single sub-path (only the first point has `isNewPath = true`), so no
+ * sub-path splitting is needed here.
  */
 private fun DrawScope.drawLiveStroke(
     points: List<DrawingPoint>,
@@ -616,36 +641,63 @@ private fun DrawScope.drawLiveStroke(
 ) {
     if (points.size < 2) return
 
-    // Average pressure / tilt over the most recent tail (up to 8 samples) so
-    // the live width responds to recent pen state without flickering on each
-    // sample.
-    val tailStart = (points.size - PRESSURE_AVG_WINDOW).coerceAtLeast(0)
-    var pressureSum = 0f
-    var tiltSum = 0f
-    for (i in tailStart until points.size) {
-        pressureSum += points[i].pressure
-        tiltSum += points[i].tilt
+    val color = Color(colorArgb.toInt())
+    val baseWidth = normalizedStrokeWidth * canvasWidth
+
+    val uniformPressure = points.first().pressure
+    val uniformTilt = points.first().tilt
+    var pressureVaries = false
+    var tiltVaries = false
+    for (p in points) {
+        if (!pressureVaries && p.pressure != uniformPressure) pressureVaries = true
+        if (!tiltVaries && p.tilt != uniformTilt) tiltVaries = true
+        if (pressureVaries && tiltVaries) break
     }
-    val n = points.size - tailStart
-    val avgPressure = pressureSum / n
-    val avgTilt = tiltSum / n
-    val width = normalizedStrokeWidth * canvasWidth *
-        avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt)
 
-    scratch.reset()
-    points.appendCatmullRomTo(scratch, canvasWidth, canvasHeight)
-    drawPath(
-        path = scratch,
-        color = Color(colorArgb.toInt()),
-        style = Stroke(
-            width = width,
-            cap = StrokeCap.Round,
-            join = StrokeJoin.Round,
-        ),
-    )
+    if (!pressureVaries && !tiltVaries) {
+        scratch.reset()
+        points.appendCatmullRomTo(scratch, canvasWidth, canvasHeight)
+        drawPath(
+            path = scratch,
+            color = color,
+            style = Stroke(
+                width = baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+        )
+        return
+    }
+
+    for (i in 0 until points.size - 1) {
+        val p0 = if (i > 0) points[i - 1] else points[0]
+        val p1 = points[i]
+        val p2 = points[i + 1]
+        val p3 = if (i + 2 < points.size) points[i + 2] else points[i + 1]
+
+        val x1 = p1.x * canvasWidth; val y1 = p1.y * canvasHeight
+        val x2 = p2.x * canvasWidth; val y2 = p2.y * canvasHeight
+
+        scratch.reset()
+        scratch.moveTo(x1, y1)
+        scratch.cubicTo(
+            x1 + (p2.x - p0.x) * canvasWidth / 6f, y1 + (p2.y - p0.y) * canvasHeight / 6f,
+            x2 - (p3.x - p1.x) * canvasWidth / 6f, y2 - (p3.y - p1.y) * canvasHeight / 6f,
+            x2, y2,
+        )
+        val avgPressure = (p1.pressure + p2.pressure) * 0.5f
+        val avgTilt = (p1.tilt + p2.tilt) * 0.5f
+        drawPath(
+            path = scratch,
+            color = color,
+            style = Stroke(
+                width = baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+        )
+    }
 }
-
-private const val PRESSURE_AVG_WINDOW = 8
 
 /**
  * Renders [stroke] with per-segment width modulated by [DrawingPoint.pressure]
@@ -822,6 +874,17 @@ private class EraseGesture(
         if (pendingBump) {
             pdfDrawingState.markHistoryChanged()
             pendingBump = false
+        }
+        // Жест мог быть отменён pointerInput-restart'ом (смена ключей,
+        // рекомпозиция родителя) уже после того, как eraseInZone реально
+        // изменил currentPaths. Если не уведомить sync — пир остаётся со
+        // старыми штрихами. Сравниваем по identity: ничего не стёрто →
+        // ничего не шлём.
+        val after = pdfDrawingState.currentPaths.toList()
+        if (after.size != preEraseSnapshot.size ||
+            after.zip(preEraseSnapshot).any { (a, b) -> a !== b }
+        ) {
+            onEraseFinished(preEraseSnapshot, after)
         }
     }
 }

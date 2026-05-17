@@ -22,12 +22,14 @@ class AndroidTabletInputController : TabletInputController {
     private val eraserFlow = MutableStateFlow(false)
     private val tiltFlow = MutableStateFlow(0f)
     private val hoverFlow = MutableStateFlow<Offset?>(null)
+    private val stylusSeenFlow = MutableStateFlow(false)
 
     override val latestPressure: StateFlow<Float> = pressureFlow.asStateFlow()
     override val barrelPressed: StateFlow<Boolean> = barrelFlow.asStateFlow()
     override val eraserTipActive: StateFlow<Boolean> = eraserFlow.asStateFlow()
     override val tilt: StateFlow<Float> = tiltFlow.asStateFlow()
     override val hoverPosition: StateFlow<Offset?> = hoverFlow.asStateFlow()
+    override val stylusEverSeen: StateFlow<Boolean> = stylusSeenFlow.asStateFlow()
 
     /**
      * Parse a single [event] and update the state-flows. `viewWidth` and
@@ -45,6 +47,11 @@ class AndroidTabletInputController : TabletInputController {
             // a finger tap should not clobber pen-driven state.
             return
         }
+
+        // Latch on first stylus / eraser-tip event — drives Pencil Mode
+        // auto-enable in DetailsContent. Hover events count too: knowing a
+        // stylus is present without contact is enough to flip the default.
+        stylusSeenFlow.value = true
 
         val action = event.actionMasked
 

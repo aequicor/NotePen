@@ -45,6 +45,13 @@ interface TabletInputController {
      * Used to draw the hover preview indicator.
      */
     val hoverPosition: StateFlow<Offset?>
+
+    /**
+     * `true` once any stylus / eraser-tip event has been observed in the
+     * current process lifetime. Latched — never flips back to `false`.
+     * Used by Pencil Mode to auto-enable on first stylus contact.
+     */
+    val stylusEverSeen: StateFlow<Boolean>
 }
 
 /** Fallback controller for platforms without tablet support. */
@@ -54,6 +61,7 @@ object NoOpTabletInputController : TabletInputController {
     override val eraserTipActive: StateFlow<Boolean> = MutableStateFlow(false)
     override val tilt: StateFlow<Float> = MutableStateFlow(0f)
     override val hoverPosition: StateFlow<Offset?> = MutableStateFlow(null)
+    override val stylusEverSeen: StateFlow<Boolean> = MutableStateFlow(false)
 }
 
 /**
