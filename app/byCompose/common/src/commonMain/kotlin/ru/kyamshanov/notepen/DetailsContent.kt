@@ -77,10 +77,14 @@ import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.magnifier.MagnifierInputPanel
+import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.pdfviewer.rememberPdfViewerState
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.geometry.Size
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
 
@@ -194,6 +198,9 @@ fun DetailsContent(
     }
     val globalUndoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
     val globalRedoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
+    // Состояние magnifier'а (рамка-цель + плавающая панель ввода). Создаётся
+    // один раз; включается toolbar-кнопкой ниже.
+    val magnifierState = remember { MagnifierState() }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
@@ -413,6 +420,13 @@ fun DetailsContent(
                     val eraserOverrideProvider = remember {
                         { eraserOverrideState.value }
                     }
+                    val isMagnifierPage = magnifierState.enabled && magnifierState.pageIndex == pageIndex
+                    if (isMagnifierPage) {
+                        // Прокидываем актуальный битмап активной страницы
+                        // в magnifier, чтобы панель могла рендерить
+                        // увеличенный PDF-тайл без отдельного запроса.
+                        SideEffect { magnifierState.updatePageBitmap(bm) }
+                    }
                     DrawablePdfPage(
                         bitmap = bm,
                         pdfDrawingState = pdfDrawingState,
@@ -422,6 +436,7 @@ fun DetailsContent(
                         eraserSettings = eraserSettings,
                         eraserOverride = eraserOverrideProvider,
                         pencilModeEnabled = pencilModeEnabled,
+                        magnifierState = if (isMagnifierPage) magnifierState else null,
                         onGestureStart = onGestureStart,
                         onEraseFinished = onEraseFinished,
                         onStrokeFinished = onStrokeFinished,
@@ -476,6 +491,20 @@ fun DetailsContent(
                     // авто-включение по stylus-событиям в этой сессии —
                     // иначе off сразу же отменялся бы.
                     pencilModeAutoApplied = true
+                },
+                magnifierEnabled = magnifierState.enabled,
+                onMagnifierToggle = {
+                    if (magnifierState.enabled) {
+                        magnifierState.disable()
+                    } else {
+                        magnifierState.enable(
+                            onPage = firstVisiblePage,
+                            viewportSize = Size(
+                                windowSizeInPx.width.toFloat(),
+                                windowSizeInPx.height.toFloat(),
+                            ),
+                        )
+                    }
                 },
                 onSave = {
                     isSaving = true
@@ -667,6 +696,56 @@ fun DetailsContent(
                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                 contentDescription = BACK_CONTENT_DESCRIPTION,
                 tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+
+        if (magnifierState.enabled) {
+            val magPage = magnifierState.pageIndex
+            val magPdfDrawingState = remember(magPage) {
+                drawingStates.getOrPut(magPage) { PdfDrawingState() }
+            }
+            val magOnGestureStart = remember(magPage) {
+                { snapshot: List<DrawingPath> ->
+                    globalUndoStack.addLast(magPage to snapshot)
+                    globalRedoStack.clear()
+                }
+            }
+            val magOnEraseFinished = remember(magPage, magPdfDrawingState, syncEngine) {
+                { before: List<DrawingPath>, _: List<DrawingPath> ->
+                    handleEraseFinished(
+                        pdfDrawingState = magPdfDrawingState,
+                        pageIndex = magPage,
+                        before = before,
+                        engine = syncEngine,
+                    )
+                }
+            }
+            val magOnStrokeFinished = remember(magPage, magPdfDrawingState, syncEngine) {
+                { path: DrawingPath ->
+                    handleStrokeFinished(
+                        pdfDrawingState = magPdfDrawingState,
+                        pageIndex = magPage,
+                        path = path,
+                        engine = syncEngine,
+                    )
+                }
+            }
+            val magEraserOverrideState = rememberUpdatedState(eraserOverride)
+            val magEraserOverrideProvider = remember { { magEraserOverrideState.value } }
+
+            MagnifierInputPanel(
+                state = magnifierState,
+                pdfDrawingState = magPdfDrawingState,
+                toolMode = effectiveToolMode,
+                penSettings = penSettings,
+                markerSettings = markerSettings,
+                eraserSettings = eraserSettings,
+                eraserOverride = magEraserOverrideProvider,
+                pencilModeEnabled = pencilModeEnabled,
+                onGestureStart = magOnGestureStart,
+                onStrokeFinished = magOnStrokeFinished,
+                onEraseFinished = magOnEraseFinished,
+                onClose = { magnifierState.disable() },
             )
         }
     }

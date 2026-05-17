@@ -26,6 +26,7 @@ class ErrorEventTest {
             is ErrorEvent.FolderNameCharsInvalid -> "folder_name_invalid"
             is ErrorEvent.FolderOperationFailed -> "folder_op_failed"
             is ErrorEvent.FileNotInHistory -> "not_in_history"
+            else -> "other"
         }
         assertEquals("not_in_history", label)
     }

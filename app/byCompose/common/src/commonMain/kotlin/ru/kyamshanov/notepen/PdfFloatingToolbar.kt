@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
@@ -61,6 +62,8 @@ fun PdfFloatingToolbar(
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
+    magnifierEnabled: Boolean,
+    onMagnifierToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -108,6 +111,13 @@ fun PdfFloatingToolbar(
                     onClick = { onPencilModeChange(!pencilModeEnabled) },
                 )
             }
+
+            ToolToggleButton(
+                icon = Icons.Default.Search,
+                contentDescription = "Лупа для письма",
+                selected = magnifierEnabled,
+                onClick = onMagnifierToggle,
+            )
 
             ToolToggleButton(
                 icon = Icons.Default.GridView,
