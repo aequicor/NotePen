@@ -32,14 +32,16 @@ import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
 import ru.kyamshanov.notepen.sync.SyncViewModel
+import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
 import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
-import ru.kyamshanov.notepen.sync.infrastructure.InMemoryPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
+import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseAndroid
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
@@ -77,9 +79,13 @@ class MainActivity : ComponentActivity() {
         }
         val syncClient = KtorSyncClient(httpClient)
         val discovery = NsdDeviceDiscovery(context)
-        // Phase 4: offline buffer for local edits; survives reconnects within
-        // one app session (Phase 5 will promote to SQLDelight for restarts).
-        val pendingDeltaQueue = InMemoryPendingDeltaQueue()
+        // Persistent offline buffer (SQLDelight-backed) — survives process death
+        // so edits made offline still replay after the next launch + reconnect.
+        val syncDatabase = createSyncDatabaseAndroid(context = context)
+        val pendingDeltaQueue = SqlDelightPendingDeltaQueue(
+            database = syncDatabase,
+            ioDispatcher = Dispatchers.IO,
+        )
         // One registry per app; each open document is its own SyncEngine.
         val syncEngineRegistry = SyncEngineRegistry(
             deviceId = selfId,
@@ -123,6 +129,12 @@ class MainActivity : ComponentActivity() {
         val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
         DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
             .start(scope = appScope)
+        // Also mark orphans passively: catalog drops a doc that has pending edits.
+        CatalogDiffOrphanDetector(
+            catalog = remoteCatalogCache.catalog,
+            queue = pendingDeltaQueue,
+            registry = remoteDocumentStatusRegistry,
+        ).start(scope = appScope)
 
         val root = DefaultRootComponent(
             componentContext = defaultComponentContext(),

@@ -50,6 +50,7 @@ import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
 import ru.kyamshanov.notepen.sync.infrastructure.KtorPeerServer
 import ru.kyamshanov.notepen.sync.HostViewModel
 import ru.kyamshanov.notepen.sync.SyncViewModel
+import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
 import ru.kyamshanov.notepen.sync.domain.DocumentTransferRequestHandler
 import ru.kyamshanov.notepen.sync.domain.HostAnnotationProjection
@@ -59,9 +60,10 @@ import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
-import ru.kyamshanov.notepen.sync.infrastructure.InMemoryPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
+import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseJvm
 import ru.kyamshanov.notepen.createAnnotationRepository
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
@@ -105,9 +107,14 @@ fun main() {
     }
     val syncClient = KtorSyncClient(httpClient)
 
-    // Phase 4: offline buffer that the engine appends to on every local edit
-    // and drains on every reconnect. In-memory; Phase 5 swaps in SQLDelight.
-    val pendingDeltaQueue = InMemoryPendingDeltaQueue()
+    // Persistent offline buffer (SQLDelight-backed) — survives app restarts so
+    // edits made offline still replay after a restart + reconnect.
+    val syncDatabasePath = System.getProperty("user.home") + "/.notepen/sync.db"
+    val syncDatabase = createSyncDatabaseJvm(syncDatabasePath)
+    val pendingDeltaQueue = SqlDelightPendingDeltaQueue(
+        database = syncDatabase,
+        ioDispatcher = Dispatchers.IO,
+    )
 
     // One registry per app; each open document is its own SyncEngine.
     val syncEngineRegistry = SyncEngineRegistry(
@@ -172,6 +179,12 @@ fun main() {
     val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
     DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
         .start(scope = appScope)
+    // Also mark orphans passively: catalog drops a doc that has pending edits.
+    CatalogDiffOrphanDetector(
+        catalog = remoteCatalogCache.catalog,
+        queue = pendingDeltaQueue,
+        registry = remoteDocumentStatusRegistry,
+    ).start(scope = appScope)
 
     // Demultiplex incoming stroke deltas by documentId — one engine per doc.
     appScope.launch {
