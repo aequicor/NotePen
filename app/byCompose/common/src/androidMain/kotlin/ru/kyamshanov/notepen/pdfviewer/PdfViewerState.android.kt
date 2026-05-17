@@ -126,6 +126,31 @@ actual class PdfViewerState internal constructor(
         zoomTo(zoom * factor, focus)
     }
 
+    /**
+     * Атомарное pinch-обновление: одновременно меняет `zoom` (на [factor])
+     * и переносит anchor с [prevCentroid] на [newCentroid]. Сохраняет
+     * инвариант: документ-точка, которая была под `prevCentroid` при старом
+     * `zoom`, окажется под `newCentroid` при новом `zoom * factor`.
+     *
+     * Pan НЕ кламп'ится — иначе при cursor-anchor zoom'е страница «снапит»
+     * к границе вьюпорта на каждом пинч-событии, и точка под пальцем
+     * визуально сдвигается. Edge-clamp применяется отдельно на single-finger
+     * скролле через [panBy] (см. `scrollableState` в `PdfPagesViewer.android.kt`).
+     *
+     * Эквивалент desktop'ного `state.zoomBy` без сопровождающего `state.panBy`.
+     */
+    internal fun pinchUpdate(prevCentroid: Offset, newCentroid: Offset, factor: Float) {
+        if (zoom <= 0f) return
+        val newZoom = (zoom * factor).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        val docX = (prevCentroid.x - pan.x) / zoom
+        val docY = (prevCentroid.y - pan.y) / zoom
+        zoom = newZoom
+        pan = Offset(
+            x = newCentroid.x - docX * newZoom,
+            y = newCentroid.y - docY * newZoom,
+        )
+    }
+
     actual fun setScalePercent(percent: Int) {
         val target = percent / 100f
         val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)

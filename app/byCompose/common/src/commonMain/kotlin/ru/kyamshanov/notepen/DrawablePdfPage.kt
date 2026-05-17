@@ -10,6 +10,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -71,6 +72,36 @@ private const val TILT_WIDTH_GAIN = 0.5f
  */
 private const val INK_CACHE_MAX_DIMENSION_PX = 3072
 
+/**
+ * Bucket size for the ink-cache key. Without bucketing, every pixel of
+ * `canvasSize` change during a continuous pinch zoom invalidates the cache
+ * key and re-rasterises ALL strokes into a freshly allocated big bitmap —
+ * at 60 fps this dominates the main thread and trashes the GC.
+ *
+ * Strokes are normalised; the rasterised bitmap is upscaled by `drawImage`
+ * at draw time, so quantising the cache size by ±256 px is visually
+ * indistinguishable but cuts rebuild frequency by ~100× during pinch.
+ */
+private const val INK_CACHE_DIM_BUCKET_PX = 256
+
+/**
+ * Hard ceiling on either dimension of the page Box at which the Android
+ * low-latency `SurfaceView` overlay is allowed to mount. Above this, the
+ * `CanvasFrontBufferedRenderer` would allocate a HardwareBuffer the full
+ * size of the page (~ width × height × 4 bytes) for front + multi-buffered
+ * layers PER visible page — at 6× zoom on a typical A4 (≈ 2700×3800 px)
+ * this is ~40 MB × ~3 buffers × ~3 visible pages = > 350 MB of graphics
+ * memory, which trips `dequeueBuffer: createGraphicBuffer failed` on most
+ * mid-range devices.
+ *
+ * Beyond this threshold we drop the overlay; Compose's own `Canvas`-based
+ * live-stroke renderer takes over (see `if (!lowLatencyOverlayActive)`
+ * below) at frame-bound latency (~ 16 ms) instead of sub-frame (~ 3 ms) —
+ * acceptable degradation only at extreme zoom, where the user is rarely
+ * drawing.
+ */
+private const val LOW_LATENCY_OVERLAY_MAX_DIM_PX = 2400
+
 @Composable
 fun DrawablePdfPage(
     bitmap: ImageBitmap,
@@ -121,27 +152,62 @@ fun DrawablePdfPage(
     val indicatorColor = MaterialTheme.colorScheme.outline
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
-    val lowLatencyOverlayActive = rememberLowLatencyOverlayAvailable()
+    val lowLatencyOverlaySupported = rememberLowLatencyOverlayAvailable()
+    // derivedStateOf — критически: иначе ЛЮБОЕ изменение canvasSize
+    // (каждый pinch-тик) триггерит рекомпозицию всего DrawablePdfPage,
+    // даже если порог не пересечён. С derivedStateOf рекомпозиция только
+    // когда сам Boolean меняет значение (пересечение 2400px).
+    val lowLatencyOverlayActive by remember(lowLatencyOverlaySupported) {
+        derivedStateOf {
+            lowLatencyOverlaySupported &&
+                maxOf(canvasSize.value.width, canvasSize.value.height) <= LOW_LATENCY_OVERLAY_MAX_DIM_PX
+        }
+    }
+
+    // Bucketed cache dimensions: drops the lowest bits of canvasSize so
+    // sub-bucket zoom changes don't invalidate the ink cache. Above the
+    // INK_CACHE_MAX_DIMENSION_PX cap the bucket is irrelevant (cap wins),
+    // which means at high zoom the key naturally stays constant.
+    // derivedStateOf — чтобы рекомпозиция триггерилась только при
+    // пересечении границы бакета, а не на каждый пиксельный delta.
+    val inkCacheDim: IntSize by remember {
+        derivedStateOf {
+            val (w, h) = canvasSize.value
+            if (w <= 0 || h <= 0) {
+                IntSize.Zero
+            } else {
+                val longest = maxOf(w, h)
+                if (longest > INK_CACHE_MAX_DIMENSION_PX) {
+                    val scaleNum = INK_CACHE_MAX_DIMENSION_PX
+                    IntSize(
+                        width = (w.toLong() * scaleNum / longest).toInt().coerceAtLeast(1),
+                        height = (h.toLong() * scaleNum / longest).toInt().coerceAtLeast(1),
+                    )
+                } else {
+                    val b = INK_CACHE_DIM_BUCKET_PX
+                    IntSize(
+                        width = ((w + b - 1) / b * b).coerceAtLeast(b),
+                        height = ((h + b - 1) / b * b).coerceAtLeast(b),
+                    )
+                }
+            }
+        }
+    }
 
     // Cache of all completed strokes rasterised to an off-screen ImageBitmap.
-    // Rebuilt only when canvas size changes or `historyVersion` is bumped
-    // (finishDrawing, undo / redo, eraser, sync). Without this cache, every
-    // frame iterated `currentPaths.forEach { drawStrokeWithPressure }` —
+    // Rebuilt only when bucketed cache dim changes or `historyVersion` is
+    // bumped (finishDrawing, undo / redo, eraser, sync). Without this cache,
+    // every frame iterated `currentPaths.forEach { drawStrokeWithPressure }` —
     // for varying-pressure strokes this is hundreds of `drawPath` calls per
     // frame per stroke on screen, which dominates the input-to-pixel latency
     // budget once the page has any ink on it.
     val completedLayer: ImageBitmap? = remember(
-        canvasSize.value,
+        inkCacheDim,
         pdfDrawingState.historyVersion.value,
     ) {
-        val (w, h) = canvasSize.value
-        if (w <= 0 || h <= 0 || pdfDrawingState.currentPaths.isEmpty()) return@remember null
-        val longest = maxOf(w, h)
-        val downscale = if (longest > INK_CACHE_MAX_DIMENSION_PX) {
-            INK_CACHE_MAX_DIMENSION_PX.toFloat() / longest
-        } else 1f
-        val bw = (w * downscale).toInt().coerceAtLeast(1)
-        val bh = (h * downscale).toInt().coerceAtLeast(1)
+        val bw = inkCacheDim.width
+        val bh = inkCacheDim.height
+        if (bw <= 0 || bh <= 0 || pdfDrawingState.currentPaths.isEmpty()) return@remember null
         val bmp = ImageBitmap(bw, bh)
         val gCanvas = GraphicsCanvas(bmp)
         val scope = CanvasDrawScope()
