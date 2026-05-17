@@ -49,6 +49,26 @@ actual class PdfViewerState internal constructor(
     var pages: List<PdfPageInfo> by mutableStateOf(emptyList())
         internal set
 
+    /**
+     * Transient множитель для активного Ctrl+wheel zoom-бёрста: применяется
+     * к содержимому `SubcomposeLayout` через `Modifier.graphicsLayer` без
+     * пересчёта layout'а и без перерисовки PDF-битмапов. `1f` вне жеста.
+     *
+     * Зачем: layout-pass + restretch огромных PDF-битмапов + (если есть
+     * ink-кэш) ре-растеризация штрихов в новый off-screen битмап на КАЖДЫЙ
+     * wheel-тик — это был источник лагов. Теперь `zoom` остаётся
+     * «закоммиченным» во время бёрста, страницы GPU-трансформируются через
+     * render node. По idle-таймеру в per-frame loop'е (см. `PdfPagesViewer.
+     * jvm.kt`) [commitPinchGesture] «впекает» множитель и трансляцию в
+     * `zoom` / `pan` атомарно, gestureScale → 1f.
+     */
+    var gestureScale: Float by mutableFloatStateOf(1f)
+        internal set
+
+    /** Transient трансляция layer'а для активного zoom-бёрста; см. [gestureScale]. */
+    var gestureTranslation: Offset by mutableStateOf(Offset.Zero)
+        internal set
+
     internal val basePageWidthPx: Float
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 
@@ -124,6 +144,54 @@ actual class PdfViewerState internal constructor(
 
     actual fun zoomBy(factor: Float, focus: Offset) {
         zoomTo(zoom * factor, focus)
+    }
+
+    /**
+     * Транзиентное Ctrl+wheel-обновление: меняет `gestureScale` и
+     * `gestureTranslation`, НЕ трогая [zoom] / [pan]. SubcomposeLayout не
+     * пересчитывается, PDF-битмапы не ре-растеризуются — видимый зум
+     * получается через `graphicsLayer` на корне страниц.
+     *
+     * Сохраняет инвариант cursor-anchor: точка под [prevCentroid] при старом
+     * (gestureScale, gestureTranslation) окажется под [newCentroid] при
+     * новом. Для wheel-зума `prev == new` (фокус — позиция курсора).
+     * Effective-зум `zoom * gestureScale` кламп'ится в [MIN_ZOOM..MAX_ZOOM],
+     * gestureTranslation пересчитывается уже с учётом клампа.
+     */
+    internal fun pinchGestureUpdate(prevCentroid: Offset, newCentroid: Offset, factor: Float) {
+        val oldScale = gestureScale
+        if (oldScale <= 0f || zoom <= 0f) return
+        val oldTrans = gestureTranslation
+        val docX = (prevCentroid.x - oldTrans.x) / oldScale
+        val docY = (prevCentroid.y - oldTrans.y) / oldScale
+        val effectiveNewZoom = (zoom * oldScale * factor)
+            .coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        val newScale = effectiveNewZoom / zoom
+        gestureScale = newScale
+        gestureTranslation = Offset(
+            x = newCentroid.x - docX * newScale,
+            y = newCentroid.y - docY * newScale,
+        )
+    }
+
+    /**
+     * Впекает накопленные [gestureScale] / [gestureTranslation] в [zoom] /
+     * [pan] и сбрасывает gesture-state в identity. Идемпотентно: повторный
+     * вызов при уже identity-состоянии — no-op. Pan кламп'ится по краям
+     * документа. Compose батчит snapshot-write'ы в один кадр — identity-layer
+     * приходит ровно тогда же, когда layout перемеряется на новом `zoom`,
+     * визуального скачка нет.
+     */
+    internal fun commitPinchGesture() {
+        val s = gestureScale
+        val t = gestureTranslation
+        if (s == 1f && t == Offset.Zero) return
+        val newZoom = (zoom * s).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        val newPan = Offset(x = pan.x * s + t.x, y = pan.y * s + t.y)
+        zoom = newZoom
+        pan = clamped(newPan)
+        gestureScale = 1f
+        gestureTranslation = Offset.Zero
     }
 
     actual fun setScalePercent(percent: Int) {

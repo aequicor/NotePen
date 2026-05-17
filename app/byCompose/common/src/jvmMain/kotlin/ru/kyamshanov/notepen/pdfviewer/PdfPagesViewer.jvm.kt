@@ -11,6 +11,8 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
@@ -62,6 +64,14 @@ private const val MAX_CACHE_ENTRIES = 6
 private const val MAX_RENDER_DIM_PX = 4000
 private const val BUFFER_PAGES = 1
 private const val ZOOM_BURST_RESET_PX = 8f
+
+/**
+ * Сколько миллисекунд idle (без новых wheel-тиков) до того, как
+ * `commitPinchGesture` впечёт transient `gestureScale` / `gestureTranslation`
+ * в `zoom` / `pan` и снимет layer-трансформу. Должен быть меньше
+ * [RENDER_DEBOUNCE_MS], иначе high-res рендер не дождётся настоящего `zoom`.
+ */
+private const val GESTURE_COMMIT_IDLE_MS = 100L
 
 /**
  * Off-screen битмап с масштабом > 2× или < 0.5× от текущего считается
@@ -138,14 +148,27 @@ actual fun PdfPagesViewer(
     }
 
     // Frame-batched zoom: pointerInput накапливает factor, применяем не
-    // чаще раза в кадр. Зум применяется напрямую — без анимационной
-    // прослойки, чтобы не было видимого отставания фактического масштаба
-    // от физического жеста.
+    // чаще раза в кадр. Во время бёрста зум идёт в transient
+    // `gestureScale` / `gestureTranslation` (graphicsLayer на SubcomposeLayout)
+    // — без layout-pass'а и без ре-растеризации битмапов. Когда новых тиков
+    // нет [GESTURE_COMMIT_IDLE_MS] мс, `commitPinchGesture` атомарно
+    // впекает накопленное в `zoom` / `pan`, layer возвращается в identity,
+    // и snapshotFlow ниже видит новый `zoom` → high-res рендер.
     LaunchedEffect(state) {
+        var lastZoomMillis = 0L
+        var hasPendingCommit = false
         while (true) {
-            withFrameMillis { }
-            val pair = pendingZoom.consume() ?: continue
-            state.zoomBy(pair.first, pair.second)
+            val now = withFrameMillis { it }
+            val pair = pendingZoom.consume()
+            if (pair != null) {
+                val focus = pair.second
+                state.pinchGestureUpdate(focus, focus, pair.first)
+                lastZoomMillis = now
+                hasPendingCommit = true
+            } else if (hasPendingCommit && now - lastZoomMillis >= GESTURE_COMMIT_IDLE_MS) {
+                state.commitPinchGesture()
+                hasPendingCommit = false
+            }
         }
     }
 
@@ -221,7 +244,23 @@ actual fun PdfPagesViewer(
             .clipToBounds()
             .pdfDesktopPointerInput(state, pendingZoom),
     ) {
-        SubcomposeLayout(modifier = Modifier.fillMaxSize()) { constraints ->
+        SubcomposeLayout(
+            modifier = Modifier
+                .fillMaxSize()
+                // Transient zoom-трансформа: scale + translate через GPU
+                // render node, без layout-pass'а. См. KDoc у
+                // [PdfViewerState.gestureScale]. Lambda-форма читает state
+                // в graphicsLayer-блоке — он переоценивается на DRAW-pass'е,
+                // без рекомпозиции / ремежа SubcomposeLayout'а.
+                .graphicsLayer {
+                    val s = state.gestureScale
+                    scaleX = s
+                    scaleY = s
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    translationX = state.gestureTranslation.x
+                    translationY = state.gestureTranslation.y
+                },
+        ) { constraints ->
             val layout = state.layout
             val zoom = state.zoom
             val pan = state.pan
@@ -314,6 +353,11 @@ private fun Modifier.pdfDesktopPointerInput(
                     }
                     val origin = middleDragOrigin
                     if (origin != null && event.buttons.isTertiaryPressed && change != null) {
+                        // Bake любую pending-gesture transform до пана:
+                        // pan-дельта в viewport-пикселях, и если оставить
+                        // gestureScale != 1, 1px движения мыши даст scale*1
+                        // пикселей визуально — рассинхрон с курсором.
+                        state.commitPinchGesture()
                         val delta = change.position - origin
                         state.panBy(delta)
                         middleDragOrigin = change.position
@@ -322,6 +366,7 @@ private fun Modifier.pdfDesktopPointerInput(
                 }
                 PointerEventType.Press -> {
                     if (event.buttons.isTertiaryPressed && change != null) {
+                        state.commitPinchGesture()
                         middleDragOrigin = change.position
                         change.consume()
                     }
@@ -344,9 +389,11 @@ private fun Modifier.pdfDesktopPointerInput(
                             pendingZoom.accumulate(factor, focus)
                         }
                         shift -> {
+                            state.commitPinchGesture()
                             state.panBy(Offset(-delta.y * WHEEL_SCROLL_PX_PER_TICK, 0f))
                         }
                         else -> {
+                            state.commitPinchGesture()
                             state.panBy(Offset(0f, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
                         }
                     }
