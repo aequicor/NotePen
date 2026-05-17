@@ -32,6 +32,14 @@ import kotlin.math.sqrt
  * [PdfViewerState] перерисовывает страницы сразу после изменения [zoom],
  * битмап показывается растянутым из предыдущего масштаба до прихода
  * нового рендера. Это и устраняет "скачок" при пинче.
+ *
+ * Pinch применяется **атомарно** через [PdfViewerState.pinchUpdate] —
+ * одна транзакция (zoom + перенос anchor с `prevCentroid` на новый
+ * `centroid`), без edge-clamp'а pan'а. Раньше использовалась пара
+ * `zoomBy` (без clamp) + `panBy` (с clamp); `panBy` снапил `pan` к
+ * границе вьюпорта, когда cursor-anchor выводил его за край, и точка
+ * под пальцами визуально сдвигалась на каждый пинч-тик (особенно
+ * заметно при больших масштабах, когда страница шире вьюпорта).
  */
 @OptIn(ExperimentalComposeUiApi::class)
 internal fun Modifier.pdfAndroidPointerInput(state: PdfViewerState): Modifier =
@@ -54,10 +62,8 @@ internal fun Modifier.pdfAndroidPointerInput(state: PdfViewerState): Modifier =
                         val span = sqrt(dx * dx + dy * dy)
                         val prevC = prevCentroid
                         if (prevC != null && prevSpan > 0f) {
-                            val pan = Offset(centroid.x - prevC.x, centroid.y - prevC.y)
-                            val zoom = if (span > 0f) span / prevSpan else 1f
-                            if (zoom != 1f) state.zoomBy(zoom, centroid)
-                            if (pan != Offset.Zero) state.panBy(pan)
+                            val factor = if (span > 0f) span / prevSpan else 1f
+                            state.pinchUpdate(prevC, centroid, factor)
                         }
                         prevCentroid = centroid
                         prevSpan = span

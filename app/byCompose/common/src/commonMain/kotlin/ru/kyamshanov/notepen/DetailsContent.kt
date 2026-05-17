@@ -11,7 +11,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -32,6 +31,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -365,10 +365,53 @@ fun DetailsContent(
             modifier = Modifier.fillMaxSize(),
         ) {
             val bm = bitmap
-            Box(modifier = Modifier.size(visualWidth, visualHeight)) {
+            // Размер страницы уже задан Constraints.fixed(w,h) из
+            // SubcomposeLayout в PdfPagesViewer (visualWidth/visualHeight —
+            // те же пиксели в Dp). Modifier.size(Dp,Dp) был бы избыточен И
+            // нестабилен: новый instance на каждом тике зума → нестабильный
+            // modifier у DrawablePdfPage → тяжёлая рекомпозиция каждый кадр
+            // pinch'а. fillMaxSize — singleton, стабильный по identity.
+            Box(modifier = Modifier.fillMaxSize()) {
                 if (bm != null) {
                     val pdfDrawingState = remember(pageIndex) {
                         drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
+                    }
+                    // Все callback'и обёрнуты в remember с стабильными
+                    // ключами — иначе каждый recomposition создаёт новые
+                    // lambda-инстансы, делает параметры DrawablePdfPage
+                    // нестабильными и блокирует skipping в Compose strong-
+                    // skipping mode. eraserOverride — отдельно через
+                    // rememberUpdatedState: лямбда стабильна по identity,
+                    // но возвращает актуальное значение при вызове.
+                    val onGestureStart = remember(pageIndex) {
+                        { snapshot: List<DrawingPath> ->
+                            globalUndoStack.addLast(pageIndex to snapshot)
+                            globalRedoStack.clear()
+                        }
+                    }
+                    val onEraseFinished = remember(pageIndex, pdfDrawingState, syncEngine) {
+                        { before: List<DrawingPath>, _: List<DrawingPath> ->
+                            handleEraseFinished(
+                                pdfDrawingState = pdfDrawingState,
+                                pageIndex = pageIndex,
+                                before = before,
+                                engine = syncEngine,
+                            )
+                        }
+                    }
+                    val onStrokeFinished = remember(pageIndex, pdfDrawingState, syncEngine) {
+                        { path: DrawingPath ->
+                            handleStrokeFinished(
+                                pdfDrawingState = pdfDrawingState,
+                                pageIndex = pageIndex,
+                                path = path,
+                                engine = syncEngine,
+                            )
+                        }
+                    }
+                    val eraserOverrideState = rememberUpdatedState(eraserOverride)
+                    val eraserOverrideProvider = remember {
+                        { eraserOverrideState.value }
                     }
                     DrawablePdfPage(
                         bitmap = bm,
@@ -377,28 +420,11 @@ fun DetailsContent(
                         penSettings = penSettings,
                         markerSettings = markerSettings,
                         eraserSettings = eraserSettings,
-                        eraserOverride = { eraserOverride },
-                        onGestureStart = { snapshot ->
-                            globalUndoStack.addLast(pageIndex to snapshot)
-                            globalRedoStack.clear()
-                        },
-                        onEraseFinished = { before, _ ->
-                            handleEraseFinished(
-                                pdfDrawingState = pdfDrawingState,
-                                pageIndex = pageIndex,
-                                before = before,
-                                engine = syncEngine,
-                            )
-                        },
-                        onStrokeFinished = { path ->
-                            handleStrokeFinished(
-                                pdfDrawingState = pdfDrawingState,
-                                pageIndex = pageIndex,
-                                path = path,
-                                engine = syncEngine,
-                            )
-                        },
-                        modifier = Modifier.size(visualWidth, visualHeight),
+                        eraserOverride = eraserOverrideProvider,
+                        onGestureStart = onGestureStart,
+                        onEraseFinished = onEraseFinished,
+                        onStrokeFinished = onStrokeFinished,
+                        modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     Text("Loading")

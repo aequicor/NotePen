@@ -22,6 +22,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
+import kotlin.math.pow
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -36,8 +37,19 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 
 private const val WHEEL_SCROLL_PX_PER_TICK = 60f
-private const val ZOOM_IN_FACTOR = 1.1f
-private const val ZOOM_OUT_FACTOR = 1f / ZOOM_IN_FACTOR
+
+/**
+ * База показательной функции зума: `factor = ZOOM_BASE^(-delta.y)`.
+ * При стандартной мыши с дискретным колесом `delta.y = ±1.0` это даёт
+ * привычные ±~7% за щелчок. На прецизионном тачпаде / smooth-scroll
+ * мыши `delta.y` приходит дробным (например 0.1) — формула даёт
+ * соответственно мелкий плавный шаг ~0.7%, и зум становится визуально
+ * непрерывным без какой-либо анимации.
+ *
+ * Снизили с прежних 1.1 → 1.075: на обычной мыши шаг ощущается мягче,
+ * на тачпаде разница незаметна.
+ */
+private const val ZOOM_BASE = 1.075f
 
 /**
  * Дебаунс между остановкой пользователя и запуском high-res рендера.
@@ -59,10 +71,11 @@ private const val STALE_SCALE_RATIO_THRESHOLD = 2f
 
 /**
  * Накопитель wheel-zoom тиков для применения раз в кадр. Один Ctrl+wheel
- * burst может выдавать > 100 событий в секунду; рекомпозиция per-tick
- * захлёбывает main-поток. Cursor-anchored zoom мультипликативно
- * коммутативен (N тиков по `f` == один тик `f^N`), батч даёт идентичный
- * визуальный результат при меньшей нагрузке.
+ * burst может выдавать > 100 событий в секунду (прецизионный тачпад);
+ * рекомпозиция per-tick захлёбывает main-поток. Cursor-anchored zoom
+ * мультипликативно коммутативен (`N` тиков по `f` == один тик `f^N`
+ * вокруг той же точки), батч даёт идентичный визуальный результат при
+ * меньшей нагрузке.
  */
 private class PendingZoom {
     var factor: Float = 1f
@@ -124,8 +137,10 @@ actual fun PdfPagesViewer(
         state.applyPendingInitialScrollIfNeeded()
     }
 
-    // Frame-batched zoom: pointerInput накапливает factor, мы применяем не
-    // чаще раза в кадр.
+    // Frame-batched zoom: pointerInput накапливает factor, применяем не
+    // чаще раза в кадр. Зум применяется напрямую — без анимационной
+    // прослойки, чтобы не было видимого отставания фактического масштаба
+    // от физического жеста.
     LaunchedEffect(state) {
         while (true) {
             withFrameMillis { }
@@ -325,7 +340,7 @@ private fun Modifier.pdfDesktopPointerInput(
                                 ?: change.position.takeIf { it != Offset.Zero }
                                 ?: lastCursor
                             zoomBurstFocus = focus
-                            val factor = if (delta.y < 0f) ZOOM_IN_FACTOR else ZOOM_OUT_FACTOR
+                            val factor = ZOOM_BASE.pow(-delta.y)
                             pendingZoom.accumulate(factor, focus)
                         }
                         shift -> {

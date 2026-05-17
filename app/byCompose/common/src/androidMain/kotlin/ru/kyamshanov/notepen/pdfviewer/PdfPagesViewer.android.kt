@@ -33,7 +33,16 @@ import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 
 private const val RENDER_DEBOUNCE_MS = 150L
 private const val MAX_CACHE_ENTRIES = 6
-private const val MAX_RENDER_DIM_PX = 3000
+
+/**
+ * Cap on PDF bitmap dimensions. Above this, the page is just upscaled by
+ * `Image.ContentScale.FillBounds` — sub-pixel blur is invisible at the kind
+ * of zoom levels where the cap kicks in, but each render allocates two big
+ * Bitmaps + an IntArray copy (≈ `widthPx * heightPx * 12` bytes on the GC
+ * path), so cutting the cap from 3000 → 2400 reduces peak per-render
+ * allocation by ~36 % and shrinks the GPU draw cost on mobile.
+ */
+private const val MAX_RENDER_DIM_PX = 2400
 private const val BUFFER_PAGES = 1
 private const val STALE_SCALE_RATIO_THRESHOLD = 2f
 
