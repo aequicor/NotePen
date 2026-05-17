@@ -148,19 +148,4 @@ sealed class NetworkMessage {
     data class AnnotationSnapshot(
         val strokes: List<StrokeDelta.Added>,
     ) : NetworkMessage()
-
-    /**
-     * Symmetric viewport state broadcast between peers.
-     *
-     * Either side emits this on local zoom / page-scroll changes; the receiving
-     * peer applies it to keep the document view in sync. Conflated upstream so
-     * fast pinch-zoom or fling doesn't flood the socket.
-     */
-    @Serializable
-    @SerialName("view_state")
-    data class ViewStateMessage(
-        val page: Int,
-        val scale: Int,
-        val pageScrollOffsetPx: Int = 0,
-    ) : NetworkMessage()
 }

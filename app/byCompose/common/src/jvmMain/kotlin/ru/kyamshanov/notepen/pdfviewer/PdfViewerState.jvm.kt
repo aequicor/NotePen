@@ -15,28 +15,17 @@ import kotlin.math.roundToInt
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 
 /**
- * Состояние PDF-вьювера: единственный источник правды по позиции, зуму и
- * перечню страниц. Аналог [androidx.compose.foundation.lazy.LazyListState],
- * но с поддержкой произвольного float-зума вокруг точки и без LazyColumn'а
- * под капотом.
+ * Desktop-реализация [PdfViewerState]: один `zoom: Float`, [pan] —
+ * единая модель координат документа во вьюпорте (см. [PdfPagesLayout]
+ * для описания координатных пространств).
  *
- * ## Координаты
- *
- * - [zoom] — визуальный масштаб (1.0 = 100%). Кламп: 0.25..8.0.
- * - [pan] — top-left угол документа в координатах вьюпорта (пиксели).
- *   Используется и для горизонтального центрирования (страницы лежат
- *   стопкой при X ∈ [0; basePageWidthPx]; видимый x = pan.x + docX * zoom),
- *   и для вертикального скролла (видимый y = pan.y + docY * zoom).
- *
- * ## Sync-совместимость
- *
- * [firstVisiblePageIndex] и [firstVisiblePageOffsetPx] совпадают с
- * семантикой `LazyListState.firstVisibleItemIndex` /
- * `firstVisibleItemScrollOffset`, поэтому существующий протокол
- * `ViewStateSync` работает без изменений.
+ * Аналог [androidx.compose.foundation.lazy.LazyListState], но с
+ * поддержкой произвольного float-зума вокруг точки и без LazyColumn'а
+ * под капотом — виртуализация делается через `SubcomposeLayout` в
+ * `PdfPagesViewer.jvm.kt`.
  */
 @Suppress("TooManyFunctions")
-class PdfViewerState internal constructor(
+actual class PdfViewerState internal constructor(
     initialZoom: Float = 1f,
     initialPanX: Float = 0f,
     initialPanY: Float = 0f,
@@ -60,15 +49,9 @@ class PdfViewerState internal constructor(
     var pages: List<PdfPageInfo> by mutableStateOf(emptyList())
         internal set
 
-    /**
-     * Ширина "базовой" страничной колонки (= ширина страницы при zoom = 1).
-     * Совпадает с прежним `viewportWidth * 2/3`, чтобы при первом открытии
-     * (zoom = 1) страница занимала те же 2/3 ширины окна, что и раньше.
-     */
     internal val basePageWidthPx: Float
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 
-    /** Layout стопки страниц при базовой ширине. */
     internal val layout: PdfPagesLayout by derivedStateOf {
         PdfPagesLayout.build(
             pages = pages,
@@ -77,21 +60,9 @@ class PdfViewerState internal constructor(
         )
     }
 
-    /**
-     * Сохранённые во время первого layout-pass-а начальные параметры
-     * скролла: применяются один раз, когда [viewportSize] и [pages] оба
-     * становятся валидны. Иначе при перезапуске сессии sync не успевает
-     * восстановить позицию.
-     */
     private var pendingInitialPage: Int? = initialPageIndex.takeIf { it > 0 || initialPageOffsetPx > 0 }
     private var pendingInitialOffset: Int = initialPageOffsetPx
     private var pendingInitialScalePercent: Int? = null
-    // One-shot флаг: гарантирует, что начальное центрирование выполняется
-    // ровно один раз, в момент когда viewport и pages впервые оба валидны.
-    // Не зависит от текущего значения pan (раньше использовалось
-    // `pan == Offset.Zero`, что не срабатывало если pan успел сдвинуться
-    // — например, через annotation-bundle scrollToPage до того, как
-    // viewport получил размер).
     private var hasInitialCentered: Boolean = false
 
     internal fun applyPendingInitialScrollIfNeeded() {
@@ -101,11 +72,6 @@ class PdfViewerState internal constructor(
                 pendingInitialScalePercent = null
             }
         }
-        // Один раз: центрируем pan по X в целочисленной арифметике, чтобы
-        // левый и правый пиксельные зазоры были равны (с разницей не
-        // более 1 px при нечётной суммарной величине). Float-центрирование
-        // через ` / 2f` + последующий `roundToInt()` при placement давало
-        // visible смещение. pan.y оставляем 0 — показываем top документа.
         if (!hasInitialCentered && viewportSize.width > 0 && pages.isNotEmpty()) {
             val pageW = (layout.basePageWidthPx * zoom).roundToInt()
             val centerX = (viewportSize.width - pageW) / 2
@@ -119,13 +85,7 @@ class PdfViewerState internal constructor(
         pendingInitialOffset = 0
     }
 
-    /**
-     * Откладывает применение зума и позиции до того момента, как
-     * viewer измерится (viewportSize > 0) и страницы будут загружены.
-     * Используется при восстановлении состояния из аннотационного
-     * бандла или sync-сообщения, пришедшего до первого layout.
-     */
-    fun applyInitialState(scalePercent: Int, pageIndex: Int, pageOffsetPx: Int) {
+    actual fun applyInitialState(scalePercent: Int, pageIndex: Int, pageOffsetPx: Int) {
         if (viewportSize.width > 0 && pages.isNotEmpty()) {
             setScalePercent(scalePercent)
             scrollToPage(pageIndex, pageOffsetPx)
@@ -136,31 +96,20 @@ class PdfViewerState internal constructor(
         }
     }
 
-    /** Индекс первой видимой страницы (см. контракт `LazyListState`). */
-    val firstVisiblePageIndex: Int by derivedStateOf {
+    actual val firstVisiblePageIndex: Int by derivedStateOf {
         PdfViewerMath.firstVisiblePageIndex(layout, pan.y, zoom)
     }
 
-    /** Смещение, на которое первая видимая страница ушла за верх вьюпорта (px). */
-    val firstVisiblePageOffsetPx: Int by derivedStateOf {
+    actual val firstVisiblePageOffsetPx: Int by derivedStateOf {
         PdfViewerMath.pageScrollOffsetPx(layout, firstVisiblePageIndex, pan.y, zoom)
     }
 
-    /** Текущий масштаб в процентах ([MIN_SCALE]..[MAX_SCALE]). */
-    val scalePercent: Int by derivedStateOf { (zoom * 100f).roundToInt() }
+    actual val scalePercent: Int by derivedStateOf { (zoom * 100f).roundToInt() }
 
     /**
      * Cursor-anchored zoom: переводит масштаб в [targetZoom], сохраняя точку
      * под [focus] на месте. [focus] — viewport-координаты курсора/центра
      * жеста.
-     *
-     * НИКАКОГО clamp здесь не делаем: даже мягкое центрирование (когда
-     * контент меньше вьюпорта) перетирает только что вычисленный
-     * cursor-anchor `pan` — и точка под курсором уплывает каждый тик. Если
-     * пользователь зум-аутом увёл документ за край вьюпорта — это его
-     * собственное действие; вернуть в центр он может через `resetView()`
-     * / `fitToWidth()`. Начальное центрирование при открытии делается
-     * отдельно в [applyPendingInitialScrollIfNeeded].
      */
     fun zoomTo(targetZoom: Float, focus: Offset) {
         val (newPan, newZoom) = PdfViewerMath.zoomAroundFocus(
@@ -173,13 +122,11 @@ class PdfViewerState internal constructor(
         pan = newPan
     }
 
-    /** Умножает зум на [factor] вокруг [focus]. */
-    fun zoomBy(factor: Float, focus: Offset) {
+    actual fun zoomBy(factor: Float, focus: Offset) {
         zoomTo(zoom * factor, focus)
     }
 
-    /** Установка зума в процентах (для toolbar / sync). Якорь — центр вьюпорта. */
-    fun setScalePercent(percent: Int) {
+    actual fun setScalePercent(percent: Int) {
         val target = percent / 100f
         val center = Offset(viewportSize.width / 2f, viewportSize.height / 2f)
         zoomTo(target, center)
@@ -190,8 +137,7 @@ class PdfViewerState internal constructor(
         pan = clamped(pan + delta)
     }
 
-    /** Прокручивает к началу страницы [pageIndex] + [offsetPx] (см. `scrollToItem`). */
-    fun scrollToPage(pageIndex: Int, offsetPx: Int = 0) {
+    actual fun scrollToPage(pageIndex: Int, offsetPx: Int) {
         if (pages.isEmpty()) return
         val idx = pageIndex.coerceIn(0, pages.lastIndex)
         val newPan = PdfViewerMath.panForPageScroll(
@@ -204,7 +150,7 @@ class PdfViewerState internal constructor(
         pan = clamped(newPan)
     }
 
-    /** Зум "по ширине" — страница занимает всю ширину вьюпорта, верх первой страницы. */
+    /** Зум "по ширине" — страница занимает всю ширину вьюпорта. */
     fun fitToWidth(pageIndex: Int = firstVisiblePageIndex) {
         if (viewportSize.width <= 0 || pages.isEmpty()) return
         val newZoom = PdfViewerMath.fitToWidthZoom(layout, viewportSize.width.toFloat())
@@ -262,12 +208,11 @@ class PdfViewerState internal constructor(
     }
 }
 
-/** Создаёт и запоминает [PdfViewerState] с сохранением между рекомпозициями. */
 @Composable
-fun rememberPdfViewerState(
-    initialZoom: Float = 1f,
-    initialPage: Int = 0,
-    initialPageOffsetPx: Int = 0,
+actual fun rememberPdfViewerState(
+    initialZoom: Float,
+    initialPage: Int,
+    initialPageOffsetPx: Int,
 ): PdfViewerState = rememberSaveable(saver = PdfViewerState.Saver) {
     PdfViewerState(
         initialZoom = initialZoom,
