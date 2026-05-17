@@ -42,6 +42,8 @@ import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
 import ru.kyamshanov.notepen.mainscreen.ui.component.FolderCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RecentFileCard
+import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteEntryCard
+import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteFolderCard
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.CreateFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.DeleteFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.SafMergeDialog
@@ -83,6 +85,9 @@ fun MainContent(
         ErrorEvent.FolderNameCharsInvalid -> "Недопустимые символы в имени папки"
         ErrorEvent.FolderOperationFailed -> "Ошибка операции с папкой"
         ErrorEvent.FileNotInHistory -> "Файл не найден в истории"
+        ErrorEvent.RemoteDocumentNotFound -> "Документ удалён на хосте"
+        ErrorEvent.RemoteDocumentTimeout -> "Хост не отвечает — попробуйте ещё раз"
+        ErrorEvent.RemoteDocumentFailed -> "Не удалось получить файл с хоста"
         null -> null
     }
 
@@ -137,7 +142,7 @@ fun MainContent(
         ) {
             when {
                 state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                state.recentFiles.isEmpty() && state.folders.isEmpty() ->
+                state.recentFiles.isEmpty() && state.folders.isEmpty() && state.remoteSection == null ->
                     EmptyState(
                         onOpenFile = { onIntent(MainScreenIntent.OpenFilePicker) },
                         modifier = Modifier.fillMaxSize(),
@@ -223,6 +228,27 @@ private fun RecentFilesAndFoldersList(
                     )
                 }
             }
+            state.remoteSection?.let { remote ->
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    SectionHeader("Remote (${remote.hostName})")
+                }
+                items(remote.entries, key = { "remote_${it.documentId}" }) { entry ->
+                    RemoteEntryCard(
+                        model = entry,
+                        onClick = {
+                            onIntent(
+                                MainScreenIntent.OpenRemoteEntry(
+                                    documentId = entry.documentId,
+                                    displayName = entry.displayName,
+                                ),
+                            )
+                        },
+                    )
+                }
+                items(remote.folders, key = { "remote_folder_${it.folderId}" }) { folder ->
+                    RemoteFolderCard(model = folder)
+                }
+            }
             if (state.folders.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Папки") }
                 items(state.folders, key = { "folder_${it.id}" }) { folder ->
@@ -254,6 +280,34 @@ private fun RecentFilesAndFoldersList(
                         },
                         onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
                         isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    )
+                }
+            }
+            state.remoteSection?.let { remote ->
+                item { Spacer(Modifier.height(24.dp)) }
+                item { SectionHeader("Remote (${remote.hostName})") }
+                items(remote.entries, key = { "remote_${it.documentId}" }) { entry ->
+                    RemoteEntryCard(
+                        model = entry,
+                        onClick = {
+                            onIntent(
+                                MainScreenIntent.OpenRemoteEntry(
+                                    documentId = entry.documentId,
+                                    displayName = entry.displayName,
+                                ),
+                            )
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    )
+                }
+                items(remote.folders, key = { "remote_folder_${it.folderId}" }) { folder ->
+                    RemoteFolderCard(
+                        model = folder,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),

@@ -36,6 +36,7 @@ kotlin {
         commonMain.dependencies {
             //module with logic
             implementation(projects.shared)
+            implementation(projects.sync)
 
             //decompose
             implementation(libs.decompose)

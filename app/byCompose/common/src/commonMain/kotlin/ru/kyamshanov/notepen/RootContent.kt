@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
+import kotlinx.coroutines.flow.Flow
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainContent
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
@@ -22,9 +23,16 @@ fun RootContent(
     component: RootComponent,
     pdfDocumentLoader: PdfDocumentLoader,
     pdfPageRenderer: PdfPageRenderer,
-    syncEngine: SyncEngine? = null,
+    /**
+     * Factory that resolves the [SyncEngine] for a given `documentId`.
+     * Wired to [ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry] at the
+     * application root. Forwarded to [DetailsContent] for per-document scoping.
+     */
+    syncEngineFor: ((documentId: String) -> SyncEngine)? = null,
     peerServer: PeerServer? = null,
     peerClient: SyncClient? = null,
+    /** Forwarded to [DetailsContent] for the offline-pending banner. */
+    pendingDeltaCounts: Flow<Map<String, Int>>? = null,
     modifier: Modifier = Modifier,
 ) {
     Children(
@@ -73,9 +81,10 @@ fun RootContent(
                 component = child.component,
                 loader = pdfDocumentLoader,
                 renderer = pdfPageRenderer,
-                syncEngine = syncEngine,
+                syncEngineFor = syncEngineFor,
                 peerServer = peerServer,
                 peerClient = peerClient,
+                pendingDeltaCounts = pendingDeltaCounts,
                 modifier = modifier,
             )
         }
