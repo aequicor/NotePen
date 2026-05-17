@@ -94,6 +94,13 @@ private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 /** Toolbar `−` button zoom factor (matches Ctrl+wheel zoom-out). */
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / TOOLBAR_ZOOM_STEP_IN
 
+/**
+ * Top offset for the tool settings panel when it is anchored at the top of the
+ * screen (Android). Keeps it clear of [PageIndicatorAirbar] which sits at
+ * TopCenter with its own ~8dp padding.
+ */
+private val TOOL_SETTINGS_TOP_OFFSET = 56.dp
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun DetailsContent(
@@ -443,12 +450,14 @@ fun DetailsContent(
             )
         }
 
+        val toolbarAlignment = if (ToolMenusAtTop) Alignment.TopEnd else Alignment.BottomStart
+        val toolbarSlideSign = if (ToolMenusAtTop) 1 else -1
         AnimatedVisibility(
             visible = true,
-            enter = slideInHorizontally { -it } + fadeIn(),
-            exit = slideOutHorizontally { -it } + fadeOut(),
+            enter = slideInHorizontally { toolbarSlideSign * it } + fadeIn(),
+            exit = slideOutHorizontally { toolbarSlideSign * it } + fadeOut(),
             modifier = Modifier
-                .align(Alignment.BottomStart)
+                .align(toolbarAlignment)
                 .padding(16.dp),
         ) {
             PdfFloatingToolbar(
@@ -557,6 +566,8 @@ fun DetailsContent(
         }
 
         val panelMaxWidth = with(LocalDensity.current) { windowSizeInPx.width.toDp() - 32.dp }
+        val settingsAlignment = if (ToolMenusAtTop) Alignment.TopCenter else Alignment.BottomCenter
+        val settingsTopPadding = if (ToolMenusAtTop) TOOL_SETTINGS_TOP_OFFSET else 0.dp
         ToolSettingsFloatingPanel(
             toolMode = toolMode,
             penSettings = penSettings,
@@ -565,8 +576,10 @@ fun DetailsContent(
             onMarkerSettingsChange = { markerSettings = it },
             eraserSettings = eraserSettings,
             onEraserSettingsChange = { eraserSettings = it },
+            atTop = ToolMenusAtTop,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
+                .align(settingsAlignment)
+                .padding(top = settingsTopPadding)
                 .widthIn(max = panelMaxWidth),
         )
 

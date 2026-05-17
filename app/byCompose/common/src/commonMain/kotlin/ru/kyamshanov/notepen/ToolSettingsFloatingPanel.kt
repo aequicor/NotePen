@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -133,16 +134,25 @@ fun ToolSettingsFloatingPanel(
     eraserSettings: EraserSettings,
     onEraserSettingsChange: (EraserSettings) -> Unit,
     modifier: Modifier = Modifier,
+    atTop: Boolean = false,
 ) {
     val visible = toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER || toolMode == ToolMode.ERASER
 
+    val insetsModifier = if (atTop) {
+        Modifier
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(top = PANEL_BOTTOM_PADDING)
+    } else {
+        Modifier
+            .windowInsetsPadding(WindowInsets.navigationBars)
+            .padding(bottom = PANEL_BOTTOM_PADDING)
+    }
+
     AnimatedVisibility(
         visible = visible,
-        enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-        exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
-        modifier = modifier
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(bottom = PANEL_BOTTOM_PADDING),
+        enter = slideInVertically(initialOffsetY = { if (atTop) -it else it }) + fadeIn(),
+        exit = slideOutVertically(targetOffsetY = { if (atTop) -it else it }) + fadeOut(),
+        modifier = modifier.then(insetsModifier),
     ) {
         Surface(
             shape = RoundedCornerShape(PANEL_CORNER_RADIUS),
@@ -160,16 +170,19 @@ fun ToolSettingsFloatingPanel(
                 ToolMode.PEN -> PenSettingsRow(
                     settings = penSettings,
                     onChange = onPenSettingsChange,
+                    expandDownward = atTop,
                 )
 
                 ToolMode.MARKER -> MarkerSettingsRow(
                     settings = markerSettings,
                     onChange = onMarkerSettingsChange,
+                    expandDownward = atTop,
                 )
 
                 ToolMode.ERASER -> EraserSettingsRow(
                     settings = eraserSettings,
                     onChange = onEraserSettingsChange,
+                    expandDownward = atTop,
                 )
 
                 ToolMode.NONE -> {
@@ -186,8 +199,10 @@ fun ToolSettingsFloatingPanel(
 private fun PenSettingsRow(
     settings: PenSettings,
     onChange: (PenSettings) -> Unit,
+    expandDownward: Boolean,
 ) {
     AdaptiveSettingsRow(
+        expandDownward = expandDownward,
         slots = listOf(
             SlotItem(
                 icon = Icons.Default.LineWeight,
@@ -272,8 +287,10 @@ private fun ColorPresetDot(
 private fun MarkerSettingsRow(
     settings: MarkerSettings,
     onChange: (MarkerSettings) -> Unit,
+    expandDownward: Boolean,
 ) {
     AdaptiveSettingsRow(
+        expandDownward = expandDownward,
         slots = listOf(
             SlotItem(
                 icon = Icons.Default.LineWeight,
@@ -315,8 +332,10 @@ private fun MarkerSettingsRow(
 private fun EraserSettingsRow(
     settings: EraserSettings,
     onChange: (EraserSettings) -> Unit,
+    expandDownward: Boolean,
 ) {
     AdaptiveSettingsRow(
+        expandDownward = expandDownward,
         slots = listOf(
             SlotItem(
                 icon = Icons.Default.Category,
@@ -446,16 +465,17 @@ private fun CollapsedSlotContent(
 @Composable
 private fun AdaptiveSettingsRow(
     slots: List<SlotItem>,
+    expandDownward: Boolean,
     modifier: Modifier = Modifier,
 ) {
     var expandedIndex by remember { mutableStateOf<Int?>(null) }
 
-    Column(modifier) {
-        // Vertical expansion panel — grows upward because Surface is BottomCenter.
+    val expansionAlignment = if (expandDownward) Alignment.Top else Alignment.Bottom
+    val expansionPanel: @Composable () -> Unit = {
         AnimatedVisibility(
             visible = expandedIndex != null,
-            enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
-            exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
+            enter = expandVertically(expandFrom = expansionAlignment) + fadeIn(),
+            exit = shrinkVertically(shrinkTowards = expansionAlignment) + fadeOut(),
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -469,7 +489,9 @@ private fun AdaptiveSettingsRow(
                 if (idx != null) slots[idx].content(SLIDER_WIDTH)
             }
         }
+    }
 
+    val mainRow: @Composable () -> Unit = {
         SubcomposeLayout { constraints ->
             val gapPx = PANEL_INNER_GAP.roundToPx()
             val paddingPx = (PANEL_HORIZONTAL_PADDING * 2).roundToPx()
@@ -533,6 +555,16 @@ private fun AdaptiveSettingsRow(
             layout(placeable.width, placeable.height) {
                 placeable.place(0, 0)
             }
+        }
+    }
+
+    Column(modifier) {
+        if (expandDownward) {
+            mainRow()
+            expansionPanel()
+        } else {
+            expansionPanel()
+            mainRow()
         }
     }
 }
