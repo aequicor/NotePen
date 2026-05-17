@@ -164,13 +164,13 @@ actual fun PdfPagesViewer(
             // проходят дальше.
             .pdfAndroidPointerInput(state)
             // Vertical scroll + native fling для одно-пальцевого drag'a.
-            // Передаём отрицательную дельту в panBy, потому что прокрутка
-            // вниз = pan.y уменьшается (документ "уходит" вверх).
+            // delta от scrollable положительна при drag вниз (+Y);
+            // panBy добавляет её к pan.y — контент следует за пальцем.
             .scrollable(
                 state = scrollableState,
                 orientation = Orientation.Vertical,
                 flingBehavior = ScrollableDefaults.flingBehavior(),
-                reverseDirection = true,
+                reverseDirection = false,
             ),
     ) {
         SubcomposeLayout(modifier = Modifier.fillMaxSize()) { constraints ->
