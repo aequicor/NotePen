@@ -33,13 +33,17 @@ import kotlin.math.sqrt
  * битмап показывается растянутым из предыдущего масштаба до прихода
  * нового рендера. Это и устраняет "скачок" при пинче.
  *
- * Pinch применяется **атомарно** через [PdfViewerState.pinchUpdate] —
- * одна транзакция (zoom + перенос anchor с `prevCentroid` на новый
- * `centroid`), без edge-clamp'а pan'а. Раньше использовалась пара
- * `zoomBy` (без clamp) + `panBy` (с clamp); `panBy` снапил `pan` к
- * границе вьюпорта, когда cursor-anchor выводил его за край, и точка
- * под пальцами визуально сдвигалась на каждый пинч-тик (особенно
- * заметно при больших масштабах, когда страница шире вьюпорта).
+ * Pinch применяется через [PdfViewerState.pinchGestureUpdate] — обновляет
+ * только transient `gestureScale` / `gestureTranslation`, которые
+ * накладываются через `Modifier.graphicsLayer` на корень SubcomposeLayout.
+ * SubcomposeLayout НЕ пересчитывает layout, PDF-битмапы НЕ ре-стрейчатся,
+ * ink-кэш НЕ ре-растеризуется — это и устраняло лаги при резком пинче.
+ *
+ * Bake в `zoom` / `pan` происходит [PdfViewerState.commitPinchGesture] в
+ * момент, когда пинч завершается (хвост, осталось <2 пальцев). Compose
+ * батчит все snapshot-write'ы в один кадр, поэтому identity-layer
+ * приходит ровно тогда же, когда layout пересчитывается на новом `zoom` —
+ * без визуального скачка.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 internal fun Modifier.pdfAndroidPointerInput(state: PdfViewerState): Modifier =
@@ -63,7 +67,7 @@ internal fun Modifier.pdfAndroidPointerInput(state: PdfViewerState): Modifier =
                         val prevC = prevCentroid
                         if (prevC != null && prevSpan > 0f) {
                             val factor = if (span > 0f) span / prevSpan else 1f
-                            state.pinchUpdate(prevC, centroid, factor)
+                            state.pinchGestureUpdate(prevC, centroid, factor)
                         }
                         prevCentroid = centroid
                         prevSpan = span
@@ -71,8 +75,10 @@ internal fun Modifier.pdfAndroidPointerInput(state: PdfViewerState): Modifier =
                     }
                     pinchActive -> {
                         // Хвост пинча: 0 или 1 палец остался после
-                        // отрыва. Consume всё, чтобы scrollable не подхватил
-                        // и не сдвинул страницу.
+                        // отрыва. Commit transient gesture-state в zoom/pan
+                        // (идемпотентно), consume всё, чтобы scrollable не
+                        // подхватил и не сдвинул страницу.
+                        state.commitPinchGesture()
                         event.changes.forEach { it.consume() }
                         prevCentroid = null
                         prevSpan = 0f

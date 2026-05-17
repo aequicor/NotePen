@@ -13,6 +13,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -49,17 +51,27 @@ private const val STALE_SCALE_RATIO_THRESHOLD = 2f
 /**
  * Android-реализация [PdfPagesViewer].
  *
- * - **Single-zoom модель** — один `state.zoom: Float`, страницы сразу
- *   получают размер `basePage * zoom`; никакого split-scale + bake (что
- *   и было корнем "скачков" при пинче в legacy-вьювере).
+ * - **Single-zoom модель** — один «закоммиченный» `state.zoom: Float`,
+ *   страницы получают размер `basePage * zoom` через `Constraints.fixed`.
+ *   Никакого split-scale + debounced bake (что было корнем "скачков" в
+ *   legacy-вьювере).
+ * - **Pinch-трансформа без layout-pass'а** — во время активного pinch'а
+ *   обновляется только `state.gestureScale` / `state.gestureTranslation`,
+ *   которые накладываются `Modifier.graphicsLayer` на корень
+ *   `SubcomposeLayout`. `zoom` / `pan` НЕ меняются → SubcomposeLayout не
+ *   перемеривается, `Image.FillBounds` не пере-стрейчит огромные битмапы,
+ *   ink-кэш в [DrawablePdfPage] не ре-растеризуется. На отпускании пинча
+ *   `commitPinchGesture` атомарно впекает gesture-state в `zoom` / `pan`,
+ *   gestureScale → 1f — за один Compose-кадр, без визуального скачка.
  * - **Гесты**: двух-пальцевый pinch с anchor в centroid (см.
  *   [pdfAndroidPointerInput]); single-finger drag — нативный fling-скролл
  *   через [Modifier.scrollable] с дефолтным [ScrollableDefaults.flingBehavior].
  * - **Виртуализация** через [SubcomposeLayout] + [BUFFER_PAGES] буферных
  *   страниц сверху/снизу.
- * - **Адаптивный рендер** — битмапы перерисовываются на текущем масштабе
- *   через общий [PdfBitmapCache]; до прихода нового битмапа `Image` в
- *   контенте страницы растягивает предыдущий.
+ * - **Адаптивный рендер** — после commit'а pinch'а snapshotFlow видит
+ *   новый `zoom`, через [RENDER_DEBOUNCE_MS] перерисовывает битмапы на
+ *   новом масштабе через общий [PdfBitmapCache]; до прихода нового
+ *   битмапа `Image` растягивает предыдущий.
  *
  * Pinch перехватывается на [androidx.compose.ui.input.pointer.PointerEventPass.Initial],
  * чтобы выиграть у scrollable и вложенного stylus-handler'а
@@ -182,7 +194,23 @@ actual fun PdfPagesViewer(
                 reverseDirection = false,
             ),
     ) {
-        SubcomposeLayout(modifier = Modifier.fillMaxSize()) { constraints ->
+        SubcomposeLayout(
+            modifier = Modifier
+                .fillMaxSize()
+                // Transient pinch-трансформа: scale + translate через GPU
+                // render node, без layout-pass'а. См. KDoc у
+                // [PdfViewerState.gestureScale]. Lambda-форма читает state
+                // в graphicsLayer-блоке — он переоценивается на DRAW-pass'е,
+                // без рекомпозиции / ремежа SubcomposeLayout'а.
+                .graphicsLayer {
+                    val s = state.gestureScale
+                    scaleX = s
+                    scaleY = s
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    translationX = state.gestureTranslation.x
+                    translationY = state.gestureTranslation.y
+                },
+        ) { constraints ->
             val layout = state.layout
             val zoom = state.zoom
             val pan = state.pan
