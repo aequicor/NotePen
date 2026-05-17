@@ -1,0 +1,40 @@
+-- Persistent FIFO queue of locally-generated stroke deltas that haven't been
+-- confirmed by the peer. Keyed by `document_id`; `clock` carries the logical
+-- timestamp used for LWW conflict resolution on replay.
+--
+-- `sequence` is the autoincrement primary key — preserves insertion order
+-- across rows whose `(document_id, clock)` would otherwise tie (clock is
+-- per-document, two devices may collide, etc.).
+CREATE TABLE PendingDelta (
+    sequence INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    document_id TEXT NOT NULL,
+    clock INTEGER NOT NULL,
+    payload_json TEXT NOT NULL,
+    queued_at INTEGER NOT NULL
+);
+
+CREATE INDEX pending_delta_document_idx ON PendingDelta(document_id);
+
+enqueue:
+INSERT INTO PendingDelta(document_id, clock, payload_json, queued_at)
+VALUES (?, ?, ?, ?);
+
+peekByDocument:
+SELECT payload_json
+FROM PendingDelta
+WHERE document_id = ?
+ORDER BY sequence ASC;
+
+deleteUpToClock:
+DELETE FROM PendingDelta
+WHERE document_id = ? AND clock <= ?;
+
+countByDocument:
+SELECT COUNT(*)
+FROM PendingDelta
+WHERE document_id = ?;
+
+countsAll:
+SELECT document_id, COUNT(*) AS pendingCount
+FROM PendingDelta
+GROUP BY document_id;
