@@ -26,4 +26,13 @@ sealed class ErrorEvent {
 
     /** Файл не найден в истории при попытке добавить в папку. */
     object FileNotInHistory : ErrorEvent()
+
+    /** Хост не нашёл документ по [documentId] (не в последнем опубликованном каталоге). */
+    object RemoteDocumentNotFound : ErrorEvent()
+
+    /** Таймаут открытия удалённого документа (host не отвечает за разумное время). */
+    object RemoteDocumentTimeout : ErrorEvent()
+
+    /** Общая ошибка при попытке открыть удалённый документ. */
+    object RemoteDocumentFailed : ErrorEvent()
 }

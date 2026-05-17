@@ -142,4 +142,16 @@ sealed class MainScreenIntent {
 
     /** UI подтвердил обработку события успеха — сбросить [ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent]. */
     object OnSuccessEventHandled : MainScreenIntent()
+
+    /**
+     * Пользователь тапнул по плитке в Remote-секции (документ хоста).
+     *
+     * ViewModel дёргает [ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener],
+     * который шлёт хосту [ru.kyamshanov.notepen.sync.domain.model.NetworkMessage.DocumentOpenRequest],
+     * принимает PDF, и по успеху ставит [NavigationTarget.Editor] на локальную копию.
+     *
+     * @property documentId Стабильный id документа из последнего полученного каталога.
+     * @property displayName Имя файла как показано в секции — для UI fallback'ов.
+     */
+    data class OpenRemoteEntry(val documentId: String, val displayName: String) : MainScreenIntent()
 }

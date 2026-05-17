@@ -13,6 +13,8 @@ package ru.kyamshanov.notepen.mainscreen.ui.model
  * @property errorEvent Одноразовое событие ошибки; null — нет активной ошибки.
  * @property dragState Текущее состояние операции перетаскивания файла.
  * @property successEvent Одноразовое событие успеха; null — нет активного события.
+ * @property remoteSection Каталог хоста для отображения секции "Remote (<имя>)" на планшете;
+ *           null — соединение не установлено или каталог ещё не получен.
  */
 data class MainScreenUiState(
     val recentFiles: List<RecentFileUiModel> = emptyList(),
@@ -25,4 +27,5 @@ data class MainScreenUiState(
     val errorEvent: ErrorEvent? = null,
     val dragState: DragState = DragState.None,
     val successEvent: SuccessEvent? = null,
+    val remoteSection: RemoteCatalogUiState? = null,
 )

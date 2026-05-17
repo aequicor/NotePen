@@ -32,7 +32,14 @@ import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
 import ru.kyamshanov.notepen.sync.SyncViewModel
-import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
+import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
+import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
+import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
+import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryPendingDeltaQueue
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
@@ -70,7 +77,19 @@ class MainActivity : ComponentActivity() {
         }
         val syncClient = KtorSyncClient(httpClient)
         val discovery = NsdDeviceDiscovery(context)
-        val syncEngine = SyncEngine(deviceId = selfId, scope = appScope, server = null, client = syncClient)
+        // Phase 4: offline buffer for local edits; survives reconnects within
+        // one app session (Phase 5 will promote to SQLDelight for restarts).
+        val pendingDeltaQueue = InMemoryPendingDeltaQueue()
+        // One registry per app; each open document is its own SyncEngine.
+        val syncEngineRegistry = SyncEngineRegistry(
+            deviceId = selfId,
+            scope = appScope,
+            server = null,
+            client = syncClient,
+            pendingQueue = pendingDeltaQueue,
+        )
+        PendingDeltaReplayCoordinator(registry = syncEngineRegistry, stateFlow = syncClient.state)
+            .start(scope = appScope)
         val syncViewModel = SyncViewModel(
             discovery = discovery,
             client = syncClient,
@@ -78,15 +97,32 @@ class MainActivity : ComponentActivity() {
             scope = appScope,
         )
 
-        // Feed peer-originated stroke deltas into the engine so SyncBridge can
-        // mirror them onto the local drawing state once DetailsContent opens.
+        // Feed peer-originated stroke deltas into the right engine so SyncBridge
+        // can mirror them onto the local drawing state once DetailsContent opens.
         appScope.launch {
             syncClient.incomingMessages.collect { msg ->
-                if (msg is NetworkMessage.StrokeDeltaMessage) syncEngine.processPeer(msg.delta)
+                if (msg is NetworkMessage.StrokeDeltaMessage) {
+                    syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
+                }
             }
         }
 
         val receivedDir = java.io.File(context.cacheDir, "sync").absolutePath
+
+        // Tablet side: cache the host's library catalog (refreshed on every
+        // reconnect by RemoteCatalogClientCoordinator), and on tap open
+        // documents on-demand via RemoteDocumentOpener.
+        val remoteCatalogCache = InMemoryRemoteCatalogCache()
+        RemoteCatalogClientCoordinator(client = syncClient, cache = remoteCatalogCache)
+            .start(scope = appScope)
+        val remoteDocumentOpener = RemoteDocumentOpener(
+            client = syncClient,
+            destDir = receivedDir,
+        )
+        // Track per-document orphan flags as host signals come in.
+        val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
+        DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
+            .start(scope = appScope)
 
         val root = DefaultRootComponent(
             componentContext = defaultComponentContext(),
@@ -103,6 +139,10 @@ class MainActivity : ComponentActivity() {
                     thumbnailGenerator = thumbnailGenerator,
                     onOpenEditor = onOpenEditor,
                     onOpenFilePicker = { null },
+                    remoteCatalogFlow = remoteCatalogCache.catalog,
+                    remoteDocumentOpener = remoteDocumentOpener,
+                    pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
+                    remoteDocumentStatuses = remoteDocumentStatusRegistry.statuses,
                 )
             },
         )
@@ -122,8 +162,9 @@ class MainActivity : ComponentActivity() {
                     pdfDocumentLoader = pdfDocumentLoader,
                     pdfPageRenderer = pdfPageRenderer,
                     syncViewModel = syncViewModel,
-                    syncEngine = syncEngine,
+                    syncEngineFor = syncEngineRegistry::get,
                     peerClient = syncClient,
+                    pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
                     receivedPdfDir = receivedDir,
                 )
             }

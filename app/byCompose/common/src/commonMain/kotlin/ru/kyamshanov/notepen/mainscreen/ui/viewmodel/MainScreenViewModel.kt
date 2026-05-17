@@ -4,9 +4,12 @@ import com.arkivanov.essenty.lifecycle.Lifecycle
 import com.arkivanov.essenty.lifecycle.coroutines.withLifecycle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -40,9 +43,16 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
+import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteCatalogUiState
+import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteEntryUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteFolderUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.SafMergeDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState
+import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
+import ru.kyamshanov.notepen.sync.domain.RemoteDocumentResult
+import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
+import ru.kyamshanov.notepen.sync.domain.model.SyncStatus
 
 /**
  * ViewModel главного экрана. Реализует MVI-цикл: Intent → State.
@@ -68,6 +78,29 @@ class MainScreenViewModel(
     private val openRecentFile: OpenRecentFileUseCase,
     private val thumbnailRepository: ThumbnailRepository,
     private val thumbnailGenerator: PdfThumbnailGenerator,
+    /**
+     * Tablet-side stream of the host's current library catalog. Null when the
+     * app instance is not a sync client (e.g. the desktop host itself).
+     */
+    private val remoteCatalogFlow: Flow<RemoteCatalog?>? = null,
+    /**
+     * Tablet-side opener for documents from the host's library. Null disables
+     * the Remote-section tap → open flow (e.g. host-only app instance).
+     */
+    private val remoteDocumentOpener: RemoteDocumentOpener? = null,
+    /**
+     * Stream of `documentId → pendingCount` from
+     * [ru.kyamshanov.notepen.sync.domain.port.PendingDeltaQueue]. Combined
+     * with [remoteCatalogFlow] to drive the "не синхронизировано (N)" badge
+     * on Remote tiles. Null disables the badge.
+     */
+    private val pendingDeltaCounts: Flow<Map<String, Int>>? = null,
+    /**
+     * Stream of `documentId → SyncStatus` from
+     * [ru.kyamshanov.notepen.sync.domain.port.RemoteDocumentStatusRegistry].
+     * Drives the "удалён на хосте" badge.
+     */
+    private val remoteDocumentStatuses: Flow<Map<String, SyncStatus>>? = null,
     private val nowMillis: () -> Long = { currentTimeMillis() },
 ) {
     private val logger = KotlinLogging.logger {}
@@ -78,6 +111,20 @@ class MainScreenViewModel(
 
     /** Поток состояния экрана (read-only). */
     val state: StateFlow<MainScreenUiState> = _state.asStateFlow()
+
+    init {
+        remoteCatalogFlow?.let { catalogFlow ->
+            val countsFlow = pendingDeltaCounts ?: flowOf(emptyMap())
+            val statusFlow = remoteDocumentStatuses ?: flowOf(emptyMap())
+            scope.launch {
+                combine(catalogFlow, countsFlow, statusFlow) { catalog, counts, statuses ->
+                    catalog?.toUiState(counts, statuses)
+                }.collect { uiState ->
+                    _state.update { it.copy(remoteSection = uiState) }
+                }
+            }
+        }
+    }
 
     /** Защита от двойного нажатия (CC-7). */
     private var isNavigating = false
@@ -118,6 +165,37 @@ class MainScreenViewModel(
             is MainScreenIntent.DropOnFolder -> handleDropOnFolder(intent)
             is MainScreenIntent.OnSuccessEventHandled ->
                 _state.update { it.copy(successEvent = null) }
+            is MainScreenIntent.OpenRemoteEntry -> openRemoteEntry(intent.documentId, intent.displayName)
+        }
+    }
+
+    /**
+     * Asks the host to stream the document and, on success, sets a navigation
+     * target to the local copy. Errors surface as one-shot [ErrorEvent]s.
+     */
+    private suspend fun openRemoteEntry(documentId: String, displayName: String) {
+        val opener = remoteDocumentOpener ?: run {
+            logger.warn { "OpenRemoteEntry($documentId) ignored — no opener wired" }
+            return
+        }
+        if (isNavigating) return
+        isNavigating = true
+        logger.info { "Opening remote document $documentId ($displayName)" }
+        val event: ErrorEvent? = when (val result = opener.open(documentId, displayName)) {
+            is RemoteDocumentResult.Success -> {
+                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(result.localPath, 0)) }
+                null
+            }
+            is RemoteDocumentResult.NotFound -> ErrorEvent.RemoteDocumentNotFound
+            is RemoteDocumentResult.Timeout -> ErrorEvent.RemoteDocumentTimeout
+            is RemoteDocumentResult.Failure -> {
+                logger.warn { "Remote open failed for $documentId: ${result.cause::class.simpleName}" }
+                ErrorEvent.RemoteDocumentFailed
+            }
+        }
+        if (event != null) {
+            isNavigating = false
+            _state.update { it.copy(errorEvent = event) }
         }
     }
 
@@ -555,6 +633,31 @@ private fun Folder.toUiModel(fileCount: Int) = FolderUiModel(
     createdAt = createdAt,
     lastFileOpenedAt = null,
 )
+
+private fun RemoteCatalog.toUiState(
+    pendingCounts: Map<String, Int>,
+    statuses: Map<String, SyncStatus>,
+): RemoteCatalogUiState {
+    val entries = recent.map { entry ->
+        RemoteEntryUiModel(
+            documentId = entry.documentId,
+            displayName = entry.displayName,
+            fileSize = entry.fileSize,
+            lastOpenedAt = entry.lastOpenedAt,
+            pendingCount = pendingCounts[entry.documentId] ?: 0,
+            isOrphanedOnHost = statuses[entry.documentId] == SyncStatus.OrphanedOnHost,
+        )
+    }
+    val countsByFolder = folderLinks.groupingBy { it.folderId }.eachCount()
+    val folders = folders.map { folder ->
+        RemoteFolderUiModel(
+            folderId = folder.folderId,
+            name = folder.name,
+            fileCount = countsByFolder[folder.folderId] ?: 0,
+        )
+    }
+    return RemoteCatalogUiState(hostName = hostName, entries = entries, folders = folders)
+}
 
 /** Platform-provided current time in milliseconds since Unix epoch. */
 internal expect fun currentTimeMillis(): Long

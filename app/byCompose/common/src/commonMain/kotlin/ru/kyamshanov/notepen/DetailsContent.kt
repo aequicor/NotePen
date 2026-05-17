@@ -69,6 +69,7 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.sync.SyncBridge
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
@@ -76,7 +77,6 @@ import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
-import ru.kyamshanov.notepen.sync.infrastructure.WebSocketFileTransfer
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.pdfviewer.rememberPdfViewerState
@@ -100,15 +100,31 @@ fun DetailsContent(
     component: DetailsComponent,
     loader: PdfDocumentLoader,
     renderer: PdfPageRenderer,
-    syncEngine: SyncEngine? = null,
+    /**
+     * Factory that resolves the [SyncEngine] bound to the given `documentId`.
+     * Wired to [ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry] at the
+     * application root. Null when sync is disabled (e.g. single-device mode).
+     */
+    syncEngineFor: ((documentId: String) -> SyncEngine)? = null,
+    @Suppress("UNUSED_PARAMETER")
     peerServer: PeerServer? = null,
     peerClient: SyncClient? = null,
+    /**
+     * Stream of `documentId → pendingCount` from the offline buffer.
+     * Drives the "Оффлайн, N правок ждут отправки" banner shown when
+     * [peerClient] is not [PairingState.Connected].
+     */
+    pendingDeltaCounts: kotlinx.coroutines.flow.Flow<Map<String, Int>>? = null,
     modifier: Modifier = Modifier,
 ) {
     val localWindowInfo = LocalWindowInfo.current
     val windowSizeInPx = localWindowInfo.containerSize
     val model by component.model.subscribeAsState()
     val filePath = remember(model.title) { model.title }
+    val documentId = remember(filePath) { documentIdFromFilePath(filePath) }
+    val syncEngine = remember(syncEngineFor, documentId) {
+        syncEngineFor?.invoke(documentId)
+    }
 
     var pdfDocument by remember(filePath) { mutableStateOf<PdfDocument?>(null) }
     val pages by remember { derivedStateOf { pdfDocument?.info?.pages ?: emptyList() } }
@@ -186,110 +202,34 @@ fun DetailsContent(
 
     LaunchedEffect(syncBridge) { syncBridge?.start() }
 
-    // Host side: stream the open PDF to the tablet as soon as a peer pairs.
-    LaunchedEffect(peerServer, filePath) {
-        val server = peerServer ?: return@LaunchedEffect
-        server.state.collect { st ->
-            if (st is PairingState.Connected) {
-                val transferId = "tx-${Random.nextLong().toString(16)}"
-                runCatching {
-                    WebSocketFileTransfer(server = server)
-                        .send(sourcePath = filePath, transferId = transferId)
-                        .collect { /* progress ignored on host */ }
-                }.onFailure { e ->
-                    logger.warn { "Failed to stream PDF to peer: ${e::class.simpleName}" }
-                }
-            }
-        }
-    }
-
-    // Host side: react to a SaveRequest from the tablet and persist locally.
-    val performHostSave: suspend () -> Result<Unit> = {
-        val annotations = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
-        annotationRepository.save(
-            pdfPath = filePath,
-            annotations = annotations,
-            scale = currentScalePercent,
-            pen = penSettings,
-            marker = markerSettings,
-            eraser = eraserSettings,
-            currentPage = firstVisiblePage,
-            currentPageOffset = currentPageOffsetPx,
-        )
-    }
-
-    LaunchedEffect(peerServer) {
-        val server = peerServer ?: return@LaunchedEffect
-        logger.info { "[save-diag host] SaveRequest collector subscribed (peerServer=$server)" }
-        server.incomingMessages.filterIsInstance<NetworkMessage.SaveRequest>().collect { req ->
-            logger.info { "[save-diag host] received SaveRequest id=${req.requestId}" }
-            val result = performHostSave()
-            logger.info {
-                "[save-diag host] performHostSave id=${req.requestId} " +
-                    "success=${result.isSuccess} err=${result.exceptionOrNull()?.message}"
-            }
-            server.send(
-                NetworkMessage.SaveResult(
-                    requestId = req.requestId,
-                    success = result.isSuccess,
-                    errorMessage = result.exceptionOrNull()?.message,
-                ),
-            )
-            logger.info { "[save-diag host] SaveResult id=${req.requestId} dispatched" }
-        }
-    }
-
-    // Host side: on tablet's snapshot request, send all current strokes.
-    // Backfills missing strokeIds in-place so future erase/sync operations
-    // can target the same stroke by id.
-    LaunchedEffect(peerServer, syncEngine) {
-        val server = peerServer ?: return@LaunchedEffect
-        server.incomingMessages
-            .filterIsInstance<NetworkMessage.AnnotationSnapshotRequest>()
-            .collect {
-                val deviceId = syncEngine?.deviceId ?: "host"
-                val collected = mutableListOf<StrokeDelta.Added>()
-                drawingStates.forEach { (pageIndex, state) ->
-                    val paths = state.currentPaths
-                    for (i in paths.indices) {
-                        val original = paths[i]
-                        val id = original.strokeId.ifEmpty {
-                            syncEngine?.newStrokeId() ?: "$deviceId#legacy-$pageIndex-$i"
-                        }
-                        if (original.strokeId.isEmpty()) {
-                            paths[i] = original.copy(strokeId = id)
-                        }
-                        collected.add(
-                            StrokeDelta.Added(
-                                strokeId = id,
-                                pageIndex = pageIndex,
-                                authorDeviceId = deviceId,
-                                clock = 0,
-                                path = paths[i].toDto(id),
-                            ),
-                        )
-                    }
-                }
-                logger.info { "Sending annotation snapshot: ${collected.size} strokes" }
-                server.send(NetworkMessage.AnnotationSnapshot(strokes = collected))
-            }
-    }
+    // Phase 3: removed the on-Connected auto-push of the host's current PDF.
+    // The tablet now drives document opens via NetworkMessage.DocumentOpenRequest,
+    // handled centrally by DocumentTransferRequestHandler.
+    //
+    // Phase 6 (headless host save): SaveRequest + AnnotationSnapshotRequest
+    // from the tablet are no longer handled here. They are owned by
+    // HostHeadlessAnnotationHandler at app scope, which uses
+    // HostAnnotationProjection (kept in sync via SyncEngine.mergedDeltas
+    // mirroring local edits). This means the host doesn't need to have the
+    // PDF open in DetailsContent for save/snapshot to work.
 
     // Tablet side: after the local bundle load, ask the host for its snapshot
     // and merge it into drawingStates (dedup by strokeId).
-    LaunchedEffect(peerClient, filePath) {
+    LaunchedEffect(peerClient, filePath, documentId) {
         val client = peerClient ?: return@LaunchedEffect
         // Give the LaunchedEffect(filePath) annotation-load a chance to populate
         // drawingStates before requesting — the dedup later filters duplicates,
         // so order is not strictly required, but this keeps logs cleaner.
-        runCatching { client.send(NetworkMessage.AnnotationSnapshotRequest) }
-            .onFailure { e ->
-                logger.warn { "Failed to request annotation snapshot: ${e::class.simpleName}" }
-            }
+        runCatching {
+            client.send(NetworkMessage.AnnotationSnapshotRequest(documentId = documentId))
+        }.onFailure { e ->
+            logger.warn { "Failed to request annotation snapshot: ${e::class.simpleName}" }
+        }
         client.incomingMessages
             .filterIsInstance<NetworkMessage.AnnotationSnapshot>()
+            .filter { it.documentId.isEmpty() || it.documentId == documentId }
             .collect { snapshot ->
-                logger.info { "Received annotation snapshot: ${snapshot.strokes.size} strokes" }
+                logger.info { "Received annotation snapshot for doc=$documentId: ${snapshot.strokes.size} strokes" }
                 snapshot.strokes.forEach { added ->
                     val state = drawingStates.getOrPut(added.pageIndex) { PdfDrawingState() }
                     if (state.currentPaths.none { it.strokeId == added.strokeId }) {
@@ -312,6 +252,16 @@ fun DetailsContent(
             showLostConnectionDialog = st is PairingState.LostConnection
         }
     }
+
+    // Phase 5: surface pending delta count for the offline banner.
+    var pendingForDoc by remember { mutableStateOf(0) }
+    LaunchedEffect(pendingDeltaCounts, documentId) {
+        val flow = pendingDeltaCounts ?: return@LaunchedEffect
+        flow.collect { counts -> pendingForDoc = counts[documentId] ?: 0 }
+    }
+    val showOfflineBanner = peerClient != null &&
+        clientPairingState !is PairingState.Connected &&
+        pendingForDoc > 0
 
     LaunchedEffect(filePath) {
         pdfDocument?.close()
@@ -381,6 +331,24 @@ fun DetailsContent(
                 } else false
             },
     ) {
+
+        if (showOfflineBanner) {
+            androidx.compose.material3.Surface(
+                color = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp)
+                    .widthIn(min = 240.dp, max = 480.dp),
+            ) {
+                Text(
+                    text = "Оффлайн, $pendingForDoc правок ждут отправки",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                )
+            }
+        }
 
         PdfPagesViewer(
             state = pdfViewerState,
@@ -509,8 +477,13 @@ fun DetailsContent(
                         // подключён ни к кому — в этом случае сохраняем локально.
                         val message = if (peerClient != null && clientPairingState is PairingState.Connected) {
                             val requestId = "save-${Random.nextLong().toString(16)}"
-                            logger.info { "[save-diag tablet] sending SaveRequest id=$requestId" }
-                            peerClient.send(NetworkMessage.SaveRequest(requestId))
+                            logger.info { "[save-diag tablet] sending SaveRequest id=$requestId doc=$documentId" }
+                            peerClient.send(
+                                NetworkMessage.SaveRequest(
+                                    requestId = requestId,
+                                    documentId = documentId,
+                                ),
+                            )
                             logger.info { "[save-diag tablet] SaveRequest id=$requestId dispatched, awaiting SaveResult (5s)" }
                             val reply = withTimeoutOrNull(5.seconds) {
                                 peerClient.incomingMessages

@@ -14,7 +14,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -26,9 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.Flow
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.sync.HostScreen
@@ -39,8 +36,8 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
-import ru.kyamshanov.notepen.sync.infrastructure.FileTransferReceiver
 
+@Suppress("unused")
 private val appLogger = KotlinLogging.logger {}
 
 @Composable
@@ -50,35 +47,30 @@ fun App(
     pdfPageRenderer: PdfPageRenderer,
     hostViewModel: HostViewModel? = null,
     syncViewModel: SyncViewModel? = null,
-    syncEngine: SyncEngine? = null,
+    /**
+     * Factory that resolves the [SyncEngine] for a given `documentId`.
+     * Wired to [ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry] at the
+     * application root. Forwarded down to [RootContent] / [DetailsContent].
+     */
+    syncEngineFor: ((documentId: String) -> SyncEngine)? = null,
     peerServer: PeerServer? = null,
     peerClient: SyncClient? = null,
+    /**
+     * Stream of `documentId → pendingCount` from the offline buffer.
+     * Forwarded to [DetailsContent] for the "Оффлайн, N правок ждут отправки"
+     * banner.
+     */
+    pendingDeltaCounts: Flow<Map<String, Int>>? = null,
+    @Suppress("UNUSED_PARAMETER")
     receivedPdfDir: String? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     var showSyncPanel by remember { mutableStateOf(false) }
 
-    // Tablet (client) side: when a PDF arrives over the WebSocket, navigate
-    // the editor to it. One-shot per pairing — receiver suspends until the
-    // first full transfer is assembled, then loops back to wait for another.
-    if (peerClient != null && receivedPdfDir != null) {
-        LaunchedEffect(peerClient, receivedPdfDir) {
-            while (currentCoroutineContext().isActive) {
-                try {
-                    val received = FileTransferReceiver(
-                        incoming = peerClient.incomingMessages,
-                        destDir = receivedPdfDir,
-                    ).awaitFile()
-                    rootComponent.openDetailsExternally(received.destPath)
-                    showSyncPanel = false
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    appLogger.warn { "Tablet PDF receiver: ${e::class.simpleName}: ${e.message}" }
-                }
-            }
-        }
-    }
+    // Phase 3: removed the auto-navigate-on-receive loop. Document opens are
+    // now driven by [ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener]
+    // from the Remote section of the main screen, which delivers the path
+    // straight into [MainScreenViewModel]'s navigation target.
 
     ComposableAppTheme {
         Surface {
@@ -87,9 +79,10 @@ fun App(
                     component = rootComponent,
                     pdfDocumentLoader = pdfDocumentLoader,
                     pdfPageRenderer = pdfPageRenderer,
-                    syncEngine = syncEngine,
+                    syncEngineFor = syncEngineFor,
                     peerServer = peerServer,
                     peerClient = peerClient,
+                    pendingDeltaCounts = pendingDeltaCounts,
                     modifier = Modifier.fillMaxSize(),
                 )
 

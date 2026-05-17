@@ -47,10 +47,22 @@ import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
-import ru.kyamshanov.notepen.server.KtorPeerServer
+import ru.kyamshanov.notepen.sync.infrastructure.KtorPeerServer
 import ru.kyamshanov.notepen.sync.HostViewModel
 import ru.kyamshanov.notepen.sync.SyncViewModel
-import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
+import ru.kyamshanov.notepen.sync.domain.DocumentTransferRequestHandler
+import ru.kyamshanov.notepen.sync.domain.HostAnnotationProjection
+import ru.kyamshanov.notepen.sync.domain.HostHeadlessAnnotationHandler
+import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
+import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
+import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
+import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
+import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryPendingDeltaQueue
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.createAnnotationRepository
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
@@ -93,7 +105,24 @@ fun main() {
     }
     val syncClient = KtorSyncClient(httpClient)
 
-    val syncEngine = SyncEngine(deviceId = selfId, scope = appScope, server = peerServer, client = syncClient)
+    // Phase 4: offline buffer that the engine appends to on every local edit
+    // and drains on every reconnect. In-memory; Phase 5 swaps in SQLDelight.
+    val pendingDeltaQueue = InMemoryPendingDeltaQueue()
+
+    // One registry per app; each open document is its own SyncEngine.
+    val syncEngineRegistry = SyncEngineRegistry(
+        deviceId = selfId,
+        scope = appScope,
+        server = peerServer,
+        client = syncClient,
+        pendingQueue = pendingDeltaQueue,
+    )
+
+    // Replay buffered deltas whenever either side (re)connects.
+    PendingDeltaReplayCoordinator(registry = syncEngineRegistry, stateFlow = peerServer.state)
+        .start(scope = appScope)
+    PendingDeltaReplayCoordinator(registry = syncEngineRegistry, stateFlow = syncClient.state)
+        .start(scope = appScope)
 
     val hostViewModel = HostViewModel(server = peerServer, scope = appScope)
     val syncViewModel = SyncViewModel(
@@ -103,15 +132,60 @@ fun main() {
         scope = appScope,
     )
 
-    // Feed incoming peer deltas into the sync engine.
+    // Host: build & serve the library catalog to any paired tablet, and
+    // respond to on-demand DocumentOpenRequests by streaming the file.
+    val remoteCatalogProvider = RemoteCatalogProvider(
+        hostName = selfName,
+        historyRepository = historyRepo,
+        folderRepository = folderRepo,
+    )
+    remoteCatalogProvider.serve(server = peerServer, scope = appScope)
+    DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider)
+        .start(scope = appScope)
+
+    // Host headless save: tablet-originated SaveRequest /
+    // AnnotationSnapshotRequest are now fulfilled without requiring the host
+    // to open the document in DetailsContent. Projection follows mergedDeltas
+    // (which now also mirror local edits — see SyncEngine.applyLocal).
+    val hostAnnotationRepository = createAnnotationRepository()
+    val hostAnnotationProjection = HostAnnotationProjection(
+        registry = syncEngineRegistry,
+        provider = remoteCatalogProvider,
+        repository = hostAnnotationRepository,
+    )
+    HostHeadlessAnnotationHandler(
+        server = peerServer,
+        provider = remoteCatalogProvider,
+        projection = hostAnnotationProjection,
+        repository = hostAnnotationRepository,
+    ).start(scope = appScope)
+
+    // Tablet role (desktop may also act as one): cache the most recent
+    // catalog this device received, keep it fresh on every reconnect, and
+    // open Remote documents on tap.
+    val receivedDir = System.getProperty("java.io.tmpdir") + "/notepen-sync"
+    val remoteCatalogCache = InMemoryRemoteCatalogCache()
+    RemoteCatalogClientCoordinator(client = syncClient, cache = remoteCatalogCache)
+        .start(scope = appScope)
+    val remoteDocumentOpener = RemoteDocumentOpener(client = syncClient, destDir = receivedDir)
+    // Track per-document orphan flags as host signals come in.
+    val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
+    DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
+        .start(scope = appScope)
+
+    // Demultiplex incoming stroke deltas by documentId — one engine per doc.
     appScope.launch {
         peerServer.incomingMessages.collect { msg ->
-            if (msg is NetworkMessage.StrokeDeltaMessage) syncEngine.processPeer(msg.delta)
+            if (msg is NetworkMessage.StrokeDeltaMessage) {
+                syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
+            }
         }
     }
     appScope.launch {
         syncClient.incomingMessages.collect { msg ->
-            if (msg is NetworkMessage.StrokeDeltaMessage) syncEngine.processPeer(msg.delta)
+            if (msg is NetworkMessage.StrokeDeltaMessage) {
+                syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
+            }
         }
     }
 
@@ -147,6 +221,10 @@ fun main() {
                         thumbnailGenerator = thumbnailGenerator,
                         onOpenEditor = onOpenEditor,
                         onOpenFilePicker = { FilePicker().pickPdfFile() },
+                        remoteCatalogFlow = remoteCatalogCache.catalog,
+                        remoteDocumentOpener = remoteDocumentOpener,
+                        pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
+                        remoteDocumentStatuses = remoteDocumentStatusRegistry.statuses,
                     )
                 },
             )
@@ -209,10 +287,11 @@ fun main() {
                     pdfPageRenderer = pdfPageRenderer,
                     hostViewModel = hostViewModel,
                     syncViewModel = syncViewModel,
-                    syncEngine = syncEngine,
+                    syncEngineFor = syncEngineRegistry::get,
                     peerServer = peerServer,
                     peerClient = syncClient,
-                    receivedPdfDir = System.getProperty("java.io.tmpdir") + "/notepen-sync",
+                    pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
+                    receivedPdfDir = receivedDir,
                 )
             }
         }

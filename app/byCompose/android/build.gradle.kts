@@ -20,6 +20,7 @@ kotlin {
     sourceSets {
         androidMain.dependencies {
             implementation(projects.shared)
+            implementation(projects.sync)
             implementation(projects.app.byCompose.common)
 
             implementation(libs.androidx.compose.ui.tooling.preview)
