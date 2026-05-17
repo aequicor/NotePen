@@ -40,6 +40,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.lowlatency.LowLatencyStrokeOverlay
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
+import ru.kyamshanov.notepen.magnifier.MagnifierState
+import ru.kyamshanov.notepen.magnifier.MagnifierTargetOverlay
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.effectivePressure
@@ -130,10 +132,29 @@ fun DrawablePdfPage(
      * "Режим стилуса" toolbar toggle (see [PencilModeSupport]).
      */
     pencilModeEnabled: Boolean = false,
+    /**
+     * Если не `null`, страница рисуется в «magnifier-режиме»: обычный
+     * pen-pipeline отключается, а сверху рендерится рамка-цель
+     * [MagnifierTargetOverlay]. Ввод пером идёт через `MagnifierInputPanel`,
+     * который коммитит штрихи в этот же [pdfDrawingState], так что
+     * результат попадает в страницу без дополнительной синхронизации.
+     *
+     * Должен передаваться только для той страницы, индекс которой
+     * совпадает с `magnifierState.pageIndex` — иначе рамка появится не
+     * там, где ожидает пользователь.
+     */
+    magnifierState: MagnifierState? = null,
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
     val tablet = LocalTabletInputController.current
+
+    // Прокидываем фактический размер canvas в magnifier — он нужен, чтобы
+    // рассчитать normalizedStrokeWidth = penSettings.strokeWidth / w так же,
+    // как это делает обычный pen-pipeline на странице.
+    LaunchedEffect(magnifierState, canvasSize.value) {
+        magnifierState?.updatePageCanvasPx(canvasSize.value.width.toFloat())
+    }
 
     // Read pencilModeEnabled через rememberUpdatedState, чтобы лямбда
     // isPalmRejectionActive внутри pointerInput видела актуальное значение
@@ -248,7 +269,13 @@ fun DrawablePdfPage(
             .onSizeChanged { canvasSize.value = it }
             .stylusEventSink(tablet)
             .then(
-                when (toolMode) {
+                // В magnifier-режиме обычный pen-вход на странице блокируется —
+                // всё рисование идёт через MagnifierInputPanel. Pan/zoom родителя
+                // продолжают работать (pointerInput не консумит события, когда
+                // не выставлен).
+                if (magnifierState != null) {
+                    Modifier
+                } else when (toolMode) {
                     ToolMode.PEN -> Modifier.pointerInput(toolMode, penSettings, eraserSettings) {
                         // Per-gesture eraser-override session: non-null while
                         // the current stylus gesture started with the eraser
@@ -556,6 +583,15 @@ fun DrawablePdfPage(
                 modifier = Modifier.fillMaxSize(),
             )
         }
+
+        // Magnifier target frame — drag/resize. Сидит над штрихами, чтобы
+        // пользователь всегда видел границу области, попадающей в панель.
+        if (magnifierState != null) {
+            MagnifierTargetOverlay(
+                state = magnifierState,
+                frameColor = MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }
 
@@ -568,7 +604,7 @@ fun DrawablePdfPage(
  *  - palm rejection once a stylus event has been seen;
  *  - cancel-safe via try / finally.
  */
-private suspend fun PointerInputScope.detectStylusAwareDrag(
+internal suspend fun PointerInputScope.detectStylusAwareDrag(
     tablet: TabletInputController,
     isPalmRejectionActive: () -> Boolean,
     onStylusSeen: () -> Unit,
@@ -631,7 +667,7 @@ private suspend fun PointerInputScope.detectStylusAwareDrag(
  * a single sub-path (only the first point has `isNewPath = true`), so no
  * sub-path splitting is needed here.
  */
-private fun DrawScope.drawLiveStroke(
+internal fun DrawScope.drawLiveStroke(
     points: List<DrawingPoint>,
     colorArgb: Long,
     normalizedStrokeWidth: Float,
@@ -712,7 +748,7 @@ private fun DrawScope.drawLiveStroke(
  *
  * Segments are joined with [StrokeCap.Round] so the width steps are invisible.
  */
-private fun DrawScope.drawStrokeWithPressure(
+internal fun DrawScope.drawStrokeWithPressure(
     stroke: DrawingPath,
     w: Float,
     h: Float,
@@ -801,7 +837,7 @@ private fun DrawScope.drawStrokeWithPressure(
  *  - the bitmap-rebuild throttle (visual refresh ≤ ~12 fps during the gesture
  *    to keep the main thread responsive on dense pages).
  */
-private class EraseGesture(
+internal class EraseGesture(
     private val pdfDrawingState: PdfDrawingState,
     private val eraserSettings: EraserSettings,
     private val eraserPos: androidx.compose.runtime.MutableState<Offset?>,
