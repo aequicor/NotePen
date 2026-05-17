@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.pdf.infrastructure
 
+import kotlinx.coroutines.CancellationException
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.rendering.PDFRenderer
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -8,54 +9,36 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfDocumentInfo
 /**
  * JVM-реализация [PdfDocument] поверх Apache PDFBox.
  *
- * [renderer] — не thread-safe; все вызовы должны быть защищены через [synchronized] на этом объекте.
- *
- * Закрытие документа откладывается до завершения всех активных рендерингов.
- * [close] идемпотентен и безопасен для вызова с любого потока.
+ * Доступ к [PDDocument]/[PDFRenderer] не thread-safe — всё взаимодействие
+ * идёт через [useRenderer], который сериализуется с [close] на общем мониторе.
  */
 internal class JvmPdfDocument(
-    internal val renderer: PDFRenderer,
+    private val renderer: PDFRenderer,
     private val document: PDDocument,
     override val info: PdfDocumentInfo,
 ) : PdfDocument {
 
     private val lock = Any()
-    private var closeRequested = false
-    private var renderCount = 0
+
+    @Volatile
+    private var closed = false
 
     /**
-     * Сигнализирует о начале рендеринга.
-     * Возвращает `false`, если документ уже закрывается — в этом случае рендеринг нельзя начинать.
+     * Выполняет [block] под общим монитором документа.
+     *
+     * Если документ уже закрыт — выбрасывает [CancellationException], чтобы
+     * вызывающий корутин-скоуп тихо отменил работу.
      */
-    internal fun beginRender(): Boolean = synchronized(lock) {
-        if (closeRequested) return@synchronized false
-        renderCount++
-        true
+    internal fun <R> useRenderer(block: (PDFRenderer) -> R): R = synchronized(lock) {
+        if (closed) throw CancellationException("PDF document is closed")
+        block(renderer)
     }
 
-    /**
-     * Сигнализирует о завершении рендеринга.
-     * Если [close] уже был вызван и это был последний активный рендеринг, закрывает документ.
-     */
-    internal fun endRender() {
-        val doClose = synchronized(lock) {
-            renderCount--
-            closeRequested && renderCount == 0
-        }
-        if (doClose) document.close()
-    }
-
-    /**
-     * Освобождает все ресурсы документа.
-     * Если рендеринг активен — фактическое закрытие откладывается до его завершения.
-     * Идемпотентен.
-     */
     override fun close() {
-        val doClose = synchronized(lock) {
-            if (closeRequested) return@synchronized false
-            closeRequested = true
-            renderCount == 0
+        synchronized(lock) {
+            if (closed) return
+            closed = true
+            document.close()
         }
-        if (doClose) document.close()
     }
 }

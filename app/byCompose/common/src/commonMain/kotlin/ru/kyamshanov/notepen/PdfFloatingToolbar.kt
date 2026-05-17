@@ -60,6 +60,9 @@ fun PdfFloatingToolbar(
     onStylusOnlyChange: (Boolean) -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showPencilModeButton: Boolean,
+    pencilModeEnabled: Boolean,
+    onPencilModeChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -98,6 +101,15 @@ fun PdfFloatingToolbar(
                     onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER))
                 },
             )
+
+            if (showPencilModeButton) {
+                ToolToggleButton(
+                    icon = Icons.Default.Gesture,
+                    contentDescription = "Режим стилуса",
+                    selected = pencilModeEnabled,
+                    onClick = { onPencilModeChange(!pencilModeEnabled) },
+                )
+            }
 
             ToolToggleButton(
                 icon = Icons.Default.Gesture,
