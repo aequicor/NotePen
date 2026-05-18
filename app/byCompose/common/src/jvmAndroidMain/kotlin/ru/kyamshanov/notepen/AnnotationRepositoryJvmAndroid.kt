@@ -61,6 +61,7 @@ private data class AnnotationDataDto(
     val eraser: EraserSettingsDto? = null,
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
+    val favoritePageIndices: List<Int> = emptyList(),
 )
 
 // ── Mappers ──────────────────────────────────────────────────────────────────
@@ -96,6 +97,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
         eraser: EraserSettings,
         currentPage: Int,
         currentPageOffset: Int,
+        favoritePageIndices: Set<Int>,
     ): Result<Unit> = try {
         val dto = AnnotationDataDto(
             pages = annotations.mapKeys { it.key.toString() }
@@ -106,6 +108,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
             eraser = eraser.toDto(),
             currentPage = currentPage,
             currentPageOffset = currentPageOffset,
+            favoritePageIndices = favoritePageIndices.toList(),
         )
         File("$pdfPath.notepen.json").writeText(json.encodeToString(AnnotationDataDto.serializer(), dto))
         Result.success(Unit)
@@ -130,6 +133,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
                     eraser = dto.eraser?.toDomain() ?: EraserSettings(),
                     currentPage = dto.currentPage,
                     currentPageOffset = dto.currentPageOffset,
+                    favoritePageIndices = dto.favoritePageIndices.toSet(),
                 ),
             )
         } catch (e: Exception) {

@@ -23,9 +23,10 @@ import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -66,12 +67,12 @@ fun PortraitTopBar(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
+    GlassSurface(
         modifier = modifier
             .fillMaxWidth()
             .windowInsetsPadding(WindowInsets.statusBars),
-        color = MaterialTheme.colorScheme.surfaceVariant,
-        tonalElevation = PORTRAIT_BAR_TONAL_ELEVATION,
+        shape = RectangleShape,
+        tint = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Row(
             modifier = Modifier
@@ -206,7 +207,6 @@ fun PortraitTopBar(
     }
 }
 
-private val PORTRAIT_BAR_TONAL_ELEVATION = 3.dp
 private val PORTRAIT_BAR_PADDING_H = 4.dp
 private val PORTRAIT_BAR_PAGE_PADDING = 8.dp
 private val PORTRAIT_BAR_PROGRESS_SIZE = 24.dp

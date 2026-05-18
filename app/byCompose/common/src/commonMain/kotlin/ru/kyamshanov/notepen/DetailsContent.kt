@@ -1,6 +1,8 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -10,10 +12,17 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -38,17 +48,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
@@ -67,6 +78,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository as SharedAnnotationRepository
+import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -94,6 +106,14 @@ import kotlin.time.Duration.Companion.seconds
 private val logger = KotlinLogging.logger {}
 
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
+
+/**
+ * Длительность анимации показа/скрытия сайдбара миниатюр. В портрете
+ * этим же tween'ом синхронно сдвигается PDF + top bar — иначе spring у
+ * `animateDpAsState` отставал от slideOutHorizontally сайдбара и при
+ * закрытии возникал визуальный лаг.
+ */
+private const val SIDEBAR_ANIM_DURATION_MS = 220
 
 /** Toolbar `+` button zoom factor (matches Ctrl+wheel zoom-in). */
 private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
@@ -178,6 +198,7 @@ fun DetailsContent(
     var isSaving by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
+    val favoritePageIndices = remember { mutableStateListOf<Int>() }
     val hasAnnotations by remember {
         derivedStateOf { drawingStates.values.any { it.currentPaths.isNotEmpty() } }
     }
@@ -213,6 +234,22 @@ fun DetailsContent(
     val pdfExporter = remember { createPdfExporter() }
     val focusRequester = remember { FocusRequester() }
     var shiftHeld by remember { mutableStateOf(false) }
+    // Высота верхней «обвязки» в портрете (top bar + опциональная панель
+    // настроек активного инструмента). Меряется через onSizeChanged ниже
+    // и используется как top-padding для PageThumbnailsSidebar, чтобы он
+    // не уезжал под top bar / панель настроек.
+    val density = LocalDensity.current
+    var portraitTopChromeHeightDp by remember { mutableStateOf(0.dp) }
+    // В портретном режиме сайдбар миниатюр выезжает слева на всю высоту
+    // и сдвигает PDF + top bar вправо (не перекрывает их, как в landscape).
+    // tween — чтобы синхронизироваться со slideOutHorizontally самого
+    // сайдбара (по умолчанию ~250 ms); spring у animateDpAsState ощутимо
+    // отставал, отчего при закрытии возникал визуальный лаг.
+    val portraitSidebarOffset by animateDpAsState(
+        targetValue = if (!isLandscape && showThumbnails && pages.isNotEmpty()) SIDEBAR_WIDTH else 0.dp,
+        animationSpec = tween(durationMillis = SIDEBAR_ANIM_DURATION_MS),
+        label = "portrait-sidebar-offset",
+    )
 
     val syncBridge = remember(syncEngine) {
         syncEngine?.let { engine ->
@@ -279,7 +316,10 @@ fun DetailsContent(
         val flow = pendingDeltaCounts ?: return@LaunchedEffect
         flow.collect { counts -> pendingForDoc = counts[documentId] ?: 0 }
     }
+    // Idle = соединение ни разу не инициировалось (локальный режим) — баннер не нужен.
     val showOfflineBanner = peerClient != null &&
+        clientPairingState != null &&
+        clientPairingState !is PairingState.Idle &&
         clientPairingState !is PairingState.Connected &&
         pendingForDoc > 0
 
@@ -316,6 +356,8 @@ fun DetailsContent(
                 state.currentPaths.addAll(paths)
                 state.markHistoryChanged()
             }
+            favoritePageIndices.clear()
+            favoritePageIndices.addAll(bundle.favoritePageIndices)
         }
     }
 
@@ -335,6 +377,7 @@ fun DetailsContent(
                 eraser = eraserSettings,
                 currentPage = firstVisiblePage,
                 currentPageOffset = currentPageOffsetPx,
+                favoritePageIndices = favoritePageIndices.toSet(),
             ).onFailure { e ->
                 logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
             }
@@ -374,30 +417,18 @@ fun DetailsContent(
             },
     ) {
 
-        if (showOfflineBanner) {
-            androidx.compose.material3.Surface(
-                color = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                shape = MaterialTheme.shapes.small,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 12.dp)
-                    .widthIn(min = 240.dp, max = 480.dp),
-            ) {
-                Text(
-                    text = "Оффлайн, $pendingForDoc правок ждут отправки",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-            }
-        }
-
         PdfPagesViewer(
             state = pdfViewerState,
             pdfDocument = pdfDocument,
             pages = pages,
             renderer = renderer,
-            modifier = Modifier.fillMaxSize(),
+            // graphicsLayer вместо padding: только смещение в placement-шаге,
+            // без remeasure. padding пересоставлял раскладку PdfPagesViewer
+            // каждый кадр анимации — из-за чего видимая страница «прыгала»
+            // в момент закрытия сайдбара.
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { translationX = portraitSidebarOffset.toPx() },
         ) {
             val bm = bitmap
             // Размер страницы уже задан Constraints.fixed(w,h) из
@@ -478,10 +509,17 @@ fun DetailsContent(
 
         AnimatedVisibility(
             visible = showThumbnails && pages.isNotEmpty(),
-            enter = slideInHorizontally { -it } + fadeIn(),
-            exit = slideOutHorizontally { -it } + fadeOut(),
+            enter = slideInHorizontally(
+                animationSpec = tween(durationMillis = SIDEBAR_ANIM_DURATION_MS),
+            ) { -it } + fadeIn(animationSpec = tween(durationMillis = SIDEBAR_ANIM_DURATION_MS)),
+            exit = slideOutHorizontally(
+                animationSpec = tween(durationMillis = SIDEBAR_ANIM_DURATION_MS),
+            ) { -it } + fadeOut(animationSpec = tween(durationMillis = SIDEBAR_ANIM_DURATION_MS)),
             modifier = Modifier.align(Alignment.CenterStart),
         ) {
+            // В портрете сайдбар занимает всю высоту экрана и сдвигает
+            // PDF + top bar — поэтому top-padding не нужен. В landscape
+            // сайдбар по-прежнему оверлеит контент сбоку.
             PageThumbnailsSidebar(
                 pages = pages,
                 pdfDocument = pdfDocument,
@@ -491,6 +529,15 @@ fun DetailsContent(
                     pdfViewerState.scrollToPage(pageIndex, 0)
                 },
                 annotatedPageIndices = annotatedPageIndices,
+                favoritePageIndices = favoritePageIndices.toSet(),
+                onToggleFavorite = { pageIndex ->
+                    if (!favoritePageIndices.remove(pageIndex)) {
+                        favoritePageIndices.add(pageIndex)
+                    }
+                },
+                pagePaths = { pageIndex ->
+                    drawingStates[pageIndex]?.currentPaths?.toList() ?: emptyList()
+                },
             )
         }
 
@@ -536,6 +583,7 @@ fun DetailsContent(
                         eraser = eraserSettings,
                         currentPage = firstVisiblePage,
                         currentPageOffset = currentPageOffsetPx,
+                        favoritePageIndices = favoritePageIndices.toSet(),
                     )
                     if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
                 }
@@ -603,76 +651,126 @@ fun DetailsContent(
         }
 
         if (isLandscape) {
-            // Landscape: vertical left rail toolbar with page counter.
+            // Когда сайдбар страниц открыт — отодвигаем floating-тулбар и
+            // back-кнопку на его ширину, чтобы они не оказывались под ним.
+            val sidebarOffset by animateDpAsState(
+                targetValue = if (showThumbnails && pages.isNotEmpty()) SIDEBAR_WIDTH else 0.dp,
+                label = "landscape-sidebar-offset",
+            )
+
+            // Landscape: vertical left rail toolbar + vertical settings panel in a Row.
             AnimatedVisibility(
                 visible = true,
                 enter = slideInHorizontally { -it } + fadeIn(),
                 exit = slideOutHorizontally { -it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.CenterStart)
-                    .padding(16.dp),
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .padding(start = 16.dp + sidebarOffset, top = 16.dp, end = 16.dp, bottom = 16.dp),
             ) {
-                PdfFloatingToolbar(
-                    toolMode = toolMode,
-                    onToolModeChange = { toolMode = it },
-                    hasAnnotations = hasAnnotations,
-                    isSaving = isSaving,
-                    isExporting = isExporting,
-                    showThumbnails = showThumbnails,
-                    onToggleThumbnails = { showThumbnails = !showThumbnails },
-                    showPencilModeButton = SupportsPencilMode,
-                    pencilModeEnabled = pencilModeEnabled,
-                    onPencilModeChange = onPencilModeChangeCallback,
-                    magnifierEnabled = magnifierState.enabled,
-                    onMagnifierToggle = onMagnifierToggle,
-                    onSave = onSaveCallback,
-                    onExport = onExportCallback,
-                    scale = currentScalePercent,
-                    onZoomIn = onZoomInCallback,
-                    onZoomOut = onZoomOutCallback,
-                    currentPage = firstVisiblePage + 1,
-                    totalPages = pages.size,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    PdfFloatingToolbar(
+                        toolMode = toolMode,
+                        onToolModeChange = { toolMode = it },
+                        hasAnnotations = hasAnnotations,
+                        isSaving = isSaving,
+                        isExporting = isExporting,
+                        showThumbnails = showThumbnails,
+                        onToggleThumbnails = { showThumbnails = !showThumbnails },
+                        showPencilModeButton = SupportsPencilMode,
+                        pencilModeEnabled = pencilModeEnabled,
+                        onPencilModeChange = onPencilModeChangeCallback,
+                        magnifierEnabled = magnifierState.enabled,
+                        onMagnifierToggle = onMagnifierToggle,
+                        onSave = onSaveCallback,
+                        onExport = onExportCallback,
+                        scale = currentScalePercent,
+                        onZoomIn = onZoomInCallback,
+                        onZoomOut = onZoomOutCallback,
+                    )
+                    // Без Spacer: settings-рейл прижимается прямо к тулбару.
+                    // Раньше 8.dp + внутренние padding'и обеих GlassSurface
+                    // давали визуально лишний зазор между панелями.
+                    ToolSettingsFloatingPanel(
+                        toolMode = toolMode,
+                        penSettings = penSettings,
+                        onPenSettingsChange = { penSettings = it },
+                        markerSettings = markerSettings,
+                        onMarkerSettingsChange = { markerSettings = it },
+                        eraserSettings = eraserSettings,
+                        onEraserSettingsChange = { eraserSettings = it },
+                        vertical = true,
+                    )
+                }
             }
 
-            // Landscape: compact settings strip at the top.
-            val panelMaxWidth = with(LocalDensity.current) { windowSizeInPx.width.toDp() - 32.dp }
-            val settingsAlignment = if (ToolMenusAtTop) Alignment.TopCenter else Alignment.BottomCenter
-            ToolSettingsFloatingPanel(
-                toolMode = toolMode,
-                penSettings = penSettings,
-                onPenSettingsChange = { penSettings = it },
-                markerSettings = markerSettings,
-                onMarkerSettingsChange = { markerSettings = it },
-                eraserSettings = eraserSettings,
-                onEraserSettingsChange = { eraserSettings = it },
-                atTop = ToolMenusAtTop,
+            // Landscape: page indicator airbar + optional offline banner, stacked vertically.
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
-                    .align(settingsAlignment)
-                    .widthIn(max = panelMaxWidth),
-            )
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(top = 8.dp),
+            ) {
+                AnimatedVisibility(
+                    visible = pages.isNotEmpty(),
+                    enter = slideInVertically { -it } + fadeIn(),
+                    exit = slideOutVertically { -it } + fadeOut(),
+                ) {
+                    PageIndicatorAirbar(
+                        currentPage = firstVisiblePage + 1,
+                        totalPages = pages.size,
+                    )
+                }
+                if (showOfflineBanner) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier
+                            .padding(top = 4.dp)
+                            .widthIn(min = 240.dp, max = 480.dp),
+                    ) {
+                        Text(
+                            text = "Оффлайн, $pendingForDoc правок ждут отправки",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        )
+                    }
+                }
+            }
 
             // Landscape: floating back button at the top-start corner.
-            IconButton(
-                onClick = onBackWithSave,
+            GlassSurface(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(16.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surface, CircleShape),
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .padding(start = 16.dp + sidebarOffset, top = 16.dp, end = 16.dp, bottom = 16.dp),
+                shape = CircleShape,
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = BACK_CONTENT_DESCRIPTION,
-                    tint = MaterialTheme.colorScheme.onSurface,
-                )
+                IconButton(onClick = onBackWithSave) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = BACK_CONTENT_DESCRIPTION,
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
             }
         } else {
             // Portrait: full-width top bar + settings strip below it.
+            // translationX вместо padding по той же причине, что и у
+            // PdfPagesViewer — чтобы не пересобирать раскладку каждый кадр.
+            // Правый край топ-бара уезжает за экран на величину сдвига,
+            // но в портрете там только страница «N/M» и зум — критичные
+            // кнопки остаются в кадре.
             Column(
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .graphicsLayer { translationX = portraitSidebarOffset.toPx() }
+                    .onSizeChanged { size ->
+                        portraitTopChromeHeightDp = with(density) { size.height.toDp() }
+                    },
             ) {
                 PortraitTopBar(
                     currentPage = firstVisiblePage + 1,
@@ -694,23 +792,46 @@ fun DetailsContent(
                     onPencilModeChange = onPencilModeChangeCallback,
                     magnifierEnabled = magnifierState.enabled,
                     onMagnifierToggle = onMagnifierToggle,
-                    onBack = onBackWithSave,
+                    onBack = {
+                        // В портрете back-кнопка сначала закрывает раскрытый
+                        // сайдбар миниатюр (он занимает всю высоту слева),
+                        // и только следующим нажатием — уходит со страницы.
+                        if (showThumbnails) showThumbnails = false
+                        else onBackWithSave()
+                    },
                 )
-                AnimatedVisibility(
-                    visible = toolMode != ToolMode.NONE,
-                    enter = slideInVertically { -it } + fadeIn(),
-                    exit = slideOutVertically { -it } + fadeOut(),
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    contentAlignment = Alignment.TopCenter,
                 ) {
-                    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
-                        ToolSettingsContent(
-                            toolMode = toolMode,
-                            penSettings = penSettings,
-                            onPenSettingsChange = { penSettings = it },
-                            markerSettings = markerSettings,
-                            onMarkerSettingsChange = { markerSettings = it },
-                            eraserSettings = eraserSettings,
-                            onEraserSettingsChange = { eraserSettings = it },
-                            expandDownward = true,
+                    ToolSettingsFloatingPanel(
+                        toolMode = toolMode,
+                        penSettings = penSettings,
+                        onPenSettingsChange = { penSettings = it },
+                        markerSettings = markerSettings,
+                        onMarkerSettingsChange = { markerSettings = it },
+                        eraserSettings = eraserSettings,
+                        onEraserSettingsChange = { eraserSettings = it },
+                        vertical = false,
+                        atTop = true,
+                        applyInsets = false,
+                    )
+                }
+                if (showOfflineBanner) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = "Оффлайн, $pendingForDoc правок ждут отправки",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
                 }
@@ -719,7 +840,9 @@ fun DetailsContent(
 
         SnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .windowInsetsPadding(WindowInsets.navigationBars),
         )
 
         if (showLostConnectionDialog) {
@@ -743,6 +866,7 @@ fun DetailsContent(
                                 eraser = eraserSettings,
                                 currentPage = firstVisiblePage,
                                 currentPageOffset = currentPageOffsetPx,
+                                favoritePageIndices = favoritePageIndices.toSet(),
                             )
                             val msg = if (result.isSuccess) "Сохранено локально" else "Ошибка локального сохранения"
                             snackbarHostState.showSnackbar(msg)

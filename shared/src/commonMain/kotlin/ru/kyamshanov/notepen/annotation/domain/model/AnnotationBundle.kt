@@ -9,4 +9,5 @@ data class AnnotationBundle(
     val eraser: EraserSettings = EraserSettings(),
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
+    val favoritePageIndices: Set<Int> = emptySet(),
 )

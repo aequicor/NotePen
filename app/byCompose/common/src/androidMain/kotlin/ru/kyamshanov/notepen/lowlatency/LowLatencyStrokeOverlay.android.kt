@@ -150,12 +150,28 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
             val widthPx = drawingState.liveStrokeWidth.value *
                 (surfaceViewHolder.value?.width ?: 0)
             val colorArgb = drawingState.liveColorArgb.value.toInt()
+            // Detect a new stroke that started while the collector was busy
+            // (e.g. paused in `delay(HANDOFF_HOLD_MS)` after a previous commit,
+            // or because snapshotFlow conflated the `isDrawing=false` edge).
+            // `startDrawing()` calls `livePoints.clear()` so `size` drops back
+            // to 1; without this reset, `lastIndex` would still point past the
+            // new list end and the loop below would never run, leaving the
+            // start of the new stroke unrendered — or, worse, a subsequent
+            // append would render a segment between `livePoints[lastIndex]`
+            // and the new point, producing a stray line across the page.
+            if (lastIndex >= size) {
+                lastIndex = -1
+            }
             // Submit every new sample since the previous tick. snapshotFlow
             // coalesces updates per frame, so a burst of 4 samples emits once.
             while (lastIndex + 1 < size) {
                 lastIndex++
                 val curr = drawingState.livePoints[lastIndex]
-                val prev = if (lastIndex > 0) drawingState.livePoints[lastIndex - 1] else null
+                val prev = if (lastIndex > 0 && !curr.isNewPath) {
+                    drawingState.livePoints[lastIndex - 1]
+                } else {
+                    null
+                }
                 renderer.renderFrontBufferedLayer(
                     StrokeSegment(prev = prev, curr = curr, colorArgb = colorArgb, widthPx = widthPx),
                 )

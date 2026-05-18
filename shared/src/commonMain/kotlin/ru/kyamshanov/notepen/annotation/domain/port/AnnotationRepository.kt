@@ -17,6 +17,7 @@ interface AnnotationRepository {
         eraser: EraserSettings = EraserSettings(),
         currentPage: Int = 0,
         currentPageOffset: Int = 0,
+        favoritePageIndices: Set<Int> = emptySet(),
     ): Result<Unit>
 
     suspend fun load(pdfPath: String): Result<AnnotationBundle>
