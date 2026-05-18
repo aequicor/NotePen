@@ -13,6 +13,7 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolder
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolderLink
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
+import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 private val logger = KotlinLogging.logger {}
 
@@ -83,6 +84,30 @@ class RemoteCatalogProvider(
                         "${catalog.folders.size} folders, ${catalog.folderLinks.size} links"
                 }
                 server.send(peerId, NetworkMessage.RemoteCatalogResponse(catalog))
+            }
+        }
+    }
+
+    /**
+     * Mirror of [serve] for the client side. When this device acts as a
+     * [SyncClient] and a remote host asks for our local library (the host's
+     * own "peers list" UI), we reply over the same channel. Reuses the same
+     * per-peer allow-list / uri map keyed by host id.
+     */
+    fun serve(client: SyncClient, scope: CoroutineScope) {
+        scope.launch {
+            client.incomingMessages.collect { hostMessage ->
+                val msg = hostMessage.message
+                if (msg !is NetworkMessage.RemoteCatalogRequest) return@collect
+                val peerId = hostMessage.host.id
+                val catalog = runCatching { buildSnapshotFor(peerId) }
+                    .onFailure { logger.warn { "Failed to build catalog snapshot: ${it::class.simpleName}" } }
+                    .getOrElse { RemoteCatalog(hostName, emptyList(), emptyList(), emptyList()) }
+                logger.info {
+                    "Serving RemoteCatalog to host ${hostMessage.host.name}: ${catalog.recent.size} recents, " +
+                        "${catalog.folders.size} folders, ${catalog.folderLinks.size} links"
+                }
+                client.send(peerId, NetworkMessage.RemoteCatalogResponse(catalog))
             }
         }
     }

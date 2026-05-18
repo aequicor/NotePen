@@ -47,9 +47,15 @@ interface TabletInputController {
     val hoverPosition: StateFlow<Offset?>
 
     /**
-     * `true` once any stylus / eraser-tip event has been observed in the
-     * current process lifetime. Latched — never flips back to `false`.
-     * Used by Pencil Mode to auto-enable on first stylus contact.
+     * `true` while a stylus / eraser-tip is considered "present" — flips on
+     * the first stylus / eraser event and stays on until the platform
+     * implementation detects that the pen has gone silent for long enough
+     * to count as disconnected (typically: a finger event arrives after a
+     * substantial idle period without any stylus event). Used by Pencil
+     * Mode to auto-enable on first contact AND to auto-recover when the
+     * pen driver hangs — without the recovery edge, a wedged S-Pen would
+     * leave palm-rejection on with no way to draw with the finger short
+     * of a device reboot.
      */
     val stylusEverSeen: StateFlow<Boolean>
 }

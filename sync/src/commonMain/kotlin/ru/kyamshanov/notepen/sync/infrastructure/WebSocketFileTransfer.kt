@@ -110,6 +110,9 @@ expect fun okio_writeBytes(path: String, bytes: ByteArray)
 /** True when a regular file exists at [path]. Used for offline cache lookups. */
 expect fun okio_exists(path: String): Boolean
 
+/** Best-effort: deletes the file at [path]. Returns true on success. No-op if it doesn't exist. */
+expect fun okio_delete(path: String): Boolean
+
 /** Base64-encodes [bytes]. Platform-provided via expect/actual. */
 expect fun encodeBase64(bytes: ByteArray): String
 

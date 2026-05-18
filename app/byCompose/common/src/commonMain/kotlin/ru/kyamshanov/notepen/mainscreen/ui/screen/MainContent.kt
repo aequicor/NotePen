@@ -41,9 +41,8 @@ import androidx.compose.ui.unit.Dp
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
 import ru.kyamshanov.notepen.mainscreen.ui.component.FolderCard
+import ru.kyamshanov.notepen.mainscreen.ui.component.PeerCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RecentFileCard
-import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteEntryCard
-import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteFolderCard
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.CreateFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.DeleteFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.SafMergeDialog
@@ -142,7 +141,7 @@ fun MainContent(
         ) {
             when {
                 state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                state.recentFiles.isEmpty() && state.folders.isEmpty() && state.remoteSection == null ->
+                state.recentFiles.isEmpty() && state.folders.isEmpty() && state.peers.isEmpty() ->
                     EmptyState(
                         onOpenFile = { onIntent(MainScreenIntent.OpenFilePicker) },
                         modifier = Modifier.fillMaxSize(),
@@ -208,6 +207,17 @@ private fun RecentFilesAndFoldersList(
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
+            if (state.peers.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Подключённые устройства") }
+                items(state.peers, key = { "peer_${it.peerId}" }) { peer ->
+                    PeerCard(
+                        model = peer,
+                        onClick = {
+                            onIntent(MainScreenIntent.OpenPeer(peer.peerId, peer.displayName))
+                        },
+                    )
+                }
+            }
             if (state.recentFiles.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Недавние файлы") }
                 items(state.recentFiles, key = { it.id }) { file ->
@@ -228,27 +238,6 @@ private fun RecentFilesAndFoldersList(
                     )
                 }
             }
-            state.remoteSection?.let { remote ->
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    SectionHeader("Remote (${remote.hostName})")
-                }
-                items(remote.entries, key = { "remote_${it.documentId}" }) { entry ->
-                    RemoteEntryCard(
-                        model = entry,
-                        onClick = {
-                            onIntent(
-                                MainScreenIntent.OpenRemoteEntry(
-                                    documentId = entry.documentId,
-                                    displayName = entry.displayName,
-                                ),
-                            )
-                        },
-                    )
-                }
-                items(remote.folders, key = { "remote_folder_${it.folderId}" }) { folder ->
-                    RemoteFolderCard(model = folder)
-                }
-            }
             if (state.folders.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Папки") }
                 items(state.folders, key = { "folder_${it.id}" }) { folder ->
@@ -263,6 +252,21 @@ private fun RecentFilesAndFoldersList(
         }
     } else {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+            if (state.peers.isNotEmpty()) {
+                item { SectionHeader("Подключённые устройства") }
+                items(state.peers, key = { "peer_${it.peerId}" }) { peer ->
+                    PeerCard(
+                        model = peer,
+                        onClick = {
+                            onIntent(MainScreenIntent.OpenPeer(peer.peerId, peer.displayName))
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
+                    )
+                }
+                item { Spacer(Modifier.height(8.dp)) }
+            }
             if (state.recentFiles.isNotEmpty()) {
                 item { SectionHeader("Недавние файлы") }
                 items(state.recentFiles, key = { it.id }) { file ->
@@ -280,34 +284,6 @@ private fun RecentFilesAndFoldersList(
                         },
                         onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
                         isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                    )
-                }
-            }
-            state.remoteSection?.let { remote ->
-                item { Spacer(Modifier.height(24.dp)) }
-                item { SectionHeader("Remote (${remote.hostName})") }
-                items(remote.entries, key = { "remote_${it.documentId}" }) { entry ->
-                    RemoteEntryCard(
-                        model = entry,
-                        onClick = {
-                            onIntent(
-                                MainScreenIntent.OpenRemoteEntry(
-                                    documentId = entry.documentId,
-                                    displayName = entry.displayName,
-                                ),
-                            )
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
-                    )
-                }
-                items(remote.folders, key = { "remote_folder_${it.folderId}" }) { folder ->
-                    RemoteFolderCard(
-                        model = folder,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(vertical = 4.dp),

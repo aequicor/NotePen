@@ -35,6 +35,7 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.FileHistoryRepositoryAndr
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroid
+import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
@@ -42,13 +43,17 @@ import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
+import ru.kyamshanov.notepen.sync.domain.LocalCachedDocumentCleaner
 import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
+import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseAndroid
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
@@ -152,10 +157,23 @@ class MainActivity : ComponentActivity() {
         val remoteCatalogCache = InMemoryRemoteCatalogCache()
         RemoteCatalogClientCoordinator(client = syncClient, cache = remoteCatalogCache)
             .start(scope = appScope)
+        // Симметричный ответ: если подключённый хост запросит наш каталог
+        // (для своей секции «Подключённые устройства»), отдадим ему snapshot
+        // нашей локальной истории.
+        RemoteCatalogProvider(
+            hostName = selfInfo.name,
+            historyRepository = historyRepo,
+            folderRepository = folderRepo,
+        ).serve(client = syncClient, scope = appScope)
+        val localDocumentIdRegistry = JsonLocalDocumentIdRegistry(
+            manifestPath = "$receivedDir/.notepen-doc-ids.json",
+            ioDispatcher = Dispatchers.IO,
+        )
         val remoteDocumentOpener = RemoteDocumentOpener(
             client = syncClient,
             catalogs = remoteCatalogCache.catalogs,
             destDir = receivedDir,
+            documentIdRegistry = localDocumentIdRegistry,
         )
         // Track per-document orphan flags as host signals come in.
         val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
@@ -168,10 +186,22 @@ class MainActivity : ComponentActivity() {
             registry = remoteDocumentStatusRegistry,
         ).start(scope = appScope)
 
+        val openDocumentRegistry = InMemoryOpenDocumentRegistry()
+        LocalCachedDocumentCleaner(
+            receivedPdfDir = receivedDir,
+            pendingCounts = pendingDeltaQueue.pendingCounts(),
+            catalogsFlow = remoteCatalogCache.catalogs,
+            openDocuments = openDocumentRegistry,
+            documentIdRegistry = localDocumentIdRegistry,
+        ).start(scope = appScope)
+
+        // Android is client-only: online peers = connected hosts.
+        val onlinePeerIds = syncClient.connectedHosts.map { hosts -> hosts.map { it.id }.toSet() }
+
         val root = DefaultRootComponent(
             componentContext = defaultComponentContext(),
             historyRepository = historyRepo,
-            mainComponentFactory = { componentContext, onOpenEditor ->
+            mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog ->
                 MainScreenComponent(
                     componentContext = componentContext,
                     historyRepository = historyRepo,
@@ -183,10 +213,22 @@ class MainActivity : ComponentActivity() {
                     thumbnailGenerator = thumbnailGenerator,
                     onOpenEditor = onOpenEditor,
                     onOpenFilePicker = { filePicker.pickPdfFile() },
-                    remoteCatalogFlow = remoteCatalogCache.catalogs.map { it.values.firstOrNull() },
+                    onOpenPeerCatalog = onOpenPeerCatalog,
+                    remoteCatalogsFlow = remoteCatalogCache.catalogs,
+                    onlinePeerIdsFlow = onlinePeerIds,
+                )
+            },
+            peerCatalogComponentFactory = { ctx, peerId, displayName, onBack, onOpenEditor ->
+                PeerCatalogComponentImpl(
+                    componentContext = ctx,
+                    peerId = peerId,
+                    displayName = displayName,
+                    catalogsFlow = remoteCatalogCache.catalogs,
+                    onlinePeerIdsFlow = onlinePeerIds,
                     remoteDocumentOpener = remoteDocumentOpener,
-                    pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
-                    remoteDocumentStatuses = remoteDocumentStatusRegistry.statuses,
+                    receivedPdfDir = receivedDir,
+                    onBack = onBack,
+                    onOpenEditor = onOpenEditor,
                 )
             },
         )
@@ -211,6 +253,8 @@ class MainActivity : ComponentActivity() {
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
                     receivedPdfDir = receivedDir,
+                    openDocumentRegistry = openDocumentRegistry,
+                    localDocumentIdRegistry = localDocumentIdRegistry,
                 )
             }
         }

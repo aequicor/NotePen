@@ -13,6 +13,11 @@ actual fun okio_writeBytes(path: String, bytes: ByteArray) {
 
 actual fun okio_exists(path: String): Boolean = File(path).isFile
 
+actual fun okio_delete(path: String): Boolean {
+    val f = File(path)
+    return !f.exists() || f.delete()
+}
+
 actual fun encodeBase64(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
 
 actual fun decodeBase64(encoded: String): ByteArray = Base64.getDecoder().decode(encoded)

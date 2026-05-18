@@ -100,8 +100,22 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
     }
 
     override suspend fun send(hostId: String, message: NetworkMessage) {
-        val session = mutex.withLock { sessions[hostId] } ?: return
+        val session = mutex.withLock { findSessionByHostId(hostId) } ?: return
         session.send(message)
+    }
+
+    /**
+     * Sessions are keyed by the placeholder `server.id` ("host:port") that the
+     * caller supplied to [connect], but every public flow ([connectedHosts],
+     * [pairingStates]) exposes the **real** peer id learned from `PairAccepted`.
+     * Callers naturally use the real id when invoking [send] / [disconnect],
+     * so we look up by either form to keep the two views reconciled.
+     *
+     * Must be called under [mutex].
+     */
+    private fun findSessionByHostId(hostId: String): HostSession? {
+        sessions[hostId]?.let { return it }
+        return sessions.values.firstOrNull { it.peer?.id == hostId }
     }
 
     override suspend fun broadcast(message: NetworkMessage) {
@@ -110,9 +124,15 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
     }
 
     override suspend fun disconnect(hostId: String) {
-        val session = mutex.withLock { sessions.remove(hostId) }
-        session?.cancel()
-        updateState(hostId, PairingState.Idle, remove = true)
+        val (keyHostId, session) = mutex.withLock {
+            sessions[hostId]?.let { return@withLock hostId to it }
+            val entry = sessions.entries.firstOrNull { it.value.peer?.id == hostId }
+            entry?.key to entry?.value
+        }
+        if (session == null || keyHostId == null) return
+        mutex.withLock { sessions.remove(keyHostId) }
+        session.cancel()
+        updateState(keyHostId, PairingState.Idle, remove = true)
     }
 
     override suspend fun disconnectAll() {

@@ -43,16 +43,12 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
-import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteCatalogUiState
-import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteEntryUiModel
-import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteFolderUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.PeerSummaryUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.SafMergeDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState
-import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
-import ru.kyamshanov.notepen.sync.domain.RemoteDocumentResult
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
-import ru.kyamshanov.notepen.sync.domain.model.SyncStatus
 
 /**
  * ViewModel главного экрана. Реализует MVI-цикл: Intent → State.
@@ -79,28 +75,19 @@ class MainScreenViewModel(
     private val thumbnailRepository: ThumbnailRepository,
     private val thumbnailGenerator: PdfThumbnailGenerator,
     /**
-     * Tablet-side stream of the host's current library catalog. Null when the
-     * app instance is not a sync client (e.g. the desktop host itself).
+     * Stream of all currently cached peer catalogs — both hosts (when this
+     * device is a client) and clients (when this device is a host). Drives the
+     * "Подключённые устройства" section as one tile per known peer.
+     * Null when sync is not wired (tests, headless instances).
      */
-    private val remoteCatalogFlow: Flow<RemoteCatalog?>? = null,
+    private val remoteCatalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>? = null,
     /**
-     * Tablet-side opener for documents from the host's library. Null disables
-     * the Remote-section tap → open flow (e.g. host-only app instance).
+     * Поток множества `peerId`, считающихся «в сети» прямо сейчас. На клиенте —
+     * `connectedHosts.map { it.id }`; на хосте — `connectedPeers.map { it.id }`;
+     * на desktop, который и клиент, и хост — объединение. Если null —
+     * считаем всех известных пиров онлайн.
      */
-    private val remoteDocumentOpener: RemoteDocumentOpener? = null,
-    /**
-     * Stream of `documentId → pendingCount` from
-     * [ru.kyamshanov.notepen.sync.domain.port.PendingDeltaQueue]. Combined
-     * with [remoteCatalogFlow] to drive the "не синхронизировано (N)" badge
-     * on Remote tiles. Null disables the badge.
-     */
-    private val pendingDeltaCounts: Flow<Map<String, Int>>? = null,
-    /**
-     * Stream of `documentId → SyncStatus` from
-     * [ru.kyamshanov.notepen.sync.domain.port.RemoteDocumentStatusRegistry].
-     * Drives the "удалён на хосте" badge.
-     */
-    private val remoteDocumentStatuses: Flow<Map<String, SyncStatus>>? = null,
+    private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
     private val nowMillis: () -> Long = { currentTimeMillis() },
 ) {
     private val logger = KotlinLogging.logger {}
@@ -113,14 +100,23 @@ class MainScreenViewModel(
     val state: StateFlow<MainScreenUiState> = _state.asStateFlow()
 
     init {
-        remoteCatalogFlow?.let { catalogFlow ->
-            val countsFlow = pendingDeltaCounts ?: flowOf(emptyMap())
-            val statusFlow = remoteDocumentStatuses ?: flowOf(emptyMap())
+        remoteCatalogsFlow?.let { catalogsFlow ->
+            val onlineFlow = onlinePeerIdsFlow ?: flowOf(null)
             scope.launch {
-                combine(catalogFlow, countsFlow, statusFlow) { catalog, counts, statuses ->
-                    catalog?.toUiState(counts, statuses)
-                }.collect { uiState ->
-                    _state.update { it.copy(remoteSection = uiState) }
+                combine(catalogsFlow, onlineFlow) { catalogs, onlineIds ->
+                    catalogs.entries.map { (device, catalog) ->
+                        PeerSummaryUiModel(
+                            peerId = device.id,
+                            displayName = catalog.hostName.ifBlank { device.name },
+                            itemCount = catalog.recent.size + catalog.folders.size,
+                            isOnline = onlineIds?.contains(device.id) ?: true,
+                        )
+                    }.sortedWith(
+                        compareByDescending<PeerSummaryUiModel> { it.isOnline }
+                            .thenBy { it.displayName.lowercase() },
+                    )
+                }.collect { peers ->
+                    _state.update { it.copy(peers = peers) }
                 }
             }
         }
@@ -165,37 +161,15 @@ class MainScreenViewModel(
             is MainScreenIntent.DropOnFolder -> handleDropOnFolder(intent)
             is MainScreenIntent.OnSuccessEventHandled ->
                 _state.update { it.copy(successEvent = null) }
-            is MainScreenIntent.OpenRemoteEntry -> openRemoteEntry(intent.documentId, intent.displayName)
+            is MainScreenIntent.OpenPeer -> openPeer(intent.peerId, intent.displayName)
         }
     }
 
-    /**
-     * Asks the host to stream the document and, on success, sets a navigation
-     * target to the local copy. Errors surface as one-shot [ErrorEvent]s.
-     */
-    private suspend fun openRemoteEntry(documentId: String, displayName: String) {
-        val opener = remoteDocumentOpener ?: run {
-            logger.warn { "OpenRemoteEntry($documentId) ignored — no opener wired" }
-            return
-        }
+    private fun openPeer(peerId: String, displayName: String) {
         if (isNavigating) return
         isNavigating = true
-        logger.info { "Opening remote document $documentId ($displayName)" }
-        val event: ErrorEvent? = when (val result = opener.open(documentId, displayName)) {
-            is RemoteDocumentResult.Success -> {
-                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(result.localPath, 0)) }
-                null
-            }
-            is RemoteDocumentResult.NotFound -> ErrorEvent.RemoteDocumentNotFound
-            is RemoteDocumentResult.Timeout -> ErrorEvent.RemoteDocumentTimeout
-            is RemoteDocumentResult.Failure -> {
-                logger.warn { "Remote open failed for $documentId: ${result.cause::class.simpleName}" }
-                ErrorEvent.RemoteDocumentFailed
-            }
-        }
-        if (event != null) {
-            isNavigating = false
-            _state.update { it.copy(errorEvent = event) }
+        _state.update {
+            it.copy(navigationTarget = NavigationTarget.PeerCatalog(peerId, displayName))
         }
     }
 
@@ -633,31 +607,6 @@ private fun Folder.toUiModel(fileCount: Int) = FolderUiModel(
     createdAt = createdAt,
     lastFileOpenedAt = null,
 )
-
-private fun RemoteCatalog.toUiState(
-    pendingCounts: Map<String, Int>,
-    statuses: Map<String, SyncStatus>,
-): RemoteCatalogUiState {
-    val entries = recent.map { entry ->
-        RemoteEntryUiModel(
-            documentId = entry.documentId,
-            displayName = entry.displayName,
-            fileSize = entry.fileSize,
-            lastOpenedAt = entry.lastOpenedAt,
-            pendingCount = pendingCounts[entry.documentId] ?: 0,
-            isOrphanedOnHost = statuses[entry.documentId] == SyncStatus.OrphanedOnHost,
-        )
-    }
-    val countsByFolder = folderLinks.groupingBy { it.folderId }.eachCount()
-    val folders = folders.map { folder ->
-        RemoteFolderUiModel(
-            folderId = folder.folderId,
-            name = folder.name,
-            fileCount = countsByFolder[folder.folderId] ?: 0,
-        )
-    }
-    return RemoteCatalogUiState(hostName = hostName, entries = entries, folders = folders)
-}
 
 /** Platform-provided current time in milliseconds since Unix epoch. */
 internal expect fun currentTimeMillis(): Long
