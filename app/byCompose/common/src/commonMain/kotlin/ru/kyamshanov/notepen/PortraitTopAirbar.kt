@@ -99,7 +99,7 @@ fun PortraitTopAirbar(
                             ),
                     )
                     Spacer(Modifier.width(PORTRAIT_AIRBAR_DIVIDER_SPACING))
-                    ToolSettingsContent(
+                    ToolSettingsFloatingPanel(
                         toolMode = toolMode,
                         penSettings = penSettings,
                         onPenSettingsChange = onPenSettingsChange,
@@ -107,7 +107,9 @@ fun PortraitTopAirbar(
                         onMarkerSettingsChange = onMarkerSettingsChange,
                         eraserSettings = eraserSettings,
                         onEraserSettingsChange = onEraserSettingsChange,
-                        expandDownward = true,
+                        vertical = false,
+                        atTop = true,
+                        applyInsets = false,
                     )
                 }
             }

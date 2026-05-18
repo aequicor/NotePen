@@ -1,16 +1,20 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Sync
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -36,6 +40,7 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 @Suppress("unused")
 private val appLogger = KotlinLogging.logger {}
@@ -90,18 +95,21 @@ fun App(
                     val hostState = hostViewModel?.serverState?.collectAsState()?.value
                     val clientState = syncViewModel?.connectionState?.collectAsState()?.value
                     val indicator = syncIndicatorColors(hostState, clientState)
-                    FloatingActionButton(
-                        onClick = { showSyncPanel = true },
+                    GlassSurface(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
                             .padding(bottom = 88.dp, end = 16.dp),
-                        containerColor = indicator.container,
+                        shape = CircleShape,
+                        tint = indicator.container,
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Sync,
-                            contentDescription = "Синхронизация",
-                            tint = indicator.icon,
-                        )
+                        IconButton(onClick = { showSyncPanel = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = "Синхронизация",
+                                tint = indicator.icon,
+                            )
+                        }
                     }
                 }
             }

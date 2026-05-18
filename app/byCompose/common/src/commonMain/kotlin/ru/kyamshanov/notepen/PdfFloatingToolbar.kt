@@ -8,7 +8,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CleaningServices
@@ -24,13 +23,13 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /**
  * Vertical floating PDF toolbar with the Pen / Eraser / Save / Zoom controls.
@@ -69,12 +68,7 @@ fun PdfFloatingToolbar(
     totalPages: Int = 0,
     modifier: Modifier = Modifier,
 ) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(TOOLBAR_CORNER_RADIUS),
-        tonalElevation = TOOLBAR_TONAL_ELEVATION,
-        color = MaterialTheme.colorScheme.surfaceVariant,
-    ) {
+    GlassSurface(modifier = modifier) {
         Column(
             modifier = Modifier.padding(TOOLBAR_PADDING),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -259,8 +253,6 @@ fun nextToolModeOnToggle(current: ToolMode, requested: ToolMode): ToolMode = whe
 internal const val MIN_SCALE = 25
 internal const val MAX_SCALE = 800
 
-private val TOOLBAR_CORNER_RADIUS = 16.dp
-private val TOOLBAR_TONAL_ELEVATION = 3.dp
 private val TOOLBAR_PADDING = 4.dp
 private val SAVE_PROGRESS_SIZE = 24.dp
 private val SAVE_PROGRESS_STROKE = 2.dp

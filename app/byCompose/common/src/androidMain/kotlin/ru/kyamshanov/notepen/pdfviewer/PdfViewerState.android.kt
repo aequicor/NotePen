@@ -178,7 +178,13 @@ actual class PdfViewerState internal constructor(
      * и сбрасывает gesture-state в identity. Идемпотентно: повторный вызов
      * при уже identity-состоянии — no-op.
      *
-     * Pan кламп'ится по краям документа (как при single-finger скролле).
+     * Pan НЕ клампится: cursor-anchored математика [pinchGestureUpdate] уже
+     * держит точку под пальцем стабильной, и любой edge-clamp в этой точке
+     * даст видимый «прыжок» страницы (типично — к левому краю вьюпорта при
+     * первом пересечении порога `contentW > viewportW` во время off-center
+     * пинча). Edge-clamp применяется только в [panBy] для одно-пальцевого
+     * скролла, где clamp ожидаем (контент не должен «улетать» от пальца).
+     *
      * Compose батчит все три snapshot-write'а в один кадр — graphicsLayer
      * приходит в identity ровно тогда же, когда layout перемеряется на новом
      * `zoom`, поэтому визуального скачка нет.
@@ -190,7 +196,7 @@ actual class PdfViewerState internal constructor(
         val newZoom = (zoom * s).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
         val newPan = Offset(x = pan.x * s + t.x, y = pan.y * s + t.y)
         zoom = newZoom
-        pan = clamped(newPan)
+        pan = newPan
         gestureScale = 1f
         gestureTranslation = Offset.Zero
     }
@@ -201,9 +207,20 @@ actual class PdfViewerState internal constructor(
         zoomTo(target, center)
     }
 
-    /** Сдвигает [pan] на [delta] (viewport-пиксели), с клампом. */
+    /**
+     * Сдвигает [pan] на [delta] (viewport-пиксели), с клампом ТОЛЬКО по тем
+     * осям, на которых действительно было движение. Иначе чисто
+     * вертикальный скролл (delta = (0, dy)) триггерил бы X-клампинг и
+     * сдвигал страницу к левому краю на каждом тике скролла, если pan.x
+     * лежит вне окна clamp'а (например, после off-center пинч-зума).
+     */
     fun panBy(delta: Offset) {
-        pan = clamped(pan + delta)
+        val candidate = pan + delta
+        val c = clamped(candidate)
+        pan = Offset(
+            x = if (delta.x == 0f) pan.x else c.x,
+            y = if (delta.y == 0f) pan.y else c.y,
+        )
     }
 
     actual fun scrollToPage(pageIndex: Int, offsetPx: Int) {
