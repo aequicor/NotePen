@@ -105,6 +105,42 @@ internal fun greedyFit(
 }
 
 /**
+ * The inner settings controls row — dispatches to the appropriate settings row
+ * composable based on [toolMode]. Has no container (no Surface, no animation);
+ * used both by [ToolSettingsFloatingPanel] (landscape) and [PortraitTopAirbar].
+ */
+@Composable
+internal fun ToolSettingsContent(
+    toolMode: ToolMode,
+    penSettings: PenSettings,
+    onPenSettingsChange: (PenSettings) -> Unit,
+    markerSettings: MarkerSettings,
+    onMarkerSettingsChange: (MarkerSettings) -> Unit,
+    eraserSettings: EraserSettings,
+    onEraserSettingsChange: (EraserSettings) -> Unit,
+    expandDownward: Boolean,
+) {
+    when (toolMode) {
+        ToolMode.PEN -> PenSettingsRow(
+            settings = penSettings,
+            onChange = onPenSettingsChange,
+            expandDownward = expandDownward,
+        )
+        ToolMode.MARKER -> MarkerSettingsRow(
+            settings = markerSettings,
+            onChange = onMarkerSettingsChange,
+            expandDownward = expandDownward,
+        )
+        ToolMode.ERASER -> EraserSettingsRow(
+            settings = eraserSettings,
+            onChange = onEraserSettingsChange,
+            expandDownward = expandDownward,
+        )
+        ToolMode.NONE -> Unit
+    }
+}
+
+/**
  * Floating "glass" settings panel docked at the bottom-center of the screen.
  *
  * Visibility — driven by [toolMode]:
@@ -164,33 +200,17 @@ fun ToolSettingsFloatingPanel(
             ),
         ) {
             // The Surface stays mounted while AnimatedVisibility plays the exit
-            // animation; we still render the body matching the *latest non-NONE*
-            // toolMode to avoid a flicker on the way out.
-            when (toolMode) {
-                ToolMode.PEN -> PenSettingsRow(
-                    settings = penSettings,
-                    onChange = onPenSettingsChange,
-                    expandDownward = atTop,
-                )
-
-                ToolMode.MARKER -> MarkerSettingsRow(
-                    settings = markerSettings,
-                    onChange = onMarkerSettingsChange,
-                    expandDownward = atTop,
-                )
-
-                ToolMode.ERASER -> EraserSettingsRow(
-                    settings = eraserSettings,
-                    onChange = onEraserSettingsChange,
-                    expandDownward = atTop,
-                )
-
-                ToolMode.NONE -> {
-                    // Rendered briefly during exit animation; show the last meaningful
-                    // body would require remembering the previous toolMode. Empty
-                    // padding keeps the chip-shape consistent during fadeOut.
-                }
-            }
+            // animation; ToolSettingsContent renders nothing for NONE (brief fadeOut).
+            ToolSettingsContent(
+                toolMode = toolMode,
+                penSettings = penSettings,
+                onPenSettingsChange = onPenSettingsChange,
+                markerSettings = markerSettings,
+                onMarkerSettingsChange = onMarkerSettingsChange,
+                eraserSettings = eraserSettings,
+                onEraserSettingsChange = onEraserSettingsChange,
+                expandDownward = atTop,
+            )
         }
     }
 }
@@ -710,7 +730,7 @@ private val PANEL_SHADOW_ELEVATION = 4.dp
 private val PANEL_BORDER_WIDTH = 1.dp
 private val PANEL_BOTTOM_PADDING = 16.dp
 private val PANEL_HORIZONTAL_PADDING = 16.dp
-private val PANEL_VERTICAL_PADDING = 8.dp
+private val PANEL_VERTICAL_PADDING = 4.dp
 private val PANEL_INNER_GAP = 12.dp
 private val SLIDER_WIDTH = 140.dp
 private val PRESET_GAP = 8.dp

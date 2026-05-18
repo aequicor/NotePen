@@ -78,6 +78,17 @@ fun SyncScreen(
 
         Spacer(Modifier.height(8.dp))
 
+        ManualConnectCard(
+            onConnect = { host, port, code ->
+                viewModel.connect(
+                    server = DeviceInfo(id = "manual:$host:$port", name = "$host:$port", host = host, port = port),
+                    code = code,
+                )
+            },
+        )
+
+        Spacer(Modifier.height(16.dp))
+
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Устройства в сети", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.weight(1f))
@@ -100,6 +111,65 @@ fun SyncScreen(
                         viewModel.connect(server = device, code = code)
                     })
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Manual host:port pairing form. Lets the user connect to a server directly
+ * when mDNS discovery is unavailable (e.g. the host is on a VPN that captures
+ * multicast, or the two devices are on different subnets).
+ */
+@Composable
+private fun ManualConnectCard(onConnect: (host: String, port: Int, code: String) -> Unit) {
+    var host by remember { mutableStateOf("") }
+    var port by remember { mutableStateOf("") }
+    var code by remember { mutableStateOf("") }
+
+    val portInt = port.toIntOrNull()
+    val canConnect = host.isNotBlank() && portInt != null && portInt in 1..65_535 && code.length == 6
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("Подключиться по адресу", style = MaterialTheme.typography.titleSmall)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = host,
+                    onValueChange = { host = it.trim() },
+                    label = { Text("Хост") },
+                    singleLine = true,
+                    modifier = Modifier.weight(2f),
+                )
+                OutlinedTextField(
+                    value = port,
+                    onValueChange = { new -> port = new.filter { it.isDigit() }.take(5) },
+                    label = { Text("Порт") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                value = code,
+                onValueChange = { new -> code = new.filter { it.isDigit() }.take(6) },
+                label = { Text("Код сопряжения") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(8.dp))
+            Button(
+                onClick = { onConnect(host, portInt ?: return@Button, code) },
+                enabled = canConnect,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text("Подключиться")
             }
         }
     }
