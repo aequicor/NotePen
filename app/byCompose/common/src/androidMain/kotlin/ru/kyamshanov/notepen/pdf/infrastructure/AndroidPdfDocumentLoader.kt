@@ -1,32 +1,32 @@
 package ru.kyamshanov.notepen.pdf.infrastructure
 
+import android.content.Context
 import android.graphics.pdf.PdfRenderer
-import android.os.ParcelFileDescriptor
+import android.net.Uri
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocumentInfo
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
-import java.io.File
 
 /**
  * Android-реализация [PdfDocumentLoader] поверх [android.graphics.pdf.PdfRenderer].
  *
+ * Принимает как `file://`-пути, так и `content://`-URI (SAF), открывая их через [ContentResolver].
+ *
+ * @param context контекст приложения для доступа к [ContentResolver]
  * @param ioDispatcher диспетчер для блокирующего IO; не должен быть Main-диспетчером
  */
-class AndroidPdfDocumentLoader(private val ioDispatcher: CoroutineDispatcher) : PdfDocumentLoader {
+class AndroidPdfDocumentLoader(
+    private val context: Context,
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfDocumentLoader {
 
     override suspend fun load(path: String): PdfDocument = withContext(ioDispatcher) {
-        val file = File(path)
-        require(file.exists()) { "PDF file not found: $path" }
-        require(file.canRead()) { "PDF file is not readable: $path" }
-
-        val pfd = try {
-            ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        } catch (e: Exception) {
-            throw IllegalArgumentException("Failed to open PDF file descriptor: $path", e)
-        }
+        val uri = Uri.parse(path)
+        val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            ?: throw IllegalArgumentException("Cannot open file descriptor for: $path")
 
         val renderer = try {
             PdfRenderer(pfd)

@@ -78,7 +78,10 @@ fun main() {
     // On Windows, AWT DropTarget registration (via dragAndDropTarget) conflicts with
     // Skia's DirectX/ANGLE swap chain and breaks ImageBitmap rendering.
     // Switching to OpenGL avoids the conflict while keeping hardware acceleration.
-    System.setProperty("skiko.renderApi", "OPENGL")
+    // macOS doesn't support OPENGL via Skiko (Metal only), so scope this to Windows.
+    if (System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)) {
+        System.setProperty("skiko.renderApi", "OPENGL")
+    }
 
     val lifecycle = LifecycleRegistry()
     val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())

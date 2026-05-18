@@ -9,7 +9,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
@@ -58,6 +60,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
@@ -98,12 +101,6 @@ private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 /** Toolbar `−` button zoom factor (matches Ctrl+wheel zoom-out). */
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / TOOLBAR_ZOOM_STEP_IN
 
-/**
- * Top offset for the tool settings panel when it is anchored at the top of the
- * screen (Android). Keeps it clear of [PageIndicatorAirbar] which sits at
- * TopCenter with its own ~8dp padding.
- */
-private val TOOL_SETTINGS_TOP_OFFSET = 56.dp
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -130,6 +127,7 @@ fun DetailsContent(
 ) {
     val localWindowInfo = LocalWindowInfo.current
     val windowSizeInPx = localWindowInfo.containerSize
+    val isLandscape = windowSizeInPx.width > windowSizeInPx.height
     val model by component.model.subscribeAsState()
     val filePath = remember(model.title) { model.title }
     val documentId = remember(filePath) { documentIdFromFilePath(filePath) }
@@ -182,6 +180,14 @@ fun DetailsContent(
     val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
     val hasAnnotations by remember {
         derivedStateOf { drawingStates.values.any { it.currentPaths.isNotEmpty() } }
+    }
+    val annotatedPageIndices by remember {
+        derivedStateOf {
+            drawingStates.asSequence()
+                .filter { (_, state) -> state.currentPaths.isNotEmpty() }
+                .map { (pageIndex, _) -> pageIndex }
+                .toSet()
+        }
     }
     // Единственный источник правды по позиции и зуму на обеих платформах.
     // Платформенные различия живут внутри expect/actual [PdfPagesViewer] +
@@ -314,6 +320,28 @@ fun DetailsContent(
     }
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    val onBackWithSave: () -> Unit = {
+        coroutineScope.launch {
+            val annotations = drawingStates.mapValues { (_, state) ->
+                state.currentPaths.toList()
+            }
+            annotationRepository.save(
+                pdfPath = filePath,
+                annotations = annotations,
+                scale = currentScalePercent,
+                pen = penSettings,
+                marker = markerSettings,
+                eraser = eraserSettings,
+                currentPage = firstVisiblePage,
+                currentPageOffset = currentPageOffsetPx,
+            ).onFailure { e ->
+                logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
+            }
+            component.saveLastPageIndex(firstVisiblePage)
+            component.onBack()
+        }
+    }
 
     Box(
         modifier
@@ -462,174 +490,237 @@ fun DetailsContent(
                 onPageClick = { pageIndex ->
                     pdfViewerState.scrollToPage(pageIndex, 0)
                 },
+                annotatedPageIndices = annotatedPageIndices,
             )
         }
 
-        val toolbarAlignment = if (ToolMenusAtTop) Alignment.TopEnd else Alignment.BottomStart
-        val toolbarSlideSign = if (ToolMenusAtTop) 1 else -1
-        AnimatedVisibility(
-            visible = true,
-            enter = slideInHorizontally { toolbarSlideSign * it } + fadeIn(),
-            exit = slideOutHorizontally { toolbarSlideSign * it } + fadeOut(),
-            modifier = Modifier
-                .align(toolbarAlignment)
-                .padding(16.dp),
-        ) {
-            PdfFloatingToolbar(
+        val onSaveCallback: () -> Unit = {
+            isSaving = true
+            coroutineScope.launch {
+                // Remote save (через peerClient) имеет смысл только если этот
+                // девайс реально подключён как клиент к чужому host-у.
+                // На host-инстансе (PC) peerClient тоже не null, но не
+                // подключён ни к кому — в этом случае сохраняем локально.
+                val message = if (peerClient != null && clientPairingState is PairingState.Connected) {
+                    val requestId = "save-${Random.nextLong().toString(16)}"
+                    logger.info { "[save-diag tablet] sending SaveRequest id=$requestId doc=$documentId" }
+                    peerClient.send(
+                        NetworkMessage.SaveRequest(
+                            requestId = requestId,
+                            documentId = documentId,
+                        ),
+                    )
+                    logger.info { "[save-diag tablet] SaveRequest id=$requestId dispatched, awaiting SaveResult (5s)" }
+                    val reply = withTimeoutOrNull(5.seconds) {
+                        peerClient.incomingMessages
+                            .filterIsInstance<NetworkMessage.SaveResult>()
+                            .filter { it.requestId == requestId }
+                            .first()
+                    }
+                    logger.info { "[save-diag tablet] await done id=$requestId reply=$reply" }
+                    when {
+                        reply == null -> "Нет ответа от ПК"
+                        reply.success -> "Сохранено на ПК"
+                        else -> "Ошибка на ПК: ${reply.errorMessage.orEmpty()}"
+                    }
+                } else {
+                    val annotations = drawingStates.mapValues { (_, state) ->
+                        state.currentPaths.toList()
+                    }
+                    val result = annotationRepository.save(
+                        pdfPath = filePath,
+                        annotations = annotations,
+                        scale = currentScalePercent,
+                        pen = penSettings,
+                        marker = markerSettings,
+                        eraser = eraserSettings,
+                        currentPage = firstVisiblePage,
+                        currentPageOffset = currentPageOffsetPx,
+                    )
+                    if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
+                }
+                isSaving = false
+                snackbarHostState.showSnackbar(message)
+            }
+        }
+
+        val onExportCallback: () -> Unit = {
+            isExporting = true
+            coroutineScope.launch {
+                val annotations = drawingStates.mapValues { (_, state) ->
+                    state.currentPaths.toList()
+                }
+                val outputPath = filePath.removeSuffix(".pdf") + "_annotated.pdf"
+                val result = pdfExporter.export(
+                    sourcePdfPath = filePath,
+                    annotations = annotations,
+                    outputPath = outputPath,
+                )
+                isExporting = false
+                val message = if (result.isSuccess) {
+                    "Экспорт завершён: $outputPath"
+                } else {
+                    "Ошибка экспорта"
+                }
+                snackbarHostState.showSnackbar(message)
+            }
+        }
+
+        val onZoomInCallback: () -> Unit = {
+            pdfViewerState.zoomBy(
+                TOOLBAR_ZOOM_STEP_IN,
+                Offset(windowSizeInPx.width / 2f, windowSizeInPx.height / 2f),
+            )
+        }
+
+        val onZoomOutCallback: () -> Unit = {
+            pdfViewerState.zoomBy(
+                TOOLBAR_ZOOM_STEP_OUT,
+                Offset(windowSizeInPx.width / 2f, windowSizeInPx.height / 2f),
+            )
+        }
+
+        val onMagnifierToggle: () -> Unit = {
+            if (magnifierState.enabled) {
+                magnifierState.disable()
+            } else {
+                magnifierState.enable(
+                    onPage = firstVisiblePage,
+                    viewportSize = Size(
+                        windowSizeInPx.width.toFloat(),
+                        windowSizeInPx.height.toFloat(),
+                    ),
+                )
+            }
+        }
+
+        val onPencilModeChangeCallback: (Boolean) -> Unit = { enabled ->
+            pencilModeEnabled = enabled
+            // Ручной toggle (в т.ч. выкл) подавляет дальнейшее
+            // авто-включение по stylus-событиям в этой сессии —
+            // иначе off сразу же отменялся бы.
+            pencilModeAutoApplied = true
+        }
+
+        if (isLandscape) {
+            // Landscape: vertical left rail toolbar with page counter.
+            AnimatedVisibility(
+                visible = true,
+                enter = slideInHorizontally { -it } + fadeIn(),
+                exit = slideOutHorizontally { -it } + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .padding(16.dp),
+            ) {
+                PdfFloatingToolbar(
+                    toolMode = toolMode,
+                    onToolModeChange = { toolMode = it },
+                    hasAnnotations = hasAnnotations,
+                    isSaving = isSaving,
+                    isExporting = isExporting,
+                    showThumbnails = showThumbnails,
+                    onToggleThumbnails = { showThumbnails = !showThumbnails },
+                    showPencilModeButton = SupportsPencilMode,
+                    pencilModeEnabled = pencilModeEnabled,
+                    onPencilModeChange = onPencilModeChangeCallback,
+                    magnifierEnabled = magnifierState.enabled,
+                    onMagnifierToggle = onMagnifierToggle,
+                    onSave = onSaveCallback,
+                    onExport = onExportCallback,
+                    scale = currentScalePercent,
+                    onZoomIn = onZoomInCallback,
+                    onZoomOut = onZoomOutCallback,
+                    currentPage = firstVisiblePage + 1,
+                    totalPages = pages.size,
+                )
+            }
+
+            // Landscape: compact settings strip at the top.
+            val panelMaxWidth = with(LocalDensity.current) { windowSizeInPx.width.toDp() - 32.dp }
+            val settingsAlignment = if (ToolMenusAtTop) Alignment.TopCenter else Alignment.BottomCenter
+            ToolSettingsFloatingPanel(
                 toolMode = toolMode,
-                onToolModeChange = { toolMode = it },
-                hasAnnotations = hasAnnotations,
-                isSaving = isSaving,
-                isExporting = isExporting,
-                showThumbnails = showThumbnails,
-                onToggleThumbnails = { showThumbnails = !showThumbnails },
-                showPencilModeButton = SupportsPencilMode,
-                pencilModeEnabled = pencilModeEnabled,
-                onPencilModeChange = { enabled ->
-                    pencilModeEnabled = enabled
-                    // Ручной toggle (в т.ч. выкл) подавляет дальнейшее
-                    // авто-включение по stylus-событиям в этой сессии —
-                    // иначе off сразу же отменялся бы.
-                    pencilModeAutoApplied = true
-                },
-                magnifierEnabled = magnifierState.enabled,
-                onMagnifierToggle = {
-                    if (magnifierState.enabled) {
-                        magnifierState.disable()
-                    } else {
-                        magnifierState.enable(
-                            onPage = firstVisiblePage,
-                            viewportSize = Size(
-                                windowSizeInPx.width.toFloat(),
-                                windowSizeInPx.height.toFloat(),
-                            ),
-                        )
-                    }
-                },
-                onSave = {
-                    isSaving = true
-                    coroutineScope.launch {
-                        // Remote save (через peerClient) имеет смысл только если этот
-                        // девайс реально подключён как клиент к чужому host-у.
-                        // На host-инстансе (PC) peerClient тоже не null, но не
-                        // подключён ни к кому — в этом случае сохраняем локально.
-                        val message = if (peerClient != null && clientPairingState is PairingState.Connected) {
-                            val requestId = "save-${Random.nextLong().toString(16)}"
-                            logger.info { "[save-diag tablet] sending SaveRequest id=$requestId doc=$documentId" }
-                            peerClient.send(
-                                NetworkMessage.SaveRequest(
-                                    requestId = requestId,
-                                    documentId = documentId,
-                                ),
-                            )
-                            logger.info { "[save-diag tablet] SaveRequest id=$requestId dispatched, awaiting SaveResult (5s)" }
-                            val reply = withTimeoutOrNull(5.seconds) {
-                                peerClient.incomingMessages
-                                    .filterIsInstance<NetworkMessage.SaveResult>()
-                                    .filter { it.requestId == requestId }
-                                    .first()
-                            }
-                            logger.info { "[save-diag tablet] await done id=$requestId reply=$reply" }
-                            when {
-                                reply == null -> "Нет ответа от ПК"
-                                reply.success -> "Сохранено на ПК"
-                                else -> "Ошибка на ПК: ${reply.errorMessage.orEmpty()}"
-                            }
-                        } else {
-                            val annotations = drawingStates.mapValues { (_, state) ->
-                                state.currentPaths.toList()
-                            }
-                            val result = annotationRepository.save(
-                                pdfPath = filePath,
-                                annotations = annotations,
-                                scale = currentScalePercent,
-                                pen = penSettings,
-                                marker = markerSettings,
-                                eraser = eraserSettings,
-                                currentPage = firstVisiblePage,
-                                currentPageOffset = currentPageOffsetPx,
-                            )
-                            if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
-                        }
-                        isSaving = false
-                        snackbarHostState.showSnackbar(message)
-                    }
-                },
-                onExport = {
-                    isExporting = true
-                    coroutineScope.launch {
-                        val annotations = drawingStates.mapValues { (_, state) ->
-                            state.currentPaths.toList()
-                        }
-                        val outputPath = filePath.removeSuffix(".pdf") + "_annotated.pdf"
-                        val result = pdfExporter.export(
-                            sourcePdfPath = filePath,
-                            annotations = annotations,
-                            outputPath = outputPath,
-                        )
-                        isExporting = false
-                        val message = if (result.isSuccess) {
-                            "Экспорт завершён: $outputPath"
-                        } else {
-                            "Ошибка экспорта"
-                        }
-                        snackbarHostState.showSnackbar(message)
-                    }
-                },
-                scale = currentScalePercent,
-                onZoomIn = {
-                    val centre = Offset(
-                        windowSizeInPx.width / 2f,
-                        windowSizeInPx.height / 2f,
-                    )
-                    pdfViewerState.zoomBy(TOOLBAR_ZOOM_STEP_IN, centre)
-                },
-                onZoomOut = {
-                    val centre = Offset(
-                        windowSizeInPx.width / 2f,
-                        windowSizeInPx.height / 2f,
-                    )
-                    pdfViewerState.zoomBy(TOOLBAR_ZOOM_STEP_OUT, centre)
-                },
+                penSettings = penSettings,
+                onPenSettingsChange = { penSettings = it },
+                markerSettings = markerSettings,
+                onMarkerSettingsChange = { markerSettings = it },
+                eraserSettings = eraserSettings,
+                onEraserSettingsChange = { eraserSettings = it },
+                atTop = ToolMenusAtTop,
+                modifier = Modifier
+                    .align(settingsAlignment)
+                    .widthIn(max = panelMaxWidth),
             )
-        }
 
-        val panelMaxWidth = with(LocalDensity.current) { windowSizeInPx.width.toDp() - 32.dp }
-        val settingsAlignment = if (ToolMenusAtTop) Alignment.TopCenter else Alignment.BottomCenter
-        val settingsTopPadding = if (ToolMenusAtTop) TOOL_SETTINGS_TOP_OFFSET else 0.dp
-        ToolSettingsFloatingPanel(
-            toolMode = toolMode,
-            penSettings = penSettings,
-            onPenSettingsChange = { penSettings = it },
-            markerSettings = markerSettings,
-            onMarkerSettingsChange = { markerSettings = it },
-            eraserSettings = eraserSettings,
-            onEraserSettingsChange = { eraserSettings = it },
-            atTop = ToolMenusAtTop,
-            modifier = Modifier
-                .align(settingsAlignment)
-                .padding(top = settingsTopPadding)
-                .widthIn(max = panelMaxWidth),
-        )
+            // Landscape: floating back button at the top-start corner.
+            IconButton(
+                onClick = onBackWithSave,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(16.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.surface, CircleShape),
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = BACK_CONTENT_DESCRIPTION,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+        } else {
+            // Portrait: full-width top bar + settings strip below it.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .fillMaxWidth(),
+            ) {
+                PortraitTopBar(
+                    currentPage = firstVisiblePage + 1,
+                    totalPages = pages.size,
+                    toolMode = toolMode,
+                    onToolModeChange = { toolMode = it },
+                    hasAnnotations = hasAnnotations,
+                    isSaving = isSaving,
+                    isExporting = isExporting,
+                    onSave = onSaveCallback,
+                    onExport = onExportCallback,
+                    scale = currentScalePercent,
+                    onZoomIn = onZoomInCallback,
+                    onZoomOut = onZoomOutCallback,
+                    showThumbnails = showThumbnails,
+                    onToggleThumbnails = { showThumbnails = !showThumbnails },
+                    showPencilModeButton = SupportsPencilMode,
+                    pencilModeEnabled = pencilModeEnabled,
+                    onPencilModeChange = onPencilModeChangeCallback,
+                    magnifierEnabled = magnifierState.enabled,
+                    onMagnifierToggle = onMagnifierToggle,
+                    onBack = onBackWithSave,
+                )
+                AnimatedVisibility(
+                    visible = toolMode != ToolMode.NONE,
+                    enter = slideInVertically { -it } + fadeIn(),
+                    exit = slideOutVertically { -it } + fadeOut(),
+                ) {
+                    Surface(color = MaterialTheme.colorScheme.secondaryContainer) {
+                        ToolSettingsContent(
+                            toolMode = toolMode,
+                            penSettings = penSettings,
+                            onPenSettingsChange = { penSettings = it },
+                            markerSettings = markerSettings,
+                            onMarkerSettingsChange = { markerSettings = it },
+                            eraserSettings = eraserSettings,
+                            onEraserSettingsChange = { eraserSettings = it },
+                            expandDownward = true,
+                        )
+                    }
+                }
+            }
+        }
 
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier.align(Alignment.BottomCenter),
         )
-
-        AnimatedVisibility(
-            visible = pages.isNotEmpty(),
-            enter = slideInVertically { -it } + fadeIn(),
-            exit = slideOutVertically { -it } + fadeOut(),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 8.dp),
-        ) {
-            PageIndicatorAirbar(
-                currentPage = firstVisiblePage + 1,
-                totalPages = pages.size,
-            )
-        }
 
         if (showLostConnectionDialog) {
             AlertDialog(
@@ -661,41 +752,6 @@ fun DetailsContent(
                 dismissButton = {
                     TextButton(onClick = { showLostConnectionDialog = false }) { Text("Отмена") }
                 },
-            )
-        }
-
-        IconButton(
-            onClick = {
-                coroutineScope.launch {
-                    val annotations = drawingStates.mapValues { (_, state) ->
-                        state.currentPaths.toList()
-                    }
-                    annotationRepository.save(
-                        pdfPath = filePath,
-                        annotations = annotations,
-                        scale = currentScalePercent,
-                        pen = penSettings,
-                        marker = markerSettings,
-                        eraser = eraserSettings,
-                        currentPage = firstVisiblePage,
-                        currentPageOffset = currentPageOffsetPx,
-                    ).onFailure { e ->
-                        logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
-                    }
-                    component.saveLastPageIndex(firstVisiblePage)
-                    component.onBack()
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(16.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surface, CircleShape),
-        ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = BACK_CONTENT_DESCRIPTION,
-                tint = MaterialTheme.colorScheme.onSurface,
             )
         }
 

@@ -1,14 +1,17 @@
 package ru.kyamshanov.notepen
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.tablet.AndroidTabletInputController
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import com.arkivanov.decompose.defaultComponentContext
@@ -56,7 +59,17 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val context = applicationContext
-        val pdfDocumentLoader = AndroidPdfDocumentLoader(Dispatchers.IO)
+
+        val filePicker = FilePicker()
+        val filePickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            filePicker.onResult(uri)
+        }
+        filePicker.init(filePickerLauncher)
+
+        val pdfDocumentLoader = AndroidPdfDocumentLoader(context, Dispatchers.IO)
         val pdfPageRenderer = AndroidPdfPageRenderer(Dispatchers.IO)
         val historyRepo = FileHistoryRepositoryAndroid(context)
         val folderRepo = FolderRepositoryAndroid(context)
@@ -152,7 +165,7 @@ class MainActivity : ComponentActivity() {
                     thumbnailRepository = thumbnailRepo,
                     thumbnailGenerator = thumbnailGenerator,
                     onOpenEditor = onOpenEditor,
-                    onOpenFilePicker = { null },
+                    onOpenFilePicker = { filePicker.pickPdfFile() },
                     remoteCatalogFlow = remoteCatalogCache.catalog,
                     remoteDocumentOpener = remoteDocumentOpener,
                     pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),

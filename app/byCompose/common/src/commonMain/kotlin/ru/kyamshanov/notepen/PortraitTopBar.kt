@@ -1,15 +1,15 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
@@ -29,25 +29,23 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 /**
- * Vertical floating PDF toolbar with the Pen / Eraser / Save / Zoom controls.
+ * Full-width top bar for portrait mode.
  *
- * Tool-settings (color / thickness / alpha for pen, shape / size for eraser)
- * are now rendered as a separate [ToolSettingsFloatingPanel] docked at
- * BottomCenter — see Step 6 rework. This composable owns only the icon column.
+ * Contains, left to right: back button, page counter, spacer, tool toggle
+ * buttons (Pen / Marker / Eraser / PencilMode / Magnifier / Thumbnails),
+ * Save, Export, and Zoom controls. Replaces the separate floating toolbar and
+ * page-indicator airbar in portrait orientation.
  *
- * Toggle semantics (AC-2 / AC-3) live in [nextToolModeOnToggle] — pure helper
- * unit-tested in `PdfFloatingToolbarLogicTest`. Re-tap on the active tool
- * deactivates it (returns to [ToolMode.NONE]); tap on the inactive tool
- * switches to it (mutual exclusion).
- *
- * Verifies AC-1, AC-2, AC-3, AC-4, AC-5, AC-18.
+ * Tool-settings are NOT shown here; when a tool is selected, the caller renders
+ * a settings strip directly below this bar.
  */
 @Composable
-fun PdfFloatingToolbar(
+fun PortraitTopBar(
+    currentPage: Int,
+    totalPages: Int,
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
     hasAnnotations: Boolean,
@@ -65,56 +63,57 @@ fun PdfFloatingToolbar(
     onPencilModeChange: (Boolean) -> Unit,
     magnifierEnabled: Boolean,
     onMagnifierToggle: () -> Unit,
-    currentPage: Int = 0,
-    totalPages: Int = 0,
+    onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(TOOLBAR_CORNER_RADIUS),
-        tonalElevation = TOOLBAR_TONAL_ELEVATION,
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.statusBars),
         color = MaterialTheme.colorScheme.surfaceVariant,
+        tonalElevation = PORTRAIT_BAR_TONAL_ELEVATION,
     ) {
-        Column(
-            modifier = Modifier.padding(TOOLBAR_PADDING),
-            horizontalAlignment = Alignment.CenterHorizontally,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = PORTRAIT_BAR_PADDING_H),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (currentPage > 0) {
-                Text(
-                    text = "$currentPage\n/\n$totalPages",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(vertical = 4.dp),
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = "Назад",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+
+            Text(
+                text = "$currentPage / $totalPages",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = PORTRAIT_BAR_PAGE_PADDING),
+            )
+
+            Spacer(Modifier.weight(1f))
+
             ToolToggleButton(
                 icon = Icons.Default.Edit,
                 contentDescription = "Перо",
                 selected = toolMode == ToolMode.PEN,
-                onClick = {
-                    onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN))
-                },
+                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN)) },
             )
-
             ToolToggleButton(
                 icon = Icons.Default.Brush,
                 contentDescription = "Маркер",
                 selected = toolMode == ToolMode.MARKER,
-                onClick = {
-                    onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER))
-                },
+                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER)) },
             )
-
             ToolToggleButton(
                 icon = Icons.Default.CleaningServices,
                 contentDescription = "Ластик",
                 selected = toolMode == ToolMode.ERASER,
-                onClick = {
-                    onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER))
-                },
+                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER)) },
             )
-
             if (showPencilModeButton) {
                 ToolToggleButton(
                     icon = Icons.Default.Gesture,
@@ -123,14 +122,12 @@ fun PdfFloatingToolbar(
                     onClick = { onPencilModeChange(!pencilModeEnabled) },
                 )
             }
-
             ToolToggleButton(
                 icon = Icons.Default.Search,
                 contentDescription = "Лупа для письма",
                 selected = magnifierEnabled,
                 onClick = onMagnifierToggle,
             )
-
             ToolToggleButton(
                 icon = Icons.Default.GridView,
                 contentDescription = "Миниатюры страниц",
@@ -144,8 +141,8 @@ fun PdfFloatingToolbar(
             ) {
                 if (isSaving) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(SAVE_PROGRESS_SIZE),
-                        strokeWidth = SAVE_PROGRESS_STROKE,
+                        modifier = Modifier.size(PORTRAIT_BAR_PROGRESS_SIZE),
+                        strokeWidth = PORTRAIT_BAR_PROGRESS_STROKE,
                         color = MaterialTheme.colorScheme.primary,
                     )
                 } else {
@@ -155,7 +152,7 @@ fun PdfFloatingToolbar(
                         tint = if (hasAnnotations) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SAVE_DISABLED_ALPHA)
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = PORTRAIT_BAR_DISABLED_ALPHA)
                         },
                     )
                 }
@@ -167,8 +164,8 @@ fun PdfFloatingToolbar(
             ) {
                 if (isExporting) {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(SAVE_PROGRESS_SIZE),
-                        strokeWidth = SAVE_PROGRESS_STROKE,
+                        modifier = Modifier.size(PORTRAIT_BAR_PROGRESS_SIZE),
+                        strokeWidth = PORTRAIT_BAR_PROGRESS_STROKE,
                         color = MaterialTheme.colorScheme.primary,
                     )
                 } else {
@@ -178,16 +175,13 @@ fun PdfFloatingToolbar(
                         tint = if (hasAnnotations) {
                             MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SAVE_DISABLED_ALPHA)
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = PORTRAIT_BAR_DISABLED_ALPHA)
                         },
                     )
                 }
             }
 
-            IconButton(
-                onClick = onZoomIn,
-                enabled = scale < MAX_SCALE,
-            ) {
+            IconButton(onClick = onZoomIn, enabled = scale < MAX_SCALE) {
                 Icon(
                     imageVector = Icons.Default.ZoomIn,
                     contentDescription = "Увеличить",
@@ -201,10 +195,7 @@ fun PdfFloatingToolbar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            IconButton(
-                onClick = onZoomOut,
-                enabled = scale > MIN_SCALE,
-            ) {
+            IconButton(onClick = onZoomOut, enabled = scale > MIN_SCALE) {
                 Icon(
                     imageVector = Icons.Default.ZoomOut,
                     contentDescription = "Уменьшить",
@@ -215,53 +206,9 @@ fun PdfFloatingToolbar(
     }
 }
 
-@Composable
-internal fun ToolToggleButton(
-    icon: ImageVector,
-    contentDescription: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier.semantics {
-            role = Role.Button
-            this.selected = selected
-        },
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = if (selected) "$contentDescription (активен)" else contentDescription,
-            tint = if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-        )
-    }
-}
-
-/**
- * Pure state-mapping helper for [PdfFloatingToolbar] tool buttons:
- *  - tap on the active tool → return to [ToolMode.NONE] (toggle off);
- *  - tap on the inactive tool → switch to it (mutual exclusion);
- *  - explicit [ToolMode.NONE] request → always [ToolMode.NONE].
- *
- * Extracted so toggle semantics stay testable without compose-ui-test infra.
- * Verifies AC-2 / AC-3 toggle / mutual-exclusion semantics.
- */
-fun nextToolModeOnToggle(current: ToolMode, requested: ToolMode): ToolMode = when {
-    requested == ToolMode.NONE -> ToolMode.NONE
-    current == requested -> ToolMode.NONE
-    else -> requested
-}
-
-internal const val MIN_SCALE = 25
-internal const val MAX_SCALE = 800
-
-private val TOOLBAR_CORNER_RADIUS = 16.dp
-private val TOOLBAR_TONAL_ELEVATION = 3.dp
-private val TOOLBAR_PADDING = 4.dp
-private val SAVE_PROGRESS_SIZE = 24.dp
-private val SAVE_PROGRESS_STROKE = 2.dp
-private const val SAVE_DISABLED_ALPHA = 0.38f
+private val PORTRAIT_BAR_TONAL_ELEVATION = 3.dp
+private val PORTRAIT_BAR_PADDING_H = 4.dp
+private val PORTRAIT_BAR_PAGE_PADDING = 8.dp
+private val PORTRAIT_BAR_PROGRESS_SIZE = 24.dp
+private val PORTRAIT_BAR_PROGRESS_STROKE = 2.dp
+private const val PORTRAIT_BAR_DISABLED_ALPHA = 0.38f
