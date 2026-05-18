@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -422,13 +423,11 @@ fun DetailsContent(
             pdfDocument = pdfDocument,
             pages = pages,
             renderer = renderer,
-            // graphicsLayer вместо padding: только смещение в placement-шаге,
-            // без remeasure. padding пересоставлял раскладку PdfPagesViewer
-            // каждый кадр анимации — из-за чего видимая страница «прыгала»
-            // в момент закрытия сайдбара.
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer { translationX = portraitSidebarOffset.toPx() },
+            // PDF в портрете не сдвигается при открытии сайдбара миниатюр —
+            // сайдбар оверлеит его слева (так же, как в landscape). Сдвиг
+            // через translationX/padding делал бы правый край PDF за экраном
+            // или дёргал бы тяжёлый SubcomposeLayout каждый кадр анимации.
+            modifier = Modifier.fillMaxSize(),
         ) {
             val bm = bitmap
             // Размер страницы уже задан Constraints.fixed(w,h) из
@@ -535,8 +534,15 @@ fun DetailsContent(
                         favoritePageIndices.add(pageIndex)
                     }
                 },
-                pagePaths = { pageIndex ->
-                    drawingStates[pageIndex]?.currentPaths?.toList() ?: emptyList()
+                // remember + .currentPaths без .toList(): возвращаем сам
+                // SnapshotStateList (он стабилен по identity для одной
+                // страницы), чтобы ThumbnailItem был skippable в strong-
+                // skipping и не рекомпозился при каждой смене firstVisiblePage
+                // во время скролла PDF.
+                pagePaths = remember(drawingStates) {
+                    { pageIndex ->
+                        drawingStates[pageIndex]?.currentPaths ?: emptyList()
+                    }
                 },
             )
         }
@@ -668,7 +674,7 @@ fun DetailsContent(
                     .windowInsetsPadding(WindowInsets.systemBars)
                     .padding(start = 16.dp + sidebarOffset, top = 16.dp, end = 16.dp, bottom = 16.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.Bottom) {
                     PdfFloatingToolbar(
                         toolMode = toolMode,
                         onToolModeChange = { toolMode = it },
@@ -688,9 +694,7 @@ fun DetailsContent(
                         onZoomIn = onZoomInCallback,
                         onZoomOut = onZoomOutCallback,
                     )
-                    // Без Spacer: settings-рейл прижимается прямо к тулбару.
-                    // Раньше 8.dp + внутренние padding'и обеих GlassSurface
-                    // давали визуально лишний зазор между панелями.
+                    Spacer(Modifier.width(12.dp))
                     ToolSettingsFloatingPanel(
                         toolMode = toolMode,
                         penSettings = penSettings,
@@ -748,7 +752,13 @@ fun DetailsContent(
                     .padding(start = 16.dp + sidebarOffset, top = 16.dp, end = 16.dp, bottom = 16.dp),
                 shape = CircleShape,
             ) {
-                IconButton(onClick = onBackWithSave) {
+                // Симметрично портрету: пока сайдбар миниатюр раскрыт,
+                // back-кнопка сначала схлопывает его, и только повторным
+                // нажатием уходит со страницы.
+                IconButton(onClick = {
+                    if (showThumbnails) showThumbnails = false
+                    else onBackWithSave()
+                }) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = BACK_CONTENT_DESCRIPTION,
@@ -758,16 +768,15 @@ fun DetailsContent(
             }
         } else {
             // Portrait: full-width top bar + settings strip below it.
-            // translationX вместо padding по той же причине, что и у
-            // PdfPagesViewer — чтобы не пересобирать раскладку каждый кадр.
-            // Правый край топ-бара уезжает за экран на величину сдвига,
-            // но в портрете там только страница «N/M» и зум — критичные
-            // кнопки остаются в кадре.
+            // При открытии сайдбара миниатюр тулбар реально сужается
+            // (start padding на ширину сайдбара) — а не уезжает правым
+            // краем за экран. Полоса лёгкая (несколько кнопок), remeasure
+            // каждый кадр анимации не ощутим.
             Column(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .fillMaxWidth()
-                    .graphicsLayer { translationX = portraitSidebarOffset.toPx() }
+                    .padding(start = portraitSidebarOffset)
                     .onSizeChanged { size ->
                         portraitTopChromeHeightDp = with(density) { size.height.toDp() }
                     },

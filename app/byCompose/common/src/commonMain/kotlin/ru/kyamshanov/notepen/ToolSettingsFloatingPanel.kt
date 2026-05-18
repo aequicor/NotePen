@@ -114,8 +114,8 @@ internal fun greedyFit(
  * Floating "glass" settings panel for the active tool.
  *
  * Always renders a [CollapsibleSettingsRail] inside a [GlassSurface]:
- *  - `vertical = true`  → vertical rail (landscape left side); expansion extends
- *    DOWN along the rail axis and the expanded slot uses a vertical slider /
+ *  - `vertical = true`  → vertical rail (landscape left side); icons sit at
+ *    the bottom and expansion extends UPWARD with a vertical slider /
  *    vertical color column.
  *  - `vertical = false` → horizontal rail (portrait, centered); expansion
  *    extends to the RIGHT along the rail axis with a horizontal slider /
@@ -336,12 +336,15 @@ private fun CollapsibleSettingsRail(
 
     when (orientation) {
         RailOrientation.VERTICAL -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            iconStrip()
+            // Expansion panel sits ABOVE the icon strip and grows upward:
+            // the rail is bottom-aligned to the tool toolbar in landscape, so
+            // expanding upward keeps the icons anchored to that baseline.
             AnimatedVisibility(
                 visible = expandedIndex != null,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
+                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
+                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
             ) { expansionContent() }
+            iconStrip()
         }
         RailOrientation.HORIZONTAL -> Row(verticalAlignment = Alignment.CenterVertically) {
             iconStrip()
