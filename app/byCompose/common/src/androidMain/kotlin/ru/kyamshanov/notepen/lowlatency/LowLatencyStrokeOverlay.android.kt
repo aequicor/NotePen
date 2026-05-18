@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import ru.kyamshanov.notepen.PdfDrawingState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 
 /**
  * Width modulation factor applied per tilt unit, mirroring the gain used in
@@ -45,6 +46,7 @@ private data class StrokeSegment(
     val curr: DrawingPoint,
     val colorArgb: Int,
     val widthPx: Float,
+    val extent: PageExtent,
 )
 
 @Composable
@@ -147,8 +149,15 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
                 }
                 return@collect
             }
-            val widthPx = drawingState.liveStrokeWidth.value *
-                (surfaceViewHolder.value?.width ?: 0)
+            val ext = drawingState.extent.value
+            val slotW = surfaceViewHolder.value?.width ?: 0
+            // liveStrokeWidth нормализован относительно ширины PDF, не слота.
+            // pdfW = slotW / extent.width, поэтому widthPx = liveW * pdfW.
+            val widthPx = if (ext.width > 0f) {
+                drawingState.liveStrokeWidth.value * slotW / ext.width
+            } else {
+                0f
+            }
             val colorArgb = drawingState.liveColorArgb.value.toInt()
             // Detect a new stroke that started while the collector was busy
             // (e.g. paused in `delay(HANDOFF_HOLD_MS)` after a previous commit,
@@ -173,7 +182,13 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
                     null
                 }
                 renderer.renderFrontBufferedLayer(
-                    StrokeSegment(prev = prev, curr = curr, colorArgb = colorArgb, widthPx = widthPx),
+                    StrokeSegment(
+                        prev = prev,
+                        curr = curr,
+                        colorArgb = colorArgb,
+                        widthPx = widthPx,
+                        extent = ext,
+                    ),
                 )
             }
         }
@@ -196,13 +211,18 @@ private fun drawSegment(
     paint.strokeWidth = segment.widthPx * segment.curr.pressure * tiltBoost
     val prev = segment.prev
     val curr = segment.curr
-    val x = curr.x * bufferWidth
-    val y = curr.y * bufferHeight
+    val ext = segment.extent
+    val pdfW = if (ext.width > 0f) bufferWidth / ext.width else bufferWidth.toFloat()
+    val pdfH = if (ext.height > 0f) bufferHeight / ext.height else bufferHeight.toFloat()
+    val offX = -ext.left
+    val offY = -ext.top
+    val x = (curr.x + offX) * pdfW
+    val y = (curr.y + offY) * pdfH
     if (prev == null) {
         // Single-sample "dot" at stroke start — draw a tiny line to itself so
         // the round cap renders a visible point.
         canvas.drawLine(x, y, x, y, paint)
     } else {
-        canvas.drawLine(prev.x * bufferWidth, prev.y * bufferHeight, x, y, paint)
+        canvas.drawLine((prev.x + offX) * pdfW, (prev.y + offY) * pdfH, x, y, paint)
     }
 }

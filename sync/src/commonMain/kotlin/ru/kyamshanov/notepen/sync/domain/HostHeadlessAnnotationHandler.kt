@@ -89,6 +89,7 @@ class HostHeadlessAnnotationHandler(
             eraser = state.eraser,
             currentPage = state.currentPage,
             currentPageOffset = state.currentPageOffset,
+            pageExtents = state.pageExtents,
         )
         logger.info {
             "Headless save id=${req.requestId} doc=$documentId success=${result.isSuccess}"

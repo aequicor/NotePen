@@ -36,8 +36,12 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.lowlatency.LowLatencyStrokeOverlay
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
 import ru.kyamshanov.notepen.magnifier.MagnifierState
@@ -113,6 +117,19 @@ fun DrawablePdfPage(
     penSettings: PenSettings,
     markerSettings: MarkerSettings,
     eraserSettings: EraserSettings,
+    /**
+     * Ширина PDF-битмапа в Dp (без учёта extent-полей). Берётся вызывающим
+     * из [ru.kyamshanov.notepen.pdfviewer.PdfPageScope.pdfWidth] — это значение
+     * известно уже на layout-pass'е, в отличие от `canvasSize`, которое
+     * приходит через `onSizeChanged` на один кадр позже. Использование
+     * этого параметра вместо вычисления через canvasSize устраняет
+     * one-frame-jitter при росте extent во время штриха.
+     */
+    pdfWidth: androidx.compose.ui.unit.Dp,
+    /** Высота PDF-битмапа в Dp; см. [pdfWidth]. */
+    pdfHeight: androidx.compose.ui.unit.Dp,
+    /** Текущий [PageExtent] страницы; см. [pdfWidth] про синхронность с layout. */
+    pageExtent: PageExtent,
     onGestureStart: (snapshot: List<DrawingPath>) -> Unit = {},
     onStrokeFinished: (path: DrawingPath) -> Unit = {},
     onEraseFinished: (before: List<DrawingPath>, after: List<DrawingPath>) -> Unit = { _, _ -> },
@@ -148,12 +165,26 @@ fun DrawablePdfPage(
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
     val tablet = LocalTabletInputController.current
+    val densityLocal = LocalDensity.current
 
-    // Прокидываем фактический размер canvas в magnifier — он нужен, чтобы
-    // рассчитать normalizedStrokeWidth = penSettings.strokeWidth / w так же,
-    // как это делает обычный pen-pipeline на странице.
-    LaunchedEffect(magnifierState, canvasSize.value) {
-        magnifierState?.updatePageCanvasPx(canvasSize.value.width.toFloat())
+    // PDF-размеры в пикселях, известные на layout-pass'е (без one-frame-lag,
+    // который был при выводе из canvasSize через onSizeChanged).
+    val pdfWidthPx: Float = with(densityLocal) { pdfWidth.toPx() }
+    val pdfHeightPx: Float = with(densityLocal) { pdfHeight.toPx() }
+
+    // Live-обёртки для использования внутри pointerInput-лямбд: pointerInput
+    // не перезапускается на каждую рекомпозицию (его keys ограничены
+    // toolMode/settings), поэтому замкнутый внутри блока обычный val
+    // фиксировал старые pdfW/pdfH/extent — при зуме или росте extent
+    // координаты штриха уезжали относительно курсора. State-обёртка
+    // (rememberUpdatedState) даёт лямбде свежий снимок без рестарта жеста.
+    val pdfWidthPxState = rememberUpdatedState(pdfWidthPx)
+    val pdfHeightPxState = rememberUpdatedState(pdfHeightPx)
+
+    // Прокидываем ширину PDF (а не всего слота) в magnifier — он использует
+    // её для нормировки strokeWidth так же, как обычный pen-pipeline.
+    LaunchedEffect(magnifierState, pdfWidthPx) {
+        magnifierState?.updatePageCanvasPx(pdfWidthPx)
     }
 
     // Read pencilModeEnabled через rememberUpdatedState, чтобы лямбда
@@ -250,6 +281,12 @@ fun DrawablePdfPage(
         val bw = inkCacheDim.width
         val bh = inkCacheDim.height
         if (bw <= 0 || bh <= 0 || pdfDrawingState.currentPaths.isEmpty()) return@remember null
+        val ext = pdfDrawingState.extent.value
+        // Кэш-битмап имеет размеры слота (т.е. покрывает PDF + extent-поля).
+        // PDF-пиксель внутри битмапа = bw / extent.width, штрихи нормализованы
+        // в PDF-page координатах — см. KDoc у `drawStrokeWithPressure`.
+        val pdfBw = bw.toFloat() / ext.width
+        val pdfBh = bh.toFloat() / ext.height
         val bmp = ImageBitmap(bw, bh)
         val gCanvas = GraphicsCanvas(bmp)
         val scope = CanvasDrawScope()
@@ -261,7 +298,7 @@ fun DrawablePdfPage(
             size = Size(bw.toFloat(), bh.toFloat()),
         ) {
             pdfDrawingState.currentPaths.forEach { path ->
-                drawStrokeWithPressure(path, bw.toFloat(), bh.toFloat(), scratch)
+                drawStrokeWithPressure(path, pdfBw, pdfBh, ext, scratch)
             }
         }
         bmp
@@ -290,10 +327,12 @@ fun DrawablePdfPage(
                             tablet = tablet,
                             isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
                             onDown = { off, pressure, tilt ->
-                                val (w, h) = canvasSize.value
-                                if (w > 0 && h > 0) {
-                                    val nx = off.x / w
-                                    val ny = off.y / h
+                                val pdfW = pdfWidthPxState.value
+                                val pdfH = pdfHeightPxState.value
+                                val ext = pdfDrawingState.extent.value
+                                if (pdfW > 0f && pdfH > 0f) {
+                                    val nx = ext.left + off.x / pdfW
+                                    val ny = ext.top + off.y / pdfH
                                     if (eraserOverride()) {
                                         activeErase = EraseGesture(
                                             pdfDrawingState = pdfDrawingState,
@@ -309,7 +348,7 @@ fun DrawablePdfPage(
                                         pdfDrawingState.startDrawing(
                                             x = nx,
                                             y = ny,
-                                            normalizedStrokeWidth = penSettings.strokeWidth / w,
+                                            normalizedStrokeWidth = penSettings.strokeWidth / pdfW,
                                             pressure = pressure,
                                             tilt = tilt,
                                         )
@@ -317,10 +356,12 @@ fun DrawablePdfPage(
                                 }
                             },
                             onMove = { off, pressure, tilt ->
-                                val (w, h) = canvasSize.value
-                                if (w > 0 && h > 0) {
-                                    val nx = off.x / w
-                                    val ny = off.y / h
+                                val pdfW = pdfWidthPxState.value
+                                val pdfH = pdfHeightPxState.value
+                                val ext = pdfDrawingState.extent.value
+                                if (pdfW > 0f && pdfH > 0f) {
+                                    val nx = ext.left + off.x / pdfW
+                                    val ny = ext.top + off.y / pdfH
                                     val erase = activeErase
                                     if (erase != null) {
                                         erase.move(nx, ny)
@@ -362,10 +403,12 @@ fun DrawablePdfPage(
                             tablet = tablet,
                             isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
                             onDown = { off, _, _ ->
-                                val (w, h) = canvasSize.value
-                                if (w > 0 && h > 0) {
-                                    val nx = off.x / w
-                                    val ny = off.y / h
+                                val pdfW = pdfWidthPxState.value
+                                val pdfH = pdfHeightPxState.value
+                                val ext = pdfDrawingState.extent.value
+                                if (pdfW > 0f && pdfH > 0f) {
+                                    val nx = ext.left + off.x / pdfW
+                                    val ny = ext.top + off.y / pdfH
                                     if (eraserOverride()) {
                                         activeErase = EraseGesture(
                                             pdfDrawingState = pdfDrawingState,
@@ -381,16 +424,18 @@ fun DrawablePdfPage(
                                         pdfDrawingState.startDrawing(
                                             x = nx,
                                             y = ny,
-                                            normalizedStrokeWidth = markerSettings.strokeWidth / w,
+                                            normalizedStrokeWidth = markerSettings.strokeWidth / pdfW,
                                         )
                                     }
                                 }
                             },
                             onMove = { off, _, _ ->
-                                val (w, h) = canvasSize.value
-                                if (w > 0 && h > 0) {
-                                    val nx = off.x / w
-                                    val ny = off.y / h
+                                val pdfW = pdfWidthPxState.value
+                                val pdfH = pdfHeightPxState.value
+                                val ext = pdfDrawingState.extent.value
+                                if (pdfW > 0f && pdfH > 0f) {
+                                    val nx = ext.left + off.x / pdfW
+                                    val ny = ext.top + off.y / pdfH
                                     val erase = activeErase
                                     if (erase != null) erase.move(nx, ny)
                                     else pdfDrawingState.addPoint(nx, ny)
@@ -424,20 +469,26 @@ fun DrawablePdfPage(
                             tablet = tablet,
                             isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
                             onDown = { off, _, _ ->
-                                val (w, h) = canvasSize.value
-                                if (w > 0 && h > 0) {
+                                val pdfW = pdfWidthPxState.value
+                                val pdfH = pdfHeightPxState.value
+                                val ext = pdfDrawingState.extent.value
+                                if (pdfW > 0f && pdfH > 0f) {
                                     session = EraseGesture(
                                         pdfDrawingState = pdfDrawingState,
                                         eraserSettings = eraserSettings,
                                         eraserPos = eraserPos,
                                         onGestureStart = onGestureStart,
                                         onEraseFinished = onEraseFinished,
-                                    ).also { it.start(off.x / w, off.y / h) }
+                                    ).also { it.start(ext.left + off.x / pdfW, ext.top + off.y / pdfH) }
                                 }
                             },
                             onMove = { off, _, _ ->
-                                val (w, h) = canvasSize.value
-                                if (w > 0 && h > 0) session?.move(off.x / w, off.y / h)
+                                val pdfW = pdfWidthPxState.value
+                                val pdfH = pdfHeightPxState.value
+                                val ext = pdfDrawingState.extent.value
+                                if (pdfW > 0f && pdfH > 0f) {
+                                    session?.move(ext.left + off.x / pdfW, ext.top + off.y / pdfH)
+                                }
                             },
                             onUp = {
                                 session?.end()
@@ -454,10 +505,25 @@ fun DrawablePdfPage(
                 }
             )
     ) {
+        // PDF-битмап располагается строго внутри слота со сдвигом
+        // (-extent.left * pdfW, -extent.top * pdfH) и размером pdfW × pdfH.
+        // При extent = Pdf этот сдвиг — нулевой, а pdfW/pdfH совпадают со
+        // слотом → визуально полностью совместимо с прежним поведением.
+        // ВАЖНО: extent берётся из параметра pageExtent (известного на том же
+        // layout-pass'е, что и slot-размеры) — НЕ через state.extent.value,
+        // иначе при росте extent slot уже сжатый/растянутый меряется
+        // мгновенно, а Image позиционируется со старым offset один кадр →
+        // PDF дёргается под пером. См. KDoc у [DrawablePdfPage.pdfWidth].
+        val pdfWDp = pdfWidth
+        val pdfHDp = pdfHeight
+        val pdfOffsetXDp = with(density) { (-pageExtent.left * pdfWidthPx).toDp() }
+        val pdfOffsetYDp = with(density) { (-pageExtent.top * pdfHeightPx).toDp() }
         Image(
             bitmap = bitmap,
             contentDescription = "PDF Page",
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .offset(x = pdfOffsetXDp, y = pdfOffsetYDp)
+                .size(width = pdfWDp, height = pdfHDp),
             // FillBounds (не Fit) — Box и bitmap могут иметь aspect-ratio,
             // отличающиеся на доли пикселя из-за rounding при вычислении
             // визуальной высоты / target render-resolution. С Fit это даёт
@@ -499,6 +565,9 @@ fun DrawablePdfPage(
             // stroke on this platform (Android API 29+) — otherwise the
             // stroke would be drawn twice (once with frame-bound latency,
             // once with sub-frame latency).
+            val ext = pdfDrawingState.extent.value
+            val pdfW = if (ext.width > 0f) size.width / ext.width else size.width
+            val pdfH = if (ext.height > 0f) size.height / ext.height else size.height
             if (!lowLatencyOverlayActive &&
                 pdfDrawingState.isDrawing.value &&
                 pdfDrawingState.livePoints.size > 1
@@ -507,8 +576,9 @@ fun DrawablePdfPage(
                     points = pdfDrawingState.livePoints,
                     colorArgb = pdfDrawingState.liveColorArgb.value,
                     normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                    canvasWidth = size.width,
-                    canvasHeight = size.height,
+                    pdfWidth = pdfW,
+                    pdfHeight = pdfH,
+                    extent = ext,
                     scratch = livePath,
                 )
             }
@@ -516,9 +586,9 @@ fun DrawablePdfPage(
             // Индикатор зоны ластика (AC-12).
             val pos = eraserPos.value
             if (toolMode == ToolMode.ERASER && pos != null) {
-                val cx = pos.x * size.width
-                val cy = pos.y * size.height
-                val sizePx = eraserSettings.sizeNormalized * size.width
+                val cx = (pos.x - ext.left) * pdfW
+                val cy = (pos.y - ext.top) * pdfH
+                val sizePx = eraserSettings.sizeNormalized * pdfW
                 val halfPx = sizePx / 2f
                 when (eraserSettings.shape) {
                     EraserShape.CIRCLE -> {
@@ -556,13 +626,13 @@ fun DrawablePdfPage(
             // экрана, только для рисующих инструментов.
             val hover = hoverPos
             if (hover != null && (toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER)) {
-                val cx = hover.x * size.width
-                val cy = hover.y * size.height
+                val cx = (hover.x - ext.left) * pdfW
+                val cy = (hover.y - ext.top) * pdfH
                 val toolStrokePx = when (toolMode) {
                     ToolMode.PEN -> penSettings.strokeWidth
                     ToolMode.MARKER -> markerSettings.strokeWidth
                     else -> 0f
-                } * size.width
+                } * pdfW
                 val radiusPx = kotlin.math.max(HOVER_INDICATOR_MIN_RADIUS_PX, toolStrokePx * 0.5f)
                 drawCircle(
                     color = indicatorColor.copy(alpha = HOVER_INDICATOR_ALPHA),
@@ -669,14 +739,17 @@ internal fun DrawScope.drawLiveStroke(
     points: List<DrawingPoint>,
     colorArgb: Long,
     normalizedStrokeWidth: Float,
-    canvasWidth: Float,
-    canvasHeight: Float,
+    pdfWidth: Float,
+    pdfHeight: Float,
+    extent: PageExtent,
     scratch: Path,
 ) {
     if (points.size < 2) return
 
     val color = Color(colorArgb.toInt())
-    val baseWidth = normalizedStrokeWidth * canvasWidth
+    val baseWidth = normalizedStrokeWidth * pdfWidth
+    val offX = -extent.left
+    val offY = -extent.top
 
     val uniformPressure = points.first().pressure
     val uniformTilt = points.first().tilt
@@ -690,7 +763,7 @@ internal fun DrawScope.drawLiveStroke(
 
     if (!pressureVaries && !tiltVaries) {
         scratch.reset()
-        points.appendCatmullRomTo(scratch, canvasWidth, canvasHeight)
+        points.appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
         drawPath(
             path = scratch,
             color = color,
@@ -709,14 +782,14 @@ internal fun DrawScope.drawLiveStroke(
         val p2 = points[i + 1]
         val p3 = if (i + 2 < points.size) points[i + 2] else points[i + 1]
 
-        val x1 = p1.x * canvasWidth; val y1 = p1.y * canvasHeight
-        val x2 = p2.x * canvasWidth; val y2 = p2.y * canvasHeight
+        val x1 = (p1.x + offX) * pdfWidth; val y1 = (p1.y + offY) * pdfHeight
+        val x2 = (p2.x + offX) * pdfWidth; val y2 = (p2.y + offY) * pdfHeight
 
         scratch.reset()
         scratch.moveTo(x1, y1)
         scratch.cubicTo(
-            x1 + (p2.x - p0.x) * canvasWidth / 6f, y1 + (p2.y - p0.y) * canvasHeight / 6f,
-            x2 - (p3.x - p1.x) * canvasWidth / 6f, y2 - (p3.y - p1.y) * canvasHeight / 6f,
+            x1 + (p2.x - p0.x) * pdfWidth / 6f, y1 + (p2.y - p0.y) * pdfHeight / 6f,
+            x2 - (p3.x - p1.x) * pdfWidth / 6f, y2 - (p3.y - p1.y) * pdfHeight / 6f,
             x2, y2,
         )
         val avgPressure = (p1.pressure + p2.pressure) * 0.5f
@@ -748,15 +821,18 @@ internal fun DrawScope.drawLiveStroke(
  */
 internal fun DrawScope.drawStrokeWithPressure(
     stroke: DrawingPath,
-    w: Float,
-    h: Float,
+    pdfWidth: Float,
+    pdfHeight: Float,
+    extent: PageExtent,
     scratch: Path,
 ) {
     val points = stroke.points
     if (points.size < 2) return
 
     val color = Color(stroke.colorArgb.toInt())
-    val baseWidth = stroke.strokeWidth * w
+    val baseWidth = stroke.strokeWidth * pdfWidth
+    val offX = -extent.left
+    val offY = -extent.top
 
     val uniformPressure = points.first().pressure
     val uniformTilt = points.first().tilt
@@ -765,7 +841,7 @@ internal fun DrawScope.drawStrokeWithPressure(
 
     if (!pressureVaries && !tiltVaries) {
         scratch.reset()
-        points.appendCatmullRomTo(scratch, w, h)
+        points.appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
         drawPath(
             path = scratch,
             color = color,
@@ -791,14 +867,14 @@ internal fun DrawScope.drawStrokeWithPressure(
             val p2 = seg[i + 1]
             val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
 
-            val x1 = p1.x * w; val y1 = p1.y * h
-            val x2 = p2.x * w; val y2 = p2.y * h
+            val x1 = (p1.x + offX) * pdfWidth; val y1 = (p1.y + offY) * pdfHeight
+            val x2 = (p2.x + offX) * pdfWidth; val y2 = (p2.y + offY) * pdfHeight
 
             scratch.reset()
             scratch.moveTo(x1, y1)
             scratch.cubicTo(
-                x1 + (p2.x - p0.x) * w / 6f, y1 + (p2.y - p0.y) * h / 6f,
-                x2 - (p3.x - p1.x) * w / 6f, y2 - (p3.y - p1.y) * h / 6f,
+                x1 + (p2.x - p0.x) * pdfWidth / 6f, y1 + (p2.y - p0.y) * pdfHeight / 6f,
+                x2 - (p3.x - p1.x) * pdfWidth / 6f, y2 - (p3.y - p1.y) * pdfHeight / 6f,
                 x2, y2,
             )
             val avgPressure = (p1.pressure + p2.pressure) * 0.5f
@@ -923,7 +999,13 @@ internal class EraseGesture(
     }
 }
 
-private fun List<DrawingPoint>.appendCatmullRomTo(target: Path, w: Float, h: Float) {
+private fun List<DrawingPoint>.appendCatmullRomTo(
+    target: Path,
+    pdfW: Float,
+    pdfH: Float,
+    offX: Float = 0f,
+    offY: Float = 0f,
+) {
     if (isEmpty()) return
 
     // Collect segment start indices (index 0 is always a start).
@@ -933,10 +1015,10 @@ private fun List<DrawingPoint>.appendCatmullRomTo(target: Path, w: Float, h: Flo
         val end = if (si + 1 < starts.size) starts[si + 1] else size
         val seg = subList(start, end)
 
-        target.moveTo(seg[0].x * w, seg[0].y * h)
+        target.moveTo((seg[0].x + offX) * pdfW, (seg[0].y + offY) * pdfH)
         if (seg.size < 2) return@forEachIndexed
         if (seg.size == 2) {
-            target.lineTo(seg[1].x * w, seg[1].y * h)
+            target.lineTo((seg[1].x + offX) * pdfW, (seg[1].y + offY) * pdfH)
             return@forEachIndexed
         }
 
@@ -947,12 +1029,12 @@ private fun List<DrawingPoint>.appendCatmullRomTo(target: Path, w: Float, h: Flo
             val p2 = seg[i + 1]
             val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
 
-            val x1 = p1.x * w; val y1 = p1.y * h
-            val x2 = p2.x * w; val y2 = p2.y * h
+            val x1 = (p1.x + offX) * pdfW; val y1 = (p1.y + offY) * pdfH
+            val x2 = (p2.x + offX) * pdfW; val y2 = (p2.y + offY) * pdfH
 
             target.cubicTo(
-                x1 + (p2.x - p0.x) * w / 6f, y1 + (p2.y - p0.y) * h / 6f,
-                x2 - (p3.x - p1.x) * w / 6f, y2 - (p3.y - p1.y) * h / 6f,
+                x1 + (p2.x - p0.x) * pdfW / 6f, y1 + (p2.y - p0.y) * pdfH / 6f,
+                x2 - (p3.x - p1.x) * pdfW / 6f, y2 - (p3.y - p1.y) * pdfH / 6f,
                 x2, y2,
             )
         }

@@ -4,6 +4,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.AnnotationBundle
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 
 /** Persistence port for per-document handwritten annotations. */
@@ -18,6 +19,7 @@ interface AnnotationRepository {
         currentPage: Int = 0,
         currentPageOffset: Int = 0,
         favoritePageIndices: Set<Int> = emptySet(),
+        pageExtents: Map<Int, PageExtent> = emptyMap(),
     ): Result<Unit>
 
     suspend fun load(pdfPath: String): Result<AnnotationBundle>

@@ -364,16 +364,28 @@ private fun MagnifierContent(
             withTransform({
                 translate(left = -target.left * virtW, top = -target.top * virtH)
             }) {
+                // Magnifier render target — в чистых PDF-page координатах,
+                // поэтому extent = Pdf (никакого extent-сдвига внутри draw
+                // функций). Смещение под target.left/top уже сделано
+                // withTransform выше.
+                val noExtent = ru.kyamshanov.notepen.annotation.domain.model.PageExtent.Pdf
                 pdfDrawingState.currentPaths.forEach { path ->
-                    drawStrokeWithPressure(path, virtW, virtH, scratch)
+                    drawStrokeWithPressure(
+                        stroke = path,
+                        pdfWidth = virtW,
+                        pdfHeight = virtH,
+                        extent = noExtent,
+                        scratch = scratch,
+                    )
                 }
                 if (pdfDrawingState.isDrawing.value && pdfDrawingState.livePoints.size > 1) {
                     drawLiveStroke(
                         points = pdfDrawingState.livePoints,
                         colorArgb = pdfDrawingState.liveColorArgb.value,
                         normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                        canvasWidth = virtW,
-                        canvasHeight = virtH,
+                        pdfWidth = virtW,
+                        pdfHeight = virtH,
+                        extent = noExtent,
                         scratch = livePath,
                     )
                 }

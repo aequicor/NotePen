@@ -1,66 +1,124 @@
 package ru.kyamshanov.notepen.pdfviewer
 
 import androidx.compose.ui.geometry.Offset
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 
 /**
  * Координатные пространства, с которыми работает viewer:
  *
- * - **Document space** (Y, units = "base px"): вертикальная стопка страниц,
- *   уложенных при единичном масштабе. Y = 0 — верх первой страницы.
- *   X = 0 соответствует левому краю страничной колонки шириной
- *   [Layout.basePageWidthPx]; страница горизонтально центрируется и
- *   занимает X ∈ [0, basePageWidthPx].
+ * - **Document space** (Y, units = "base px"): вертикальная стопка страничных
+ *   **слотов**, уложенных при единичном масштабе. Y = 0 — верх слота первой
+ *   страницы. X = 0 соответствует левому краю PDF-колонки шириной
+ *   [Layout.basePageWidthPx]; PDF-колонка горизонтально центрируется. **Слот**
+ *   страницы может быть шире/выше PDF за счёт [PageExtent] — slot.left =
+ *   `extent.left * basePageWidthPx` (≤ 0), slot.right =
+ *   `extent.right * basePageWidthPx` (≥ basePageWidthPx).
  * - **Viewport space**: экранные пиксели внутри Composable.
- * - **Page space** ([0..1]): нормализованные координаты внутри страницы;
- *   используются [DrawablePdfPage] для штрихов.
+ * - **Page space** (нормализованные PDF-страничные координаты): `[0..1]` —
+ *   сама PDF-страница; точки штрихов могут выходить за `[0..1]` в пределах
+ *   текущего [PageExtent].
  *
  * Связь Document → Viewport:
  *
- *     viewport = pan + docPoint * zoom + (viewportCenterX − basePageWidth*zoom/2, 0)
- *
- * Горизонтальное центрирование скрыто в [pageVisualLeft]. Для упрощения
- * математики зум-якорения вокруг курсора удобнее работать в варианте, где
- * `pan` уже включает в себя сдвиг центрирования; в этом случае
- *
- *     viewport.x = pan.x + docPoint.x * zoom
+ *     viewport.x = pan.x + docPoint.x * zoom   (PDF при docX=0 ложится в pan.x)
  *     viewport.y = pan.y + docPoint.y * zoom
  *
- * Конвертация и обратные функции — ниже.
+ * Слот страницы i занимает в viewport прямоугольник:
+ *
+ *     left   = pan.x + extent.left  * basePageWidthPx * zoom
+ *     top    = pan.y + pageTopsPx[i] * zoom
+ *     width  = pageWidthsPx[i]  * zoom
+ *     height = pageHeightsPx[i] * zoom
+ *
+ * PDF-битмап внутри слота располагается со сдвигом
+ * `(-extent.left * basePageWidthPx, -extent.top * pdfHeightsPx[i])`.
  */
 internal data class PdfPagesLayout(
     val basePageWidthPx: Float,
+    val pageExtents: List<PageExtent>,
+    /** PDF-высота каждой страницы (без учёта extent). */
+    val pdfHeightsPx: FloatArray,
+    /** Ширина слота каждой страницы (PDF × extent.width). */
+    val pageWidthsPx: FloatArray,
+    /**
+     * Высота PDF-страницы в document space — `pdfHeightsPx[i]`. Стекинг
+     * по PDF-размерам, чтобы рост extent одной страницы не сдвигал
+     * соседние: слот может выезжать за границу PDF страницы наружу и
+     * перекрывать (визуально) пустую зону вокруг соседних PDF.
+     */
     val pageHeightsPx: FloatArray,
+    /** Y верха PDF-страницы i в document space (по PDF-стекингу). */
     val pageTopsPx: FloatArray,
+    /** Высота, занятая всеми PDF-страницами (без учёта расширений). */
     val totalHeightPx: Float,
+    /** Левая граница самого «торчащего влево» слота (≤ 0). */
+    val contentLeftPx: Float,
+    /** Правая граница самого «торчащего вправо» слота (≥ basePageWidthPx). */
+    val contentRightPx: Float,
+    /** Верхняя граница самого «торчащего вверх» слота (≤ 0). */
+    val contentTopPx: Float,
+    /** Нижняя граница самого «торчащего вниз» слота (≥ totalHeightPx). */
+    val contentBottomPx: Float,
 ) {
     companion object {
 
         /**
          * Строит layout для [pages] при базовой ширине [basePageWidthPx].
-         * Каждая страница укладывается высотой `basePageWidthPx / aspectRatio`;
-         * страницы стекаются вертикально с [pageSpacingPx] между ними.
+         * [extents] — extent каждой страницы (отсутствующие → [PageExtent.Pdf]).
+         *
+         * **Стекинг — строго по PDF-размерам.** Слоты могут выходить за
+         * пределы своего PDF-«окна» (в зоне extent), но это не влияет на
+         * pageTopsPx соседей: PDF-страница, на которой пользователь рисует,
+         * не уплывает, и нижестоящие страницы не съезжают, когда extent
+         * текущей растёт. Перекрытие slot'ов в зоне extent визуально
+         * допускается: extent-поля по умолчанию пусты у соседей, штрихи
+         * рендерятся в z-порядке размещения placeables.
          */
         fun build(
             pages: List<PdfPageInfo>,
             basePageWidthPx: Float,
+            extents: List<PageExtent> = emptyList(),
             pageSpacingPx: Float = 0f,
         ): PdfPagesLayout {
-            val heights = FloatArray(pages.size)
-            val tops = FloatArray(pages.size)
+            val n = pages.size
+            val pdfHeights = FloatArray(n)
+            val slotWidths = FloatArray(n)
+            val tops = FloatArray(n)
+            val ext = List(n) { i -> extents.getOrNull(i) ?: PageExtent.Pdf }
+
             var y = 0f
+            var minLeft = 0f
+            var maxRight = if (n > 0) basePageWidthPx else 0f
+            var minTop = 0f
+            var maxBottom = 0f
             for (i in pages.indices) {
                 val aspect = pages[i].aspectRatio.takeIf { it > 0f } ?: 1f
-                val h = basePageWidthPx / aspect
-                heights[i] = h
+                val e = ext[i]
+                val pdfH = basePageWidthPx / aspect
+                pdfHeights[i] = pdfH
+                slotWidths[i] = basePageWidthPx * e.width
                 tops[i] = y
-                y += h + if (i < pages.lastIndex) pageSpacingPx else 0f
+                // Границы слота в document space — для clamp'а вьюпорта.
+                minTop = minOf(minTop, y + e.top * pdfH)
+                maxBottom = maxOf(maxBottom, y + e.bottom * pdfH)
+                y += pdfH + if (i < pages.lastIndex) pageSpacingPx else 0f
+                minLeft = minOf(minLeft, e.left * basePageWidthPx)
+                maxRight = maxOf(maxRight, e.right * basePageWidthPx)
             }
+            if (n == 0) maxBottom = 0f
             return PdfPagesLayout(
                 basePageWidthPx = basePageWidthPx,
-                pageHeightsPx = heights,
+                pageExtents = ext,
+                pdfHeightsPx = pdfHeights,
+                pageWidthsPx = slotWidths,
+                pageHeightsPx = pdfHeights,
                 pageTopsPx = tops,
                 totalHeightPx = y,
+                contentLeftPx = minLeft,
+                contentRightPx = maxRight,
+                contentTopPx = minTop,
+                contentBottomPx = maxBottom,
             )
         }
     }
@@ -124,8 +182,13 @@ internal object PdfViewerMath {
         var first = -1
         var last = -1
         for (i in 0 until n) {
-            val top = panY + layout.pageTopsPx[i] * zoom
-            val bottom = top + layout.pageHeightsPx[i] * zoom
+            // Видимость по границам slot'а — extent может выводить ink за
+            // PDF, и страница должна оставаться «активной», пока хоть какая-то
+            // часть extent попадает во вьюпорт.
+            val ext = layout.pageExtents[i]
+            val pdfH = layout.pdfHeightsPx[i]
+            val top = panY + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom
+            val bottom = panY + (layout.pageTopsPx[i] + ext.bottom * pdfH) * zoom
             if (bottom < 0f || top > viewportHeight) continue
             if (first == -1) first = i
             last = i
@@ -195,9 +258,10 @@ internal object PdfViewerMath {
     }
 
     /**
-     * Pan для центрирования страницы [pageIndex] по горизонтали и
-     * прижатия её верха к верху вьюпорта (используется `fitToWidth` и
-     * `fitToPage`).
+     * Pan для центрирования **PDF-колонки** по горизонтали и прижатия верха
+     * страницы [pageIndex] к верху вьюпорта (используется `fitToWidth` и
+     * `fitToPage`). Центрируется именно PDF (не слот) — иначе видимая
+     * страница «прыгает» вбок при росте extent.
      */
     fun panForPageTop(
         layout: PdfPagesLayout,
@@ -220,9 +284,8 @@ internal object PdfViewerMath {
      * (даже только вертикальный) затирает горизонтальное смещение,
      * выставленное cursor-anchored zoom'ом не по центру.
      *
-     * Начальное центрирование делается отдельно в
-     * [PdfViewerState.applyPendingInitialScrollIfNeeded] при первом
-     * измерении viewport.
+     * Учитывает [PdfPagesLayout.contentLeftPx] / [PdfPagesLayout.contentRightPx]
+     * — границы слотов с учётом [PageExtent], не только PDF-колонки.
      */
     fun clampPan(
         pan: Offset,
@@ -230,19 +293,23 @@ internal object PdfViewerMath {
         zoom: Float,
         viewportSize: FloatSize,
     ): Offset {
-        val contentW = layout.basePageWidthPx * zoom
-        val contentH = layout.totalHeightPx * zoom
+        val contentW = (layout.contentRightPx - layout.contentLeftPx) * zoom
+        val contentH = (layout.contentBottomPx - layout.contentTopPx) * zoom
         val x = if (contentW <= viewportSize.width) {
             pan.x
         } else {
-            val minX = viewportSize.width - contentW
-            pan.x.coerceIn(minX, 0f)
+            val minX = viewportSize.width - layout.contentRightPx * zoom
+            // `0f - x` вместо `-x`, чтобы для contentLeftPx == 0 получить +0f,
+            // а не -0f (различимы Float.equals и ассертами в тестах).
+            val maxX = 0f - layout.contentLeftPx * zoom
+            pan.x.coerceIn(minX, maxX)
         }
         val y = if (contentH <= viewportSize.height) {
             pan.y
         } else {
-            val minY = viewportSize.height - contentH
-            pan.y.coerceIn(minY, 0f)
+            val minY = viewportSize.height - layout.contentBottomPx * zoom
+            val maxY = 0f - layout.contentTopPx * zoom
+            pan.y.coerceIn(minY, maxY)
         }
         return Offset(x, y)
     }
@@ -260,13 +327,15 @@ internal object PdfViewerMath {
         zoom: Float,
         viewportSize: FloatSize,
     ): Offset {
-        val contentW = layout.basePageWidthPx * zoom
-        val contentH = layout.totalHeightPx * zoom
+        val contentW = (layout.contentRightPx - layout.contentLeftPx) * zoom
+        val contentH = (layout.contentBottomPx - layout.contentTopPx) * zoom
         val x = if (contentW <= viewportSize.width) {
-            (viewportSize.width - contentW) / 2f
+            val midContent = (layout.contentLeftPx + layout.contentRightPx) / 2f * zoom
+            viewportSize.width / 2f - midContent
         } else pan.x
         val y = if (contentH <= viewportSize.height) {
-            (viewportSize.height - contentH) / 2f
+            val midContent = (layout.contentTopPx + layout.contentBottomPx) / 2f * zoom
+            viewportSize.height / 2f - midContent
         } else pan.y
         return Offset(x, y)
     }

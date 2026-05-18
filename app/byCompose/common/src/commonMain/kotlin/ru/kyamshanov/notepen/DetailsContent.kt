@@ -76,6 +76,7 @@ import androidx.compose.material3.Surface
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository as SharedAnnotationRepository
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
@@ -87,6 +88,7 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
+import ru.kyamshanov.notepen.sync.domain.model.RectDto
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
@@ -249,6 +251,14 @@ fun DetailsContent(
     // Платформенные различия живут внутри expect/actual [PdfPagesViewer] +
     // [PdfViewerState]; здесь они не видны.
     val pdfViewerState: PdfViewerState = rememberPdfViewerState()
+    // Прокидываем источник правды по [PageExtent] страницы в viewer-state.
+    // derivedStateOf внутри layout пересчитает размеры слотов при росте
+    // extent у любого PdfDrawingState.
+    SideEffect {
+        pdfViewerState.pageExtentProvider = { pageIndex ->
+            drawingStates[pageIndex]?.extent?.value ?: PageExtent.Pdf
+        }
+    }
     val firstVisiblePage by remember {
         derivedStateOf { pdfViewerState.firstVisiblePageIndex }
     }
@@ -324,6 +334,9 @@ fun DetailsContent(
                 logger.info { "Received annotation snapshot for doc=$documentId: ${snapshot.strokes.size} strokes" }
                 snapshot.strokes.forEach { added ->
                     val state = drawingStates.getOrPut(added.pageIndex) { PdfDrawingState() }
+                    added.pageExtent?.let { extDto ->
+                        state.setExtent(state.extent.value.union(extDto.toDomain()))
+                    }
                     if (state.currentPaths.none { it.strokeId == added.strokeId }) {
                         state.currentPaths.add(added.path.toDomain())
                         state.markHistoryChanged()
@@ -382,6 +395,7 @@ fun DetailsContent(
         val annotations = drawingStates.mapValues { (_, state) ->
             state.currentPaths.toList()
         }
+        val extents = drawingStates.mapValues { (_, state) -> state.extent.value }
         val result = annotationRepository.save(
             pdfPath = filePath,
             annotations = annotations,
@@ -392,6 +406,7 @@ fun DetailsContent(
             currentPage = firstVisiblePage,
             currentPageOffset = currentPageOffsetPx,
             favoritePageIndices = favoritePageIndices.toSet(),
+            pageExtents = extents,
         )
         val text = if (result.isSuccess) message else "Ошибка локального сохранения"
         snackbarHostState.showSnackbar(text)
@@ -483,6 +498,10 @@ fun DetailsContent(
                 state.currentPaths.addAll(paths)
                 state.markHistoryChanged()
             }
+            bundle.pageExtents.forEach { (pageIndex, ext) ->
+                val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
+                state.setExtent(ext)
+            }
             favoritePageIndices.clear()
             favoritePageIndices.addAll(bundle.favoritePageIndices)
         }
@@ -495,6 +514,7 @@ fun DetailsContent(
             val annotations = drawingStates.mapValues { (_, state) ->
                 state.currentPaths.toList()
             }
+            val extents = drawingStates.mapValues { (_, state) -> state.extent.value }
             annotationRepository.save(
                 pdfPath = filePath,
                 annotations = annotations,
@@ -505,6 +525,7 @@ fun DetailsContent(
                 currentPage = firstVisiblePage,
                 currentPageOffset = currentPageOffsetPx,
                 favoritePageIndices = favoritePageIndices.toSet(),
+                pageExtents = extents,
             ).onFailure { e ->
                 logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
             }
@@ -618,6 +639,9 @@ fun DetailsContent(
                         penSettings = penSettings,
                         markerSettings = markerSettings,
                         eraserSettings = eraserSettings,
+                        pdfWidth = pdfWidth,
+                        pdfHeight = pdfHeight,
+                        pageExtent = extent,
                         eraserOverride = eraserOverrideProvider,
                         pencilModeEnabled = pencilModeEnabled,
                         magnifierState = if (isMagnifierPage) magnifierState else null,
@@ -709,6 +733,7 @@ fun DetailsContent(
                     val annotations = drawingStates.mapValues { (_, state) ->
                         state.currentPaths.toList()
                     }
+                    val extents = drawingStates.mapValues { (_, state) -> state.extent.value }
                     val result = annotationRepository.save(
                         pdfPath = filePath,
                         annotations = annotations,
@@ -719,6 +744,7 @@ fun DetailsContent(
                         currentPage = firstVisiblePage,
                         currentPageOffset = currentPageOffsetPx,
                         favoritePageIndices = favoritePageIndices.toSet(),
+                        pageExtents = extents,
                     )
                     if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
                 }
@@ -1068,6 +1094,8 @@ private fun handleEraseFinished(
             newAdded.add(stamped)
         }
     }
+    val ext = pdfDrawingState.extent.value
+    val extDto = if (ext != PageExtent.Pdf) RectDto.fromDomain(ext) else null
     val batch = buildList<StrokeDelta> {
         for (id in removedOrModified) add(
             StrokeDelta.Removed(
@@ -1077,13 +1105,15 @@ private fun handleEraseFinished(
                 clock = 0,
             ),
         )
-        for (p in newAdded) add(
+        for ((idx, p) in newAdded.withIndex()) add(
             StrokeDelta.Added(
                 strokeId = p.strokeId,
                 pageIndex = pageIndex,
                 authorDeviceId = engine.deviceId,
                 clock = 0,
                 path = p.toDto(p.strokeId),
+                // Достаточно отправить extent один раз в первой Added; получатель union'ит.
+                pageExtent = if (idx == 0) extDto else null,
             ),
         )
     }
@@ -1107,6 +1137,7 @@ private fun handleStrokeFinished(
         pdfDrawingState.currentPaths[idx] = stamped
         pdfDrawingState.markHistoryChanged()
     }
+    val ext = pdfDrawingState.extent.value
     engine.applyLocal(
         StrokeDelta.Added(
             strokeId = id,
@@ -1114,6 +1145,7 @@ private fun handleStrokeFinished(
             authorDeviceId = engine.deviceId,
             clock = 0,
             path = stamped.toDto(id),
+            pageExtent = if (ext != PageExtent.Pdf) RectDto.fromDomain(ext) else null,
         ),
     )
 }

@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.roundToInt
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 
 /**
@@ -50,6 +51,14 @@ actual class PdfViewerState internal constructor(
         internal set
 
     /**
+     * Source of truth по [PageExtent] для страницы. Читается внутри
+     * [derivedStateOf] при построении [layout], поэтому когда underlying
+     * snapshot-state (`PdfDrawingState.extent`) меняется — layout
+     * пересчитывается. По умолчанию возвращает [PageExtent.Pdf].
+     */
+    actual var pageExtentProvider: (Int) -> PageExtent by mutableStateOf({ PageExtent.Pdf })
+
+    /**
      * Transient множитель для активного Ctrl+wheel zoom-бёрста: применяется
      * к содержимому `SubcomposeLayout` через `Modifier.graphicsLayer` без
      * пересчёта layout'а и без перерисовки PDF-битмапов. `1f` вне жеста.
@@ -73,9 +82,11 @@ actual class PdfViewerState internal constructor(
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 
     internal val layout: PdfPagesLayout by derivedStateOf {
+        val provider = pageExtentProvider
         PdfPagesLayout.build(
             pages = pages,
             basePageWidthPx = basePageWidthPx,
+            extents = pages.indices.map { provider(it) },
             pageSpacingPx = 0f,
         )
     }

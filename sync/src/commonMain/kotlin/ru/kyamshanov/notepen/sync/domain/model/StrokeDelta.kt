@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.sync.domain.model
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 
 /**
  * Atomic change to a page's stroke list.
@@ -28,6 +29,15 @@ sealed class StrokeDelta {
         override val authorDeviceId: String,
         override val clock: Long,
         val path: DrawingPathDto,
+        /**
+         * Если этот штрих расширил рисуемую область страницы за пределы
+         * PDF, отправитель кладёт сюда результирующий [PageExtent] страницы
+         * (в PDF-page координатах). `null` означает «extent не менялся, у
+         * получателя ничего обновлять не надо». Старые клиенты, у которых
+         * этого поля нет, корректно десериализуют payload (default = null)
+         * — то же поведение, что было до фичи.
+         */
+        val pageExtent: RectDto? = null,
     ) : StrokeDelta()
 
     @Serializable
@@ -38,6 +48,15 @@ sealed class StrokeDelta {
         override val authorDeviceId: String,
         override val clock: Long,
     ) : StrokeDelta()
+}
+
+/** Serialisation-safe версия [PageExtent]. Поля сокращены для wire-overhead. */
+@Serializable
+data class RectDto(val l: Float, val t: Float, val r: Float, val b: Float) {
+    fun toDomain(): PageExtent = PageExtent(l, t, r, b)
+    companion object {
+        fun fromDomain(e: PageExtent): RectDto = RectDto(e.left, e.top, e.right, e.bottom)
+    }
 }
 
 /** Serialisation-safe version of [DrawingPath] (avoids Compose dependency in shared). */

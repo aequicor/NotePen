@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.pdfviewer
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -78,6 +79,15 @@ expect class PdfViewerState {
 
     /** Умножает зум на [factor] вокруг [focus] (viewport-координаты). */
     fun zoomBy(factor: Float, focus: Offset)
+
+    /**
+     * Source of truth по [PageExtent] для страницы. Читается viewer'ом при
+     * построении layout, поэтому изменение underlying state расширения
+     * (`PdfDrawingState.extent`) автоматически триггерит relayout — нет
+     * необходимости явно дёргать какой-либо `invalidate()`. По умолчанию
+     * возвращает [PageExtent.Pdf].
+     */
+    var pageExtentProvider: (Int) -> PageExtent
 }
 
 /** Создаёт и запоминает [PdfViewerState] с сохранением между рекомпозициями. */

@@ -25,6 +25,9 @@ class SyncBridge(
                 val state = drawingStates.getOrPut(delta.pageIndex) { PdfDrawingState() }
                 when (delta) {
                     is StrokeDelta.Added -> {
+                        delta.pageExtent?.let { ext ->
+                            state.setExtent(state.extent.value.union(ext.toDomain()))
+                        }
                         if (state.currentPaths.none { it.strokeId == delta.strokeId }) {
                             state.currentPaths.add(delta.path.toDomain())
                             state.markHistoryChanged()
