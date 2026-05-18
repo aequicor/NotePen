@@ -28,7 +28,7 @@ class ProjectionHostController(
             _pendingFrame
                 .filterNotNull()
                 .conflate()
-                .collect { frame -> server.send(frame) }
+                .collect { frame -> server.broadcast(frame) }
         }
     }
 

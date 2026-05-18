@@ -2,8 +2,9 @@ package ru.kyamshanov.notepen.sync.domain
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
@@ -17,19 +18,17 @@ private val logger = KotlinLogging.logger {}
 
 /**
  * Host-side service that builds the [RemoteCatalog] from local repositories
- * and serves it to the paired peer in response to a
+ * and serves it to paired peers in response to a
  * [NetworkMessage.RemoteCatalogRequest].
  *
- * **Security model**: every time a catalog is built, the set of `documentId`s
- * it contains is captured as [allowedDocumentIds]. When Phase 3 wires the
- * on-demand fetch flow, the host MUST validate every
- * [NetworkMessage.DocumentOpenRequest] against this set — otherwise a client
- * could ask the host to read arbitrary files outside its library
- * (path traversal). Until then the field is filled but unused.
+ * **Security model**: every time a catalog is served to a peer, the set of
+ * `documentId`s included is captured as that peer's allow-list. Subsequent
+ * [NetworkMessage.DocumentOpenRequest]s are validated via [isAllowed] —
+ * otherwise a client could ask the host to read arbitrary files outside its
+ * library (path traversal).
  *
- * Single-client per server is assumed (the underlying [PeerServer] already
- * rejects extra connections), so a single `Set<String>` is sufficient. When
- * multi-client support arrives, key the snapshot by peer id.
+ * Multi-client safe: each peer has its own allow-list and uri map, keyed by
+ * [ru.kyamshanov.notepen.sync.domain.model.DeviceInfo.id].
  *
  * @param hostName Display name of this host, embedded in the served catalog.
  * @param historyRepository Source of "recent" files.
@@ -41,58 +40,59 @@ class RemoteCatalogProvider(
     private val folderRepository: FolderRepository,
 ) {
 
-    /**
-     * `documentId`s in the most recently built catalog. Updated on every
-     * [buildSnapshot] call. Phase 3 reads this to authorize document opens.
-     */
-    @Volatile
-    var allowedDocumentIds: Set<String> = emptySet()
-        private set
+    private val mutex = Mutex()
+    private val allowedByPeer = mutableMapOf<String, Set<String>>()
+    private val uriByPeer = mutableMapOf<String, Map<String, String>>()
+
+    /** Resolves [documentId] for [peerId] back to the local URI, or `null` if not allowed. */
+    suspend fun resolveUri(peerId: String, documentId: String): String? =
+        mutex.withLock { uriByPeer[peerId]?.get(documentId) }
 
     /**
-     * `documentId` → original host file URI mapping for the last-built catalog.
-     * Used by [resolveUri] to resolve incoming
-     * [NetworkMessage.DocumentOpenRequest]s into a local file path the host
-     * can stream over [ru.kyamshanov.notepen.sync.infrastructure.WebSocketFileTransfer].
+     * Resolves [documentId] back to the local URI using **any** peer's map.
+     * Intended for peer-agnostic host-side caches (e.g. `HostAnnotationProjection`)
+     * that don't know which client originally requested the document — the URI
+     * itself is identical across peers, the per-peer maps only differ in *which*
+     * documents each peer is authorised to see.
      */
-    @Volatile
-    private var documentIdToUri: Map<String, String> = emptyMap()
+    suspend fun resolveUri(documentId: String): String? =
+        mutex.withLock {
+            uriByPeer.values.firstNotNullOfOrNull { it[documentId] }
+        }
 
-    /**
-     * Resolves [documentId] back to the local URI on the host, or `null` if
-     * the document is not part of the most recent catalog snapshot. Callers
-     * MUST check this against [allowedDocumentIds] (or equivalently get a
-     * non-null result here) before reading any bytes from disk.
-     */
-    fun resolveUri(documentId: String): String? = documentIdToUri[documentId]
+    /** True if [peerId] has been served a catalog containing [documentId]. */
+    suspend fun isAllowed(peerId: String, documentId: String): Boolean =
+        mutex.withLock { allowedByPeer[peerId]?.contains(documentId) == true }
 
     /**
      * Subscribes [server] to incoming [NetworkMessage.RemoteCatalogRequest]s
-     * and replies with a freshly built snapshot. Runs until [scope] is cancelled.
+     * and replies to the requesting peer with a freshly built snapshot.
+     * Runs until [scope] is cancelled.
      */
     fun serve(server: PeerServer, scope: CoroutineScope) {
         scope.launch {
-            server.incomingMessages
-                .filterIsInstance<NetworkMessage.RemoteCatalogRequest>()
-                .collect {
-                    val catalog = runCatching { buildSnapshot() }
-                        .onFailure { logger.warn { "Failed to build catalog snapshot: ${it::class.simpleName}" } }
-                        .getOrElse { RemoteCatalog(hostName, emptyList(), emptyList(), emptyList()) }
-                    logger.info {
-                        "Serving RemoteCatalog: ${catalog.recent.size} recents, " +
-                            "${catalog.folders.size} folders, ${catalog.folderLinks.size} links"
-                    }
-                    server.send(NetworkMessage.RemoteCatalogResponse(catalog))
+            server.incomingMessages.collect { peerMessage ->
+                val msg = peerMessage.message
+                if (msg !is NetworkMessage.RemoteCatalogRequest) return@collect
+                val peerId = peerMessage.peer.id
+                val catalog = runCatching { buildSnapshotFor(peerId) }
+                    .onFailure { logger.warn { "Failed to build catalog snapshot: ${it::class.simpleName}" } }
+                    .getOrElse { RemoteCatalog(hostName, emptyList(), emptyList(), emptyList()) }
+                logger.info {
+                    "Serving RemoteCatalog to ${peerMessage.peer.name}: ${catalog.recent.size} recents, " +
+                        "${catalog.folders.size} folders, ${catalog.folderLinks.size} links"
                 }
+                server.send(peerId, NetworkMessage.RemoteCatalogResponse(catalog))
+            }
         }
     }
 
     /**
-     * Builds a fresh [RemoteCatalog] from the bound repositories and refreshes
-     * [allowedDocumentIds]. Exposed so the host can also push proactive updates
-     * when the local library changes (Phase 5).
+     * Builds a fresh [RemoteCatalog] from the bound repositories and registers
+     * the per-peer allow-list / uri map for [peerId]. Exposed so the host can
+     * push proactive updates as well (Phase 5).
      */
-    suspend fun buildSnapshot(): RemoteCatalog {
+    suspend fun buildSnapshotFor(peerId: String): RemoteCatalog {
         val recentFiles = historyRepository.getAll()
         val recent = recentFiles.map { file ->
             RemoteEntry(
@@ -115,14 +115,17 @@ class RemoteCatalogProvider(
                     RemoteFolderLink(
                         folderId = folder.id,
                         documentId = docId,
-                        // We don't have a per-link lastOpenedAt in domain — reuse file's open time.
                         lastOpenedAt = recentFiles.firstOrNull { it.uri == uri }?.openedAt ?: 0L,
                     )
                 }
             }
         }
-        allowedDocumentIds = recent.map { it.documentId }.toSet()
-        documentIdToUri = recentFiles.associate { documentIdFromFilePath(it.uri) to it.uri }
+        val allowed = recent.map { it.documentId }.toSet()
+        val docToUri = recentFiles.associate { documentIdFromFilePath(it.uri) to it.uri }
+        mutex.withLock {
+            allowedByPeer[peerId] = allowed
+            uriByPeer[peerId] = docToUri
+        }
         return RemoteCatalog(
             hostName = hostName,
             recent = recent,

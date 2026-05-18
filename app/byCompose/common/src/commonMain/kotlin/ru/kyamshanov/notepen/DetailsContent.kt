@@ -69,6 +69,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.material3.AlertDialog
@@ -271,20 +272,20 @@ fun DetailsContent(
     // mirroring local edits). This means the host doesn't need to have the
     // PDF open in DetailsContent for save/snapshot to work.
 
-    // Tablet side: after the local bundle load, ask the host for its snapshot
-    // and merge it into drawingStates (dedup by strokeId).
+    // Tablet side: after the local bundle load, ask every connected host for
+    // its snapshot and merge into drawingStates (dedup by strokeId). Multi-host:
+    // broadcast the request, accept snapshots from any host (the strokes are
+    // logically the same — first wins, others are deduped).
     LaunchedEffect(peerClient, filePath, documentId) {
         val client = peerClient ?: return@LaunchedEffect
-        // Give the LaunchedEffect(filePath) annotation-load a chance to populate
-        // drawingStates before requesting — the dedup later filters duplicates,
-        // so order is not strictly required, but this keeps logs cleaner.
         runCatching {
-            client.send(NetworkMessage.AnnotationSnapshotRequest(documentId = documentId))
+            client.broadcast(NetworkMessage.AnnotationSnapshotRequest(documentId = documentId))
         }.onFailure { e ->
             logger.warn { "Failed to request annotation snapshot: ${e::class.simpleName}" }
         }
         client.incomingMessages
-            .filterIsInstance<NetworkMessage.AnnotationSnapshot>()
+            .filter { it.message is NetworkMessage.AnnotationSnapshot }
+            .map { it.message as NetworkMessage.AnnotationSnapshot }
             .filter { it.documentId.isEmpty() || it.documentId == documentId }
             .collect { snapshot ->
                 logger.info { "Received annotation snapshot for doc=$documentId: ${snapshot.strokes.size} strokes" }
@@ -298,16 +299,29 @@ fun DetailsContent(
             }
     }
 
-    // Tablet side: surface connection loss; also expose the latest pairing
-    // state so the Save action can decide between remote (send SaveRequest
-    // to host) and local (host has no remote host of its own).
+    // Tablet side: surface connection loss; also expose an aggregated pairing
+    // state so the Save action can decide between remote (send SaveRequest to
+    // the host) and local (no host paired). With multi-host: "Connected" if
+    // any host is paired; "LostConnection" if every host has lost connection
+    // (and at least one was tried).
     var showLostConnectionDialog by remember { mutableStateOf(false) }
     var clientPairingState by remember { mutableStateOf<PairingState?>(null) }
     LaunchedEffect(peerClient) {
         val client = peerClient ?: return@LaunchedEffect
-        client.state.collect { st ->
-            clientPairingState = st
-            showLostConnectionDialog = st is PairingState.LostConnection
+        client.pairingStates.collect { states ->
+            val aggregate: PairingState = when {
+                states.values.any { it is PairingState.Connected } ->
+                    states.values.first { it is PairingState.Connected }
+                states.isNotEmpty() && states.values.all { it is PairingState.LostConnection } ->
+                    PairingState.LostConnection
+                states.values.any { it is PairingState.Reconnecting } ->
+                    states.values.first { it is PairingState.Reconnecting }
+                states.values.any { it is PairingState.Error } ->
+                    states.values.first { it is PairingState.Error }
+                else -> PairingState.Idle
+            }
+            clientPairingState = aggregate
+            showLostConnectionDialog = aggregate is PairingState.LostConnection
         }
     }
 
@@ -557,7 +571,9 @@ fun DetailsContent(
                 val message = if (peerClient != null && clientPairingState is PairingState.Connected) {
                     val requestId = "save-${Random.nextLong().toString(16)}"
                     logger.info { "[save-diag tablet] sending SaveRequest id=$requestId doc=$documentId" }
-                    peerClient.send(
+                    // Multi-host: ask every connected host. The first reply wins —
+                    // typically only one host actually holds the document.
+                    peerClient.broadcast(
                         NetworkMessage.SaveRequest(
                             requestId = requestId,
                             documentId = documentId,
@@ -566,7 +582,8 @@ fun DetailsContent(
                     logger.info { "[save-diag tablet] SaveRequest id=$requestId dispatched, awaiting SaveResult (5s)" }
                     val reply = withTimeoutOrNull(5.seconds) {
                         peerClient.incomingMessages
-                            .filterIsInstance<NetworkMessage.SaveResult>()
+                            .filter { it.message is NetworkMessage.SaveResult }
+                            .map { it.message as NetworkMessage.SaveResult }
                             .filter { it.requestId == requestId }
                             .first()
                     }

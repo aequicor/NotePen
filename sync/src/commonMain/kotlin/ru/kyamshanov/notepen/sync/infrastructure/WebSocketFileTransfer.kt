@@ -18,10 +18,16 @@ private val logger = KotlinLogging.logger {}
  *
  * Both [PeerServer] and [SyncClient] are accepted so the same class works on
  * either side of the channel; exactly one of them must be non-null.
+ *
+ * When configured with [server], a non-null [peerId] addresses the transfer
+ * to that single peer; `null` falls back to [PeerServer.broadcast] for the
+ * rare cases where every peer should receive the bytes.
  */
 class WebSocketFileTransfer(
     private val server: PeerServer? = null,
     private val client: SyncClient? = null,
+    private val peerId: String? = null,
+    private val hostId: String? = null,
 ) : FileTransfer {
 
     init {
@@ -36,7 +42,7 @@ class WebSocketFileTransfer(
     /**
      * Sends the file at [sourcePath] tagged with [documentId]. The id propagates
      * to [NetworkMessage.FileTransferStart] and every [NetworkMessage.FileChunk]
-     * so the receiver can route parallel transfers (Phase 3 wiring).
+     * so the receiver can route parallel transfers.
      */
     fun send(
         sourcePath: String,
@@ -56,7 +62,7 @@ class WebSocketFileTransfer(
             sha256 = "",
             documentId = documentId,
         )
-        server?.send(header) ?: client?.send(header)
+        dispatch(header)
 
         var sent = 0L
         for (i in 0 until chunkCount) {
@@ -72,10 +78,19 @@ class WebSocketFileTransfer(
                 dataBase64 = encoded,
                 documentId = documentId,
             )
-            server?.send(msg) ?: client?.send(msg)
+            dispatch(msg)
             sent += (end - start)
             emit(TransferProgress(transferred = sent, total = total))
             logger.debug { "Sent chunk ${i + 1}/$chunkCount for $transferId (doc=$documentId)" }
+        }
+    }
+
+    private suspend fun dispatch(message: NetworkMessage) {
+        when {
+            server != null && peerId != null -> server.send(peerId, message)
+            server != null -> server.broadcast(message)
+            client != null && hostId != null -> client.send(hostId, message)
+            client != null -> client.broadcast(message)
         }
     }
 

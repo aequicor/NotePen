@@ -4,8 +4,8 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
 import ru.kyamshanov.notepen.sync.domain.model.SyncStatus
 import ru.kyamshanov.notepen.sync.domain.port.PendingDeltaQueue
@@ -15,30 +15,21 @@ private val logger = KotlinLogging.logger {}
 
 /**
  * Tablet-side detector that flips a document to [SyncStatus.OrphanedOnHost]
- * the moment a fresh catalog reveals the host has dropped it, **without
- * waiting for the user to tap the tile or attempt a save**.
+ * the moment a fresh catalog from **any** connected host reveals the document
+ * has been dropped.
  *
- * Trigger: on every new [RemoteCatalog] (or pending-count change), compute
- * the diff between `pendingDeltaCounts.keys` (locally-known docs with unsent
- * edits) and the catalog's `documentId`s.
+ * Trigger: on every new catalog map (or pending-count change), compute the
+ * diff between `pendingDeltaCounts.keys` (locally-known docs with unsent
+ * edits) and the union of all hosts' catalog `documentId`s.
  *
- * - `documentId` in pending **and not** in catalog → mark [SyncStatus.OrphanedOnHost].
- *   The replay queue will keep buffering, but the user sees the warning so
- *   they don't expect the changes to land.
- * - `documentId` in pending **and** in catalog → mark [SyncStatus.Synced].
- *   Clears stale orphan flags (e.g. host re-added the file between snapshots,
- *   or an earlier `SaveResult` error has since been resolved).
- *
- * Docs without pending edits are intentionally ignored — they have nothing
- * to lose, and surfacing every removed entry would just be noise.
- *
- * Complements [DocumentStatusCoordinator]: that one reacts to host-pushed
- * `DocumentNotFound` / `SaveResult` errors per-operation; this one reacts to
- * passive catalog refreshes so the orphan flag never gets stuck waiting for
- * the user to interact.
+ * - `documentId` in pending **and not** in ANY catalog → mark
+ *   [SyncStatus.OrphanedOnHost]. A document is considered live if at least
+ *   one connected host still has it.
+ * - `documentId` in pending **and** in at least one catalog → mark
+ *   [SyncStatus.Synced].
  */
 class CatalogDiffOrphanDetector(
-    private val catalog: Flow<RemoteCatalog?>,
+    private val catalogs: Flow<Map<DeviceInfo, RemoteCatalog>>,
     private val queue: PendingDeltaQueue,
     private val registry: RemoteDocumentStatusRegistry,
 ) {
@@ -46,21 +37,21 @@ class CatalogDiffOrphanDetector(
     fun start(scope: CoroutineScope) {
         scope.launch {
             combine(
-                catalog.filterNotNull(),
+                catalogs,
                 queue.pendingCounts(),
             ) { snapshot, counts -> snapshot to counts }
                 .collect { (snapshot, counts) ->
-                    if (counts.isEmpty()) return@collect
-                    val presentIds = snapshot.recent.mapTo(HashSet()) { it.documentId }
+                    if (counts.isEmpty() || snapshot.isEmpty()) return@collect
+                    val presentIds = snapshot.values
+                        .flatMap { catalog -> catalog.recent.map { it.documentId } }
+                        .toHashSet()
                     for (documentId in counts.keys) {
                         if (documentId !in presentIds) {
                             logger.info {
-                                "Catalog from '${snapshot.hostName}' dropped $documentId — " +
-                                    "marking OrphanedOnHost (pending=${counts[documentId]})"
+                                "No connected host still has $documentId — marking OrphanedOnHost (pending=${counts[documentId]})"
                             }
                             registry.set(documentId, SyncStatus.OrphanedOnHost)
                         } else {
-                            // Doc is back (or never left); make sure any stale orphan flag is gone.
                             registry.set(documentId, SyncStatus.Synced)
                         }
                     }

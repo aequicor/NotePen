@@ -3,10 +3,11 @@ package ru.kyamshanov.notepen.sync.infrastructure
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.WebSockets
-import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.plugins.websocket.receiveDeserialized
 import io.ktor.client.plugins.websocket.sendSerialized
+import io.ktor.client.plugins.websocket.webSocket
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
@@ -17,11 +18,15 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.HostMessage
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
@@ -32,173 +37,268 @@ private const val RECONNECT_DEADLINE_MS = 10_000L
 private const val RECONNECT_RETRY_INTERVAL_MS = 1_000L
 
 /**
- * [SyncClient] backed by Ktor WebSocket.
+ * [SyncClient] backed by Ktor WebSocket — supports multiple concurrent host
+ * connections, each managed by its own [HostSession].
  *
  * Engine is injected so the same class works on JVM (CIO) and Android (CIO).
  * The caller must install [WebSockets] on [client] before passing it in.
  *
- * On unexpected disconnection the client transparently retries connecting for
+ * On unexpected disconnection each host's session transparently retries for
  * [RECONNECT_DEADLINE_MS] ms, emitting [PairingState.Reconnecting] each second.
- * If the deadline elapses without success, state becomes
- * [PairingState.LostConnection].
+ * If the deadline elapses without success, that host's state becomes
+ * [PairingState.LostConnection]; other hosts are unaffected.
  */
 class KtorSyncClient(private val client: HttpClient) : SyncClient {
 
-    private val _state = MutableStateFlow<PairingState>(PairingState.Idle)
-    override val state: Flow<PairingState> = _state.asStateFlow()
+    private val mutex = Mutex()
+    private val sessions = mutableMapOf<String, HostSession>()
 
-    private val _incoming = MutableSharedFlow<NetworkMessage>(extraBufferCapacity = 64)
-    override val incomingMessages: Flow<NetworkMessage> = _incoming.asSharedFlow()
+    private val _pairingStates = MutableStateFlow<Map<String, PairingState>>(emptyMap())
+    override val pairingStates: Flow<Map<String, PairingState>> = _pairingStates.asStateFlow()
 
-    /** Buffered outgoing queue; consumed by the active WebSocket session's forward coroutine. */
-    private val _outgoing = Channel<NetworkMessage>(Channel.BUFFERED)
-
-    private var sessionScope: CoroutineScope? = null
-    private var explicitlyDisconnected = false
-
-    override suspend fun connect(server: DeviceInfo, pairingCode: String, selfInfo: DeviceInfo) {
-        explicitlyDisconnected = false
-        val scope = CoroutineScope(Job())
-        sessionScope = scope
-
-        scope.launch {
-            var firstAttempt = true
-            while (scope.isActive && !explicitlyDisconnected) {
-                val ok = runSession(server, pairingCode, selfInfo, firstAttempt)
-                firstAttempt = false
-                if (explicitlyDisconnected) return@launch
-                if (ok == SessionOutcome.PairingFailed) return@launch
-                // Connection dropped; try to reconnect inside the 10 s deadline.
-                if (!attemptReconnect(scope, server, pairingCode, selfInfo)) return@launch
-            }
-        }
+    override val connectedHosts: Flow<Set<DeviceInfo>> = _pairingStates.map { snapshot ->
+        snapshot.values
+            .filterIsInstance<PairingState.Connected>()
+            .map { it.peer }
+            .toSet()
     }
 
-    private suspend fun runSession(
+    private val _incoming = MutableSharedFlow<HostMessage>(extraBufferCapacity = 64)
+    override val incomingMessages: Flow<HostMessage> = _incoming.asSharedFlow()
+
+    override suspend fun connect(
         server: DeviceInfo,
         pairingCode: String,
         selfInfo: DeviceInfo,
-        firstAttempt: Boolean,
-    ): SessionOutcome {
+    ): Result<DeviceInfo> {
+        // If we already have a session for this host id, return its current peer
+        // info if connected; otherwise drop it so we can re-pair.
+        val hostId = server.id
+        mutex.withLock {
+            sessions[hostId]?.let { existing ->
+                if (existing.isConnected()) {
+                    return Result.success(existing.peer ?: server)
+                }
+                existing.cancel()
+                sessions.remove(hostId)
+                publishStates()
+            }
+        }
+
+        val session = HostSession(
+            server = server,
+            pairingCode = pairingCode,
+            selfInfo = selfInfo,
+            incomingFlow = _incoming,
+            httpClient = client,
+            onStateChange = { hostId, st -> updateState(hostId, st) },
+            onTerminated = { id -> removeSession(id) },
+        )
+        mutex.withLock { sessions[hostId] = session }
+        updateState(hostId, PairingState.Idle)
+        return session.start()
+    }
+
+    override suspend fun send(hostId: String, message: NetworkMessage) {
+        val session = mutex.withLock { sessions[hostId] } ?: return
+        session.send(message)
+    }
+
+    override suspend fun broadcast(message: NetworkMessage) {
+        val snapshot = mutex.withLock { sessions.values.toList() }
+        for (s in snapshot) runCatching { s.send(message) }
+    }
+
+    override suspend fun disconnect(hostId: String) {
+        val session = mutex.withLock { sessions.remove(hostId) }
+        session?.cancel()
+        updateState(hostId, PairingState.Idle, remove = true)
+    }
+
+    override suspend fun disconnectAll() {
+        val snapshot = mutex.withLock {
+            val copy = sessions.toMap()
+            sessions.clear()
+            copy
+        }
+        for ((_, s) in snapshot) s.cancel()
+        _pairingStates.value = emptyMap()
+    }
+
+    private suspend fun updateState(hostId: String, state: PairingState, remove: Boolean = false) {
+        val updated = _pairingStates.value.toMutableMap()
+        if (remove) updated.remove(hostId) else updated[hostId] = state
+        _pairingStates.value = updated
+    }
+
+    private suspend fun removeSession(hostId: String) {
+        mutex.withLock { sessions.remove(hostId) }
+        updateState(hostId, PairingState.Idle, remove = true)
+    }
+
+    private suspend fun publishStates() {
+        // Trigger a state emission with the current map (used after session map mutation).
+        _pairingStates.value = _pairingStates.value.toMap()
+    }
+}
+
+/**
+ * One independent WebSocket session against a single host. Owns its own scope,
+ * outgoing channel, and reconnect loop. Lifetime ends when the caller invokes
+ * [cancel] or when the host's reconnect deadline elapses.
+ */
+@Suppress("TooManyFunctions")
+private class HostSession(
+    val server: DeviceInfo,
+    private val pairingCode: String,
+    private val selfInfo: DeviceInfo,
+    private val incomingFlow: MutableSharedFlow<HostMessage>,
+    private val httpClient: HttpClient,
+    private val onStateChange: suspend (hostId: String, PairingState) -> Unit,
+    private val onTerminated: suspend (hostId: String) -> Unit,
+) {
+
+    private val scope = CoroutineScope(Job())
+    private val outgoingChannel = Channel<NetworkMessage>(Channel.BUFFERED)
+    private val firstPairingResult = CompletableDeferred<Result<DeviceInfo>>()
+
+    @Volatile var peer: DeviceInfo? = null
+        private set
+
+    @Volatile private var connectedFlag: Boolean = false
+
+    fun isConnected(): Boolean = connectedFlag
+
+    /**
+     * Starts the connect+reconnect loop in [scope] and suspends until the
+     * **first** pairing attempt produces a definitive result. On success
+     * subsequent reconnects are silent; on first-attempt rejection the session
+     * tears down and returns the failure.
+     */
+    suspend fun start(): Result<DeviceInfo> {
+        scope.launch {
+            var firstAttempt = true
+            while (scope.isActive) {
+                val outcome = runSession(firstAttempt)
+                if (firstAttempt) {
+                    when (outcome) {
+                        is SessionOutcome.Paired -> firstPairingResult.complete(Result.success(outcome.peer))
+                        is SessionOutcome.PairingFailed -> {
+                            firstPairingResult.complete(Result.failure(IllegalStateException(outcome.reason)))
+                            return@launch
+                        }
+                        SessionOutcome.Disconnected -> {
+                            // first attempt never even paired — treat as failure
+                            firstPairingResult.complete(Result.failure(IllegalStateException("connect failed")))
+                        }
+                    }
+                }
+                firstAttempt = false
+                if (!scope.isActive) return@launch
+                // Try to reconnect within deadline
+                val reconnected = attemptReconnect()
+                if (!reconnected) {
+                    onStateChange(server.id, PairingState.LostConnection)
+                    onTerminated(server.id)
+                    return@launch
+                }
+            }
+        }
+        return firstPairingResult.await()
+    }
+
+    suspend fun send(message: NetworkMessage) {
+        outgoingChannel.send(message)
+    }
+
+    fun cancel() {
+        scope.cancel()
+        outgoingChannel.close()
+    }
+
+    private suspend fun runSession(firstAttempt: Boolean): SessionOutcome {
         var outcome: SessionOutcome = SessionOutcome.Disconnected
         try {
-            client.webSocket(host = server.host, port = server.port, path = "/ws") {
+            httpClient.webSocket(host = server.host, port = server.port, path = "/ws") {
                 sendSerialized<NetworkMessage>(NetworkMessage.PairRequest(code = pairingCode, device = selfInfo))
-
                 when (val reply = receiveDeserialized<NetworkMessage>()) {
                     is NetworkMessage.PairAccepted -> {
-                        _state.value = PairingState.Connected(reply.serverDevice)
-                        logger.info { "Paired with ${reply.serverDevice.name}" }
+                        peer = reply.serverDevice
+                        connectedFlag = true
+                        onStateChange(server.id, PairingState.Connected(reply.serverDevice))
+                        outcome = SessionOutcome.Paired(reply.serverDevice)
+                        logger.info { "Paired with ${reply.serverDevice.name} (host=${server.id})" }
                     }
                     is NetworkMessage.PairRejected -> {
-                        _state.value = PairingState.Error("Pairing rejected: ${reply.reason}")
-                        outcome = if (firstAttempt) SessionOutcome.PairingFailed else SessionOutcome.Disconnected
-                        return@webSocket
+                        onStateChange(server.id, PairingState.Error("Pairing rejected: ${reply.reason}"))
+                        return@webSocket Unit.also {
+                            outcome = if (firstAttempt) {
+                                SessionOutcome.PairingFailed(reply.reason)
+                            } else {
+                                SessionOutcome.Disconnected
+                            }
+                        }
                     }
                     else -> {
-                        _state.value = PairingState.Error("Unexpected reply: $reply")
-                        outcome = SessionOutcome.PairingFailed
+                        onStateChange(server.id, PairingState.Error("Unexpected reply: $reply"))
+                        outcome = SessionOutcome.PairingFailed("unexpected reply")
                         return@webSocket
                     }
                 }
 
-                // Forward outgoing messages from the shared channel to this session.
+                val session = this
                 val forwarder = launch {
-                    for (msg in _outgoing) {
-                        sendSerialized<NetworkMessage>(msg)
+                    try {
+                        while (true) {
+                            val msg = outgoingChannel.receive()
+                            session.sendSerialized<NetworkMessage>(msg)
+                        }
+                    } catch (_: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
+                        // Channel closed by [HostSession.cancel] — normal shutdown path.
                     }
                 }
-
                 try {
+                    val hostPeer = peer ?: server
                     while (true) {
                         val msg = receiveDeserialized<NetworkMessage>()
                         if (msg is NetworkMessage.Disconnect) break
-                        _incoming.emit(msg)
+                        incomingFlow.emit(HostMessage(hostPeer, msg))
                     }
                 } finally {
                     forwarder.cancel()
+                    connectedFlag = false
                 }
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            logger.warn { "SyncClient session ended: ${e.message}" }
+            logger.warn { "Session for ${server.id} ended: ${e.message}" }
+            connectedFlag = false
         }
         return outcome
     }
 
-    private suspend fun attemptReconnect(
-        scope: CoroutineScope,
-        server: DeviceInfo,
-        pairingCode: String,
-        selfInfo: DeviceInfo,
-    ): Boolean {
+    private suspend fun attemptReconnect(): Boolean {
         val start = TimeSource.Monotonic.markNow()
         val deadline = RECONNECT_DEADLINE_MS.milliseconds
-        while (scope.isActive && !explicitlyDisconnected) {
+        while (scope.isActive) {
             val remainingMs = (deadline - start.elapsedNow()).inWholeMilliseconds
-            if (remainingMs <= 0) {
-                _state.value = PairingState.LostConnection
-                return false
-            }
-            _state.value = PairingState.Reconnecting(
-                secondsRemaining = ((remainingMs + 999) / 1000).toInt(),
+            if (remainingMs <= 0) return false
+            onStateChange(
+                server.id,
+                PairingState.Reconnecting(secondsRemaining = ((remainingMs + 999) / 1000).toInt()),
             )
-            val pingOk = try {
-                client.webSocket(host = server.host, port = server.port, path = "/ws") {
-                    sendSerialized<NetworkMessage>(NetworkMessage.PairRequest(code = pairingCode, device = selfInfo))
-                    when (val reply = receiveDeserialized<NetworkMessage>()) {
-                        is NetworkMessage.PairAccepted -> {
-                            _state.value = PairingState.Connected(reply.serverDevice)
-                        }
-                        else -> {
-                            _state.value = PairingState.Error("Reconnect rejected")
-                            return@webSocket
-                        }
-                    }
-                    val forwarder = launch {
-                        for (msg in _outgoing) sendSerialized<NetworkMessage>(msg)
-                    }
-                    try {
-                        while (true) {
-                            val msg = receiveDeserialized<NetworkMessage>()
-                            if (msg is NetworkMessage.Disconnect) break
-                            _incoming.emit(msg)
-                        }
-                    } finally {
-                        forwarder.cancel()
-                    }
-                }
-                true
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                logger.debug { "Reconnect attempt failed: ${e.message}" }
-                false
-            }
-            if (pingOk && _state.value is PairingState.Connected) {
-                // Session completed cleanly after a successful reconnect; loop will retry again if needed.
-                return true
-            }
+            val pingOk = runCatching { runSession(firstAttempt = false) }
+                .getOrNull() is SessionOutcome.Paired
+            if (pingOk) return true
             delay(RECONNECT_RETRY_INTERVAL_MS)
         }
         return false
     }
+}
 
-    override suspend fun send(message: NetworkMessage) {
-        // Suspending send: applies back-pressure when the buffered outgoing
-        // channel (capacity 64) is full. The earlier `trySend` silently
-        // dropped overflow, which corrupted erase batches that emit
-        // hundreds of deltas in one burst.
-        _outgoing.send(message)
-    }
-
-    override suspend fun disconnect() {
-        explicitlyDisconnected = true
-        sessionScope?.cancel()
-        sessionScope = null
-        _state.value = PairingState.Idle
-    }
-
-    private enum class SessionOutcome { Disconnected, PairingFailed }
+private sealed class SessionOutcome {
+    data class Paired(val peer: DeviceInfo) : SessionOutcome()
+    data class PairingFailed(val reason: String) : SessionOutcome()
+    data object Disconnected : SessionOutcome()
 }

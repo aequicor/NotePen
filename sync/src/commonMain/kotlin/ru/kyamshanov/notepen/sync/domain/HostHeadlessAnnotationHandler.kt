@@ -2,8 +2,6 @@ package ru.kyamshanov.notepen.sync.domain
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.flow.filterIsInstance
-import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
@@ -16,20 +14,8 @@ private val logger = KotlinLogging.logger {}
  * [NetworkMessage.SaveRequest] and [NetworkMessage.AnnotationSnapshotRequest]s
  * without requiring the host to open the document in its own `DetailsContent`.
  *
- * For every incoming request the handler:
- * 1. Resolves `documentId` → host file URI via [provider]. Unknown ids are
- *    answered with `success = false` / no snapshot.
- * 2. Asks [projection] to start following the document (lazy-loads from disk
- *    on first touch, then keeps state in sync with `mergedDeltas`).
- * 3. For save: serialises the projection state back to
- *    [AnnotationRepository.save] and replies with [NetworkMessage.SaveResult].
- *    For snapshot: emits [NetworkMessage.AnnotationSnapshot] built from
- *    [HostAnnotationProjection.snapshotDtos].
- *
- * Coexists peacefully with the host's `DetailsContent` write-path: the
- * projection itself sees both local edits (mirrored by [SyncEngine.applyLocal]
- * onto `mergedDeltas`) and peer edits, so persistence stays consistent
- * regardless of which side actually drew the strokes.
+ * Replies (`SaveResult`, `AnnotationSnapshot`, `DocumentNotFound`) are sent
+ * back to the **requesting peer** only.
  */
 class HostHeadlessAnnotationHandler(
     private val server: PeerServer,
@@ -41,39 +27,36 @@ class HostHeadlessAnnotationHandler(
     /** Starts the request loop; runs until [scope] is cancelled. */
     fun start(scope: CoroutineScope) {
         scope.launch {
-            merge(
-                server.incomingMessages.filterIsInstance<NetworkMessage.SaveRequest>(),
-                server.incomingMessages.filterIsInstance<NetworkMessage.AnnotationSnapshotRequest>(),
-            ).collect { msg ->
-                scope.launch {
-                    when (msg) {
-                        is NetworkMessage.SaveRequest -> handleSave(msg, scope)
-                        is NetworkMessage.AnnotationSnapshotRequest -> handleSnapshot(msg, scope)
-                        else -> Unit
-                    }
+            server.incomingMessages.collect { peerMessage ->
+                when (val msg = peerMessage.message) {
+                    is NetworkMessage.SaveRequest ->
+                        scope.launch { handleSave(peerMessage.peer.id, msg, scope) }
+                    is NetworkMessage.AnnotationSnapshotRequest ->
+                        scope.launch { handleSnapshot(peerMessage.peer.id, msg, scope) }
+                    else -> Unit
                 }
             }
         }
     }
 
-    private suspend fun handleSave(req: NetworkMessage.SaveRequest, scope: CoroutineScope) {
+    private suspend fun handleSave(peerId: String, req: NetworkMessage.SaveRequest, scope: CoroutineScope) {
         val documentId = req.documentId
         if (documentId.isEmpty()) {
             logger.warn { "Headless: SaveRequest id=${req.requestId} missing documentId, ignoring" }
             return
         }
-        val hostUri = provider.resolveUri(documentId)
+        val hostUri = provider.resolveUri(peerId, documentId)
         if (hostUri == null) {
-            logger.warn { "Headless save denied: $documentId not in catalog" }
-            // Both signals so the tablet's DocumentStatusCoordinator can mark
-            // orphan immediately regardless of which it listens for.
+            logger.warn { "Headless save denied: $documentId not in catalog for $peerId" }
             server.send(
+                peerId,
                 NetworkMessage.DocumentNotFound(
                     documentId = documentId,
                     reason = "Unknown documentId — not in last published catalog",
                 ),
             )
             server.send(
+                peerId,
                 NetworkMessage.SaveResult(
                     requestId = req.requestId,
                     success = false,
@@ -87,6 +70,7 @@ class HostHeadlessAnnotationHandler(
         val state = projection.stateOf(documentId)
         if (state == null) {
             server.send(
+                peerId,
                 NetworkMessage.SaveResult(
                     requestId = req.requestId,
                     success = false,
@@ -110,6 +94,7 @@ class HostHeadlessAnnotationHandler(
             "Headless save id=${req.requestId} doc=$documentId success=${result.isSuccess}"
         }
         server.send(
+            peerId,
             NetworkMessage.SaveResult(
                 requestId = req.requestId,
                 success = result.isSuccess,
@@ -120,6 +105,7 @@ class HostHeadlessAnnotationHandler(
     }
 
     private suspend fun handleSnapshot(
+        peerId: String,
         req: NetworkMessage.AnnotationSnapshotRequest,
         scope: CoroutineScope,
     ) {
@@ -128,9 +114,10 @@ class HostHeadlessAnnotationHandler(
             logger.warn { "Headless: AnnotationSnapshotRequest missing documentId, ignoring" }
             return
         }
-        if (provider.resolveUri(documentId) == null) {
-            logger.warn { "Headless snapshot denied: $documentId not in catalog" }
+        if (provider.resolveUri(peerId, documentId) == null) {
+            logger.warn { "Headless snapshot denied: $documentId not in catalog for $peerId" }
             server.send(
+                peerId,
                 NetworkMessage.DocumentNotFound(
                     documentId = documentId,
                     reason = "Unknown documentId — not in last published catalog",
@@ -142,6 +129,7 @@ class HostHeadlessAnnotationHandler(
         val snapshot = projection.snapshotDtos(documentId).orEmpty()
         logger.info { "Headless snapshot doc=$documentId strokes=${snapshot.size}" }
         server.send(
+            peerId,
             NetworkMessage.AnnotationSnapshot(
                 strokes = snapshot,
                 documentId = documentId,

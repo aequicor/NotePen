@@ -23,6 +23,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
@@ -35,10 +38,12 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroi
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
-import ru.kyamshanov.notepen.sync.SyncViewModel
+import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
 import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
+import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
@@ -49,7 +54,6 @@ import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseAndroid
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
-import ru.kyamshanov.notepen.sync.infrastructure.NsdDeviceDiscovery
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
@@ -93,7 +97,6 @@ class MainActivity : ComponentActivity() {
             }
         }
         val syncClient = KtorSyncClient(httpClient)
-        val discovery = NsdDeviceDiscovery(context)
         // Persistent offline buffer (SQLDelight-backed) — survives process death
         // so edits made offline still replay after the next launch + reconnect.
         val syncDatabase = createSyncDatabaseAndroid(context = context)
@@ -109,11 +112,23 @@ class MainActivity : ComponentActivity() {
             client = syncClient,
             pendingQueue = pendingDeltaQueue,
         )
-        PendingDeltaReplayCoordinator(registry = syncEngineRegistry, stateFlow = syncClient.state)
-            .start(scope = appScope)
-        val syncViewModel = SyncViewModel(
-            discovery = discovery,
-            client = syncClient,
+        // Trigger pending-delta replay whenever a new host enters the connected set.
+        val clientConnected = syncClient.connectedHosts
+            .distinctUntilChanged()
+            .filter { it.isNotEmpty() }
+            .map { }
+        PendingDeltaReplayCoordinator(
+            registry = syncEngineRegistry,
+            connectionEstablished = clientConnected,
+        ).start(scope = appScope)
+
+        val clientScanViewModel = ClientQrScanViewModel(
+            syncClient = syncClient,
+            selfInfo = selfInfo,
+            scope = appScope,
+        )
+        val manualConnectViewModel = ManualConnectViewModel(
+            syncClient = syncClient,
             selfInfo = selfInfo,
             scope = appScope,
         )
@@ -121,7 +136,8 @@ class MainActivity : ComponentActivity() {
         // Feed peer-originated stroke deltas into the right engine so SyncBridge
         // can mirror them onto the local drawing state once DetailsContent opens.
         appScope.launch {
-            syncClient.incomingMessages.collect { msg ->
+            syncClient.incomingMessages.collect { hostMessage ->
+                val msg = hostMessage.message
                 if (msg is NetworkMessage.StrokeDeltaMessage) {
                     syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
                 }
@@ -138,6 +154,7 @@ class MainActivity : ComponentActivity() {
             .start(scope = appScope)
         val remoteDocumentOpener = RemoteDocumentOpener(
             client = syncClient,
+            catalogs = remoteCatalogCache.catalogs,
             destDir = receivedDir,
         )
         // Track per-document orphan flags as host signals come in.
@@ -146,7 +163,7 @@ class MainActivity : ComponentActivity() {
             .start(scope = appScope)
         // Also mark orphans passively: catalog drops a doc that has pending edits.
         CatalogDiffOrphanDetector(
-            catalog = remoteCatalogCache.catalog,
+            catalogs = remoteCatalogCache.catalogs,
             queue = pendingDeltaQueue,
             registry = remoteDocumentStatusRegistry,
         ).start(scope = appScope)
@@ -166,7 +183,7 @@ class MainActivity : ComponentActivity() {
                     thumbnailGenerator = thumbnailGenerator,
                     onOpenEditor = onOpenEditor,
                     onOpenFilePicker = { filePicker.pickPdfFile() },
-                    remoteCatalogFlow = remoteCatalogCache.catalog,
+                    remoteCatalogFlow = remoteCatalogCache.catalogs.map { it.values.firstOrNull() },
                     remoteDocumentOpener = remoteDocumentOpener,
                     pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
                     remoteDocumentStatuses = remoteDocumentStatusRegistry.statuses,
@@ -188,10 +205,11 @@ class MainActivity : ComponentActivity() {
                     rootComponent = root,
                     pdfDocumentLoader = pdfDocumentLoader,
                     pdfPageRenderer = pdfPageRenderer,
-                    syncViewModel = syncViewModel,
                     syncEngineFor = syncEngineRegistry::get,
                     peerClient = syncClient,
                     pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
+                    clientScanViewModel = clientScanViewModel,
+                    manualConnectViewModel = manualConnectViewModel,
                     receivedPdfDir = receivedDir,
                 )
             }

@@ -27,6 +27,9 @@ import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import notepen.app.bycompose.desktop.generated.resources.Res
@@ -47,9 +50,9 @@ import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
+import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
+import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
 import ru.kyamshanov.notepen.sync.infrastructure.KtorPeerServer
-import ru.kyamshanov.notepen.sync.HostViewModel
-import ru.kyamshanov.notepen.sync.SyncViewModel
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
 import ru.kyamshanov.notepen.sync.domain.DocumentTransferRequestHandler
@@ -68,7 +71,7 @@ import ru.kyamshanov.notepen.createAnnotationRepository
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
-import ru.kyamshanov.notepen.sync.infrastructure.JmDnsDeviceDiscovery
+import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import java.net.InetAddress
@@ -101,7 +104,6 @@ fun main() {
 
     val peerServer = KtorPeerServer(selfInfo = selfInfo, ioDispatcher = Dispatchers.IO)
     val serviceRegistrar = JmDnsServiceRegistrar()
-    val discovery = JmDnsDeviceDiscovery(Dispatchers.IO)
     val wsJson = Json { classDiscriminator = "type" }
     val httpClient = HttpClient(CIO) {
         install(WebSockets) {
@@ -129,16 +131,29 @@ fun main() {
     )
 
     // Replay buffered deltas whenever either side (re)connects.
-    PendingDeltaReplayCoordinator(registry = syncEngineRegistry, stateFlow = peerServer.state)
-        .start(scope = appScope)
-    PendingDeltaReplayCoordinator(registry = syncEngineRegistry, stateFlow = syncClient.state)
-        .start(scope = appScope)
+    // Host: trigger on first peer joining (transition `empty → non-empty`).
+    val hostPeerConnected = peerServer.connectedPeers
+        .distinctUntilChanged()
+        .filter { it.isNotEmpty() }
+        .map { }
+    // Client: trigger when at least one host enters the connected set.
+    val clientConnected = syncClient.connectedHosts
+        .distinctUntilChanged()
+        .filter { it.isNotEmpty() }
+        .map { }
+    PendingDeltaReplayCoordinator(
+        registry = syncEngineRegistry,
+        connectionEstablished = hostPeerConnected,
+    ).start(scope = appScope)
+    PendingDeltaReplayCoordinator(
+        registry = syncEngineRegistry,
+        connectionEstablished = clientConnected,
+    ).start(scope = appScope)
 
-    val hostViewModel = HostViewModel(server = peerServer, scope = appScope)
-    val syncViewModel = SyncViewModel(
-        discovery = discovery,
-        client = syncClient,
-        selfInfo = selfInfo,
+    val hostQrViewModel = HostQrPairingViewModel(
+        peerServer = peerServer,
+        qrEncoder = ZxingQrEncoder(),
+        hostDeviceName = selfName,
         scope = appScope,
     )
 
@@ -177,28 +192,34 @@ fun main() {
     val remoteCatalogCache = InMemoryRemoteCatalogCache()
     RemoteCatalogClientCoordinator(client = syncClient, cache = remoteCatalogCache)
         .start(scope = appScope)
-    val remoteDocumentOpener = RemoteDocumentOpener(client = syncClient, destDir = receivedDir)
+    val remoteDocumentOpener = RemoteDocumentOpener(
+        client = syncClient,
+        catalogs = remoteCatalogCache.catalogs,
+        destDir = receivedDir,
+    )
     // Track per-document orphan flags as host signals come in.
     val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
     DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
         .start(scope = appScope)
     // Also mark orphans passively: catalog drops a doc that has pending edits.
     CatalogDiffOrphanDetector(
-        catalog = remoteCatalogCache.catalog,
+        catalogs = remoteCatalogCache.catalogs,
         queue = pendingDeltaQueue,
         registry = remoteDocumentStatusRegistry,
     ).start(scope = appScope)
 
     // Demultiplex incoming stroke deltas by documentId — one engine per doc.
     appScope.launch {
-        peerServer.incomingMessages.collect { msg ->
+        peerServer.incomingMessages.collect { peerMessage ->
+            val msg = peerMessage.message
             if (msg is NetworkMessage.StrokeDeltaMessage) {
                 syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
             }
         }
     }
     appScope.launch {
-        syncClient.incomingMessages.collect { msg ->
+        syncClient.incomingMessages.collect { hostMessage ->
+            val msg = hostMessage.message
             if (msg is NetworkMessage.StrokeDeltaMessage) {
                 syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
             }
@@ -207,12 +228,14 @@ fun main() {
 
     // Register/unregister mDNS service as the server lifecycle changes.
     appScope.launch {
-        peerServer.state.collect { state ->
+        peerServer.lifecycle.collect { state ->
             withContext(Dispatchers.IO) {
                 when (state) {
-                    is PairingState.AwaitingConnection ->
+                    is ServerLifecycleState.Running ->
                         serviceRegistrar.register(selfInfo.copy(host = state.host, port = state.port))
-                    is PairingState.Idle -> serviceRegistrar.unregister()
+                    is ServerLifecycleState.Idle,
+                    is ServerLifecycleState.Stopped,
+                    -> serviceRegistrar.unregister()
                     else -> Unit
                 }
             }
@@ -237,7 +260,7 @@ fun main() {
                         thumbnailGenerator = thumbnailGenerator,
                         onOpenEditor = onOpenEditor,
                         onOpenFilePicker = { FilePicker().pickPdfFile() },
-                        remoteCatalogFlow = remoteCatalogCache.catalog,
+                        remoteCatalogFlow = remoteCatalogCache.catalogs.map { it.values.firstOrNull() },
                         remoteDocumentOpener = remoteDocumentOpener,
                         pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
                         remoteDocumentStatuses = remoteDocumentStatusRegistry.statuses,
@@ -301,12 +324,15 @@ fun main() {
                     rootComponent = root,
                     pdfDocumentLoader = pdfDocumentLoader,
                     pdfPageRenderer = pdfPageRenderer,
-                    hostViewModel = hostViewModel,
-                    syncViewModel = syncViewModel,
                     syncEngineFor = syncEngineRegistry::get,
                     peerServer = peerServer,
                     peerClient = syncClient,
                     pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
+                    hostQrViewModel = hostQrViewModel,
+                    // Client VMs are null on desktop — the scan / manual panes
+                    // stay hidden, leaving only the host QR panel.
+                    clientScanViewModel = null,
+                    manualConnectViewModel = null,
                     receivedPdfDir = receivedDir,
                 )
             }
