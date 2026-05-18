@@ -8,8 +8,10 @@ import kotlinx.coroutines.sync.withLock
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
+import ru.kyamshanov.notepen.sync.domain.model.RectDto
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
@@ -23,6 +25,7 @@ data class DocumentAnnotationState(
     val eraser: EraserSettings,
     val currentPage: Int,
     val currentPageOffset: Int,
+    val pageExtents: Map<Int, PageExtent> = emptyMap(),
 )
 
 private val logger = KotlinLogging.logger {}
@@ -106,6 +109,9 @@ class HostAnnotationProjection(
                 bundle.pages.forEach { (page, paths) ->
                     state.pages.getOrPut(page) { mutableListOf() }.addAll(paths)
                 }
+                bundle.pageExtents.forEach { (page, ext) ->
+                    state.pageExtents[page] = ext
+                }
                 logger.info {
                     "Projection loaded from disk: doc=$documentId pages=${bundle.pages.size}"
                 }
@@ -124,6 +130,10 @@ class HostAnnotationProjection(
                     if (page.none { it.strokeId == delta.strokeId }) {
                         page.add(delta.path.toDomain())
                     }
+                    delta.pageExtent?.let { ext ->
+                        val current = state.pageExtents[delta.pageIndex] ?: PageExtent.Pdf
+                        state.pageExtents[delta.pageIndex] = current.union(ext.toDomain())
+                    }
                 }
                 is StrokeDelta.Removed -> {
                     page.removeAll { it.strokeId == delta.strokeId }
@@ -138,8 +148,16 @@ class HostAnnotationProjection(
         val deviceId = "host"
         val out = mutableListOf<StrokeDelta.Added>()
         for ((pageIndex, paths) in s.pages) {
+            // Поле extent передаём только в первом штрихе каждой страницы —
+            // повторять в каждом нет смысла, получатель всё равно union'ит.
+            val extDto = s.pageExtents[pageIndex]
+                ?.takeIf { it != PageExtent.Pdf }
+                ?.let { RectDto.fromDomain(it) }
+            var attachedExtent = false
             for (path in paths) {
                 val id = path.strokeId.ifEmpty { "$deviceId#legacy-$pageIndex-${out.size}" }
+                val ext = if (!attachedExtent) extDto else null
+                if (ext != null) attachedExtent = true
                 out.add(
                     StrokeDelta.Added(
                         strokeId = id,
@@ -147,15 +165,20 @@ class HostAnnotationProjection(
                         authorDeviceId = deviceId,
                         clock = 0,
                         path = path.toDto(id),
+                        pageExtent = ext,
                     ),
                 )
             }
+            // Если страница пустая, но extent не дефолтный — отправлять нечего
+            // в snapshot'е (snapshot — это только Added). Сжатие через snapshot
+            // out of scope.
         }
         return out
     }
 
     private class MutableDocumentState {
         val pages: MutableMap<Int, MutableList<DrawingPath>> = mutableMapOf()
+        val pageExtents: MutableMap<Int, PageExtent> = mutableMapOf()
         var scale: Int = 100
         var pen: PenSettings = PenSettings()
         var marker: MarkerSettings = MarkerSettings()
@@ -172,5 +195,6 @@ class HostAnnotationProjection(
         eraser = eraser,
         currentPage = currentPage,
         currentPageOffset = currentPageOffset,
+        pageExtents = pageExtents.toMap(),
     )
 }

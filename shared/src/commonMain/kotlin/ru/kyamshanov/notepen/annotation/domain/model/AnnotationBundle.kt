@@ -10,4 +10,9 @@ data class AnnotationBundle(
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
     val favoritePageIndices: Set<Int> = emptySet(),
+    /**
+     * Расширенная рисуемая область каждой страницы (см. [PageExtent]).
+     * Отсутствие ключа эквивалентно [PageExtent.Pdf].
+     */
+    val pageExtents: Map<Int, PageExtent> = emptyMap(),
 )

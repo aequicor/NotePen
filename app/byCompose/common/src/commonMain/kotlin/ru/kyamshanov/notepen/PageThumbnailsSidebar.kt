@@ -454,7 +454,13 @@ private fun ThumbnailItem(
             if (paths.isNotEmpty()) {
                 Canvas(modifier = Modifier.matchParentSize()) {
                     paths.forEach { path ->
-                        drawStrokeWithPressure(path, size.width, size.height, strokeScratch)
+                        drawStrokeWithPressure(
+                            stroke = path,
+                            pdfWidth = size.width,
+                            pdfHeight = size.height,
+                            extent = ru.kyamshanov.notepen.annotation.domain.model.PageExtent.Pdf,
+                            scratch = strokeScratch,
+                        )
                     }
                 }
             }

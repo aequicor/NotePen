@@ -282,13 +282,19 @@ actual fun PdfPagesViewer(
 
             data class Item(val placeableX: Int, val placeableY: Int, val placeable: androidx.compose.ui.layout.Placeable)
             val items = mutableListOf<Item>()
-            val w = (layout.basePageWidthPx * zoom).roundToInt().coerceAtLeast(1)
-            val visualWidthDp = with(density) { w.toDp() }
-            val px = pan.x.roundToInt()
-            var py = (pan.y + layout.pageTopsPx[first] * zoom).roundToInt()
             for (i in first..last) {
-                val h = (layout.pageHeightsPx[i] * zoom).roundToInt().coerceAtLeast(1)
+                val ext = layout.pageExtents[i]
+                val pdfH = layout.pdfHeightsPx[i]
+                val w = (layout.pageWidthsPx[i] * zoom).roundToInt().coerceAtLeast(1)
+                val h = (pdfH * ext.height * zoom).roundToInt().coerceAtLeast(1)
+                val visualWidthDp = with(density) { w.toDp() }
                 val visualHeightDp = with(density) { h.toDp() }
+                val pdfWidthDp = with(density) {
+                    (layout.basePageWidthPx * zoom).roundToInt().coerceAtLeast(1).toDp()
+                }
+                val pdfHeightDp = with(density) {
+                    (pdfH * zoom).roundToInt().coerceAtLeast(1).toDp()
+                }
                 val pagePlaceables = subcompose(i) {
                     val cached = cache.entries[i]?.bitmap
                     val scope = ImmutablePdfPageScope(
@@ -296,12 +302,15 @@ actual fun PdfPagesViewer(
                         bitmap = cached,
                         visualWidth = visualWidthDp,
                         visualHeight = visualHeightDp,
+                        pdfWidth = pdfWidthDp,
+                        pdfHeight = pdfHeightDp,
+                        extent = ext,
                     )
                     with(scope) { pageContent() }
                 }.map { it.measure(Constraints.fixed(w, h)) }
-                val placementY = py
-                pagePlaceables.forEach { items.add(Item(px, placementY, it)) }
-                py += h
+                val slotX = (pan.x + ext.left * layout.basePageWidthPx * zoom).roundToInt()
+                val slotY = (pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom).roundToInt()
+                pagePlaceables.forEach { items.add(Item(slotX, slotY, it)) }
             }
             layout(constraints.maxWidth, constraints.maxHeight) {
                 items.forEach { it.placeable.place(it.placeableX, it.placeableY) }
@@ -323,6 +332,9 @@ private data class ImmutablePdfPageScope(
     override val bitmap: androidx.compose.ui.graphics.ImageBitmap?,
     override val visualWidth: androidx.compose.ui.unit.Dp,
     override val visualHeight: androidx.compose.ui.unit.Dp,
+    override val pdfWidth: androidx.compose.ui.unit.Dp,
+    override val pdfHeight: androidx.compose.ui.unit.Dp,
+    override val extent: ru.kyamshanov.notepen.annotation.domain.model.PageExtent,
 ) : PdfPageScope
 
 /**

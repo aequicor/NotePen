@@ -7,6 +7,16 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+
+/**
+ * Запас, на который extent расширяется наружу при выходе пера за текущую
+ * границу — крупный шаг (40 % ширины PDF), чтобы за один штрих за пределы
+ * страницы случилось максимум 2–3 роста, а не «дёрганье на каждую точку
+ * стилуса». Каждый рост => relayout вьюера + ре-растеризация кэша штрихов;
+ * на dense-страницах это дорого, поэтому экономим.
+ */
+private const val EXTENT_GROW_PAD: Float = 0.4f
 
 class PdfDrawingState {
     var currentPaths = mutableStateListOf<DrawingPath>()
@@ -45,9 +55,47 @@ class PdfDrawingState {
      */
     val historyVersion = mutableStateOf(0)
 
+    /**
+     * Расширенная рисуемая область страницы (см. [PageExtent]). Изначально
+     * равна PDF-странице, растёт по мере того, как пользователь рисует за её
+     * пределами. Изменение значения инкрементирует [historyVersion] — это
+     * сигнал к перестройке кэша штрихов и перерасчёту layout вьюера.
+     */
+    val extent = mutableStateOf(PageExtent.Pdf)
+
     /** Bump [historyVersion] to invalidate caches keyed on completed-stroke content. */
     fun markHistoryChanged() {
         historyVersion.value++
+    }
+
+    /**
+     * Расширить [extent], чтобы он включал точку `(x, y)` с запасом
+     * [EXTENT_GROW_PAD]. Возвращает `true`, если extent действительно изменился.
+     * Использовать внутри drawing-pipeline; при возврате `true` вызывающий
+     * (или этот метод сам — через [markHistoryChanged]) обязан инвалидировать
+     * зависимые кэши.
+     */
+    fun growExtentToInclude(x: Float, y: Float): Boolean {
+        val current = extent.value
+        val grown = current.including(x, y, pad = EXTENT_GROW_PAD)
+        if (grown === current) return false
+        extent.value = grown
+        // Кэш `completedLayer` ребилдится при изменении extent (он сидит в
+        // системе координат слота). Бамп нужен только если есть, что
+        // перерисовывать — пустой кэш сам собой никнет.
+        if (currentPaths.isNotEmpty()) markHistoryChanged()
+        return true
+    }
+
+    /**
+     * Принудительно установить [extent] (например, при загрузке из репозитория
+     * или при применении удалённого `StrokeDelta`). Если значение меняется —
+     * инвалидирует кэши через [markHistoryChanged].
+     */
+    fun setExtent(value: PageExtent) {
+        if (extent.value == value) return
+        extent.value = value
+        markHistoryChanged()
     }
 
     fun startDrawing(
@@ -62,11 +110,13 @@ class PdfDrawingState {
         liveStrokeWidth.value = normalizedStrokeWidth
         livePoints.clear()
         livePoints.add(DrawingPoint(x, y, isNewPath = true, pressure = pressure, tilt = tilt))
+        growExtentToInclude(x, y)
     }
 
     fun addPoint(x: Float, y: Float, pressure: Float = 1f, tilt: Float = 0f) {
         if (isDrawing.value) {
             livePoints.add(DrawingPoint(x, y, pressure = pressure, tilt = tilt))
+            growExtentToInclude(x, y)
         }
     }
 
@@ -91,6 +141,7 @@ class PdfDrawingState {
     fun clearDrawing() {
         currentPaths.clear()
         livePoints.clear()
+        extent.value = PageExtent.Pdf
         markHistoryChanged()
     }
 

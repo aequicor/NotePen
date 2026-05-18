@@ -9,6 +9,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import java.io.File
@@ -53,6 +54,14 @@ private data class MarkerSettingsDto(
 )
 
 @Serializable
+private data class PageExtentDto(
+    val l: Float = 0f,
+    val t: Float = 0f,
+    val r: Float = 1f,
+    val b: Float = 1f,
+)
+
+@Serializable
 private data class AnnotationDataDto(
     val pages: Map<String, List<DrawingPathDto>>,
     val scale: Int = 100,
@@ -62,6 +71,7 @@ private data class AnnotationDataDto(
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
     val favoritePageIndices: List<Int> = emptyList(),
+    val pageExtents: Map<String, PageExtentDto> = emptyMap(),
 )
 
 // ── Mappers ──────────────────────────────────────────────────────────────────
@@ -81,6 +91,8 @@ private fun EraserMode.toDto() = if (this == EraserMode.OBJECT) EraserModeDto.OB
 private fun EraserSettings.toDto() = EraserSettingsDto(shape.toDto(), sizeNormalized, mode.toDto())
 private fun MarkerSettings.toDto() = MarkerSettingsDto(colorArgb, strokeWidth)
 private fun MarkerSettingsDto.toDomain() = MarkerSettings(colorArgb, strokeWidth)
+private fun PageExtentDto.toDomain() = PageExtent(l, t, r, b)
+private fun PageExtent.toDto() = PageExtentDto(left, top, right, bottom)
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
@@ -98,6 +110,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
         currentPage: Int,
         currentPageOffset: Int,
         favoritePageIndices: Set<Int>,
+        pageExtents: Map<Int, PageExtent>,
     ): Result<Unit> = try {
         val dto = AnnotationDataDto(
             pages = annotations.mapKeys { it.key.toString() }
@@ -109,6 +122,10 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
             currentPage = currentPage,
             currentPageOffset = currentPageOffset,
             favoritePageIndices = favoritePageIndices.toList(),
+            pageExtents = pageExtents
+                .filterValues { it != PageExtent.Pdf }
+                .mapKeys { it.key.toString() }
+                .mapValues { (_, e) -> e.toDto() },
         )
         File("$pdfPath.notepen.json").writeText(json.encodeToString(AnnotationDataDto.serializer(), dto))
         Result.success(Unit)
@@ -124,6 +141,9 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
             val pages = dto.pages.mapKeys {
                 it.key.toIntOrNull() ?: return Result.success(AnnotationBundle())
             }.mapValues { (_, paths) -> paths.map { it.toDomain() } }
+            val extents = dto.pageExtents.mapNotNull { (k, v) ->
+                k.toIntOrNull()?.let { it to v.toDomain() }
+            }.toMap()
             Result.success(
                 AnnotationBundle(
                     pages = pages,
@@ -134,6 +154,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
                     currentPage = dto.currentPage,
                     currentPageOffset = dto.currentPageOffset,
                     favoritePageIndices = dto.favoritePageIndices.toSet(),
+                    pageExtents = extents,
                 ),
             )
         } catch (e: Exception) {
