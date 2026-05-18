@@ -10,6 +10,8 @@ import com.arkivanov.decompose.extensions.compose.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
 import kotlinx.coroutines.flow.Flow
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
+import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
+import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogContent
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainContent
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
@@ -33,6 +35,12 @@ fun RootContent(
     peerClient: SyncClient? = null,
     /** Forwarded to [DetailsContent] for the offline-pending banner. */
     pendingDeltaCounts: Flow<Map<String, Int>>? = null,
+    /** Forwarded to [DetailsContent] so it can detect remote-opened PDFs. */
+    receivedPdfDir: String? = null,
+    /** Forwarded to [DetailsContent] for open/close tracking. */
+    openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
+    /** Forwarded to [DetailsContent] for remote-cached documentId lookup. */
+    localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
     modifier: Modifier = Modifier,
 ) {
     Children(
@@ -67,6 +75,10 @@ fun RootContent(
                                 ),
                             )
                         }
+                        is NavigationTarget.PeerCatalog -> {
+                            mainScreenComponent.onOpenPeerCatalog(target.peerId, target.displayName)
+                            mainScreenComponent.viewModel.onNavigationHandled()
+                        }
                         null -> {}
                     }
                 }
@@ -85,8 +97,16 @@ fun RootContent(
                 peerServer = peerServer,
                 peerClient = peerClient,
                 pendingDeltaCounts = pendingDeltaCounts,
+                receivedPdfDir = receivedPdfDir,
+                openDocumentRegistry = openDocumentRegistry,
+                localDocumentIdRegistry = localDocumentIdRegistry,
                 modifier = modifier,
             )
+            is RootComponent.Child.PeerCatalogChild -> {
+                val impl = child.component as? PeerCatalogComponentImpl
+                    ?: error("PeerCatalogChild.component must be PeerCatalogComponentImpl — check DefaultRootComponent factory")
+                PeerCatalogContent(component = impl, modifier = modifier)
+            }
         }
     }
 }

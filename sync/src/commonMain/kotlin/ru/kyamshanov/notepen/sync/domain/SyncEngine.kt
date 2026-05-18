@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
@@ -117,6 +118,11 @@ class SyncEngine(
         val queue = pendingQueue ?: return
         val pending = queue.peek(documentId)
         if (pending.isEmpty()) return
+        if (!hasReachablePeer()) {
+            logger.info { "drainAndReplay skipped — no reachable peer for doc=$documentId, " +
+                "${pending.size} delta(s) stay buffered" }
+            return
+        }
         logger.info { "Replaying ${pending.size} pending delta(s) for doc=$documentId" }
         val result = runCatching {
             for (d in pending) {
@@ -132,6 +138,10 @@ class SyncEngine(
     }
 
     private suspend fun sendStamped(stamped: List<StrokeDelta>) {
+        // Без реального получателя `broadcast` молча проходит мимо — `runCatching`
+        // вернёт success, и `markSent` сотрёт правки, которые на самом деле
+        // никуда не ушли. Поэтому сначала проверяем, есть ли с кем синкаться.
+        if (!hasReachablePeer()) return
         val result = runCatching {
             for (d in stamped) {
                 val msg = NetworkMessage.StrokeDeltaMessage(delta = d, documentId = documentId)
@@ -143,6 +153,19 @@ class SyncEngine(
         }
         // On failure (typically connection down) the entries remain queued
         // for the next [drainAndReplay] cycle.
+    }
+
+    /**
+     * True если у нас есть хотя бы один подключённый пир, кому broadcast реально дойдёт.
+     * Используем `.first()` поверх Flow-обёртки над StateFlow — возвращает текущий
+     * снапшот без блокировки.
+     */
+    private suspend fun hasReachablePeer(): Boolean {
+        val srv = server
+        if (srv != null && srv.connectedPeers.first().isNotEmpty()) return true
+        val cli = client
+        if (cli != null && cli.connectedHosts.first().isNotEmpty()) return true
+        return false
     }
 
     /** Call for each [NetworkMessage.StrokeDeltaMessage] received from the peer. */

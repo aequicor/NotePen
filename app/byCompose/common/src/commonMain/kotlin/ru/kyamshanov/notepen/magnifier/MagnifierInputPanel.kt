@@ -89,7 +89,6 @@ fun MagnifierInputPanel(
 
     val density = LocalDensity.current
     val tablet = LocalTabletInputController.current
-    val stylusSeen = remember { mutableStateOf(false) }
     val pencilModeState = rememberUpdatedState(pencilModeEnabled)
     val eraserPos = remember { mutableStateOf<Offset?>(null) }
 
@@ -171,7 +170,6 @@ fun MagnifierInputPanel(
                     eraserSettings = eraserSettings,
                     eraserOverride = eraserOverride,
                     pencilModeState = pencilModeState,
-                    stylusSeen = stylusSeen,
                     eraserPos = eraserPos,
                     onGestureStart = onGestureStart,
                     onStrokeFinished = onStrokeFinished,
@@ -218,7 +216,6 @@ private fun MagnifierContent(
     eraserSettings: EraserSettings,
     eraserOverride: () -> Boolean,
     pencilModeState: androidx.compose.runtime.State<Boolean>,
-    stylusSeen: androidx.compose.runtime.MutableState<Boolean>,
     eraserPos: androidx.compose.runtime.MutableState<Offset?>,
     onGestureStart: (List<DrawingPath>) -> Unit,
     onStrokeFinished: (DrawingPath) -> Unit,
@@ -239,10 +236,10 @@ private fun MagnifierContent(
                 val panelSizeF = Size(panelW, panelH)
                 var activeErase: EraseGesture? = null
 
+                val stylusEverSeen = tablet.stylusEverSeen
                 detectStylusAwareDrag(
                     tablet = tablet,
-                    isPalmRejectionActive = { pencilModeState.value || stylusSeen.value },
-                    onStylusSeen = { stylusSeen.value = true },
+                    isPalmRejectionActive = { pencilModeState.value || stylusEverSeen.value },
                     onDown = { offset, pressure, tilt ->
                         val pageCanvasW = state.pageCanvasWidthPx
                         if (pageCanvasW > 0f && panelW > 0f && panelH > 0f) {

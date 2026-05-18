@@ -22,5 +22,6 @@ interface RootComponent {
     sealed class Child {
         class MainChild(val component: MainComponent) : Child()
         class DetailsChild(val component: DetailsComponent) : Child()
+        class PeerCatalogChild(val component: PeerCatalogComponent) : Child()
     }
 }

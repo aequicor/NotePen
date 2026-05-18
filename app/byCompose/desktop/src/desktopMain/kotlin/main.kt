@@ -27,6 +27,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
@@ -47,6 +48,7 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
+import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
@@ -58,13 +60,17 @@ import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
 import ru.kyamshanov.notepen.sync.domain.DocumentTransferRequestHandler
 import ru.kyamshanov.notepen.sync.domain.HostAnnotationProjection
 import ru.kyamshanov.notepen.sync.domain.HostHeadlessAnnotationHandler
+import ru.kyamshanov.notepen.sync.domain.LocalCachedDocumentCleaner
 import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
+import ru.kyamshanov.notepen.sync.domain.RemoteCatalogHostCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseJvm
 import ru.kyamshanov.notepen.createAnnotationRepository
@@ -165,6 +171,10 @@ fun main() {
         folderRepository = folderRepo,
     )
     remoteCatalogProvider.serve(server = peerServer, scope = appScope)
+    // Symmetric direction: when this desktop is connected to another host as a
+    // client and that host requests our catalog (for its "Подключённые
+    // устройства" tile), reply over the SyncClient transport.
+    remoteCatalogProvider.serve(client = syncClient, scope = appScope)
     DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider)
         .start(scope = appScope)
 
@@ -192,10 +202,20 @@ fun main() {
     val remoteCatalogCache = InMemoryRemoteCatalogCache()
     RemoteCatalogClientCoordinator(client = syncClient, cache = remoteCatalogCache)
         .start(scope = appScope)
+    // Host side mirror: request a RemoteCatalog from every connected client and
+    // cache it under the same per-peer map so the main screen can list both
+    // hosts (we are a client of) AND clients (we are a host for) as tiles.
+    RemoteCatalogHostCoordinator(server = peerServer, cache = remoteCatalogCache)
+        .start(scope = appScope)
+    val localDocumentIdRegistry = JsonLocalDocumentIdRegistry(
+        manifestPath = "$receivedDir/.notepen-doc-ids.json",
+        ioDispatcher = Dispatchers.IO,
+    )
     val remoteDocumentOpener = RemoteDocumentOpener(
         client = syncClient,
         catalogs = remoteCatalogCache.catalogs,
         destDir = receivedDir,
+        documentIdRegistry = localDocumentIdRegistry,
     )
     // Track per-document orphan flags as host signals come in.
     val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
@@ -207,6 +227,26 @@ fun main() {
         queue = pendingDeltaQueue,
         registry = remoteDocumentStatusRegistry,
     ).start(scope = appScope)
+
+    // Реестр открытых в редакторе документов + автоудаление кеш-копии после
+    // успешного отправления накопленных offline-правок.
+    val openDocumentRegistry = InMemoryOpenDocumentRegistry()
+    LocalCachedDocumentCleaner(
+        receivedPdfDir = receivedDir,
+        pendingCounts = pendingDeltaQueue.pendingCounts(),
+        catalogsFlow = remoteCatalogCache.catalogs,
+        openDocuments = openDocumentRegistry,
+        documentIdRegistry = localDocumentIdRegistry,
+    ).start(scope = appScope)
+
+    // Union of "online peers" — for desktop, that's hosts we are paired to plus
+    // clients paired to us. Drives the offline-marker on Peer tiles.
+    val onlinePeerIds = combine(
+        syncClient.connectedHosts,
+        peerServer.connectedPeers,
+    ) { hosts, peers ->
+        (hosts.map { it.id } + peers.map { it.id }).toSet()
+    }
 
     // Demultiplex incoming stroke deltas by documentId — one engine per doc.
     appScope.launch {
@@ -248,7 +288,7 @@ fun main() {
             DefaultRootComponent(
                 componentContext = DefaultComponentContext(lifecycle = lifecycle),
                 historyRepository = historyRepo,
-                mainComponentFactory = { componentContext, onOpenEditor ->
+                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog ->
                     MainScreenComponent(
                         componentContext = componentContext,
                         historyRepository = historyRepo,
@@ -260,10 +300,22 @@ fun main() {
                         thumbnailGenerator = thumbnailGenerator,
                         onOpenEditor = onOpenEditor,
                         onOpenFilePicker = { FilePicker().pickPdfFile() },
-                        remoteCatalogFlow = remoteCatalogCache.catalogs.map { it.values.firstOrNull() },
+                        onOpenPeerCatalog = onOpenPeerCatalog,
+                        remoteCatalogsFlow = remoteCatalogCache.catalogs,
+                        onlinePeerIdsFlow = onlinePeerIds,
+                    )
+                },
+                peerCatalogComponentFactory = { ctx, peerId, displayName, onBack, onOpenEditor ->
+                    PeerCatalogComponentImpl(
+                        componentContext = ctx,
+                        peerId = peerId,
+                        displayName = displayName,
+                        catalogsFlow = remoteCatalogCache.catalogs,
+                        onlinePeerIdsFlow = onlinePeerIds,
                         remoteDocumentOpener = remoteDocumentOpener,
-                        pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
-                        remoteDocumentStatuses = remoteDocumentStatusRegistry.statuses,
+                        receivedPdfDir = receivedDir,
+                        onBack = onBack,
+                        onOpenEditor = onOpenEditor,
                     )
                 },
             )
@@ -334,6 +386,8 @@ fun main() {
                     clientScanViewModel = null,
                     manualConnectViewModel = null,
                     receivedPdfDir = receivedDir,
+                    openDocumentRegistry = openDocumentRegistry,
+                    localDocumentIdRegistry = localDocumentIdRegistry,
                 )
             }
         }

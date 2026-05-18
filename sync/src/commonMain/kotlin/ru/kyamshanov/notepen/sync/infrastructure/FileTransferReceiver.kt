@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.transform
+import ru.kyamshanov.notepen.sync.domain.documentIdToCacheFileName
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.port.TransferProgress
 
@@ -75,7 +76,16 @@ class FileTransferReceiver(
                                     offset += chunk.size
                                 }
                             }
-                            val dest = joinPath(destDir, h.fileName)
+                            // Имя кеш-файла включает hash(documentId) — два файла
+                            // с одинаковым `fileName`, но разными documentId
+                            // (`book.pdf#a` и `book.pdf#b`) больше не затирают друг друга.
+                            // Для legacy-вызовов (пустой documentId) поведение не меняется.
+                            val cacheName = if (h.documentId.isNotEmpty()) {
+                                documentIdToCacheFileName(h.documentId, h.fileName)
+                            } else {
+                                h.fileName
+                            }
+                            val dest = joinPath(destDir, cacheName)
                             okio_writeBytes(dest, assembled)
                             logger.info { "FileTransferReceiver: completed → $dest" }
                             emit(

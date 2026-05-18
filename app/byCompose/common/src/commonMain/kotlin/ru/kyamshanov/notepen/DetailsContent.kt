@@ -72,9 +72,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Surface
-import androidx.compose.material3.TextButton
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
@@ -123,6 +121,9 @@ private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 /** Toolbar `−` button zoom factor (matches Ctrl+wheel zoom-out). */
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / TOOLBAR_ZOOM_STEP_IN
 
+/** Сколько ждём слива offline-буфера на пир после реконнекта, прежде чем считать неуспехом. */
+private val REPLAY_DEADLINE = 10.seconds
+
 
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -145,6 +146,25 @@ fun DetailsContent(
      * [peerClient] is not [PairingState.Connected].
      */
     pendingDeltaCounts: kotlinx.coroutines.flow.Flow<Map<String, Int>>? = null,
+    /**
+     * Directory in which [ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener]
+     * caches remote-opened PDFs. When the current [filePath] sits inside it the
+     * editor treats the doc as remote-cached — used to gate the disconnect
+     * snackbar (no point telling local-only users about a "lost connection").
+     */
+    receivedPdfDir: String? = null,
+    /**
+     * Registry, в который мы анонсируем «документ открыт». Сервис
+     * [ru.kyamshanov.notepen.sync.domain.LocalCachedDocumentCleaner] отложит
+     * удаление кеш-копии пока документ держится здесь.
+     */
+    openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
+    /**
+     * Mapping `localPath → documentId` для remote-кешированных PDF. Нужен
+     * чтобы tablet использовал тот же documentId, что host (а не вычислял
+     * заново из локального пути — это давало бы другой hash и ломало синк).
+     */
+    localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
     modifier: Modifier = Modifier,
 ) {
     val localWindowInfo = LocalWindowInfo.current
@@ -152,7 +172,17 @@ fun DetailsContent(
     val isLandscape = windowSizeInPx.width > windowSizeInPx.height
     val model by component.model.subscribeAsState()
     val filePath = remember(model.title) { model.title }
-    val documentId = remember(filePath) { documentIdFromFilePath(filePath) }
+    val documentId = remember(filePath, localDocumentIdRegistry, receivedPdfDir) {
+        // Для файлов, скачанных с пира, documentId должен быть тем, который
+        // прислал host — иначе hash будет посчитан от tablet'ского пути и не
+        // совпадёт с тем, что host использует у себя.
+        val fromRegistry = if (receivedPdfDir != null && filePath.startsWith(receivedPdfDir)) {
+            localDocumentIdRegistry?.lookup(filePath)
+        } else {
+            null
+        }
+        fromRegistry ?: documentIdFromFilePath(filePath)
+    }
     val syncEngine = remember(syncEngineFor, documentId) {
         syncEngineFor?.invoke(documentId)
     }
@@ -185,16 +215,19 @@ fun DetailsContent(
     // Pencil Mode: пока активен — palm-rejection форсирован, рисует только
     // стилус, палец проходит сквозь на pan / pinch.
     var pencilModeEnabled by remember { mutableStateOf(false) }
-    // Авто-включение по первому stylus-событию срабатывает один раз за
-    // композицию. Ручной off также взводит этот флаг — повторного авто-on
-    // в той же сессии не будет.
-    var pencilModeAutoApplied by remember { mutableStateOf(false) }
+    // Пользователь хотя бы раз руками щёлкнул по toggle. После этого
+    // авто-логика по stylus-присутствию замолкает: ручной выбор уважается
+    // до конца сессии, иначе ON/OFF постоянно бы перебивался состоянием
+    // пера.
+    var pencilModeManuallyTouched by remember { mutableStateOf(false) }
     val stylusEverSeen by tabletController.stylusEverSeen.collectAsState()
-    LaunchedEffect(stylusEverSeen) {
-        if (stylusEverSeen && !pencilModeAutoApplied) {
-            pencilModeAutoApplied = true
-            pencilModeEnabled = true
-        }
+    LaunchedEffect(stylusEverSeen, pencilModeManuallyTouched) {
+        if (pencilModeManuallyTouched) return@LaunchedEffect
+        // Включаем по первому stylus-событию и снимаем, если контроллер
+        // решил, что перо «ушло» (см. AndroidTabletInputController —
+        // recovery edge для зависших S-Pen). Без авто-выключения Pencil
+        // Mode оставался бы латчем и блокировал ввод пальцем до ребута.
+        pencilModeEnabled = stylusEverSeen
     }
     var showThumbnails by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
@@ -304,8 +337,11 @@ fun DetailsContent(
     // the host) and local (no host paired). With multi-host: "Connected" if
     // any host is paired; "LostConnection" if every host has lost connection
     // (and at least one was tried).
-    var showLostConnectionDialog by remember { mutableStateOf(false) }
     var clientPairingState by remember { mutableStateOf<PairingState?>(null) }
+    var wasEverConnected by remember(filePath) { mutableStateOf(false) }
+    val isRemoteOpenedDoc = remember(filePath, receivedPdfDir) {
+        receivedPdfDir != null && filePath.startsWith(receivedPdfDir)
+    }
     LaunchedEffect(peerClient) {
         val client = peerClient ?: return@LaunchedEffect
         client.pairingStates.collect { states ->
@@ -321,7 +357,7 @@ fun DetailsContent(
                 else -> PairingState.Idle
             }
             clientPairingState = aggregate
-            showLostConnectionDialog = aggregate is PairingState.LostConnection
+            if (aggregate is PairingState.Connected) wasEverConnected = true
         }
     }
 
@@ -338,6 +374,77 @@ fun DetailsContent(
         clientPairingState !is PairingState.Connected &&
         pendingForDoc > 0
 
+    // Discoonnect → автосохранение + снекбар. Запускается только для документов,
+    // открытых с удалённого пира (живут в receivedPdfDir), и только когда
+    // соединение хотя бы раз было установлено в этой сессии — иначе нет смысла
+    // сообщать «потеряли связь», её и не было.
+    val saveLocallyAndNotify: suspend (String) -> Unit = save@{ message ->
+        val annotations = drawingStates.mapValues { (_, state) ->
+            state.currentPaths.toList()
+        }
+        val result = annotationRepository.save(
+            pdfPath = filePath,
+            annotations = annotations,
+            scale = currentScalePercent,
+            pen = penSettings,
+            marker = markerSettings,
+            eraser = eraserSettings,
+            currentPage = firstVisiblePage,
+            currentPageOffset = currentPageOffsetPx,
+            favoritePageIndices = favoritePageIndices.toSet(),
+        )
+        val text = if (result.isSuccess) message else "Ошибка локального сохранения"
+        snackbarHostState.showSnackbar(text)
+    }
+    var previouslyConnected by remember(filePath) { mutableStateOf(false) }
+    var previouslyOffline by remember(filePath) { mutableStateOf(false) }
+    LaunchedEffect(clientPairingState, isRemoteOpenedDoc) {
+        if (!isRemoteOpenedDoc) return@LaunchedEffect
+        val nowConnected = clientPairingState is PairingState.Connected
+        val nowOffline = clientPairingState is PairingState.Reconnecting ||
+            clientPairingState is PairingState.LostConnection ||
+            clientPairingState is PairingState.Error
+        when {
+            previouslyConnected && nowOffline -> {
+                // Edge-trigger: гасим флаг сразу, чтобы повторные тики Reconnecting
+                // (его state эмитит каждую секунду с countdown) не плодили снекбары.
+                previouslyConnected = false
+                previouslyOffline = true
+                saveLocallyAndNotify("Пропало соединение. Документ сохранён локально")
+            }
+            previouslyOffline && nowConnected -> {
+                // Reconnect-edge: PendingDeltaReplayCoordinator уже запустился на
+                // переход connectedHosts → non-empty (см. main.kt). Дождёмся, пока
+                // буфер для текущего документа опустеет — это и есть "успешно
+                // синхронизировано". Если за разумное время не опустел —
+                // сообщаем о неуспехе.
+                previouslyOffline = false
+                previouslyConnected = true
+                val pendingAtReconnect = pendingForDoc
+                if (pendingAtReconnect <= 0) {
+                    snackbarHostState.showSnackbar("Соединение восстановлено")
+                } else {
+                    val flow = pendingDeltaCounts
+                    val syncedInTime = if (flow != null) {
+                        withTimeoutOrNull(REPLAY_DEADLINE) {
+                            flow.first { (it[documentId] ?: 0) == 0 }
+                            true
+                        } ?: false
+                    } else {
+                        false
+                    }
+                    val text = if (syncedInTime) {
+                        "Соединение восстановлено. Изменения синхронизированы"
+                    } else {
+                        "Соединение восстановлено, но не все изменения отправлены"
+                    }
+                    snackbarHostState.showSnackbar(text)
+                }
+            }
+            nowConnected -> previouslyConnected = true
+        }
+    }
+
     LaunchedEffect(filePath) {
         pdfDocument?.close()
         pdfDocument = try {
@@ -350,6 +457,11 @@ fun DetailsContent(
 
     DisposableEffect(Unit) {
         onDispose { pdfDocument?.close() }
+    }
+
+    DisposableEffect(openDocumentRegistry, documentId) {
+        openDocumentRegistry?.acquire(documentId)
+        onDispose { openDocumentRegistry?.release(documentId) }
     }
 
     LaunchedEffect(filePath) {
@@ -668,9 +780,9 @@ fun DetailsContent(
         val onPencilModeChangeCallback: (Boolean) -> Unit = { enabled ->
             pencilModeEnabled = enabled
             // Ручной toggle (в т.ч. выкл) подавляет дальнейшее
-            // авто-включение по stylus-событиям в этой сессии —
+            // авто-управление по stylus-событиям в этой сессии —
             // иначе off сразу же отменялся бы.
-            pencilModeAutoApplied = true
+            pencilModeManuallyTouched = true
         }
 
         if (isLandscape) {
@@ -870,40 +982,6 @@ fun DetailsContent(
                 .align(Alignment.BottomCenter)
                 .windowInsetsPadding(WindowInsets.navigationBars),
         )
-
-        if (showLostConnectionDialog) {
-            AlertDialog(
-                onDismissRequest = { showLostConnectionDialog = false },
-                title = { Text("Соединение потеряно") },
-                text = { Text("Не удалось переподключиться к ПК за 10 секунд. Сохранить аннотации локально?") },
-                confirmButton = {
-                    TextButton(onClick = {
-                        showLostConnectionDialog = false
-                        coroutineScope.launch {
-                            val annotations = drawingStates.mapValues { (_, state) ->
-                                state.currentPaths.toList()
-                            }
-                            val result = annotationRepository.save(
-                                pdfPath = filePath,
-                                annotations = annotations,
-                                scale = currentScalePercent,
-                                pen = penSettings,
-                                marker = markerSettings,
-                                eraser = eraserSettings,
-                                currentPage = firstVisiblePage,
-                                currentPageOffset = currentPageOffsetPx,
-                                favoritePageIndices = favoritePageIndices.toSet(),
-                            )
-                            val msg = if (result.isSuccess) "Сохранено локально" else "Ошибка локального сохранения"
-                            snackbarHostState.showSnackbar(msg)
-                        }
-                    }) { Text("Сохранить локально") }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showLostConnectionDialog = false }) { Text("Отмена") }
-                },
-            )
-        }
 
         if (magnifierState.enabled) {
             val magPage = magnifierState.pageIndex

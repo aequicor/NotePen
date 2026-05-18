@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.tablet
 
+import android.os.SystemClock
 import android.view.MotionEvent
 import androidx.compose.ui.geometry.Offset
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,14 @@ class AndroidTabletInputController : TabletInputController {
     private val hoverFlow = MutableStateFlow<Offset?>(null)
     private val stylusSeenFlow = MutableStateFlow(false)
 
+    /**
+     * `elapsedRealtime()` ms of the last stylus / eraser event we saw, or
+     * `0L` if none yet. Used to decide whether a finger event should be
+     * treated as a "stylus disconnected, fall back to finger" recovery
+     * signal — see [feed].
+     */
+    private var lastStylusEventAtMs: Long = 0L
+
     override val latestPressure: StateFlow<Float> = pressureFlow.asStateFlow()
     override val barrelPressed: StateFlow<Boolean> = barrelFlow.asStateFlow()
     override val eraserTipActive: StateFlow<Boolean> = eraserFlow.asStateFlow()
@@ -42,9 +51,24 @@ class AndroidTabletInputController : TabletInputController {
     fun feed(event: MotionEvent, viewWidth: Int, viewHeight: Int) {
         val index = event.actionIndex.coerceAtLeast(0)
         val toolType = event.getToolType(index)
-        if (toolType != MotionEvent.TOOL_TYPE_STYLUS && toolType != MotionEvent.TOOL_TYPE_ERASER) {
-            // Only update hover-exit if we had a stylus hover before; otherwise
-            // a finger tap should not clobber pen-driven state.
+        val isStylus =
+            toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_ERASER
+        val nowMs = SystemClock.elapsedRealtime()
+
+        if (!isStylus) {
+            // Recovery edge: on some Samsung tablets the S-Pen BLE link
+            // hangs and stylus events stop arriving entirely. Without this
+            // branch, [stylusSeenFlow] stayed latched at `true` forever,
+            // Pencil Mode kept palm-rejection on, and the user could not
+            // draw with a finger either — the app appeared dead until a
+            // device reboot. If a finger event arrives after the stylus
+            // has been silent past [STYLUS_INACTIVITY_RECOVERY_MS], treat
+            // that as "pen gone" and unlatch.
+            if (stylusSeenFlow.value &&
+                nowMs - lastStylusEventAtMs >= STYLUS_INACTIVITY_RECOVERY_MS
+            ) {
+                stylusSeenFlow.value = false
+            }
             return
         }
 
@@ -52,6 +76,7 @@ class AndroidTabletInputController : TabletInputController {
         // auto-enable in DetailsContent. Hover events count too: knowing a
         // stylus is present without contact is enough to flip the default.
         stylusSeenFlow.value = true
+        lastStylusEventAtMs = nowMs
 
         val action = event.actionMasked
 
@@ -104,5 +129,15 @@ class AndroidTabletInputController : TabletInputController {
     private companion object {
         /** Tilt angle (radians) considered "fully tilted" for normalisation. */
         const val TILT_FULL_RAD: Float = (Math.PI / 2.0).toFloat()
+
+        /**
+         * After this long without any stylus event, the next finger event
+         * is treated as a "pen disconnected" signal and clears the latched
+         * stylus-seen flag. Chosen long enough to span thinking pauses
+         * between strokes (so casual two-finger pinches between drawings
+         * don't drop Pencil Mode), short enough to recover from a wedged
+         * S-Pen within ~half a minute of the user reaching for the screen.
+         */
+        const val STYLUS_INACTIVITY_RECOVERY_MS: Long = 25_000L
     }
 }

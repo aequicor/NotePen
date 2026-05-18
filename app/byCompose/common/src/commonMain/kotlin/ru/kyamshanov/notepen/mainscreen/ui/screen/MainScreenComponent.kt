@@ -11,9 +11,8 @@ import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
 import ru.kyamshanov.notepen.mainscreen.ui.viewmodel.MainScreenViewModel
-import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
-import ru.kyamshanov.notepen.sync.domain.model.SyncStatus
 
 /**
  * Decompose-компонент главного экрана.
@@ -31,6 +30,9 @@ import ru.kyamshanov.notepen.sync.domain.model.SyncStatus
  * @param onOpenEditor Обратный вызов при открытии редактора (URI файла, индекс страницы).
  * @param onOpenFilePicker Суспендирующий обратный вызов для открытия системного файлового диалога.
  *        Возвращает нормализованный путь к выбранному файлу или null при отмене.
+ * @param onOpenPeerCatalog Колбэк навигации в каталог выбранного пира (peerId, displayName).
+ * @param remoteCatalogsFlow Поток карты «пир → его каталог». На клиенте это хосты,
+ *        на хосте — клиенты. Null отключает секцию «Подключённые устройства».
  */
 class MainScreenComponent(
     componentContext: ComponentContext,
@@ -43,20 +45,10 @@ class MainScreenComponent(
     private val thumbnailGenerator: PdfThumbnailGenerator,
     val onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
     val onOpenFilePicker: suspend () -> String?,
-    /** Optional tablet-side stream of the host's current catalog; null on the host. */
-    private val remoteCatalogFlow: Flow<RemoteCatalog?>? = null,
-    /** Optional tablet-side opener for documents from the host's library; null on the host. */
-    private val remoteDocumentOpener: RemoteDocumentOpener? = null,
-    /**
-     * Optional stream of `documentId → pendingCount` from the offline buffer.
-     * Drives the "не синхронизировано (N)" badge on Remote tiles.
-     */
-    private val pendingDeltaCounts: Flow<Map<String, Int>>? = null,
-    /**
-     * Optional stream of `documentId → SyncStatus`. Drives the
-     * "удалён на хосте" badge.
-     */
-    private val remoteDocumentStatuses: Flow<Map<String, SyncStatus>>? = null,
+    val onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
+    private val remoteCatalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>? = null,
+    /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
+    private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
 ) : MainComponent, ComponentContext by componentContext {
 
     /** ViewModel главного экрана, привязанная к жизненному циклу компонента. */
@@ -69,9 +61,7 @@ class MainScreenComponent(
         openRecentFile = openRecentFileUseCase,
         thumbnailRepository = thumbnailRepository,
         thumbnailGenerator = thumbnailGenerator,
-        remoteCatalogFlow = remoteCatalogFlow,
-        remoteDocumentOpener = remoteDocumentOpener,
-        pendingDeltaCounts = pendingDeltaCounts,
-        remoteDocumentStatuses = remoteDocumentStatuses,
+        remoteCatalogsFlow = remoteCatalogsFlow,
+        onlinePeerIdsFlow = onlinePeerIdsFlow,
     )
 }

@@ -144,14 +144,10 @@ sealed class MainScreenIntent {
     object OnSuccessEventHandled : MainScreenIntent()
 
     /**
-     * Пользователь тапнул по плитке в Remote-секции (документ хоста).
+     * Пользователь тапнул по плитке пира в секции «Подключённые устройства».
      *
-     * ViewModel дёргает [ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener],
-     * который шлёт хосту [ru.kyamshanov.notepen.sync.domain.model.NetworkMessage.DocumentOpenRequest],
-     * принимает PDF, и по успеху ставит [NavigationTarget.Editor] на локальную копию.
-     *
-     * @property documentId Стабильный id документа из последнего полученного каталога.
-     * @property displayName Имя файла как показано в секции — для UI fallback'ов.
+     * @property peerId Стабильный id подключённого хоста/клиента.
+     * @property displayName Имя пира для заголовка sub-экрана.
      */
-    data class OpenRemoteEntry(val documentId: String, val displayName: String) : MainScreenIntent()
+    data class OpenPeer(val peerId: String, val displayName: String) : MainScreenIntent()
 }

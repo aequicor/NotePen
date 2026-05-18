@@ -165,11 +165,14 @@ fun DrawablePdfPage(
     // штрихи остаются на ПК, синхронизация ластика «теряет» дельты.
     val pencilModeState = rememberUpdatedState(pencilModeEnabled)
 
-    // Becomes `true` after the first stylus / eraser-tip event is seen in this
-    // composition. Once set, finger touches stop drawing (palm rejection) and
-    // are passed through to parent gestures (pan / zoom). Stays `false` on
-    // devices without a stylus so the app remains usable with fingers only.
-    val stylusSeen = remember { mutableStateOf(false) }
+    // `true` while a stylus is considered present (see
+    // TabletInputController.stylusEverSeen for the lifecycle, including the
+    // disconnected-pen recovery edge). Reading from the controller — instead
+    // of latching a local boolean as we used to — is what lets recovery
+    // actually unblock finger drawing: a local latch would stay `true` for
+    // the lifetime of the composition and palm-rejection would never lift,
+    // even after the controller decided the pen was gone.
+    val stylusEverSeen by tablet.stylusEverSeen.collectAsState()
 
     // Позиция пальца ластика в нормализованных координатах [0..1] относительно canvas.
     // null → жест ластика не активен (палец не на экране) → индикатор не отрисовывается.
@@ -285,8 +288,7 @@ fun DrawablePdfPage(
                         var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { pencilModeState.value || stylusSeen.value },
-                            onStylusSeen = { stylusSeen.value = true },
+                            isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
                             onDown = { off, pressure, tilt ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
@@ -358,8 +360,7 @@ fun DrawablePdfPage(
                         var activeErase: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { pencilModeState.value || stylusSeen.value },
-                            onStylusSeen = { stylusSeen.value = true },
+                            isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
@@ -421,8 +422,7 @@ fun DrawablePdfPage(
                         var session: EraseGesture? = null
                         detectStylusAwareDrag(
                             tablet = tablet,
-                            isPalmRejectionActive = { pencilModeState.value || stylusSeen.value },
-                            onStylusSeen = { stylusSeen.value = true },
+                            isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
                             onDown = { off, _, _ ->
                                 val (w, h) = canvasSize.value
                                 if (w > 0 && h > 0) {
@@ -607,7 +607,6 @@ fun DrawablePdfPage(
 internal suspend fun PointerInputScope.detectStylusAwareDrag(
     tablet: TabletInputController,
     isPalmRejectionActive: () -> Boolean,
-    onStylusSeen: () -> Unit,
     onDown: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onMove: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onUp: () -> Unit,
@@ -616,7 +615,6 @@ internal suspend fun PointerInputScope.detectStylusAwareDrag(
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
         val downIsStylus = down.type == PointerType.Stylus || down.type == PointerType.Eraser
-        if (downIsStylus) onStylusSeen()
         if (!downIsStylus && isPalmRejectionActive()) {
             return@awaitEachGesture
         }

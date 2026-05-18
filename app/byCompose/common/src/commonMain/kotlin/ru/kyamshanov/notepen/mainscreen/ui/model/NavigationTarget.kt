@@ -13,4 +13,12 @@ sealed class NavigationTarget {
 
     /** Открыть системный диалог выбора файла. */
     object FilePicker : NavigationTarget()
+
+    /**
+     * Открыть sub-экран со списком папок и документов выбранного пира.
+     *
+     * @property peerId Стабильный id пира (`DeviceInfo.id`).
+     * @property displayName Имя пира — используется как заголовок sub-экрана.
+     */
+    data class PeerCatalog(val peerId: String, val displayName: String) : NavigationTarget()
 }

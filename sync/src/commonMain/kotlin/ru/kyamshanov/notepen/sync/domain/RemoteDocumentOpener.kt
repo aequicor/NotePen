@@ -14,6 +14,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
+import ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.FileTransferReceiver
 import ru.kyamshanov.notepen.sync.infrastructure.okio_exists
@@ -46,6 +47,8 @@ class RemoteDocumentOpener(
     private val client: SyncClient,
     private val catalogs: Flow<Map<DeviceInfo, RemoteCatalog>>,
     private val destDir: String,
+    /** Реестр, в котором запоминаем `localPath → documentId`. Null отключает запись. */
+    private val documentIdRegistry: LocalDocumentIdRegistry? = null,
     private val requestTimeoutMs: Long = 60_000L,
 ) {
 
@@ -54,9 +57,10 @@ class RemoteDocumentOpener(
         // Phase 5 offline-first: if the file is already in the local cache use it
         // directly. Keeps the Remote section functional without a live peer.
         if (displayName != null) {
-            val cachedPath = joinPath(destDir, displayName)
+            val cachedPath = joinPath(destDir, documentIdToCacheFileName(documentId, displayName))
             if (okio_exists(cachedPath)) {
                 logger.info { "Opening cached copy of $documentId at $cachedPath" }
+                documentIdRegistry?.register(cachedPath, documentId)
                 return RemoteDocumentResult.Success(documentId, cachedPath)
             }
         }
@@ -97,6 +101,7 @@ class RemoteDocumentOpener(
                         RemoteDocumentResult.NotFound(documentId, nf.reason)
                     }
                     received.onAwait { file ->
+                        documentIdRegistry?.register(file.destPath, documentId)
                         RemoteDocumentResult.Success(documentId, file.destPath)
                     }
                 }

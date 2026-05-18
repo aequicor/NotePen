@@ -91,8 +91,11 @@ fun App(
     clientScanViewModel: ClientQrScanViewModel? = null,
     /** Drives manual host/port/code form. `null` hides the manual-connect option. */
     manualConnectViewModel: ManualConnectViewModel? = null,
-    @Suppress("UNUSED_PARAMETER")
     receivedPdfDir: String? = null,
+    /** Реестр открытых документов; нужен `LocalCachedDocumentCleaner`-у. */
+    openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
+    /** Реестр `localPath → documentId` для remote-кешированных PDF. */
+    localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     var showSyncPanel by remember { mutableStateOf(false) }
@@ -111,6 +114,9 @@ fun App(
                     peerServer = peerServer,
                     peerClient = peerClient,
                     pendingDeltaCounts = pendingDeltaCounts,
+                    receivedPdfDir = receivedPdfDir,
+                    openDocumentRegistry = openDocumentRegistry,
+                    localDocumentIdRegistry = localDocumentIdRegistry,
                     modifier = Modifier.fillMaxSize(),
                 )
 
