@@ -36,11 +36,11 @@ actual class PdfViewerState internal constructor(
 ) {
 
     /** Текущий зум (1.0 = 100%). */
-    var zoom: Float by mutableFloatStateOf(initialZoom.coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM))
+    actual var zoom: Float by mutableFloatStateOf(initialZoom.coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM))
         private set
 
     /** Текущий сдвиг документа во вьюпорте. */
-    var pan: Offset by mutableStateOf(Offset(initialPanX, initialPanY))
+    actual var pan: Offset by mutableStateOf(Offset(initialPanX, initialPanY))
         private set
 
     /** Размер вьюпорта в физических пикселях. */
@@ -77,10 +77,10 @@ actual class PdfViewerState internal constructor(
     var gestureTranslation: Offset by mutableStateOf(Offset.Zero)
         internal set
 
-    internal val basePageWidthPx: Float
+    internal actual val basePageWidthPx: Float
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 
-    internal val layout: PdfPagesLayout by derivedStateOf {
+    internal actual val layout: PdfPagesLayout by derivedStateOf {
         val provider = pageExtentProvider
         PdfPagesLayout.build(
             pages = pages,
