@@ -39,11 +39,18 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -94,6 +101,19 @@ fun PageThumbnailsSidebar(
 ) {
     val listState = rememberLazyListState()
     var filterMode by rememberSaveable { mutableStateOf(PageFilterMode.ALL) }
+    // Кэш отрендеренных миниатюр живёт на уровне сайдбара, а не отдельного
+    // ThumbnailItem'а: LazyColumn утилизирует ушедшие за экран элементы и
+    // при возврате создаёт их заново, теряя локальный bitmap. Это давало
+    // визуальное мигание превью верхних страниц при автоскролле сайдбара
+    // (двойной scrollToItem для выравнивания по нижнему краю). Ключ — по
+    // pdfDocument, чтобы при смене документа кэш сбрасывался.
+    val bitmapCache = remember(pdfDocument) { mutableStateMapOf<Int, ImageBitmap>() }
+    // Глобальный для сайдбара mutex, через который проходят ВСЕ запросы
+    // renderer.renderPage из миниатюр. Так максимум одна миниатюра в
+    // момент времени держит лок Android-овского PdfRenderer'а: если
+    // пользователь начнёт скролл сразу после короткой паузы, ему придётся
+    // подождать максимум один рендер (~50-150 мс), а не очередь из 5+.
+    val thumbRenderMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
     val visiblePages = when (filterMode) {
         PageFilterMode.ALL -> pages
@@ -104,29 +124,81 @@ fun PageThumbnailsSidebar(
     // Сайдбар работает как скользящее окно: пока текущая страница в нём
     // полностью видна — не двигаемся (клик по миниатюре только меняет
     // выделение). Если PDF проскроллили так, что страница выпала снизу —
-    // сдвигаем окно ровно так, чтобы она встала по нижнему краю
-    // (было 14–18 → стало 15–19). Назад — симметрично, по верхнему краю.
-    LaunchedEffect(currentPage, filterMode, pages.size) {
-        if (visiblePages.isEmpty()) return@LaunchedEffect
-        val targetIndex = visiblePages.indexOfFirst { it.pageIndex == currentPage }
-            .coerceAtLeast(0)
-            .coerceAtMost(visiblePages.size - 1)
-        val info = listState.layoutInfo
-        val fullyVisible = info.visibleItemsInfo.filter { item ->
-            item.offset >= info.viewportStartOffset &&
-                item.offset + item.size <= info.viewportEndOffset
-        }
-        val firstFull = fullyVisible.firstOrNull()?.index
-        val lastFull = fullyVisible.lastOrNull()?.index
-        when {
-            firstFull == null || lastFull == null -> listState.scrollToItem(targetIndex)
-            targetIndex in firstFull..lastFull -> Unit
-            targetIndex > lastFull -> {
-                val visibleCount = lastFull - firstFull + 1
-                val newFirst = (targetIndex - visibleCount + 1).coerceAtLeast(0)
-                listState.scrollToItem(newFirst)
+    // прижимаем её к нижнему краю вьюпорта так, чтобы следующая миниатюра
+    // не торчала «огрызком». Назад — симметрично, по верхнему краю.
+    //
+    // Дебаунс через snapshotFlow + collectLatest: во время непрерывного
+    // скролла PDF currentPage меняется десятки раз в секунду, и каждый
+    // scrollToItem поднимает новые ThumbnailItem'ы в композицию, дёргая
+    // тяжёлый renderer.renderPage — это лагало основной просмотр PDF.
+    // Теперь авто-скролл сайдбара срабатывает только после паузы в
+    // SIDEBAR_AUTOSCROLL_DEBOUNCE_MS. Подсветка активной страницы
+    // (isCurrentPage) при этом обновляется мгновенно — она идёт через
+    // обычную рекомпозицию, минуя этот эффект.
+    // currentPage — обычный Int-параметр, не State; чтобы snapshotFlow
+    // мог наблюдать его смены из LaunchedEffect-корутины, заворачиваем в
+    // rememberUpdatedState. Иначе корутина держит захваченное при первом
+    // запуске значение и авто-скролл сайдбара перестаёт реагировать.
+    val currentPageState = rememberUpdatedState(currentPage)
+    val visiblePagesState = rememberUpdatedState(visiblePages)
+    // Подсветка миниатюры тоже идёт через дебаунс, иначе при непрерывном
+    // скролле PDF рамка моргает между десятками миниатюр в секунду. После
+    // паузы — встаёт один раз на актуальную страницу.
+    var displayedCurrentPage by remember { mutableStateOf(currentPage) }
+    // Сигнал «PDF простаивает», по которому ThumbnailItem решает, можно
+    // ли сейчас дёрнуть renderer.renderPage. Android PdfRenderer
+    // однопоточный (synchronized в AndroidPdfPageRenderer), так что рендер
+    // миниатюры во время скролла основного viewer'а блокирует основной
+    // поток рендера и вызывает видимый лаг — особенно на скролле вниз,
+    // где каждая новая страница тянет рендер.
+    val pdfIdle = remember { mutableStateOf(true) }
+    LaunchedEffect(filterMode) {
+        snapshotFlow { currentPageState.value }.collectLatest { page ->
+            pdfIdle.value = false
+            // Дебаунс: во время непрерывного PDF-скролла currentPage меняется
+            // десятки раз в секунду; каждый scrollToItem подтягивал в
+            // композицию новые ThumbnailItem'ы → дёргался тяжёлый
+            // renderer.renderPage и лагал основной просмотр. Скроллим
+            // сайдбар (и обновляем подсветку) только после паузы.
+            delay(SIDEBAR_AUTOSCROLL_DEBOUNCE_MS)
+            displayedCurrentPage = page
+            pdfIdle.value = true
+            val currentVisiblePages = visiblePagesState.value
+            if (currentVisiblePages.isEmpty()) return@collectLatest
+            val targetIndex = currentVisiblePages.indexOfFirst { it.pageIndex == page }
+                .coerceAtLeast(0)
+                .coerceAtMost(currentVisiblePages.size - 1)
+            val info = listState.layoutInfo
+            val fullyVisible = info.visibleItemsInfo.filter { item ->
+                item.offset >= info.viewportStartOffset &&
+                    item.offset + item.size <= info.viewportEndOffset
             }
-            else -> listState.scrollToItem(targetIndex)
+            val firstFull = fullyVisible.firstOrNull()?.index
+            val lastFull = fullyVisible.lastOrNull()?.index
+            when {
+                firstFull == null || lastFull == null -> listState.scrollToItem(targetIndex)
+                targetIndex in firstFull..lastFull -> Unit
+                targetIndex > lastFull -> {
+                    // Выравнивание по нижнему краю одним scrollToItem с
+                    // отрицательным scrollOffset — без промежуточного снапа.
+                    val viewportHeight = info.viewportEndOffset - info.viewportStartOffset
+                    val targetVisible = info.visibleItemsInfo
+                        .firstOrNull { it.index == targetIndex }
+                    if (targetVisible != null && targetVisible.size < viewportHeight) {
+                        listState.scrollToItem(targetIndex, targetVisible.size - viewportHeight)
+                    } else {
+                        listState.scrollToItem(targetIndex)
+                        val info2 = listState.layoutInfo
+                        val targetItem = info2.visibleItemsInfo
+                            .firstOrNull { it.index == targetIndex }
+                        val viewportHeight2 = info2.viewportEndOffset - info2.viewportStartOffset
+                        if (targetItem != null && targetItem.size < viewportHeight2) {
+                            listState.scrollToItem(targetIndex, targetItem.size - viewportHeight2)
+                        }
+                    }
+                }
+                else -> listState.scrollToItem(targetIndex)
+            }
         }
     }
 
@@ -168,15 +240,22 @@ fun PageThumbnailsSidebar(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier.padding(vertical = 8.dp),
                 ) {
-                    itemsIndexed(visiblePages) { _, page ->
+                    itemsIndexed(
+                        items = visiblePages,
+                        key = { _, page -> page.pageIndex },
+                    ) { _, page ->
                         ThumbnailItem(
                             page = page,
                             pdfDocument = pdfDocument,
                             renderer = renderer,
                             pageNumber = page.pageIndex + 1,
-                            isCurrentPage = page.pageIndex == currentPage,
+                            isCurrentPage = page.pageIndex == displayedCurrentPage,
                             isFavorite = page.pageIndex in favoritePageIndices,
                             paths = pagePaths(page.pageIndex),
+                            cachedBitmap = bitmapCache[page.pageIndex],
+                            onBitmapRendered = { bm -> bitmapCache[page.pageIndex] = bm },
+                            pdfIdle = pdfIdle,
+                            renderMutex = thumbRenderMutex,
                             onClick = { onPageClick(page.pageIndex) },
                             onToggleFavorite = { onToggleFavorite(page.pageIndex) },
                         )
@@ -301,6 +380,10 @@ private fun ThumbnailItem(
     isCurrentPage: Boolean,
     isFavorite: Boolean,
     paths: List<DrawingPath>,
+    cachedBitmap: ImageBitmap?,
+    onBitmapRendered: (ImageBitmap) -> Unit,
+    pdfIdle: State<Boolean>,
+    renderMutex: kotlinx.coroutines.sync.Mutex,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
 ) {
@@ -308,16 +391,35 @@ private fun ThumbnailItem(
     val thumbWidthPx = with(density) { THUMBNAIL_WIDTH.roundToPx() }
     val thumbHeightPx = (thumbWidthPx / page.aspectRatio).toInt()
 
-    var bitmap by remember(page.pageIndex, pdfDocument) { mutableStateOf<ImageBitmap?>(null) }
-
-    LaunchedEffect(page.pageIndex, pdfDocument) {
+    LaunchedEffect(page.pageIndex, pdfDocument, cachedBitmap == null) {
+        if (cachedBitmap != null) return@LaunchedEffect
         val doc = pdfDocument ?: return@LaunchedEffect
-        bitmap = renderer.renderPage(
-            document = doc,
-            pageIndex = page.pageIndex,
-            widthPx = thumbWidthPx,
-            heightPx = thumbHeightPx,
-        ).toImageBitmap()
+        // Гейтим рендер миниатюры дважды: ждём «PDF простаивает», берём
+        // глобальный mutex сайдбара (один рендер в момент) и ещё раз
+        // перепроверяем pdfIdle под локом. Если за время ожидания
+        // пользователь снова начал скроллить — отпускаем mutex и идём на
+        // следующий круг ожидания pdfIdle. Это не даёт миниатюрам отбирать
+        // лок Android PdfRenderer'а у основного viewer'а на скролле.
+        while (true) {
+            snapshotFlow { pdfIdle.value }.first { it }
+            val rendered: ImageBitmap? = renderMutex.lock().let {
+                try {
+                    if (!pdfIdle.value) null
+                    else renderer.renderPage(
+                        document = doc,
+                        pageIndex = page.pageIndex,
+                        widthPx = thumbWidthPx,
+                        heightPx = thumbHeightPx,
+                    ).toImageBitmap()
+                } finally {
+                    renderMutex.unlock()
+                }
+            }
+            if (rendered != null) {
+                onBitmapRendered(rendered)
+                return@LaunchedEffect
+            }
+        }
     }
 
     val borderColor = if (isCurrentPage) {
@@ -340,7 +442,7 @@ private fun ThumbnailItem(
                 .border(borderWidth, borderColor, RoundedCornerShape(4.dp))
                 .clickable(onClick = onClick),
         ) {
-            val bm = bitmap
+            val bm = cachedBitmap
             if (bm != null) {
                 Image(
                     bitmap = bm,
@@ -413,3 +515,4 @@ private val THUMBNAIL_SPACING = 8.dp
 private val SIDEBAR_CORNER = 12.dp
 private val FILTER_CHIP_CORNER = 8.dp
 private const val SIDEBAR_ALPHA = 0.92f
+private const val SIDEBAR_AUTOSCROLL_DEBOUNCE_MS = 120L
