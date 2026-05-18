@@ -14,7 +14,6 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -29,7 +28,6 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -38,7 +36,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
-import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
@@ -130,25 +127,6 @@ fun DrawablePdfPage(
     pdfHeight: androidx.compose.ui.unit.Dp,
     /** Текущий [PageExtent] страницы; см. [pdfWidth] про синхронность с layout. */
     pageExtent: PageExtent,
-    onGestureStart: (snapshot: List<DrawingPath>) -> Unit = {},
-    onStrokeFinished: (path: DrawingPath) -> Unit = {},
-    onEraseFinished: (before: List<DrawingPath>, after: List<DrawingPath>) -> Unit = { _, _ -> },
-    /**
-     * Read at gesture start: when `true`, the gesture is routed to the erase
-     * pipeline even though the user-selected [toolMode] is PEN or MARKER.
-     * Lets the stylus eraser tip / barrel button trigger erase without
-     * relying on Compose recomposition to swap [toolMode] (which would
-     * restart `pointerInput` and lose the in-flight DOWN event).
-     */
-    eraserOverride: () -> Boolean = { false },
-    /**
-     * When `true`, palm-rejection is forced active regardless of whether a
-     * stylus has been seen yet — finger gestures are not consumed and fall
-     * through to the parent viewer (single-finger pan, two-finger pinch).
-     * Only stylus / eraser-tip events draw. Surfaced on Android via the
-     * "Режим стилуса" toolbar toggle (see [PencilModeSupport]).
-     */
-    pencilModeEnabled: Boolean = false,
     /**
      * Если не `null`, страница рисуется в «magnifier-режиме»: обычный
      * pen-pipeline отключается, а сверху рендерится рамка-цель
@@ -172,55 +150,13 @@ fun DrawablePdfPage(
     val pdfWidthPx: Float = with(densityLocal) { pdfWidth.toPx() }
     val pdfHeightPx: Float = with(densityLocal) { pdfHeight.toPx() }
 
-    // Live-обёртки для использования внутри pointerInput-лямбд: pointerInput
-    // не перезапускается на каждую рекомпозицию (его keys ограничены
-    // toolMode/settings), поэтому замкнутый внутри блока обычный val
-    // фиксировал старые pdfW/pdfH/extent — при зуме или росте extent
-    // координаты штриха уезжали относительно курсора. State-обёртка
-    // (rememberUpdatedState) даёт лямбде свежий снимок без рестарта жеста.
-    val pdfWidthPxState = rememberUpdatedState(pdfWidthPx)
-    val pdfHeightPxState = rememberUpdatedState(pdfHeightPx)
-
     // Прокидываем ширину PDF (а не всего слота) в magnifier — он использует
     // её для нормировки strokeWidth так же, как обычный pen-pipeline.
     LaunchedEffect(magnifierState, pdfWidthPx) {
         magnifierState?.updatePageCanvasPx(pdfWidthPx)
     }
 
-    // Read pencilModeEnabled через rememberUpdatedState, чтобы лямбда
-    // isPalmRejectionActive внутри pointerInput видела актуальное значение
-    // без пересоздания самого pointerInput. Если включить флаг в ключи
-    // pointerInput, авто-on по первому stylus-событию (LaunchedEffect в
-    // DetailsContent) рекомпонует страницу и отменит активный жест:
-    // EraseGesture.cancel() не отправляет onEraseFinished → стёртые
-    // штрихи остаются на ПК, синхронизация ластика «теряет» дельты.
-    val pencilModeState = rememberUpdatedState(pencilModeEnabled)
-
-    // `true` while a stylus is considered present (see
-    // TabletInputController.stylusEverSeen for the lifecycle, including the
-    // disconnected-pen recovery edge). Reading from the controller — instead
-    // of latching a local boolean as we used to — is what lets recovery
-    // actually unblock finger drawing: a local latch would stay `true` for
-    // the lifetime of the composition and palm-rejection would never lift,
-    // even after the controller decided the pen was gone.
-    val stylusEverSeen by tablet.stylusEverSeen.collectAsState()
-
-    // Позиция пальца ластика в нормализованных координатах [0..1] относительно canvas.
-    // null → жест ластика не активен (палец не на экране) → индикатор не отрисовывается.
-    val eraserPos = remember { mutableStateOf<Offset?>(null) }
-
     val hoverPos by tablet.hoverPosition.collectAsState()
-
-    // EC-1 / EC-2: при смене инструмента финализируем незавершённый штрих и
-    // сбрасываем активную сессию стирания.
-    LaunchedEffect(toolMode) {
-        if (toolMode != ToolMode.PEN && toolMode != ToolMode.MARKER && pdfDrawingState.isDrawing.value) {
-            pdfDrawingState.finishDrawing()
-        }
-        if (toolMode != ToolMode.ERASER) {
-            eraserPos.value = null
-        }
-    }
 
     val indicatorColor = MaterialTheme.colorScheme.outline
     val density = LocalDensity.current
@@ -304,206 +240,14 @@ fun DrawablePdfPage(
         bmp
     }
 
+    // Ввод рисования поднят на уровень PdfPagesViewer'а (см.
+    // [MultiPageDrawingController]) — страница только рендерит штрихи и
+    // индикаторы. `stylusEventSink` остаётся пассивным наблюдателем для
+    // tablet pressure/tilt.
     Box(
         modifier = modifier
             .onSizeChanged { canvasSize.value = it }
-            .stylusEventSink(tablet)
-            .then(
-                // В magnifier-режиме обычный pen-вход на странице блокируется —
-                // всё рисование идёт через MagnifierInputPanel. Pan/zoom родителя
-                // продолжают работать (pointerInput не консумит события, когда
-                // не выставлен).
-                if (magnifierState != null) {
-                    Modifier
-                } else when (toolMode) {
-                    ToolMode.PEN -> Modifier.pointerInput(toolMode, penSettings, eraserSettings) {
-                        // Per-gesture eraser-override session: non-null while
-                        // the current stylus gesture started with the eraser
-                        // tip / barrel button down. Routes onMove/onUp to the
-                        // erase pipeline so the user doesn't have to switch
-                        // tools manually.
-                        var activeErase: EraseGesture? = null
-                        detectStylusAwareDrag(
-                            tablet = tablet,
-                            isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
-                            onDown = { off, pressure, tilt ->
-                                val pdfW = pdfWidthPxState.value
-                                val pdfH = pdfHeightPxState.value
-                                val ext = pdfDrawingState.extent.value
-                                if (pdfW > 0f && pdfH > 0f) {
-                                    val nx = ext.left + off.x / pdfW
-                                    val ny = ext.top + off.y / pdfH
-                                    if (eraserOverride()) {
-                                        activeErase = EraseGesture(
-                                            pdfDrawingState = pdfDrawingState,
-                                            eraserSettings = eraserSettings,
-                                            eraserPos = eraserPos,
-                                            onGestureStart = onGestureStart,
-                                            onEraseFinished = onEraseFinished,
-                                        ).also { it.start(nx, ny) }
-                                    } else {
-                                        onGestureStart(pdfDrawingState.currentPaths.toList())
-                                        pdfDrawingState.strokeColorArgb.value = penSettings.colorArgb
-                                        pdfDrawingState.strokeWidth.value = penSettings.strokeWidth
-                                        pdfDrawingState.startDrawing(
-                                            x = nx,
-                                            y = ny,
-                                            normalizedStrokeWidth = penSettings.strokeWidth / pdfW,
-                                            pressure = pressure,
-                                            tilt = tilt,
-                                        )
-                                    }
-                                }
-                            },
-                            onMove = { off, pressure, tilt ->
-                                val pdfW = pdfWidthPxState.value
-                                val pdfH = pdfHeightPxState.value
-                                val ext = pdfDrawingState.extent.value
-                                if (pdfW > 0f && pdfH > 0f) {
-                                    val nx = ext.left + off.x / pdfW
-                                    val ny = ext.top + off.y / pdfH
-                                    val erase = activeErase
-                                    if (erase != null) {
-                                        erase.move(nx, ny)
-                                    } else {
-                                        pdfDrawingState.addPoint(
-                                            x = nx,
-                                            y = ny,
-                                            pressure = pressure,
-                                            tilt = tilt,
-                                        )
-                                    }
-                                }
-                            },
-                            onUp = {
-                                val erase = activeErase
-                                if (erase != null) {
-                                    erase.end()
-                                    activeErase = null
-                                } else {
-                                    val completed = pdfDrawingState.finishDrawing()
-                                    if (completed != null) onStrokeFinished(completed)
-                                }
-                            },
-                            onCancel = {
-                                val erase = activeErase
-                                if (erase != null) {
-                                    erase.cancel()
-                                    activeErase = null
-                                } else {
-                                    pdfDrawingState.finishDrawing()
-                                }
-                            },
-                        )
-                    }
-
-                    ToolMode.MARKER -> Modifier.pointerInput(toolMode, markerSettings, eraserSettings) {
-                        var activeErase: EraseGesture? = null
-                        detectStylusAwareDrag(
-                            tablet = tablet,
-                            isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
-                            onDown = { off, _, _ ->
-                                val pdfW = pdfWidthPxState.value
-                                val pdfH = pdfHeightPxState.value
-                                val ext = pdfDrawingState.extent.value
-                                if (pdfW > 0f && pdfH > 0f) {
-                                    val nx = ext.left + off.x / pdfW
-                                    val ny = ext.top + off.y / pdfH
-                                    if (eraserOverride()) {
-                                        activeErase = EraseGesture(
-                                            pdfDrawingState = pdfDrawingState,
-                                            eraserSettings = eraserSettings,
-                                            eraserPos = eraserPos,
-                                            onGestureStart = onGestureStart,
-                                            onEraseFinished = onEraseFinished,
-                                        ).also { it.start(nx, ny) }
-                                    } else {
-                                        onGestureStart(pdfDrawingState.currentPaths.toList())
-                                        pdfDrawingState.strokeColorArgb.value = markerSettings.colorArgb
-                                        pdfDrawingState.strokeWidth.value = markerSettings.strokeWidth
-                                        pdfDrawingState.startDrawing(
-                                            x = nx,
-                                            y = ny,
-                                            normalizedStrokeWidth = markerSettings.strokeWidth / pdfW,
-                                        )
-                                    }
-                                }
-                            },
-                            onMove = { off, _, _ ->
-                                val pdfW = pdfWidthPxState.value
-                                val pdfH = pdfHeightPxState.value
-                                val ext = pdfDrawingState.extent.value
-                                if (pdfW > 0f && pdfH > 0f) {
-                                    val nx = ext.left + off.x / pdfW
-                                    val ny = ext.top + off.y / pdfH
-                                    val erase = activeErase
-                                    if (erase != null) erase.move(nx, ny)
-                                    else pdfDrawingState.addPoint(nx, ny)
-                                }
-                            },
-                            onUp = {
-                                val erase = activeErase
-                                if (erase != null) {
-                                    erase.end()
-                                    activeErase = null
-                                } else {
-                                    val completed = pdfDrawingState.finishDrawing()
-                                    if (completed != null) onStrokeFinished(completed)
-                                }
-                            },
-                            onCancel = {
-                                val erase = activeErase
-                                if (erase != null) {
-                                    erase.cancel()
-                                    activeErase = null
-                                } else {
-                                    pdfDrawingState.finishDrawing()
-                                }
-                            },
-                        )
-                    }
-
-                    ToolMode.ERASER -> Modifier.pointerInput(toolMode, eraserSettings) {
-                        var session: EraseGesture? = null
-                        detectStylusAwareDrag(
-                            tablet = tablet,
-                            isPalmRejectionActive = { pencilModeState.value || stylusEverSeen },
-                            onDown = { off, _, _ ->
-                                val pdfW = pdfWidthPxState.value
-                                val pdfH = pdfHeightPxState.value
-                                val ext = pdfDrawingState.extent.value
-                                if (pdfW > 0f && pdfH > 0f) {
-                                    session = EraseGesture(
-                                        pdfDrawingState = pdfDrawingState,
-                                        eraserSettings = eraserSettings,
-                                        eraserPos = eraserPos,
-                                        onGestureStart = onGestureStart,
-                                        onEraseFinished = onEraseFinished,
-                                    ).also { it.start(ext.left + off.x / pdfW, ext.top + off.y / pdfH) }
-                                }
-                            },
-                            onMove = { off, _, _ ->
-                                val pdfW = pdfWidthPxState.value
-                                val pdfH = pdfHeightPxState.value
-                                val ext = pdfDrawingState.extent.value
-                                if (pdfW > 0f && pdfH > 0f) {
-                                    session?.move(ext.left + off.x / pdfW, ext.top + off.y / pdfH)
-                                }
-                            },
-                            onUp = {
-                                session?.end()
-                                session = null
-                            },
-                            onCancel = {
-                                session?.cancel()
-                                session = null
-                            },
-                        )
-                    }
-
-                    ToolMode.NONE -> Modifier
-                }
-            )
+            .stylusEventSink(tablet),
     ) {
         // PDF-битмап располагается строго внутри слота со сдвигом
         // (-extent.left * pdfW, -extent.top * pdfH) и размером pdfW × pdfH.
@@ -583,8 +327,10 @@ fun DrawablePdfPage(
                 )
             }
 
-            // Индикатор зоны ластика (AC-12).
-            val pos = eraserPos.value
+            // Индикатор зоны ластика (AC-12). Позиция курсора эрейзера
+            // живёт в [PdfDrawingState] — её обновляет lifted overlay
+            // (см. [MultiPageDrawingController]), страница только рендерит.
+            val pos = pdfDrawingState.eraserPos.value
             if (toolMode == ToolMode.ERASER && pos != null) {
                 val cx = (pos.x - ext.left) * pdfW
                 val cy = (pos.y - ext.top) * pdfH

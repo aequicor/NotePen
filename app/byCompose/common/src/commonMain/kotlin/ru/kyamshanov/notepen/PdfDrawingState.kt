@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen
 
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Offset
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
@@ -62,6 +63,14 @@ class PdfDrawingState {
      * сигнал к перестройке кэша штрихов и перерасчёту layout вьюера.
      */
     val extent = mutableStateOf(PageExtent.Pdf)
+
+    /**
+     * Позиция курсора эрейзера в нормализованных PDF-страничных координатах
+     * (`null` пока жест не активен). Лежит в state, чтобы lifted overlay
+     * мог обновлять её без обратной связи в `DrawablePdfPage`, а каждая
+     * страница рендерила свой индикатор из своего же state'а.
+     */
+    val eraserPos = mutableStateOf<Offset?>(null)
 
     /** Bump [historyVersion] to invalidate caches keyed on completed-stroke content. */
     fun markHistoryChanged() {

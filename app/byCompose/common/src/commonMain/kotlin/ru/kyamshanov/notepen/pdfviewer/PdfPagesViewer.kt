@@ -88,6 +88,20 @@ expect class PdfViewerState {
      * возвращает [PageExtent.Pdf].
      */
     var pageExtentProvider: (Int) -> PageExtent
+
+    /** Текущий сдвиг документа во вьюпорте (viewport-пиксели). */
+    var pan: Offset
+        private set
+
+    /** Текущий зум (1.0 = 100%). */
+    var zoom: Float
+        private set
+
+    /** PDF-ширина колонки страниц при `zoom = 1`. */
+    internal val basePageWidthPx: Float
+
+    /** Композиционный layout страниц в document space. */
+    internal val layout: PdfPagesLayout
 }
 
 /** Создаёт и запоминает [PdfViewerState] с сохранением между рекомпозициями. */

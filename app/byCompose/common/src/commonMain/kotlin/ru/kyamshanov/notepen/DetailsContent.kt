@@ -565,6 +565,72 @@ fun DetailsContent(
             },
     ) {
 
+        // Lifted multi-page input: один pointerInput поверх viewer'а вместо
+        // pointerInput'а в каждом [DrawablePdfPage]. Стилус-жест, перешедший
+        // с верхней страницы на нижнюю, продолжает рисоваться (отдельным
+        // sub-strok'ом на новой странице), а не обрезается у границы.
+        //
+        // Reactive-значения прокидываются через rememberUpdatedState, чтобы
+        // лямбды контроллера читали актуальные snapshot'ы на каждом вызове,
+        // а сам контроллер не пересоздавался при их смене (это рестартанёт
+        // overlay-pointerInput, и активный жест потеряет DOWN).
+        val toolModeProvider = rememberUpdatedState(effectiveToolMode)
+        val penSettingsProvider = rememberUpdatedState(penSettings)
+        val markerSettingsProvider = rememberUpdatedState(markerSettings)
+        val eraserSettingsProvider = rememberUpdatedState(eraserSettings)
+        val eraserOverrideProvider = rememberUpdatedState(eraserOverride)
+        val pencilModeProvider = rememberUpdatedState(pencilModeEnabled)
+        val stylusEverSeenProvider = rememberUpdatedState(stylusEverSeen)
+        val syncEngineProvider = rememberUpdatedState(syncEngine)
+        val drawingController = remember(pdfViewerState, drawingStates, magnifierState) {
+            MultiPageDrawingController(
+                drawingStates = drawingStates,
+                viewerState = pdfViewerState,
+                toolMode = { toolModeProvider.value },
+                penSettings = { penSettingsProvider.value },
+                markerSettings = { markerSettingsProvider.value },
+                eraserSettings = { eraserSettingsProvider.value },
+                eraserOverride = { eraserOverrideProvider.value },
+                // Magnifier-страница пропускается — там ввод идёт через
+                // [MagnifierInputPanel]. На остальных страницах overlay
+                // работает обычно.
+                skipPage = { idx ->
+                    magnifierState.enabled && magnifierState.pageIndex == idx
+                },
+                onGestureStart = { pageIndex, snapshot ->
+                    globalUndoStack.addLast(pageIndex to snapshot)
+                    globalRedoStack.clear()
+                },
+                onStrokeFinished = { pageIndex, path ->
+                    val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
+                    handleStrokeFinished(
+                        pdfDrawingState = state,
+                        pageIndex = pageIndex,
+                        path = path,
+                        engine = syncEngineProvider.value,
+                    )
+                },
+                onEraseFinished = { pageIndex, before, _ ->
+                    val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
+                    handleEraseFinished(
+                        pdfDrawingState = state,
+                        pageIndex = pageIndex,
+                        before = before,
+                        engine = syncEngineProvider.value,
+                    )
+                },
+            )
+        }
+        val palmRejectionActive = remember {
+            { pencilModeProvider.value || stylusEverSeenProvider.value }
+        }
+
+        // Drawing-input навешивается на тот же modifier-chain, что и
+        // встроенный pointerInput viewer'а (zoom / scroll / pan): два
+        // PointerInputModifierNode на одном LayoutNode оба получают
+        // события. Если развести их по сиблингам в Box'е, верхний сиблинг
+        // эксклюзивно забирает события (sharePointerInputWithSiblings =
+        // false по умолчанию) — и колесо мыши перестаёт скроллить.
         PdfPagesViewer(
             state = pdfViewerState,
             pdfDocument = pdfDocument,
@@ -574,56 +640,25 @@ fun DetailsContent(
             // сайдбар оверлеит его слева (так же, как в landscape). Сдвиг
             // через translationX/padding делал бы правый край PDF за экраном
             // или дёргал бы тяжёлый SubcomposeLayout каждый кадр анимации.
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .pdfMultiPageDrawingInput(
+                    controller = drawingController,
+                    tablet = tabletController,
+                    palmRejectionActive = palmRejectionActive,
+                ),
         ) {
-            val bm = bitmap
-            // Размер страницы уже задан Constraints.fixed(w,h) из
-            // SubcomposeLayout в PdfPagesViewer (visualWidth/visualHeight —
-            // те же пиксели в Dp). Modifier.size(Dp,Dp) был бы избыточен И
-            // нестабилен: новый instance на каждом тике зума → нестабильный
-            // modifier у DrawablePdfPage → тяжёлая рекомпозиция каждый кадр
-            // pinch'а. fillMaxSize — singleton, стабильный по identity.
+                val bm = bitmap
+                // Размер страницы уже задан Constraints.fixed(w,h) из
+                // SubcomposeLayout в PdfPagesViewer (visualWidth/visualHeight —
+                // те же пиксели в Dp). Modifier.size(Dp,Dp) был бы избыточен И
+                // нестабилен: новый instance на каждом тике зума → нестабильный
+                // modifier у DrawablePdfPage → тяжёлая рекомпозиция каждый кадр
+                // pinch'а. fillMaxSize — singleton, стабильный по identity.
             Box(modifier = Modifier.fillMaxSize()) {
                 if (bm != null) {
                     val pdfDrawingState = remember(pageIndex) {
                         drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
-                    }
-                    // Все callback'и обёрнуты в remember с стабильными
-                    // ключами — иначе каждый recomposition создаёт новые
-                    // lambda-инстансы, делает параметры DrawablePdfPage
-                    // нестабильными и блокирует skipping в Compose strong-
-                    // skipping mode. eraserOverride — отдельно через
-                    // rememberUpdatedState: лямбда стабильна по identity,
-                    // но возвращает актуальное значение при вызове.
-                    val onGestureStart = remember(pageIndex) {
-                        { snapshot: List<DrawingPath> ->
-                            globalUndoStack.addLast(pageIndex to snapshot)
-                            globalRedoStack.clear()
-                        }
-                    }
-                    val onEraseFinished = remember(pageIndex, pdfDrawingState, syncEngine) {
-                        { before: List<DrawingPath>, _: List<DrawingPath> ->
-                            handleEraseFinished(
-                                pdfDrawingState = pdfDrawingState,
-                                pageIndex = pageIndex,
-                                before = before,
-                                engine = syncEngine,
-                            )
-                        }
-                    }
-                    val onStrokeFinished = remember(pageIndex, pdfDrawingState, syncEngine) {
-                        { path: DrawingPath ->
-                            handleStrokeFinished(
-                                pdfDrawingState = pdfDrawingState,
-                                pageIndex = pageIndex,
-                                path = path,
-                                engine = syncEngine,
-                            )
-                        }
-                    }
-                    val eraserOverrideState = rememberUpdatedState(eraserOverride)
-                    val eraserOverrideProvider = remember {
-                        { eraserOverrideState.value }
                     }
                     val isMagnifierPage = magnifierState.enabled && magnifierState.pageIndex == pageIndex
                     if (isMagnifierPage) {
@@ -642,12 +677,7 @@ fun DetailsContent(
                         pdfWidth = pdfWidth,
                         pdfHeight = pdfHeight,
                         pageExtent = extent,
-                        eraserOverride = eraserOverrideProvider,
-                        pencilModeEnabled = pencilModeEnabled,
                         magnifierState = if (isMagnifierPage) magnifierState else null,
-                        onGestureStart = onGestureStart,
-                        onEraseFinished = onEraseFinished,
-                        onStrokeFinished = onStrokeFinished,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
