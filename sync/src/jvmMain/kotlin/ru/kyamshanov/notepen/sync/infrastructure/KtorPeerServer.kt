@@ -17,20 +17,22 @@ import io.ktor.server.websocket.sendSerialized
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.close
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
-import ru.kyamshanov.notepen.sync.domain.model.PairingState
+import ru.kyamshanov.notepen.sync.domain.model.PeerMessage
+import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import java.net.Inet4Address
 import java.net.InetAddress
@@ -40,14 +42,13 @@ import kotlin.time.Duration.Companion.seconds
 private val logger = KotlinLogging.logger {}
 
 /**
- * Ktor CIO [PeerServer] implementation.
+ * Ktor CIO [PeerServer] implementation supporting **multiple concurrent
+ * clients** behind a single shared pairing code.
  *
- * Starts an HTTP/WebSocket server on a random available port. After [start],
- * callers should register an mDNS service using [state]'s [PairingState.AwaitingConnection]
- * to let peers discover the port.
- *
- * Only one client is accepted at a time; subsequent connections are rejected
- * while a session is active.
+ * Sessions are keyed by [DeviceInfo.id] in [sessions]. Each newly connecting
+ * client emits to [pendingApprovals] and suspends until the UI calls
+ * [approve]/[reject]. Approved peers move into [connectedPeers] and may
+ * remain until [disconnect], [disconnectAll], or [stop].
  *
  * @param selfInfo description of this device sent to peers after pairing
  * @param ioDispatcher dispatcher for Ktor engine I/O
@@ -57,27 +58,33 @@ class KtorPeerServer(
     private val ioDispatcher: CoroutineDispatcher,
 ) : PeerServer {
 
-    private val _state = MutableStateFlow<PairingState>(PairingState.Idle)
-    override val state: Flow<PairingState> = _state.asStateFlow()
+    private val _lifecycle = MutableStateFlow<ServerLifecycleState>(ServerLifecycleState.Idle)
+    override val lifecycle: Flow<ServerLifecycleState> = _lifecycle.asStateFlow()
 
-    private val _incoming = MutableSharedFlow<NetworkMessage>(extraBufferCapacity = 64)
-    override val incomingMessages: Flow<NetworkMessage> = _incoming.asSharedFlow()
+    private val _connectedPeers = MutableStateFlow<Set<DeviceInfo>>(emptySet())
+    override val connectedPeers: Flow<Set<DeviceInfo>> = _connectedPeers.asStateFlow()
+
+    private val _pendingApprovals = MutableSharedFlow<DeviceInfo>(extraBufferCapacity = 16)
+    override val pendingApprovals: Flow<DeviceInfo> = _pendingApprovals.asSharedFlow()
+
+    private val _incoming = MutableSharedFlow<PeerMessage>(extraBufferCapacity = 128)
+    override val incomingMessages: Flow<PeerMessage> = _incoming.asSharedFlow()
 
     private val pairing = PairingManager()
     private val json = Json { classDiscriminator = "type" }
 
+    private val sessionMutex = Mutex()
+    private val sessions = mutableMapOf<String, DefaultWebSocketServerSession>()
+    private val approvalDeferreds = mutableMapOf<String, CompletableDeferred<Boolean>>()
+    private val pendingPeers = mutableMapOf<String, DeviceInfo>()
+
     private var engine: EmbeddedServer<*, *>? = null
-    private var serverPort: Int = 0
-    private var serverHost: String = ""
-    private var activeSession: DefaultWebSocketServerSession? = null
     private val serverScope = CoroutineScope(ioDispatcher + Job())
 
-    override suspend fun start(): Result<String> = runCatching {
+    override suspend fun start(): Result<ServerLifecycleState.Running> = runCatching {
         val code = pairing.generateCode()
         val host = pickLanIpv4Address() ?: InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
-        serverHost = host
         val port = findFreePort()
-        serverPort = port
 
         engine = embeddedServer(CIO, port = port) {
             install(ContentNegotiation) { json(json) }
@@ -90,9 +97,10 @@ class KtorPeerServer(
             }
         }.also { it.start(wait = false) }
 
-        _state.value = PairingState.AwaitingConnection(code = code, host = host, port = port)
+        val running = ServerLifecycleState.Running(host = host, port = port, code = code)
+        _lifecycle.value = running
         logger.info { "PeerServer started on $host:$port (code=$code)" }
-        code
+        running
     }
 
     private fun findFreePort(): Int = java.net.ServerSocket(0).use { it.localPort }
@@ -117,7 +125,6 @@ class KtorPeerServer(
                 if (addr !is Inet4Address) continue
                 if (addr.isLoopbackAddress || addr.isLinkLocalAddress || addr.isAnyLocalAddress) continue
                 val host = addr.hostAddress ?: continue
-                // Prefer RFC1918 over public IPs; skip VPN interfaces unless nothing else is left.
                 val rank = when {
                     looksVpn -> 100
                     host.startsWith("192.168.") -> 0
@@ -131,74 +138,138 @@ class KtorPeerServer(
         return candidates.minByOrNull { it.first }?.second
     }
 
+    @Suppress("ReturnCount", "LongMethod")
     private suspend fun handleSession(session: DefaultWebSocketServerSession) {
-        if (activeSession != null) {
-            logger.warn { "Rejecting extra connection — already have an active session" }
-            session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "already connected"))
+        val first = runCatching { session.receiveDeserialized<NetworkMessage>() }.getOrNull()
+        if (first !is NetworkMessage.PairRequest) {
+            session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "expected pair_request"))
             return
         }
-        _state.value = PairingState.AwaitingCode
+        if (!pairing.validate(first.code)) {
+            session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("invalid code"))
+            session.close()
+            return
+        }
+        val peer = first.device
+        // Refuse duplicate connections from the same device id — the existing
+        // session is authoritative; the second attempt is likely a stale retry.
+        sessionMutex.withLock {
+            if (sessions.containsKey(peer.id) || pendingPeers.containsKey(peer.id)) {
+                session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("already connected"))
+                session.close()
+                return
+            }
+            pendingPeers[peer.id] = peer
+        }
+
+        val approvalDeferred = CompletableDeferred<Boolean>()
+        sessionMutex.withLock { approvalDeferreds[peer.id] = approvalDeferred }
+        _pendingApprovals.emit(peer)
+
+        val approved = approvalDeferred.await()
+        sessionMutex.withLock {
+            approvalDeferreds.remove(peer.id)
+            pendingPeers.remove(peer.id)
+        }
+        if (!approved) {
+            runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.Disconnect) }
+            session.close(CloseReason(CloseReason.Codes.NORMAL, "rejected by user"))
+            return
+        }
+
+        session.sendSerialized<NetworkMessage>(NetworkMessage.PairAccepted(selfInfo))
+        sessionMutex.withLock {
+            sessions[peer.id] = session
+            peerInfoById[peer.id] = peer
+        }
+        publishConnectedPeers()
+        logger.info { "Paired with ${peer.name} (${peer.id})" }
 
         try {
-            val first = session.receiveDeserialized<NetworkMessage>()
-            if (first !is NetworkMessage.PairRequest) {
-                session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "expected pair_request"))
-                resetToAwaitingConnection()
-                return
-            }
-
-            if (!pairing.validateAndConsume(first.code)) {
-                session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("invalid code"))
-                session.close()
-                resetToAwaitingConnection()
-                return
-            }
-
-            session.sendSerialized<NetworkMessage>(NetworkMessage.PairAccepted(selfInfo))
-            activeSession = session
-            _state.value = PairingState.Connected(first.device)
-            logger.info { "Paired with ${first.device.name}" }
-
             while (true) {
                 val msg = session.receiveDeserialized<NetworkMessage>()
                 if (msg is NetworkMessage.Disconnect) break
-                if (msg is NetworkMessage.SaveRequest) {
-                    logger.info { "[save-diag host-ws] received SaveRequest id=${msg.requestId} on session" }
-                }
-                _incoming.emit(msg)
-                if (msg is NetworkMessage.SaveRequest) {
-                    logger.info { "[save-diag host-ws] SaveRequest id=${msg.requestId} emitted to _incoming" }
-                }
+                _incoming.emit(PeerMessage(peer, msg))
             }
         } catch (e: Exception) {
-            logger.warn { "Session ended: ${e.message}" }
+            logger.warn { "Session for ${peer.name} ended: ${e.message}" }
         } finally {
-            activeSession = null
-            resetToAwaitingConnection()
+            sessionMutex.withLock {
+                sessions.remove(peer.id)
+                peerInfoById.remove(peer.id)
+            }
+            publishConnectedPeers()
         }
     }
 
-    private fun resetToAwaitingConnection() {
-        val current = _state.value
-        if (current is PairingState.AwaitingConnection || current is PairingState.Idle) return
-        serverScope.launch {
-            if (engine == null) return@launch
-            val code = pairing.generateCode()
-            _state.value = PairingState.AwaitingConnection(code = code, host = serverHost, port = serverPort)
+    private val peerInfoById = mutableMapOf<String, DeviceInfo>()
+
+    private suspend fun publishConnectedPeers() {
+        val snapshot = sessionMutex.withLock { peerInfoById.values.toSet() }
+        _connectedPeers.value = snapshot
+    }
+
+    override suspend fun send(peerId: String, message: NetworkMessage) {
+        val session = sessionMutex.withLock { sessions[peerId] } ?: return
+        runCatching { session.sendSerialized<NetworkMessage>(message) }
+            .onFailure { logger.warn { "send to $peerId failed: ${it.message}" } }
+    }
+
+    override suspend fun broadcast(message: NetworkMessage) {
+        val snapshot = sessionMutex.withLock { sessions.values.toList() }
+        for (session in snapshot) {
+            runCatching { session.sendSerialized<NetworkMessage>(message) }
         }
     }
 
-    override suspend fun send(message: NetworkMessage) {
-        activeSession?.sendSerialized<NetworkMessage>(message)
+    override suspend fun approve(peerId: String) {
+        val deferred = sessionMutex.withLock { approvalDeferreds[peerId] } ?: return
+        deferred.complete(true)
+    }
+
+    override suspend fun reject(peerId: String) {
+        val deferred = sessionMutex.withLock { approvalDeferreds[peerId] } ?: return
+        deferred.complete(false)
+    }
+
+    override suspend fun disconnect(peerId: String) {
+        val session = sessionMutex.withLock { sessions[peerId] }
+        if (session != null) {
+            runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.Disconnect) }
+            runCatching { session.close(CloseReason(CloseReason.Codes.NORMAL, "disconnected by host")) }
+        }
+        sessionMutex.withLock {
+            sessions.remove(peerId)
+            peerInfoById.remove(peerId)
+        }
+        publishConnectedPeers()
+    }
+
+    override suspend fun disconnectAll() {
+        val snapshot = sessionMutex.withLock { sessions.toMap() }
+        for ((_, session) in snapshot) {
+            runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.Disconnect) }
+            runCatching { session.close(CloseReason(CloseReason.Codes.NORMAL, "disconnected by host")) }
+        }
+        sessionMutex.withLock {
+            sessions.clear()
+            peerInfoById.clear()
+        }
+        publishConnectedPeers()
     }
 
     override suspend fun stop() {
         pairing.invalidate()
-        activeSession?.close(CloseReason(CloseReason.Codes.GOING_AWAY, "server stopping"))
-        activeSession = null
+        // Reject any pending approvals so suspended handleSession coroutines exit.
+        val pendings = sessionMutex.withLock { approvalDeferreds.toMap() }
+        for ((_, d) in pendings) {
+            d.complete(false)
+        }
+        disconnectAll()
+        _lifecycle.value = ServerLifecycleState.Stopped
         engine?.stop()
         engine = null
-        _state.value = PairingState.Idle
+        _lifecycle.value = ServerLifecycleState.Idle
         logger.info { "PeerServer stopped" }
     }
 }

@@ -9,16 +9,19 @@ import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 /**
- * State machine for the viewer side of projection mode.
+ * State machine for the viewer side of projection mode bound to a single
+ * `hostId`. Multi-host clients spin up one controller per host that drives
+ * the local viewport.
  *
- * **Follow** mode: applies incoming [NetworkMessage.ProjectionFrame]s to
- * [currentFrame] so the presentation layer can drive scroll/zoom.
+ * **Follow** mode: applies incoming [NetworkMessage.ProjectionFrame]s from
+ * the bound host to [currentFrame] so the presentation layer can drive
+ * scroll/zoom.
  *
  * **Free** mode: ignores frames, lets the user scroll independently.
- * The viewer can re-attach by calling [attach].
  */
 class ProjectionViewerController(
     private val client: SyncClient,
+    private val hostId: String,
     private val scope: CoroutineScope,
 ) {
     private val _following = MutableStateFlow(true)
@@ -33,7 +36,9 @@ class ProjectionViewerController(
 
     init {
         scope.launch {
-            client.incomingMessages.collect { msg ->
+            client.incomingMessages.collect { hostMessage ->
+                if (hostMessage.host.id != hostId) return@collect
+                val msg = hostMessage.message
                 if (msg is NetworkMessage.ProjectionFrame && _following.value) {
                     _currentFrame.value = msg
                 }
@@ -44,12 +49,12 @@ class ProjectionViewerController(
     /** Detach from host viewport — enter free-scroll mode. */
     fun detach() {
         _following.value = false
-        scope.launch { client.send(NetworkMessage.ProjectionDetach) }
+        scope.launch { client.send(hostId, NetworkMessage.ProjectionDetach) }
     }
 
     /** Re-attach to host viewport — resume following. */
     fun attach() {
         _following.value = true
-        scope.launch { client.send(NetworkMessage.ProjectionAttach) }
+        scope.launch { client.send(hostId, NetworkMessage.ProjectionAttach) }
     }
 }

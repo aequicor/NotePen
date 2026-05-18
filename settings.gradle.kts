@@ -38,5 +38,6 @@ include(":app:byCompose:theme")
 include(":app:byCompose:uikit")
 include(":shared")
 include(":sync")
+include(":qr-connect")
 include(":server")
 

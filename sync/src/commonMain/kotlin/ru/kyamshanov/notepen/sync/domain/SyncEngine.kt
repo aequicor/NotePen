@@ -121,7 +121,7 @@ class SyncEngine(
         val result = runCatching {
             for (d in pending) {
                 val msg = NetworkMessage.StrokeDeltaMessage(delta = d, documentId = documentId)
-                server?.send(msg) ?: client?.send(msg)
+                server?.broadcast(msg) ?: client?.broadcast(msg)
             }
         }
         if (result.isSuccess) {
@@ -135,7 +135,7 @@ class SyncEngine(
         val result = runCatching {
             for (d in stamped) {
                 val msg = NetworkMessage.StrokeDeltaMessage(delta = d, documentId = documentId)
-                server?.send(msg) ?: client?.send(msg)
+                server?.broadcast(msg) ?: client?.broadcast(msg)
             }
         }
         if (result.isSuccess) {

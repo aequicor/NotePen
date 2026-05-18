@@ -37,6 +37,7 @@ kotlin {
             //module with logic
             implementation(projects.shared)
             implementation(projects.sync)
+            implementation(projects.qrConnect)
 
             //decompose
             implementation(libs.decompose)
@@ -72,6 +73,8 @@ kotlin {
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.androidx.graphics.core)
+            implementation(libs.androidx.camera.view)
+            implementation(libs.androidx.camera.lifecycle)
         }
 
         jvmMain.dependencies {
