@@ -95,12 +95,30 @@ class MagnifierState {
      */
     private val pageBitmapsState = mutableStateMapOf<Int, ImageBitmap>()
 
-    /** Битмап страницы по индексу или `null`, если ещё не подан. */
-    fun pageBitmap(pageIndex: Int): ImageBitmap? = pageBitmapsState[pageIndex]
+    /**
+     * Высокоразрешённые битмапы для активных страниц лупы. Рендерятся
+     * отдельно от viewer'овских (которые имеют разрешение под текущий
+     * zoom) и используются панелью лупы как источник — даёт чёткое
+     * изображение при сильном увеличении.
+     */
+    private val highResBitmapsState = mutableStateMapOf<Int, ImageBitmap>()
+
+    /** Битмап страницы по индексу — high-res имеет приоритет над viewer-битмапом. */
+    fun pageBitmap(pageIndex: Int): ImageBitmap? =
+        highResBitmapsState[pageIndex] ?: pageBitmapsState[pageIndex]
+
+    /** Низкоразрешённый viewer-битмап (без приоритета high-res); для рендера на странице. */
+    fun viewerPageBitmap(pageIndex: Int): ImageBitmap? = pageBitmapsState[pageIndex]
 
     /** Битмап первой страницы — для обратной совместимости. */
     val pageBitmap: ImageBitmap?
-        get() = pageBitmapsState[pageIndex]
+        get() = pageBitmap(pageIndex)
+
+    /** Обновить high-res битмап страницы [pageIndex]. */
+    fun updateHighResBitmap(pageIndex: Int, bitmap: ImageBitmap?) {
+        if (bitmap == null) highResBitmapsState.remove(pageIndex)
+        else highResBitmapsState[pageIndex] = bitmap
+    }
 
     /** Включена ли авто-прокрутка рамки при подходе пера к правому краю панели. */
     var autoScrollEnabled: Boolean by mutableStateOf(true)
@@ -265,6 +283,7 @@ class MagnifierState {
     fun disable() {
         enabled = false
         pageBitmapsState.clear()
+        highResBitmapsState.clear()
         segments = emptyList()
     }
 
