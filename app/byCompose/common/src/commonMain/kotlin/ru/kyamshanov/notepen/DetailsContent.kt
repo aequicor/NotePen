@@ -84,6 +84,7 @@ import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 import ru.kyamshanov.notepen.sync.SyncBridge
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
@@ -133,6 +134,13 @@ private const val TOOLBAR_ZOOM_STEP_OUT = 1f / TOOLBAR_ZOOM_STEP_IN
 
 /** Сколько ждём слива offline-буфера на пир после реконнекта, прежде чем считать неуспехом. */
 private val REPLAY_DEADLINE = 10.seconds
+
+/**
+ * Размер high-res рендеринга страницы под лупой (макс. сторона в пикселях).
+ * Дополнительно к viewer-битмапу — даёт чёткое изображение в панели при
+ * сильной магнификации. 4000 px ≈ хватает на 3-8× зум поверх baseline.
+ */
+private const val HIGH_RES_DIM_PX = 4000
 
 
 @OptIn(ExperimentalComposeUiApi::class)
@@ -292,6 +300,40 @@ fun DetailsContent(
     // Состояние magnifier'а (рамка-цель + плавающая панель ввода). Создаётся
     // один раз; включается toolbar-кнопкой ниже.
     val magnifierState = remember { MagnifierState() }
+
+    // High-res рендер страниц под лупой. Viewer'овский битмап рендерится
+    // под текущий zoom — при сильном увеличении в панели лупы он мылится.
+    // Здесь рендерим страницу при MAX_HIGH_RES_DIM_PX и подсовываем
+    // её в MagnifierState; MagnifierContent предпочитает high-res, если он
+    // есть. Срабатывает при включении лупы и при смене pageIndex'ов.
+    val magnifierPageIndices = magnifierState.segments.map { it.pageIndex }
+    LaunchedEffect(magnifierState.enabled, magnifierPageIndices, pdfDocument) {
+        if (!magnifierState.enabled) return@LaunchedEffect
+        val doc = pdfDocument ?: return@LaunchedEffect
+        for (pageIndex in magnifierPageIndices) {
+            val pageInfo = doc.info.pages.getOrNull(pageIndex) ?: continue
+            val aspect = pageInfo.aspectRatio.takeIf { it > 0f } ?: 1f
+            // Clamp обе оси пропорционально, чтобы сохранить aspect.
+            val widthCapped = HIGH_RES_DIM_PX
+            val heightFromWidth = (widthCapped / aspect).toInt().coerceAtLeast(1)
+            val (w, h) = if (heightFromWidth > HIGH_RES_DIM_PX) {
+                val hh = HIGH_RES_DIM_PX
+                val ww = (hh * aspect).toInt().coerceAtLeast(1)
+                ww to hh
+            } else {
+                widthCapped to heightFromWidth
+            }
+            launch {
+                runCatching {
+                    val data = renderer.renderPage(doc, pageIndex, w, h)
+                    val bm = data.toImageBitmap()
+                    magnifierState.updateHighResBitmap(pageIndex, bm)
+                }.onFailure { e ->
+                    logger.warn { "Magnifier high-res render failed for page $pageIndex: ${e::class.simpleName}" }
+                }
+            }
+        }
+    }
     var showShortcutsDialog by remember { mutableStateOf(false) }
     var ctrlHeld by remember { mutableStateOf(false) }
     var altHeld by remember { mutableStateOf(false) }
