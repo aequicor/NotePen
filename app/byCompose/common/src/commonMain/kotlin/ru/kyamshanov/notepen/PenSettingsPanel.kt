@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
 import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
+import ru.kyamshanov.notepen.annotation.domain.model.sliderPositionToStrokeWidth
+import ru.kyamshanov.notepen.annotation.domain.model.strokeWidthToSliderPosition
 
 /**
  * Panel with thickness slider, alpha slider and a horizontal lane of color presets
@@ -47,9 +49,20 @@ fun PenSettingsPanel(
             color = MaterialTheme.colorScheme.onSurface,
         )
         Slider(
-            value = settings.strokeWidth,
-            onValueChange = { onChange(settings.applyStrokeWidth(it)) },
-            valueRange = PenSettings.MIN_STROKE_WIDTH..PenSettings.MAX_STROKE_WIDTH,
+            value = strokeWidthToSliderPosition(
+                settings.strokeWidth,
+                PenSettings.MIN_STROKE_WIDTH,
+                PenSettings.MAX_STROKE_WIDTH,
+            ),
+            onValueChange = {
+                val width = sliderPositionToStrokeWidth(
+                    it,
+                    PenSettings.MIN_STROKE_WIDTH,
+                    PenSettings.MAX_STROKE_WIDTH,
+                )
+                onChange(settings.applyStrokeWidth(width))
+            },
+            valueRange = 0f..1f,
         )
 
         Spacer(Modifier.height(PEN_PANEL_INNER_SPACING))

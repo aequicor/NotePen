@@ -208,7 +208,7 @@ private fun drawSegment(
 ) {
     paint.color = segment.colorArgb
     val tiltBoost = 1f + TILT_WIDTH_GAIN * segment.curr.tilt
-    paint.strokeWidth = segment.widthPx * segment.curr.pressure * tiltBoost
+    paint.strokeWidth = (segment.widthPx * segment.curr.pressure * tiltBoost).coerceAtLeast(1f)
     val prev = segment.prev
     val curr = segment.curr
     val ext = segment.extent

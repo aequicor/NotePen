@@ -54,7 +54,10 @@ class MagnifierInputController internal constructor(
         activePageIndex = segment.pageIndex
         when (effectiveTool) {
             ToolMode.PEN, ToolMode.MARKER -> {
-                val widthPx = if (effectiveTool == ToolMode.PEN) {
+                // strokeWidth is a fraction of page width. Inside the loupe the
+                // page is magnified by `mag`, so we divide by `mag` to keep the
+                // visual stroke thickness the same as outside the loupe.
+                val widthFrac = if (effectiveTool == ToolMode.PEN) {
                     penSettings().strokeWidth
                 } else {
                     markerSettings().strokeWidth
@@ -66,13 +69,13 @@ class MagnifierInputController internal constructor(
                 }
                 onGestureStart(segment.pageIndex, pdfDrawingState.currentPaths.toList())
                 pdfDrawingState.strokeColorArgb.value = colorArgb
-                pdfDrawingState.strokeWidth.value = widthPx
+                pdfDrawingState.strokeWidth.value = widthFrac
                 val mag = loupeMagnification(panelSize, segment)
-                val adaptedWidthPx = (widthPx / mag).coerceAtLeast(MIN_ADAPTED_STROKE_PX)
+                val adaptedWidth = (widthFrac / mag).coerceAtLeast(MIN_NORMALIZED_STROKE)
                 pdfDrawingState.startDrawing(
                     x = page.x,
                     y = page.y,
-                    normalizedStrokeWidth = adaptedWidthPx / pageCanvasW,
+                    normalizedStrokeWidth = adaptedWidth,
                     pressure = pressure,
                     tilt = tilt,
                 )
@@ -239,7 +242,8 @@ class MagnifierInputController internal constructor(
          */
         const val AUTO_SCROLL_LIFT_OFF_FRAC: Float = 0.35f
 
-        const val MIN_ADAPTED_STROKE_PX: Float = 0.5f
+        /** Lower bound for stroke width as a fraction of page width (~0.04 mm on A4). */
+        const val MIN_NORMALIZED_STROKE: Float = 0.0002f
     }
 }
 

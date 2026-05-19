@@ -77,6 +77,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
 import ru.kyamshanov.notepen.annotation.domain.model.applyShape
 import ru.kyamshanov.notepen.annotation.domain.model.applySize
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
+import ru.kyamshanov.notepen.annotation.domain.model.sliderPositionToStrokeWidth
+import ru.kyamshanov.notepen.annotation.domain.model.strokeWidthToSliderPosition
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import kotlin.math.roundToInt
 
@@ -398,14 +400,12 @@ private fun penSlots(
         icon = Icons.Default.LineWeight,
         contentDescription = "Толщина",
         content = { orientation ->
-            OrientedSlider(
+            StrokeWidthSlider(
                 orientation = orientation,
-                value = settings.strokeWidth,
-                onValueChange = { onChange(settings.applyStrokeWidth(it)) },
-                valueRange = PenSettings.MIN_STROKE_WIDTH..PenSettings.MAX_STROKE_WIDTH,
-                formatDisplay = { it.roundToInt().toString() },
-                parseInput = { it.trim().toIntOrNull()?.toFloat() },
-                suffix = " dp",
+                strokeWidth = settings.strokeWidth,
+                min = PenSettings.MIN_STROKE_WIDTH,
+                max = PenSettings.MAX_STROKE_WIDTH,
+                onWidthChange = { onChange(settings.applyStrokeWidth(it)) },
             )
         },
     ),
@@ -446,14 +446,12 @@ private fun markerSlots(
         icon = Icons.Default.LineWeight,
         contentDescription = "Толщина",
         content = { orientation ->
-            OrientedSlider(
+            StrokeWidthSlider(
                 orientation = orientation,
-                value = settings.strokeWidth,
-                onValueChange = { onChange(settings.applyStrokeWidth(it)) },
-                valueRange = MarkerSettings.MIN_STROKE_WIDTH..MarkerSettings.MAX_STROKE_WIDTH,
-                formatDisplay = { it.roundToInt().toString() },
-                parseInput = { it.trim().toIntOrNull()?.toFloat() },
-                suffix = " dp",
+                strokeWidth = settings.strokeWidth,
+                min = MarkerSettings.MIN_STROKE_WIDTH,
+                max = MarkerSettings.MAX_STROKE_WIDTH,
+                onWidthChange = { onChange(settings.applyStrokeWidth(it)) },
             )
         },
     ),
@@ -592,6 +590,46 @@ private fun EraserChip(selected: Boolean, label: String, onClick: () -> Unit) {
         ),
     )
 }
+
+/**
+ * Slider for stroke width that:
+ * - operates on a perceptually-uniform log scale (equal-feeling steps at every position);
+ * - reports/accepts width as a fraction of page width;
+ * - shows mm in the value field (A4-width reference, 210 mm).
+ *
+ * Display & parsing in mm-on-A4 is purely UI sugar — the underlying value is the
+ * page-width fraction, so it stays correct on any actual page format.
+ */
+@Composable
+private fun StrokeWidthSlider(
+    orientation: RailOrientation,
+    strokeWidth: Float,
+    min: Float,
+    max: Float,
+    onWidthChange: (Float) -> Unit,
+) {
+    OrientedSlider(
+        orientation = orientation,
+        value = strokeWidthToSliderPosition(strokeWidth, min, max),
+        onValueChange = { t -> onWidthChange(sliderPositionToStrokeWidth(t, min, max)) },
+        valueRange = 0f..1f,
+        formatDisplay = { t ->
+            val widthMm = sliderPositionToStrokeWidth(t, min, max) * A4_WIDTH_MM
+            val tenths = (widthMm * 10f).roundToInt()
+            "${tenths / 10}.${tenths % 10}"
+        },
+        parseInput = { raw ->
+            val cleaned = raw.trim().trimEnd('м', 'm').trim().replace(',', '.')
+            cleaned.toFloatOrNull()?.let { mm ->
+                val width = (mm / A4_WIDTH_MM).coerceIn(min, max)
+                strokeWidthToSliderPosition(width, min, max)
+            }
+        },
+        suffix = " мм",
+    )
+}
+
+private const val A4_WIDTH_MM: Float = 210f
 
 @Composable
 private fun OrientedSlider(

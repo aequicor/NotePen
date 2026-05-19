@@ -1,6 +1,8 @@
 package ru.kyamshanov.notepen.annotation.domain.model
 
 import kotlinx.serialization.Serializable
+import kotlin.math.ln
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 /**
@@ -9,6 +11,10 @@ import kotlin.math.roundToInt
  * [colorArgb] is packed ARGB (bits 31-24 alpha, 23-16 red, 15-8 green, 7-0 blue).
  * [alpha] mirrors the alpha channel of [colorArgb] as a Float [0..1] for slider UX;
  * always kept in sync by [applyAlpha].
+ *
+ * [strokeWidth] is the line width as a fraction of the PDF page width
+ * (DPI / zoom / device-independent). On A4 (210 mm wide) `0.002` ≈ 0.42 mm —
+ * the look of an ordinary ballpoint over body text.
  */
 @Serializable
 data class PenSettings(
@@ -24,10 +30,16 @@ data class PenSettings(
     val minWidthFactor: Float = DEFAULT_MIN_WIDTH_FACTOR,
 ) {
     companion object {
-        const val DEFAULT_STROKE_WIDTH = 10f
-        const val MIN_STROKE_WIDTH = 1f
-        const val MAX_STROKE_WIDTH = 60f
-        const val DEFAULT_MIN_WIDTH_FACTOR = 0.2f
+        /** ≈ 0.42 mm on A4 — matches text stroke thickness. */
+        const val DEFAULT_STROKE_WIDTH: Float = 0.0020f
+
+        /** ≈ 0.13 mm on A4 — thinnest pleasant pen. */
+        const val MIN_STROKE_WIDTH: Float = 0.0006f
+
+        /** ≈ 4.2 mm on A4 — heaviest pen before it reads as a marker. */
+        const val MAX_STROKE_WIDTH: Float = 0.020f
+
+        const val DEFAULT_MIN_WIDTH_FACTOR: Float = 0.2f
 
         /**
          * Preset colours as packed ARGB Longs (fully opaque).
@@ -65,7 +77,51 @@ fun PenSettings.applyAlpha(newAlpha: Float): PenSettings {
 }
 
 /**
- * Apply a new stroke width from the slider; clamp to [MIN_STROKE_WIDTH]..[MAX_STROKE_WIDTH].
+ * Apply a new stroke width; values outside [[MIN_STROKE_WIDTH]..[MAX_STROKE_WIDTH]] are clamped.
+ *
+ * Also performs a one-shot migration: legacy settings stored width in raw pixels
+ * (range `1f..60f`). Anything above [MAX_STROKE_WIDTH] is reset to the new default —
+ * dropping a 10× over-thick line is preferable to silently mis-scaling user input.
  */
 fun PenSettings.applyStrokeWidth(newWidth: Float): PenSettings =
-    copy(strokeWidth = newWidth.coerceIn(PenSettings.MIN_STROKE_WIDTH, PenSettings.MAX_STROKE_WIDTH))
+    copy(strokeWidth = sanitizePenStrokeWidth(newWidth))
+
+/**
+ * Migrate / clamp a raw stroke-width value read from persistence or user input.
+ * `strokeWidth` is now a fraction of page width; legacy data stored it in raw
+ * pixels (range ~1..60). Treat anything an order of magnitude above the new
+ * [PenSettings.MAX_STROKE_WIDTH] as legacy and reset to the default.
+ */
+fun sanitizePenStrokeWidth(width: Float): Float {
+    val migrated = if (width > PenSettings.MAX_STROKE_WIDTH * 5f) {
+        PenSettings.DEFAULT_STROKE_WIDTH
+    } else {
+        width
+    }
+    return migrated.coerceIn(PenSettings.MIN_STROKE_WIDTH, PenSettings.MAX_STROKE_WIDTH)
+}
+
+/**
+ * Return a copy with `strokeWidth` sanitised — see [sanitizePenStrokeWidth].
+ * Call this on settings restored from disk so legacy pixel-range values don't
+ * blow up into page-wide blobs.
+ */
+fun PenSettings.sanitizedForCurrentScheme(): PenSettings =
+    copy(strokeWidth = sanitizePenStrokeWidth(strokeWidth))
+
+/**
+ * Perceptually-uniform slider position `[0..1]` for a stroke width.
+ * Log-mapped so each ~10 % of slider travel multiplies width by the same factor.
+ */
+fun strokeWidthToSliderPosition(width: Float, min: Float, max: Float): Float {
+    val w = width.coerceIn(min, max)
+    return (ln(w / min) / ln(max / min)).coerceIn(0f, 1f)
+}
+
+/**
+ * Inverse of [strokeWidthToSliderPosition]: `t∈[0..1] → width∈[min..max]` on a log scale.
+ */
+fun sliderPositionToStrokeWidth(t: Float, min: Float, max: Float): Float {
+    val clamped = t.coerceIn(0f, 1f)
+    return min * (max / min).pow(clamped)
+}
