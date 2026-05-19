@@ -208,14 +208,25 @@ actual fun PdfPagesViewer(
                     if (cached != null && cached.renderedAtScalePercent >= snap.scalePercent) continue
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
-                    val targetWidthPx = (basePageWidthPx * snap.scalePercent / 100f * density.density)
+                    val desiredWidthPx = (basePageWidthPx * snap.scalePercent / 100f * density.density)
                         .toInt()
                         .coerceAtLeast(1)
-                        .coerceAtMost(MAX_RENDER_DIM_PX)
-                    val targetHeightPx = (targetWidthPx / aspect)
-                        .toInt()
-                        .coerceAtLeast(1)
-                        .coerceAtMost(MAX_RENDER_DIM_PX)
+                    // Clamp обе оси с сохранением aspect: если высота, рассчитанная
+                    // от полной ширины, выходит за MAX_RENDER_DIM_PX, уменьшаем
+                    // и ширину пропорционально. Иначе битмап получит aspect,
+                    // отличный от page.aspectRatio, и лупа (которая использует
+                    // `target × bmp.dims` без коррекции) покажет искажённое
+                    // изображение. Обычный PDF-display этого не видит — он
+                    // через FillBounds компенсирует distortion обратно.
+                    val widthCapped = desiredWidthPx.coerceAtMost(MAX_RENDER_DIM_PX)
+                    val heightFromWidth = (widthCapped / aspect).toInt().coerceAtLeast(1)
+                    val (targetWidthPx, targetHeightPx) = if (heightFromWidth > MAX_RENDER_DIM_PX) {
+                        val cappedH = MAX_RENDER_DIM_PX
+                        val cappedW = (cappedH * aspect).toInt().coerceAtLeast(1)
+                        cappedW to cappedH
+                    } else {
+                        widthCapped to heightFromWidth
+                    }
                     launch {
                         val bitmap = withContext(renderDispatcher) {
                             renderer.renderPage(doc, i, targetWidthPx, targetHeightPx)

@@ -154,8 +154,8 @@ fun DrawablePdfPage(
 
     // Прокидываем ширину PDF (а не всего слота) в magnifier — он использует
     // её для нормировки strokeWidth так же, как обычный pen-pipeline.
-    LaunchedEffect(magnifierState, pdfWidthPx) {
-        magnifierState?.updatePageCanvasPx(pdfWidthPx)
+    LaunchedEffect(magnifierState, pdfWidthPx, pdfHeightPx) {
+        magnifierState?.updatePageCanvasPx(pdfWidthPx, pdfHeightPx)
     }
 
     val hoverPos by tablet.hoverPosition.collectAsState()
