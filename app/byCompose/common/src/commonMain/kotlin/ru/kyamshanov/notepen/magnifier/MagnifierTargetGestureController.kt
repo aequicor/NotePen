@@ -1,5 +1,8 @@
 package ru.kyamshanov.notepen.magnifier
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
@@ -16,11 +19,21 @@ import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 internal class MagnifierTargetGestureController(
     private val state: MagnifierState,
     private val viewerState: PdfViewerState,
+    /**
+     * Колбэк, вызываемый после `onUp` в режиме MOVE. Используется
+     * `DetailsContent` для обновления pinned-viewport-прямоугольника в режиме
+     * [MagnifierAttachment.SCREEN]: пока пользователь зажимает рамку, она
+     * визуально отвязана от screen-pin'а; после отпускания нужно зафиксировать
+     * новую viewport-позицию как pin-якорь.
+     */
+    private val onMoveFinished: () -> Unit = {},
 ) {
     enum class Mode { NONE, MOVE, RESIZE }
 
-    private var mode: Mode = Mode.NONE
+    private var mode: Mode by mutableStateOf(Mode.NONE)
     private var startViewport: Offset = Offset.Zero
+    private var startPanX: Float = 0f
+    private var startPanY: Float = 0f
     private var startTopYDoc: Float = 0f
     private var startLeftXNorm: Float = 0f
     private var startWidthNorm: Float = 0f
@@ -54,6 +67,8 @@ internal class MagnifierTargetGestureController(
         val r = seg.targetOnPage
         mode = m
         startViewport = viewportPos
+        startPanX = viewerState.pan.x
+        startPanY = viewerState.pan.y
         startTopYDoc = pageTop + r.top * pdfH
         startLeftXNorm = r.left
         startWidthNorm = r.right - r.left
@@ -75,7 +90,9 @@ internal class MagnifierTargetGestureController(
     }
 
     fun onUp() {
+        val wasMove = mode == Mode.MOVE
         mode = Mode.NONE
+        if (wasMove) onMoveFinished()
     }
 
     fun onCancel() {
@@ -97,9 +114,15 @@ internal class MagnifierTargetGestureController(
         val pageCount = layout.pageHeightsPx.size
         if (basePageW <= 0f || zoom <= 0f || pageCount == 0) return
 
-        val totalDragVp = viewportPos - startViewport
-        val totalDragDocX = totalDragVp.x / zoom
-        val totalDragDocY = totalDragVp.y / zoom
+        // Кумулятивный drag в document-space с поправкой на изменение pan'а
+        // во время удержания: если viewer проскроллил, тот же viewport-Y
+        // соответствует другой document-Y. Без поправки рамка «отставала»
+        // бы от пера на величину скролла.
+        val pan = viewerState.pan
+        val effDragVpX = (viewportPos.x - startViewport.x) - (pan.x - startPanX)
+        val effDragVpY = (viewportPos.y - startViewport.y) - (pan.y - startPanY)
+        val totalDragDocX = effDragVpX / zoom
+        val totalDragDocY = effDragVpY / zoom
 
         val width = startWidthNorm
         val height = startHeightNorm
@@ -109,18 +132,8 @@ internal class MagnifierTargetGestureController(
 
         // Какая страница содержит intendedTopYDoc?
         val tops = layout.pageTopsPx
-        val newPageIdx = when {
-            intendedTopYDoc < tops[0] -> 0
-            else -> {
-                var lo = 0
-                var hi = pageCount - 1
-                while (lo < hi) {
-                    val mid = (lo + hi + 1) ushr 1
-                    if (tops[mid] <= intendedTopYDoc) lo = mid else hi = mid - 1
-                }
-                lo
-            }
-        }
+        val newPageIdx = resolvePageForDocY(tops, intendedTopYDoc)
+            .coerceAtMost(pageCount - 1)
         val newPdfH = layout.pdfHeightsPx[newPageIdx]
         val newPageTop = tops[newPageIdx]
         val rawNewTopNorm = (intendedTopYDoc - newPageTop) / newPdfH
@@ -146,9 +159,11 @@ internal class MagnifierTargetGestureController(
         val pdfH = layout.pdfHeightsPx[pi]
         if (zoom <= 0f || basePageW <= 0f || pdfH <= 0f) return
 
-        val totalDragVp = viewportPos - startViewport
-        val totalDragXNorm = totalDragVp.x / (basePageW * zoom)
-        val totalDragYNorm = totalDragVp.y / (pdfH * zoom)
+        val pan = viewerState.pan
+        val effDragVpX = (viewportPos.x - startViewport.x) - (pan.x - startPanX)
+        val effDragVpY = (viewportPos.y - startViewport.y) - (pan.y - startPanY)
+        val totalDragXNorm = effDragVpX / (basePageW * zoom)
+        val totalDragYNorm = effDragVpY / (pdfH * zoom)
         state.resizeTarget(
             newWidth = (startWidthNorm + totalDragXNorm).coerceAtLeast(MIN_TARGET_DIM),
             newHeight = (startHeightNorm + totalDragYNorm).coerceAtLeast(MIN_TARGET_DIM),

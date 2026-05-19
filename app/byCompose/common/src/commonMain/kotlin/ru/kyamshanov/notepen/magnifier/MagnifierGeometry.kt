@@ -75,3 +75,23 @@ fun clampTargetToPage(target: Rect): Rect {
 
 /** Минимальная ширина/высота рамки-цели (доля от страницы) — иначе деление на ~0. */
 const val MIN_TARGET_DIM = 0.02f
+
+/**
+ * Возвращает индекс страницы, содержащей `docY` (document-space координата
+ * по вертикали). При `docY` выше первой страницы — возвращает `0`; при
+ * `docY` ниже последней — последний валидный индекс.
+ *
+ * Использует бинарный поиск по `pageTopsPx`, который монотонно возрастает.
+ */
+internal fun resolvePageForDocY(pageTopsPx: FloatArray, docY: Float): Int {
+    val n = pageTopsPx.size
+    if (n == 0) return 0
+    if (docY < pageTopsPx[0]) return 0
+    var lo = 0
+    var hi = n - 1
+    while (lo < hi) {
+        val mid = (lo + hi + 1) ushr 1
+        if (pageTopsPx[mid] <= docY) lo = mid else hi = mid - 1
+    }
+    return lo
+}
