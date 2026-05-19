@@ -96,11 +96,7 @@ class MagnifierInputController internal constructor(
     fun onMove(panelLocal: Offset, panelSize: Size, pressure: Float, tilt: Float) {
         if (activeMode == Mode.NONE) return
         if (panelSize.width <= 0f || panelSize.height <= 0f) return
-        // Сегмент фиксируем в момент Down — если палец переехал в соседний
-        // сегмент посреди штриха, продолжаем писать на исходной странице
-        // (точка выйдет за пределы targetRect, что приемлемо). Альтернатива
-        // — финализировать штрих и начать новый — слишком инвазивно для
-        // первой итерации.
+
         val pi = activePageIndex
         val segment = state.segments.firstOrNull { it.pageIndex == pi } ?: return
         val page = panelLocalToPage(panelLocal, panelSize, segment)
@@ -142,18 +138,45 @@ class MagnifierInputController internal constructor(
         val pi = activePageIndex
         val completed = pdfDrawingState.finishDrawing() ?: return
         onStrokeFinished(pi, completed)
-        if (state.autoScrollEnabled && panelSize.width > 0f && state.segments.size == 1) {
-            // Auto-scroll работает только для single-page (для multi-page
-            // понятие «следующая строка» неоднозначно).
-            val segment = state.segments[0]
-            val last = completed.points.lastOrNull() ?: return
-            val panelLocal = pageNormalizedToPanelLocalForSegment(
-                Offset(last.x, last.y), panelSize, segment,
-            )
-            if (panelLocal.x > panelSize.width * AUTO_SCROLL_TRIGGER_FRAC) {
-                state.shiftTargetForAutoscroll(AutoScrollDir.RIGHT)
-            }
-        }
+
+        // Авто-прокрутка после отрыва пера. Если последняя точка штриха
+        // была в одной из edge-зон панели, сдвигаем target-rect в эту
+        // сторону на AUTO_SCROLL_LIFT_OFF_FRAC своего размера. Только для
+        // single-page (для multi-page понятие «следующая строка» сейчас
+        // не определено).
+        if (!state.autoScrollEnabled || state.segments.size != 1) return
+        if (panelSize.width <= 0f || panelSize.height <= 0f) return
+        val seg = state.segments.firstOrNull { it.pageIndex == pi } ?: return
+        val last = completed.points.lastOrNull() ?: return
+        val target = seg.targetOnPage
+        val width = target.right - target.left
+        val height = target.bottom - target.top
+        val tw = (target.right - target.left).coerceAtLeast(1e-6f)
+        val th = (target.bottom - target.top).coerceAtLeast(1e-6f)
+        val lastPanelX = (last.x - target.left) / tw * panelSize.width
+        val lastPanelY = (last.y - target.top) / th * panelSize.height
+
+        var shiftX = 0f
+        var shiftY = 0f
+        val rightZone = panelSize.width * (1f - AUTO_SCROLL_EDGE_FRAC)
+        val leftZone = panelSize.width * AUTO_SCROLL_EDGE_FRAC
+        val bottomZone = panelSize.height * (1f - AUTO_SCROLL_EDGE_FRAC)
+        val topZone = panelSize.height * AUTO_SCROLL_EDGE_FRAC
+        if (lastPanelX > rightZone) shiftX = width * AUTO_SCROLL_LIFT_OFF_FRAC
+        else if (lastPanelX < leftZone) shiftX = -width * AUTO_SCROLL_LIFT_OFF_FRAC
+        if (lastPanelY > bottomZone) shiftY = height * AUTO_SCROLL_LIFT_OFF_FRAC
+        else if (lastPanelY < topZone) shiftY = -height * AUTO_SCROLL_LIFT_OFF_FRAC
+
+        if (shiftX == 0f && shiftY == 0f) return
+        val maxLeft = (1f - width).coerceAtLeast(0f)
+        val maxTop = (1f - height).coerceAtLeast(0f)
+        val newLeft = (target.left + shiftX).coerceIn(0f, maxLeft)
+        val newTop = (target.top + shiftY).coerceIn(0f, maxTop)
+        if (newLeft == target.left && newTop == target.top) return
+        state.setSingleSegmentTarget(
+            pageIndex = pi,
+            targetOnPage = Rect(newLeft, newTop, newLeft + width, newTop + height),
+        )
     }
 
     private fun finishErase() {
@@ -196,25 +219,6 @@ class MagnifierInputController internal constructor(
         return Offset(nx, ny)
     }
 
-    /**
-     * Обратное преобразование для нужд auto-scroll: page-normalized →
-     * panel-local в пределах одного сегмента.
-     */
-    private fun pageNormalizedToPanelLocalForSegment(
-        page: Offset,
-        panelSize: Size,
-        segment: MagnifierPageSegment,
-    ): Offset {
-        val target = segment.targetOnPage
-        val tw = target.right - target.left
-        val th = target.bottom - target.top
-        val x = if (tw > 0f) (page.x - target.left) / tw * panelSize.width else 0f
-        val localY = if (th > 0f) (page.y - target.top) / th else 0f
-        val segH = segment.panelBottomFrac - segment.panelTopFrac
-        val y = (segment.panelTopFrac + localY * segH) * panelSize.height
-        return Offset(x, y)
-    }
-
     private fun loupeMagnification(panelSize: Size, segment: MagnifierPageSegment): Float {
         val targetW = segment.targetOnPage.right - segment.targetOnPage.left
         val pageCanvasW = state.pageCanvasWidthPx
@@ -225,7 +229,16 @@ class MagnifierInputController internal constructor(
     private enum class Mode { NONE, DRAW, ERASE }
 
     private companion object {
-        const val AUTO_SCROLL_TRIGGER_FRAC: Float = 0.92f
+        /** Edge-зона: 20% панели у каждой из 4 сторон — там штрих считается «у края». */
+        const val AUTO_SCROLL_EDGE_FRAC: Float = 0.20f
+
+        /**
+         * Сдвиг рамки на отрыве пера, если штрих кончился в edge-зоне —
+         * в долях размера рамки. 0.35 = ~⅓ окна, остаётся ⅔ для перехлёста
+         * предыдущего письма (комфортнее, чем прежние 0.85).
+         */
+        const val AUTO_SCROLL_LIFT_OFF_FRAC: Float = 0.35f
+
         const val MIN_ADAPTED_STROKE_PX: Float = 0.5f
     }
 }
