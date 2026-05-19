@@ -17,8 +17,11 @@ import com.sun.jna.win32.StdCallLibrary
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 private val logger = KotlinLogging.logger {}
 
@@ -186,6 +189,29 @@ object WindowsPointerHook {
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
+    private val penButtonsFlow = MutableStateFlow<Set<Int>>(emptySet())
+
+    /**
+     * Слушатель изменений состояния кнопок пера. Регистрируется
+     * [WinTabTabletInputController] для слияния WM_POINTER-битов с
+     * WinTab-битами в единый StateFlow. Один слушатель за раз — больше
+     * сейчас не нужно.
+     */
+    internal var penButtonsListener: ((Set<Int>) -> Unit)? = null
+
+    /**
+     * Текущее состояние кнопок пера, прочитанное из WM_POINTER (POINTER_INFO
+     * `pointerFlags` + `PointerPenInfo.penFlags`). Биты соответствуют
+     * физическим кнопкам стилуса: 1 — barrel, 2..4 — дополнительные кнопки.
+     * Тип пера (FIRSTBUTTON / бит 0) намеренно НЕ включается — это касание,
+     * не кнопка.
+     *
+     * Обновляется на каждом pen-событии (включая hover): шорткаты должны
+     * срабатывать без касания планшета. На платформах с WinTab набор
+     * сливается с WinTab-кнопками в [WinTabTabletInputController].
+     */
+    val penButtons: StateFlow<Set<Int>> = penButtonsFlow.asStateFlow()
+
     /** Поток pen-событий от Windows Ink, для drawing-pipeline'а. */
     val pointerEvents: SharedFlow<PenPointerEvent> = penEventsFlow.asSharedFlow()
 
@@ -330,6 +356,11 @@ object WindowsPointerHook {
         info: PointerPenInfo,
         phase: PenPointerEventType,
     ) {
+        // Обновляем состояние кнопок пера ДО hover-фильтра — barrel может
+        // быть нажат, пока перо просто висит над планшетом, и шорткаты
+        // должны это видеть. На POINTERUP — если pen ушёл из proximity —
+        // POINTER_FLAG_*BUTTON соответственно очистятся в следующем событии.
+        updatePenButtons(info)
         if (phase == PenPointerEventType.UPDATE &&
             (info.pointerInfo.pointerFlags and POINTER_FLAG_INCONTACT) == 0
         ) {
@@ -365,7 +396,42 @@ object WindowsPointerHook {
             ),
         )
     }
+
+    /**
+     * Извлекает состояние физических кнопок пера из [POINTER_INFO.pointerFlags]
+     * и [PointerPenInfo.penFlags], кладёт в [penButtonsFlow] как Set<Int>:
+     * - бит 1 = barrel (SECONDBUTTON ∨ PEN_FLAG_BARREL),
+     * - биты 2..4 = дополнительные кнопки.
+     * Бит 0 (касание тиром) намеренно НЕ включается.
+     */
+    private fun updatePenButtons(info: PointerPenInfo) {
+        val pf = info.pointerInfo.pointerFlags
+        val barrel = (pf and POINTER_FLAG_SECONDBUTTON) != 0 ||
+            (info.penFlags and PEN_FLAG_BARREL) != 0
+        val newSet = buildSet {
+            if (barrel) add(1)
+            if ((pf and POINTER_FLAG_THIRDBUTTON) != 0) add(2)
+            if ((pf and POINTER_FLAG_FOURTHBUTTON) != 0) add(3)
+            if ((pf and POINTER_FLAG_FIFTHBUTTON) != 0) add(4)
+        }
+        if (newSet != penButtonsFlow.value) {
+            penButtonsFlow.value = newSet
+            penButtonsListener?.invoke(newSet)
+        }
+    }
 }
 
 /** [POINTER_INFO.pointerFlags] бит — перо/палец касается экрана. */
 private const val POINTER_FLAG_INCONTACT: Int = 0x00000004
+
+// Биты состояния кнопок указателя — у пера соответствуют физическим кнопкам.
+// FIRSTBUTTON = тип пера (касание); SECONDBUTTON = barrel; далее
+// дополнительные кнопки многокнопочных перьев.
+private const val POINTER_FLAG_FIRSTBUTTON: Int = 0x00000010
+private const val POINTER_FLAG_SECONDBUTTON: Int = 0x00000020
+private const val POINTER_FLAG_THIRDBUTTON: Int = 0x00000040
+private const val POINTER_FLAG_FOURTHBUTTON: Int = 0x00000080
+private const val POINTER_FLAG_FIFTHBUTTON: Int = 0x00000100
+
+/** [PointerPenInfo.penFlags] — barrel-кнопка зажата (дублирует SECONDBUTTON). */
+private const val PEN_FLAG_BARREL: Int = 0x00000001

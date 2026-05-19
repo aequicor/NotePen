@@ -333,14 +333,38 @@ internal fun Modifier.pdfMultiPageDrawingInput(
     controller: MultiPageDrawingController,
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
-): Modifier = this.pointerInput(controller) {
+): Modifier = pdfMultiPageDrawingInput(
+    key = controller,
+    tablet = tablet,
+    palmRejectionActive = palmRejectionActive,
+    onDown = controller::onDown,
+    onMove = controller::onMove,
+    onUp = controller::onUp,
+    onCancel = controller::onCancel,
+)
+
+/**
+ * Перегрузка с явными колбэками — используется, когда события маршрутизируются
+ * между несколькими получателями (например, drawing vs loupe selection). [key]
+ * задаёт identity для `pointerInput`: смена ключа пересоздаёт обработчик и
+ * обрывает активный жест.
+ */
+internal fun Modifier.pdfMultiPageDrawingInput(
+    key: Any?,
+    tablet: TabletInputController,
+    palmRejectionActive: () -> Boolean,
+    onDown: (Offset, Float, Float) -> Unit,
+    onMove: (Offset, Float, Float) -> Unit,
+    onUp: () -> Unit,
+    onCancel: () -> Unit,
+): Modifier = this.pointerInput(key) {
     detectStylusAwareDrag(
         tablet = tablet,
         isPalmRejectionActive = palmRejectionActive,
-        onDown = controller::onDown,
-        onMove = controller::onMove,
-        onUp = controller::onUp,
-        onCancel = controller::onCancel,
+        onDown = onDown,
+        onMove = onMove,
+        onUp = onUp,
+        onCancel = onCancel,
     )
 }
 

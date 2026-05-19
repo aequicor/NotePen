@@ -139,6 +139,8 @@ fun DrawablePdfPage(
      * там, где ожидает пользователь.
      */
     magnifierState: MagnifierState? = null,
+    /** Индекс страницы в документе — нужен для multi-page magnifier overlay. */
+    pageIndex: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -402,11 +404,23 @@ fun DrawablePdfPage(
 
         // Magnifier target frame — drag/resize. Сидит над штрихами, чтобы
         // пользователь всегда видел границу области, попадающей в панель.
+        // ВАЖНО: рамку рисуем в pdf-only-области (offset + size совпадают с
+        // PDF-битмапом), а не в полной extent-области страницы. targetRect
+        // нормализован к PDF [0..1]; без offset/size в pdf-coords дашед-рамка
+        // отображалась бы со сдвигом и растяжением относительно фактической
+        // области, попадающей в окно лупы.
         if (magnifierState != null) {
-            MagnifierTargetOverlay(
-                state = magnifierState,
-                frameColor = MaterialTheme.colorScheme.primary,
-            )
+            Box(
+                modifier = Modifier
+                    .offset(x = pdfOffsetXDp, y = pdfOffsetYDp)
+                    .size(width = pdfWDp, height = pdfHDp),
+            ) {
+                MagnifierTargetOverlay(
+                    state = magnifierState,
+                    pageIndex = pageIndex,
+                    frameColor = MaterialTheme.colorScheme.primary,
+                )
+            }
         }
     }
 }

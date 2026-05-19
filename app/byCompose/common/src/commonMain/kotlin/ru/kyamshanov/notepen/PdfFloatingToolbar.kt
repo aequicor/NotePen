@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
@@ -64,6 +65,7 @@ fun PdfFloatingToolbar(
     onPencilModeChange: (Boolean) -> Unit,
     magnifierEnabled: Boolean,
     onMagnifierToggle: () -> Unit,
+    onOpenShortcutsSettings: () -> Unit,
     currentPage: Int = 0,
     totalPages: Int = 0,
     modifier: Modifier = Modifier,
@@ -131,6 +133,14 @@ fun PdfFloatingToolbar(
                 selected = showThumbnails,
                 onClick = onToggleThumbnails,
             )
+
+            IconButton(onClick = onOpenShortcutsSettings) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Шорткаты",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             IconButton(
                 onClick = onSave,
