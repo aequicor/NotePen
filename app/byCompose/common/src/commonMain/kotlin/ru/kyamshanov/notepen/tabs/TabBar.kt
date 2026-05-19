@@ -1,7 +1,8 @@
 package ru.kyamshanov.notepen.tabs
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,6 +17,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -23,6 +26,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,6 +63,13 @@ fun TabBar(
     onSelect: (PanelSide, DocumentId) -> Unit,
     onClose: (PanelSide, DocumentId) -> Unit,
     onAddTab: (PanelSide) -> Unit,
+    /**
+     * Invoked from the per-tab context menu ("Open in split right" /
+     * "Open in split bottom"). `null` when the workspace already has a
+     * split — the spec disallows nesting deeper than one level, so the
+     * menu items are hidden.
+     */
+    onOpenInSplit: ((PanelSide, PanelOrientation) -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -77,6 +91,9 @@ fun TabBar(
                     isActive = tab.id == openDocs.activeId,
                     onSelect = { onSelect(side, tab.id) },
                     onClose = { onClose(side, tab.id) },
+                    onOpenInSplit = onOpenInSplit?.let { callback ->
+                        { orientation -> callback(side, orientation) }
+                    },
                 )
             }
             IconButton(
@@ -95,12 +112,14 @@ fun TabBar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun TabChip(
     tab: DocumentTab,
     isActive: Boolean,
     onSelect: () -> Unit,
     onClose: () -> Unit,
+    onOpenInSplit: ((PanelOrientation) -> Unit)?,
 ) {
     val background: Color = if (isActive) {
         MaterialTheme.colorScheme.secondaryContainer
@@ -112,12 +131,21 @@ private fun TabChip(
     } else {
         MaterialTheme.colorScheme.onSurface
     }
+    var menuExpanded by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
             .height(TAB_BAR_HEIGHT)
             .widthIn(min = TAB_MIN_WIDTH, max = TAB_MAX_WIDTH)
             .background(color = background, shape = TAB_SHAPE)
-            .clickable(enabled = !isActive, onClick = onSelect)
+            .combinedClickable(
+                enabled = true,
+                onClick = { if (!isActive) onSelect() },
+                onLongClick = if (onOpenInSplit != null) {
+                    { menuExpanded = true }
+                } else {
+                    null
+                },
+            )
             .padding(start = 12.dp, end = 4.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
@@ -144,6 +172,27 @@ private fun TabChip(
                     contentDescription = "Закрыть вкладку ${tab.displayName}",
                     tint = contentColor,
                     modifier = Modifier.size(16.dp),
+                )
+            }
+        }
+        if (onOpenInSplit != null) {
+            DropdownMenu(
+                expanded = menuExpanded,
+                onDismissRequest = { menuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Open in split right") },
+                    onClick = {
+                        menuExpanded = false
+                        onOpenInSplit(PanelOrientation.HORIZONTAL)
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Open in split bottom") },
+                    onClick = {
+                        menuExpanded = false
+                        onOpenInSplit(PanelOrientation.VERTICAL)
+                    },
                 )
             }
         }
