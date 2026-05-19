@@ -683,6 +683,11 @@ fun DetailsContent(
                     )
                 }
             },
+            // Split-view rendering is set up in a follow-up. PanelContainer
+            // and the per-tab context menu are in place; once DetailsContent
+            // wraps the editor body in a PanelContainer slot, pass a real
+            // [PanelOrientation] lambda here.
+            onOpenInSplit = null,
             modifier = Modifier.align(Alignment.TopStart),
         )
         Box(
