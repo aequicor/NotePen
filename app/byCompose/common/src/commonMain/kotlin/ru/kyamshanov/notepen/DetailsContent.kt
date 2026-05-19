@@ -41,7 +41,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -101,14 +100,14 @@ import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
 import ru.kyamshanov.notepen.magnifier.MagnifierInputPanel
-import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
-import ru.kyamshanov.notepen.pdfviewer.rememberPdfViewerState
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tabs.PdfDocumentState
+import ru.kyamshanov.notepen.tabs.rememberPdfDocumentState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.geometry.Size
 import kotlin.random.Random
@@ -208,8 +207,13 @@ fun DetailsContent(
         syncEngineFor?.invoke(documentId)
     }
 
-    var pdfDocument by remember(filePath) { mutableStateOf<PdfDocument?>(null) }
-    val pages by remember { derivedStateOf { pdfDocument?.info?.pages ?: emptyList() } }
+    // Все per-document field'ы (pdfDocument, drawingStates, undo/redo, magnifier,
+    // viewer position, favourites) собраны в [PdfDocumentState]. Полевые
+    // declared val'ы ниже — это локальные алиасы для читаемости (Compose
+    // отследит чтение через property-getter pdfState.* при рекомпозиции).
+    val pdfState = rememberPdfDocumentState(filePath = filePath, documentId = documentId)
+    val pdfDocument: PdfDocument? = pdfState.pdfDocument
+    val pages = pdfState.pages
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     val tabletController = LocalTabletInputController.current
@@ -264,8 +268,8 @@ fun DetailsContent(
     var showThumbnails by remember { mutableStateOf(false) }
     var isSaving by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
-    val drawingStates = remember { mutableStateMapOf<Int, PdfDrawingState>() }
-    val favoritePageIndices = remember { mutableStateListOf<Int>() }
+    val drawingStates = pdfState.drawingStates
+    val favoritePageIndices = pdfState.favoritePageIndices
     val hasAnnotations by remember {
         derivedStateOf { drawingStates.values.any { it.currentPaths.isNotEmpty() } }
     }
@@ -280,7 +284,7 @@ fun DetailsContent(
     // Единственный источник правды по позиции и зуму на обеих платформах.
     // Платформенные различия живут внутри expect/actual [PdfPagesViewer] +
     // [PdfViewerState]; здесь они не видны.
-    val pdfViewerState: PdfViewerState = rememberPdfViewerState()
+    val pdfViewerState: PdfViewerState = pdfState.pdfViewerState
     // Прокидываем источник правды по [PageExtent] страницы в viewer-state.
     // derivedStateOf внутри layout пересчитает размеры слотов при росте
     // extent у любого PdfDrawingState.
@@ -298,11 +302,12 @@ fun DetailsContent(
     val currentPageOffsetPx: Int by remember {
         derivedStateOf { pdfViewerState.firstVisiblePageOffsetPx }
     }
-    val globalUndoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
-    val globalRedoStack = remember { ArrayDeque<Pair<Int, List<DrawingPath>>>() }
-    // Состояние magnifier'а (рамка-цель + плавающая панель ввода). Создаётся
-    // один раз; включается toolbar-кнопкой ниже.
-    val magnifierState = remember { MagnifierState() }
+    val globalUndoStack = pdfState.undoStack
+    val globalRedoStack = pdfState.redoStack
+    // Состояние magnifier'а (рамка-цель + плавающая панель ввода) живёт
+    // внутри [PdfDocumentState] — одно на вкладку; включается toolbar-
+    // кнопкой ниже.
+    val magnifierState = pdfState.magnifierState
 
     // High-res рендер страниц под лупой. Viewer'овский битмап рендерится
     // под текущий zoom — при сильном увеличении в панели лупы он мылится.
@@ -530,8 +535,8 @@ fun DetailsContent(
     }
 
     LaunchedEffect(filePath) {
-        pdfDocument?.close()
-        pdfDocument = try {
+        pdfState.pdfDocument?.close()
+        pdfState.pdfDocument = try {
             loader.load(filePath)
         } catch (e: Exception) {
             logger.warn { "Failed to open PDF: ${e::class.simpleName}" }
@@ -540,7 +545,7 @@ fun DetailsContent(
     }
 
     DisposableEffect(Unit) {
-        onDispose { pdfDocument?.close() }
+        onDispose { pdfState.pdfDocument?.close() }
     }
 
     DisposableEffect(openDocumentRegistry, documentId) {
@@ -631,18 +636,17 @@ fun DetailsContent(
                     false
                 } else if (e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && !shiftHeld) {
                     if (globalUndoStack.isNotEmpty()) {
-                        val (pageIndex, snapshot) = globalUndoStack.removeLast()
-                        val current = drawingStates[pageIndex]?.currentPaths?.toList() ?: emptyList()
-                        globalRedoStack.addLast(pageIndex to current)
-                        drawingStates[pageIndex]?.restoreSnapshot(snapshot)
+                        val entry = globalUndoStack.removeLast()
+                        val current = drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
+                        globalRedoStack.addLast(PdfDocumentState.UndoEntry(entry.pageIndex, current))
+                        drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
                     }
                     true
                 } else if (e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && shiftHeld) {
                     if (globalRedoStack.isNotEmpty()) {
-                        val (pageIndex, snapshot) = globalRedoStack.removeLast()
-                        val current = drawingStates[pageIndex]?.currentPaths?.toList() ?: emptyList()
-                        globalUndoStack.addLast(pageIndex to snapshot)
-                        drawingStates[pageIndex]?.restoreSnapshot(snapshot)
+                        val entry = globalRedoStack.removeLast()
+                        globalUndoStack.addLast(PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths))
+                        drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
                     }
                     true
                 } else {
@@ -690,8 +694,7 @@ fun DetailsContent(
                 // Android оба пайплайна конкурируют за render-thread.
                 skipPage = { _ -> magnifierState.enabled },
                 onGestureStart = { pageIndex, snapshot ->
-                    globalUndoStack.addLast(pageIndex to snapshot)
-                    globalRedoStack.clear()
+                    pdfState.pushUndoSnapshot(pageIndex, snapshot)
                 },
                 onStrokeFinished = { pageIndex, path ->
                     val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
@@ -1501,11 +1504,8 @@ fun DetailsContent(
             val magPdfDrawingStateProvider: (Int) -> PdfDrawingState = remember(drawingStates) {
                 { pageIdx -> drawingStates.getOrPut(pageIdx) { PdfDrawingState() } }
             }
-            val magOnGestureStart: (Int, List<DrawingPath>) -> Unit = remember {
-                { pageIdx, snapshot ->
-                    globalUndoStack.addLast(pageIdx to snapshot)
-                    globalRedoStack.clear()
-                }
+            val magOnGestureStart: (Int, List<DrawingPath>) -> Unit = remember(pdfState) {
+                { pageIdx, snapshot -> pdfState.pushUndoSnapshot(pageIdx, snapshot) }
             }
             val syncEngineRef = rememberUpdatedState(syncEngine)
             val magOnStrokeFinished: (Int, DrawingPath) -> Unit = remember(drawingStates) {
