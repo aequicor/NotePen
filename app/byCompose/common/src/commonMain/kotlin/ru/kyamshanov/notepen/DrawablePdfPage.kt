@@ -64,6 +64,15 @@ private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
 private const val TILT_WIDTH_GAIN = 0.5f
 
 /**
+ * Floor for any rendered stroke segment in pixels. Below 1px Skia's stroking
+ * pipeline produces broken or invisible lines (especially on low-DPI screens
+ * and at low pressure on thin pens); clamping here guarantees the user never
+ * draws a line that disappears at zoom-1, even at the thinnest slider position
+ * with minimum pressure.
+ */
+private const val MIN_RENDERED_STROKE_PX = 1f
+
+/**
  * Hard ceiling on either dimension of the off-screen ink-cache bitmap.
  *
  * The completed-strokes layer is rasterised at `canvasSize`; at 4–8× zoom the
@@ -503,6 +512,12 @@ internal suspend fun PointerInputScope.detectStylusAwareDrag(
  * [points] is the receiver's `livePoints` list and is guaranteed to contain
  * a single sub-path (only the first point has `isNewPath = true`), so no
  * sub-path splitting is needed here.
+ *
+ * [fromSegmentIndex] / [toSegmentIndexExclusive] let callers render only a
+ * range of segments — used by the magnifier's incremental-bake live layer
+ * to (a) bake stable older segments once into an off-screen bitmap and
+ * (b) draw only the unbaked tail each frame. Default range covers the
+ * whole stroke for the main-page renderer.
  */
 internal fun DrawScope.drawLiveStroke(
     points: List<DrawingPoint>,
@@ -512,40 +527,51 @@ internal fun DrawScope.drawLiveStroke(
     pdfHeight: Float,
     extent: PageExtent,
     scratch: Path,
+    fromSegmentIndex: Int = 0,
+    toSegmentIndexExclusive: Int = points.size - 1,
 ) {
     if (points.size < 2) return
+    val segFrom = fromSegmentIndex.coerceAtLeast(0)
+    val segTo = toSegmentIndexExclusive.coerceAtMost(points.size - 1)
+    if (segFrom >= segTo) return
 
     val color = Color(colorArgb.toInt())
     val baseWidth = normalizedStrokeWidth * pdfWidth
     val offX = -extent.left
     val offY = -extent.top
 
-    val uniformPressure = points.first().pressure
-    val uniformTilt = points.first().tilt
-    var pressureVaries = false
-    var tiltVaries = false
-    for (p in points) {
-        if (!pressureVaries && p.pressure != uniformPressure) pressureVaries = true
-        if (!tiltVaries && p.tilt != uniformTilt) tiltVaries = true
-        if (pressureVaries && tiltVaries) break
+    // Fast path applies only when rendering the full stroke; partial-range
+    // renders bypass it (cost is dominated by GPU drawPath calls, not the
+    // few-point scan, so this is fine).
+    if (segFrom == 0 && segTo == points.size - 1) {
+        val uniformPressure = points.first().pressure
+        val uniformTilt = points.first().tilt
+        var pressureVaries = false
+        var tiltVaries = false
+        for (p in points) {
+            if (!pressureVaries && p.pressure != uniformPressure) pressureVaries = true
+            if (!tiltVaries && p.tilt != uniformTilt) tiltVaries = true
+            if (pressureVaries && tiltVaries) break
+        }
+
+        if (!pressureVaries && !tiltVaries) {
+            scratch.reset()
+            points.appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
+            drawPath(
+                path = scratch,
+                color = color,
+                style = Stroke(
+                    width = (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
+                        .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
+            )
+            return
+        }
     }
 
-    if (!pressureVaries && !tiltVaries) {
-        scratch.reset()
-        points.appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
-        drawPath(
-            path = scratch,
-            color = color,
-            style = Stroke(
-                width = baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round,
-            ),
-        )
-        return
-    }
-
-    for (i in 0 until points.size - 1) {
+    for (i in segFrom until segTo) {
         val p0 = if (i > 0) points[i - 1] else points[0]
         val p1 = points[i]
         val p2 = points[i + 1]
@@ -567,7 +593,8 @@ internal fun DrawScope.drawLiveStroke(
             path = scratch,
             color = color,
             style = Stroke(
-                width = baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt),
+                width = (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
+                    .coerceAtLeast(MIN_RENDERED_STROKE_PX),
                 cap = StrokeCap.Round,
                 join = StrokeJoin.Round,
             ),
@@ -615,7 +642,8 @@ internal fun DrawScope.drawStrokeWithPressure(
             path = scratch,
             color = color,
             style = Stroke(
-                width = baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt),
+                width = (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
+                    .coerceAtLeast(MIN_RENDERED_STROKE_PX),
                 cap = StrokeCap.Round,
                 join = StrokeJoin.Round,
             ),
@@ -652,7 +680,8 @@ internal fun DrawScope.drawStrokeWithPressure(
                 path = scratch,
                 color = color,
                 style = Stroke(
-                    width = baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt),
+                    width = (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
+                        .coerceAtLeast(MIN_RENDERED_STROKE_PX),
                     cap = StrokeCap.Round,
                     join = StrokeJoin.Round,
                 ),
