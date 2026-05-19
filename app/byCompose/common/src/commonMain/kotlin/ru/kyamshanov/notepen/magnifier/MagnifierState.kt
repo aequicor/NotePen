@@ -76,6 +76,19 @@ class MagnifierState {
     var pageCanvasWidthPx: Float by mutableStateOf(0f)
         private set
 
+    /** Высота PDF-области страницы в пикселях viewport'а; см. [pageCanvasWidthPx]. */
+    var pageCanvasHeightPx: Float by mutableStateOf(0f)
+        private set
+
+    /**
+     * Aspect-ratio активной страницы (`pageCanvasWidthPx / pageCanvasHeightPx`).
+     * Используется alignment-функциями: target-rect нормализован к [0..1] от
+     * PDF, поэтому page-normalized aspect != page-pixel aspect, и при
+     * ресайзе панели/рамки aspect-факторы должны учитываться явно.
+     */
+    private val pageAspect: Float
+        get() = if (pageCanvasHeightPx > 0f) pageCanvasWidthPx / pageCanvasHeightPx else 1f
+
     /**
      * Битмапы страниц по индексу — для каждой задетой страницы лупой.
      * Подаются из `pageContent` в `DetailsContent` через [updatePageBitmap].
@@ -292,8 +305,9 @@ class MagnifierState {
      * Обновить размер canvas страницы. Вызывается из `DrawablePdfPage`
      * при изменении его размера, пока magnifier активен на этой странице.
      */
-    fun updatePageCanvasPx(widthPx: Float) {
+    fun updatePageCanvasPx(widthPx: Float, heightPx: Float = pageCanvasHeightPx) {
         pageCanvasWidthPx = widthPx
+        if (heightPx > 0f) pageCanvasHeightPx = heightPx
     }
 
     /** Обновить ссылку на битмап страницы [pageIndex]. */
@@ -349,7 +363,12 @@ class MagnifierState {
         val tw = r.right - r.left
         val th = r.bottom - r.top
         if (tw <= 0f || th <= 0f) return
-        val newPanelH = panelSize.width * th / tw
+        // Page-pixel aspect: panelW/panelH = (tw * basePageW)/(th * pdfH)
+        //                                  = (tw/th) * pageAspect.
+        // Без учёта pageAspect alignment даёт неправильный aspect окна
+        // относительно области, попадающей в зум — bitmap-region и dstSize
+        // имеют разные aspect'ы, и drawImage растягивает анизотропно.
+        val newPanelH = panelSize.width * th / tw / pageAspect
         panelSize = Size(panelSize.width, newPanelH.coerceAtLeast(MIN_PANEL_DIM_PX))
     }
 
@@ -359,7 +378,9 @@ class MagnifierState {
         val r = s.targetOnPage
         val tw = r.right - r.left
         if (tw <= 0f || panelSize.width <= 0f) return
-        val targetH = tw * panelSize.height / panelSize.width
+        // Обратное к alignPanelAspectToTarget: target.height (page-normalized)
+        // = panel-pixel-aspect / page-pixel-aspect * target.width.
+        val targetH = tw * panelSize.height / panelSize.width * pageAspect
         val newRect = clampTargetToPage(
             Rect(r.left, r.top, r.right, r.top + targetH),
         )
