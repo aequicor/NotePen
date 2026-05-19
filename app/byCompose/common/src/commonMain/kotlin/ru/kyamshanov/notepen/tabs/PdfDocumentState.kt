@@ -1,13 +1,10 @@
 package ru.kyamshanov.notepen.tabs
 
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import ru.kyamshanov.notepen.PdfDrawingState
@@ -15,7 +12,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
-import ru.kyamshanov.notepen.pdfviewer.rememberPdfViewerState
+import ru.kyamshanov.notepen.pdfviewer.createPdfViewerState
 
 /**
  * Per-document state holder for a single open PDF. Owns everything that
@@ -78,6 +75,21 @@ class PdfDocumentState internal constructor(
     /** Magnifier overlay state. One instance per tab — see plan §commit 3. */
     val magnifierState: MagnifierState = MagnifierState()
 
+    private val annotationsLoadedState = mutableStateOf(false)
+
+    /**
+     * `true` once the persisted annotation bundle (strokes, scroll/zoom
+     * snapshot, favourites) has been merged into this tab. Stops the
+     * `LaunchedEffect(pdfState)` reload from firing every time the user
+     * switches back to the tab — without this, paths would be appended
+     * cumulatively on each visit.
+     */
+    var annotationsLoaded: Boolean
+        get() = annotationsLoadedState.value
+        set(value) {
+            annotationsLoadedState.value = value
+        }
+
     /**
      * Pushes the current snapshot of [pageIndex] onto [undoStack] and
      * clears [redoStack]. Called at the start of each stroke / erase
@@ -94,25 +106,28 @@ class PdfDocumentState internal constructor(
         val pageIndex: Int,
         val paths: List<DrawingPath>,
     )
-}
 
-/**
- * Creates and remembers a [PdfDocumentState] for [filePath]. The inner
- * [PdfViewerState] is created via [rememberPdfViewerState] so it benefits
- * from the platform-specific saveable behaviour (e.g. Android's
- * `rememberSaveable` restore across configuration changes).
- */
-@Composable
-internal fun rememberPdfDocumentState(
-    filePath: String,
-    documentId: String,
-): PdfDocumentState {
-    val viewerState = rememberPdfViewerState()
-    return remember(filePath) {
-        PdfDocumentState(
-            filePath = filePath,
-            documentId = documentId,
-            pdfViewerState = viewerState,
-        )
+    /**
+     * Closes the underlying [PdfDocument] (if any) and clears the
+     * holder. Called by [TabSession] when this tab is closed or when
+     * the editor is dismissed.
+     */
+    fun closeDocument() {
+        pdfDocument?.close()
+        pdfDocument = null
+    }
+
+    companion object {
+        /**
+         * Creates a [PdfDocumentState] eagerly (no Composable scope
+         * required). Used by [TabSession] when opening a new tab in
+         * response to user input.
+         */
+        internal fun create(filePath: String, documentId: String): PdfDocumentState =
+            PdfDocumentState(
+                filePath = filePath,
+                documentId = documentId,
+                pdfViewerState = createPdfViewerState(),
+            )
     }
 }

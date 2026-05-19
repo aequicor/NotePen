@@ -41,6 +41,13 @@ fun RootContent(
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     /** Forwarded to [DetailsContent] for remote-cached documentId lookup. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /**
+     * Platform PDF picker. Used both by [MainContent] (to open the first
+     * file from the home screen) and by [DetailsContent] (the `+` button
+     * on the tab bar). Same suspend semantics as
+     * [MainScreenComponent.onOpenFilePicker].
+     */
+    pickPdfPath: suspend () -> String?,
     modifier: Modifier = Modifier,
 ) {
     Children(
@@ -100,6 +107,7 @@ fun RootContent(
                 receivedPdfDir = receivedPdfDir,
                 openDocumentRegistry = openDocumentRegistry,
                 localDocumentIdRegistry = localDocumentIdRegistry,
+                onPickPdf = pickPdfPath,
                 modifier = modifier,
             )
             is RootComponent.Child.PeerCatalogChild -> {

@@ -106,8 +106,14 @@ import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tabs.PanelLayout
+import ru.kyamshanov.notepen.tabs.PanelSide
 import ru.kyamshanov.notepen.tabs.PdfDocumentState
-import ru.kyamshanov.notepen.tabs.rememberPdfDocumentState
+import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
+import ru.kyamshanov.notepen.tabs.TabBar
+import ru.kyamshanov.notepen.tabs.TabCloseResult
+import ru.kyamshanov.notepen.tabs.displayNameForFilePath
+import ru.kyamshanov.notepen.tabs.rememberTabSession
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.geometry.Size
 import kotlin.random.Random
@@ -185,35 +191,63 @@ fun DetailsContent(
      * заново из локального пути — это давало бы другой hash и ломало синк).
      */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /**
+     * Platform PDF picker, invoked by the `+` tab button. Returns the
+     * picked file path / URI, or `null` if the user dismissed the
+     * dialog. Reuse [ru.kyamshanov.notepen.mainscreen.platform.FilePicker.pickPdfFile]
+     * at the application root.
+     */
+    onPickPdf: suspend () -> String?,
     modifier: Modifier = Modifier,
 ) {
     val localWindowInfo = LocalWindowInfo.current
     val windowSizeInPx = localWindowInfo.containerSize
     val isLandscape = windowSizeInPx.width > windowSizeInPx.height
     val model by component.model.subscribeAsState()
-    val filePath = remember(model.title) { model.title }
-    val documentId = remember(filePath, localDocumentIdRegistry, receivedPdfDir) {
-        // Для файлов, скачанных с пира, documentId должен быть тем, который
-        // прислал host — иначе hash будет посчитан от tablet'ского пути и не
-        // совпадёт с тем, что host использует у себя.
-        val fromRegistry = if (receivedPdfDir != null && filePath.startsWith(receivedPdfDir)) {
-            localDocumentIdRegistry?.lookup(filePath)
-        } else {
-            null
+    val initialFilePath = remember(model.title) { model.title }
+    // Sync documentId resolution: for files downloaded from a remote
+    // peer, documentId must be the one the host computed (otherwise our
+    // hash would be over the tablet-side path and not match host). Other
+    // files just hash their local path.
+    val syncDocumentIdFor: (String) -> String =
+        remember(localDocumentIdRegistry, receivedPdfDir) {
+            { path ->
+                val fromRegistry = if (
+                    receivedPdfDir != null && path.startsWith(receivedPdfDir)
+                ) {
+                    localDocumentIdRegistry?.lookup(path)
+                } else {
+                    null
+                }
+                fromRegistry ?: documentIdFromFilePath(path)
+            }
         }
-        fromRegistry ?: documentIdFromFilePath(filePath)
-    }
+    val tabSession = rememberTabSession(
+        initialFilePath = initialFilePath,
+        syncDocumentIdFor = syncDocumentIdFor,
+    )
+
+    val singleLayout = tabSession.layout as? PanelLayout.Single
+        ?: error("Commit 2 only supports PanelLayout.Single (no split yet)")
+    val openDocs = singleLayout.tabs
+    val activeTab = openDocs.activeTab
+
+    // All per-document fields (pdfDocument, drawingStates, undo/redo,
+    // magnifier, viewer position, favourites) come from the active
+    // tab's [PdfDocumentState]. When the user switches tab, `pdfState`
+    // identity changes — `remember(pdfState) { ... }` blocks below
+    // reset accordingly. When the workspace has no active tab (the
+    // moment after closing the last one, before we pop), `Stub` carries
+    // an empty placeholder so the rest of the body stays expressible.
+    val pdfState = activeTab?.let { tabSession.stateOf(it) }
+        ?: error("DetailsContent invariant: tabSession must always have one active tab here")
+    val filePath = pdfState.filePath
+    val documentId = pdfState.documentId
+    val pdfDocument: PdfDocument? = pdfState.pdfDocument
+    val pages = pdfState.pages
     val syncEngine = remember(syncEngineFor, documentId) {
         syncEngineFor?.invoke(documentId)
     }
-
-    // Все per-document field'ы (pdfDocument, drawingStates, undo/redo, magnifier,
-    // viewer position, favourites) собраны в [PdfDocumentState]. Полевые
-    // declared val'ы ниже — это локальные алиасы для читаемости (Compose
-    // отследит чтение через property-getter pdfState.* при рекомпозиции).
-    val pdfState = rememberPdfDocumentState(filePath = filePath, documentId = documentId)
-    val pdfDocument: PdfDocument? = pdfState.pdfDocument
-    val pages = pdfState.pages
 
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     val tabletController = LocalTabletInputController.current
@@ -315,7 +349,7 @@ fun DetailsContent(
     // её в MagnifierState; MagnifierContent предпочитает high-res, если он
     // есть. Срабатывает при включении лупы и при смене pageIndex'ов.
     val magnifierPageIndices = magnifierState.segments.map { it.pageIndex }
-    LaunchedEffect(magnifierState.enabled, magnifierPageIndices, pdfDocument) {
+    LaunchedEffect(pdfState, magnifierState.enabled, magnifierPageIndices, pdfDocument) {
         if (!magnifierState.enabled) return@LaunchedEffect
         val doc = pdfDocument ?: return@LaunchedEffect
         for (pageIndex in magnifierPageIndices) {
@@ -534,18 +568,26 @@ fun DetailsContent(
         }
     }
 
-    LaunchedEffect(filePath) {
-        pdfState.pdfDocument?.close()
-        pdfState.pdfDocument = try {
-            loader.load(filePath)
-        } catch (e: Exception) {
-            logger.warn { "Failed to open PDF: ${e::class.simpleName}" }
-            null
+    LaunchedEffect(pdfState) {
+        // Load on first activation of each tab. Switching back to a tab
+        // whose PdfDocument is already cached in [pdfState] skips the
+        // re-open — drawing state, undo stack and viewer position were
+        // preserved by [tabSession.stateOf].
+        if (pdfState.pdfDocument == null) {
+            pdfState.pdfDocument = try {
+                loader.load(filePath)
+            } catch (e: Exception) {
+                logger.warn { "Failed to open PDF: ${e::class.simpleName}" }
+                null
+            }
         }
     }
 
-    DisposableEffect(Unit) {
-        onDispose { pdfState.pdfDocument?.close() }
+    DisposableEffect(tabSession) {
+        // Close every open tab's PDF when the editor leaves composition —
+        // not just the active one, since with tabs the user may have
+        // loaded several documents.
+        onDispose { tabSession.disposeAll() }
     }
 
     DisposableEffect(openDocumentRegistry, documentId) {
@@ -553,7 +595,11 @@ fun DetailsContent(
         onDispose { openDocumentRegistry?.release(documentId) }
     }
 
-    LaunchedEffect(filePath) {
+    LaunchedEffect(pdfState) {
+        // Annotations are merged into this tab exactly once; subsequent
+        // returns to the tab keep the user's in-memory edits.
+        if (pdfState.annotationsLoaded) return@LaunchedEffect
+        pdfState.annotationsLoaded = true
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
             // applyInitialState откладывает scroll/zoom до момента, когда
             // viewport измерится и страницы загрузятся — работает одинаково
@@ -588,36 +634,64 @@ fun DetailsContent(
 
     val onBackWithSave: () -> Unit = {
         coroutineScope.launch {
-            val annotations = drawingStates.mapValues { (_, state) ->
-                state.currentPaths.toList()
-            }
-            val extents = drawingStates.mapValues { (_, state) -> state.extent.value }
-            annotationRepository.save(
-                pdfPath = filePath,
-                annotations = annotations,
-                scale = currentScalePercent,
-                pen = penSettings,
-                marker = markerSettings,
-                eraser = eraserSettings,
-                currentPage = firstVisiblePage,
-                currentPageOffset = currentPageOffsetPx,
-                favoritePageIndices = favoritePageIndices.toSet(),
-                pageExtents = extents,
-            ).onFailure { e ->
-                logger.warn { "Auto-save on back failed: ${e::class.simpleName}" }
+            // Save every open tab — the user expects edits on background
+            // tabs to survive the back gesture, not just the active one.
+            for (tab in openDocs.tabs) {
+                val state = tabSession.stateOf(tab)
+                val annotations = state.drawingStates.mapValues { (_, s) ->
+                    s.currentPaths.toList()
+                }
+                val extents = state.drawingStates.mapValues { (_, s) -> s.extent.value }
+                annotationRepository.save(
+                    pdfPath = state.filePath,
+                    annotations = annotations,
+                    scale = state.pdfViewerState.scalePercent,
+                    pen = penSettings,
+                    marker = markerSettings,
+                    eraser = eraserSettings,
+                    currentPage = state.pdfViewerState.firstVisiblePageIndex,
+                    currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
+                    favoritePageIndices = state.favoritePageIndices.toSet(),
+                    pageExtents = extents,
+                ).onFailure { e ->
+                    logger.warn {
+                        "Auto-save on back failed for ${state.filePath}: ${e::class.simpleName}"
+                    }
+                }
             }
             component.saveLastPageIndex(firstVisiblePage)
             component.onBack()
         }
     }
 
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .focusRequester(focusRequester)
-            .focusTarget()
-            .onKeyEvent { e ->
+    Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        TabBar(
+            side = PanelSide.PRIMARY,
+            openDocs = openDocs,
+            onSelect = { _, id -> tabSession.setActiveTab(PanelSide.PRIMARY, id) },
+            onClose = { _, id ->
+                val result = tabSession.closeTab(PanelSide.PRIMARY, id)
+                if (result == TabCloseResult.AllClosed) onBackWithSave()
+            },
+            onAddTab = { _ ->
+                coroutineScope.launch {
+                    val path = onPickPdf() ?: return@launch
+                    tabSession.openTab(
+                        side = PanelSide.PRIMARY,
+                        filePath = path,
+                        displayName = displayNameForFilePath(path),
+                    )
+                }
+            },
+            modifier = Modifier.align(Alignment.TopStart),
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(top = TAB_BAR_HEIGHT)
+                .focusRequester(focusRequester)
+                .focusTarget()
+                .onKeyEvent { e ->
                 val isShift = e.key == Key.ShiftLeft || e.key == Key.ShiftRight
                 val isCtrl = e.key == Key.CtrlLeft || e.key == Key.CtrlRight
                 val isAlt = e.key == Key.AltLeft || e.key == Key.AltRight
@@ -749,14 +823,14 @@ fun DetailsContent(
         // уже зажат (например, тот же биндинг что и open), не закрылась
         // мгновенно. Армируется при отпускании, разоружается при использовании
         // или при закрытом состоянии.
-        val closeArmed = remember { mutableStateOf(false) }
-        LaunchedEffect(magnifierState.enabled) {
+        val closeArmed = remember(pdfState) { mutableStateOf(false) }
+        LaunchedEffect(pdfState, magnifierState.enabled) {
             // При смене состояния лупы перестраиваем armed: false когда лупа
             // выключена; при включении — armed зависит от текущего состояния
             // биндинга (если он сейчас зажат — НЕ armed, ждём отпускания).
             closeArmed.value = magnifierState.enabled && !isCloseTriggerActive
         }
-        LaunchedEffect(isCloseTriggerActive) {
+        LaunchedEffect(pdfState, isCloseTriggerActive) {
             if (!magnifierState.enabled) return@LaunchedEffect
             if (!isCloseTriggerActive) {
                 closeArmed.value = true
@@ -769,7 +843,7 @@ fun DetailsContent(
         // Pinned viewport-прямоугольник target rect в режиме SCREEN-attached:
         // null когда attachment == PAGE; задаётся при входе в SCREEN и
         // обновляется после GRAB-релиза в SCREEN-режиме.
-        val pinnedRect = remember { mutableStateOf<Rect?>(null) }
+        val pinnedRect = remember(pdfState) { mutableStateOf<Rect?>(null) }
 
         val magnifierTargetGestureController = remember(pdfViewerState, magnifierState) {
             ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController(
@@ -787,7 +861,7 @@ fun DetailsContent(
 
         // Переключение attachment: при входе в SCREEN — снимаем текущий
         // viewport-rect рамки и запоминаем; при выходе — сбрасываем.
-        LaunchedEffect(magnifierState.attachment, magnifierState.enabled) {
+        LaunchedEffect(pdfState, magnifierState.attachment, magnifierState.enabled) {
             if (!magnifierState.enabled) {
                 pinnedRect.value = null
                 return@LaunchedEffect
@@ -803,6 +877,7 @@ fun DetailsContent(
         // рамки) пересчитываем targetOnPage так, чтобы viewport-прямоугольник
         // совпадал с pinnedRect — рамка остаётся «на экране».
         LaunchedEffect(
+            pdfState,
             magnifierState.attachment,
             magnifierState.enabled,
             pdfViewerState.pan,
@@ -822,7 +897,7 @@ fun DetailsContent(
         // клавиатуры — там shortcutsSettings.loupeOpen недоступен). Когда
         // armed, следующий жест по странице роутится в loupeSelectionController
         // и после успешного выделения автоматически сбрасывается.
-        val quickLoupeArmed = remember { mutableStateOf(false) }
+        val quickLoupeArmed = remember(pdfState) { mutableStateOf(false) }
         val loupeSelectionController = remember(pdfViewerState, magnifierState) {
             LoupeSelectionController(
                 viewerState = pdfViewerState,
@@ -843,13 +918,13 @@ fun DetailsContent(
         // Текущее «куда роутить активный жест». Фиксируется на DOWN, держится
         // до UP/CANCEL — иначе отпускание binding'а посреди драга оборвало бы
         // выделение и часть точек ушла бы в drawingController.
-        val gestureRoute = remember { mutableStateOf(GestureRoute.NONE) }
+        val gestureRoute = remember(pdfState) { mutableStateOf(GestureRoute.NONE) }
         val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
         // Контроллер магнифир-ввода живёт во внутреннем if-блоке ниже;
         // эта ссылка обновляется оттуда. Нативные pen-события (минующие
         // Compose pointerInput из-за WindowsPointerHook) роутятся сюда,
         // когда позиция пера попадает в content-область панели.
-        val magnifierInputControllerHolder = remember {
+        val magnifierInputControllerHolder = remember(pdfState) {
             mutableStateOf<ru.kyamshanov.notepen.magnifier.MagnifierInputController?>(null)
         }
 
@@ -1589,6 +1664,7 @@ fun DetailsContent(
                 onDismiss = { showShortcutsDialog = false },
                 penButtons = tabletController.penButtons,
             )
+        }
         }
     }
 }
