@@ -96,6 +96,13 @@ fun App(
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     /** Реестр `localPath → documentId` для remote-кешированных PDF. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /**
+     * Platform PDF picker forwarded to [RootContent] so the tab bar's
+     * `+` button can open another file without re-routing through the
+     * main screen. Same source as the picker wired into
+     * [ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent.onOpenFilePicker].
+     */
+    pickPdfPath: suspend () -> String?,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     var showSyncPanel by remember { mutableStateOf(false) }
@@ -117,6 +124,7 @@ fun App(
                     receivedPdfDir = receivedPdfDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
+                    pickPdfPath = pickPdfPath,
                     modifier = Modifier.fillMaxSize(),
                 )
 
