@@ -15,6 +15,7 @@ import com.sun.jna.platform.win32.WinUser.WNDENUMPROC
 import com.sun.jna.ptr.IntByReference
 import com.sun.jna.win32.StdCallLibrary
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -35,11 +36,6 @@ private const val WM_POINTERCAPTURECHANGED: Int = 0x024C
 // POINTER_INPUT_TYPE значения.
 private const val PT_PEN: Int = 3
 
-// POINTER_FLAGS биты (winuser.h).
-private const val POINTER_FLAG_DOWN: Int = 0x00010000
-private const val POINTER_FLAG_UPDATE: Int = 0x00020000
-private const val POINTER_FLAG_UP: Int = 0x00040000
-
 // PEN_MASK биты — какие поля POINTER_PEN_INFO заполнены.
 private const val PEN_MASK_PRESSURE: Int = 0x00000001
 
@@ -58,8 +54,29 @@ private interface User32WndProc : StdCallLibrary {
 
     fun GetPointerType(pointerId: Int, pointerType: IntByReference): Boolean
     fun GetPointerPenInfo(pointerId: Int, penInfo: PointerPenInfo): Boolean
+
+    /**
+     * Возвращает массив POINTER_PEN_INFO с историческими сэмплами для
+     * указанного pointer'а — оснасткой "newest first, oldest last". MSDN.
+     *
+     * `entriesCount` — IN: capacity массива, OUT: фактически записано.
+     * Если IN < доступного, заполняет ровно IN последних сэмплов.
+     */
+    fun GetPointerPenInfoHistory(
+        pointerId: Int,
+        entriesCount: IntByReference,
+        penInfo: Array<PointerPenInfo>,
+    ): Boolean
+
     fun ScreenToClient(hWnd: HWND, lpPoint: POINT): Boolean
 }
+
+/**
+ * Верхний предел сэмплов в одном WM_POINTERUPDATE-батче. Huion при ~250Гц
+ * device rate и WM_POINTER notify rate ~20Гц = ~12.5 сэмплов / батч. 64 —
+ * с большим запасом, на случай fastpath'ов или нестандартных драйверов.
+ */
+private const val MAX_PEN_HISTORY: Int = 64
 
 /** WNDPROC, который JNA marshall'ит в нативный __stdcall function pointer. */
 internal interface PenWndProc : StdCallLibrary.StdCallCallback {
@@ -160,7 +177,13 @@ object WindowsPointerHook {
 
     private val penEventsFlow = MutableSharedFlow<PenPointerEvent>(
         replay = 0,
-        extraBufferCapacity = 256,
+        // 1024 ≈ 4 кадра при 250Гц native sample-rate. С DROP_OLDEST tryEmit
+        // никогда не блокирует AWT EDT (где живёт WndProc) и не дропает
+        // самые свежие сэмплы; теоретически возможны крошечные пропуски
+        // в середине жеста при затыке drawing-pipeline'а — Catmull-Rom
+        // в renderer'е сгладит.
+        extraBufferCapacity = 1024,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
     /** Поток pen-событий от Windows Ink, для drawing-pipeline'а. */
@@ -240,34 +263,77 @@ object WindowsPointerHook {
         uMsg: Int,
         pointerId: Int,
     ) {
+        when (uMsg) {
+            WM_POINTERDOWN -> emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.DOWN)
+            WM_POINTERUP -> emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UP)
+            WM_POINTERUPDATE -> emitHistoryAsUpdates(lib, hwnd, pointerId)
+            // ENTER / LEAVE / CAPCHG нас интересуют только как hover-индикатор;
+            // drawing-pipeline их не требует — пропускаем (Compose hoverPosition
+            // обновляется отдельным каналом, если потребуется).
+            else -> Unit
+        }
+    }
+
+    /**
+     * Достаёт исторический батч сэмплов пера для одного WM_POINTERUPDATE
+     * и эмитит их в хронологическом порядке (oldest → newest). Windows
+     * шлёт UPDATE-нотификации ~20Гц, но между ними устройство семплит на
+     * ~200-300Гц; без `GetPointerPenInfoHistory` мы бы дропали ~12 сэмплов
+     * на каждый видимый UPDATE → штрих смотрится ступенчатым.
+     */
+    private fun emitHistoryAsUpdates(lib: User32WndProc, hwnd: HWND, pointerId: Int) {
+        @Suppress("UNCHECKED_CAST")
+        val historyArr = PointerPenInfo().toArray(MAX_PEN_HISTORY) as Array<PointerPenInfo>
+        val countRef = IntByReference(MAX_PEN_HISTORY)
+        val ok = try {
+            lib.GetPointerPenInfoHistory(pointerId, countRef, historyArr)
+        } catch (t: Throwable) {
+            logger.warn(t) { "WindowsPointerHook: GetPointerPenInfoHistory threw" }
+            // Fallback: одиночный сэмпл.
+            emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UPDATE)
+            return
+        }
+        if (!ok || countRef.value <= 0) {
+            emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UPDATE)
+            return
+        }
+        // MSDN: массив заполнен newest-first. Эмитим в обратном порядке —
+        // drawing-pipeline ожидает хронологию.
+        val n = countRef.value
+        for (i in (n - 1) downTo 0) {
+            historyArr[i].read()
+            emitFromParsedInfo(lib, hwnd, historyArr[i], PenPointerEventType.UPDATE)
+        }
+    }
+
+    /** Однократный запрос `GetPointerPenInfo` + эмит как [phase]. */
+    private fun emitFromInfo(
+        lib: User32WndProc,
+        hwnd: HWND,
+        pointerId: Int,
+        phase: PenPointerEventType,
+    ) {
         val info = PointerPenInfo()
         if (!lib.GetPointerPenInfo(pointerId, info)) return
         info.read()
+        emitFromParsedInfo(lib, hwnd, info, phase)
+    }
 
-        // ENTER / LEAVE / CAPCHG нас интересуют только как hover-индикатор;
-        // drawing-pipeline их не требует — пропускаем (Compose hoverPosition
-        // обновляется отдельным каналом, если потребуется).
-        val phase = when {
-            uMsg == WM_POINTERDOWN -> PenPointerEventType.DOWN
-            uMsg == WM_POINTERUP -> PenPointerEventType.UP
-            uMsg == WM_POINTERUPDATE -> {
-                // Во время сёрфинга пера над экраном (hover) UPDATE'ы тоже
-                // приходят, но IN_RANGE без button-press: pointerFlags даст
-                // POINTER_FLAG_UPDATE без DOWN. Фильтруем — нам нужен только
-                // contact-стрим. Hover'ы будут опубликованы отдельно, если
-                // потребуется.
-                val isInContact = (info.pointerInfo.pointerFlags and POINTER_FLAG_UPDATE) != 0 &&
-                    (info.pointerInfo.pointerFlags and POINTER_FLAG_DOWN.inv() and 0x000F_0000) != 0
-                // Проще: проверяем bit "in contact" — Windows выставляет
-                // POINTER_FLAG_INCONTACT = 0x4 когда касается экрана.
-                // Используем его напрямую через сырое значение flag-маски.
-                val POINTER_FLAG_INCONTACT = 0x00000004
-                if ((info.pointerInfo.pointerFlags and POINTER_FLAG_INCONTACT) == 0) {
-                    return
-                }
-                PenPointerEventType.UPDATE
-            }
-            else -> return  // ENTER / LEAVE / CAPCHG — пропускаем
+    /**
+     * Парсит уже прочитанный [info] и публикует событие. Для UPDATE-фазы
+     * фильтрует hover'ы (нет [POINTER_FLAG_INCONTACT]) — drawing-pipeline
+     * их не использует.
+     */
+    private fun emitFromParsedInfo(
+        lib: User32WndProc,
+        hwnd: HWND,
+        info: PointerPenInfo,
+        phase: PenPointerEventType,
+    ) {
+        if (phase == PenPointerEventType.UPDATE &&
+            (info.pointerInfo.pointerFlags and POINTER_FLAG_INCONTACT) == 0
+        ) {
+            return
         }
 
         // Screen → client coords (relative to hooked HWND). Для root-окна это
@@ -289,13 +355,17 @@ object WindowsPointerHook {
             (maxAbs.toFloat() / 90f).coerceIn(0f, 1f)
         }
 
-        val ev = PenPointerEvent(
-            type = phase,
-            position = Offset(pt.x.toFloat(), pt.y.toFloat()),
-            pressure = pressure,
-            tilt = tilt,
-            timestamp = System.currentTimeMillis(),
+        penEventsFlow.tryEmit(
+            PenPointerEvent(
+                type = phase,
+                position = Offset(pt.x.toFloat(), pt.y.toFloat()),
+                pressure = pressure,
+                tilt = tilt,
+                timestamp = System.currentTimeMillis(),
+            ),
         )
-        penEventsFlow.tryEmit(ev)
     }
 }
+
+/** [POINTER_INFO.pointerFlags] бит — перо/палец касается экрана. */
+private const val POINTER_FLAG_INCONTACT: Int = 0x00000004
