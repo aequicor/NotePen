@@ -16,6 +16,7 @@ import ru.kyamshanov.notepen.tablet.NoOpTabletInputController
 import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.WinTabTabletInputController
 import ru.kyamshanov.notepen.tablet.WindowsPenFix
+import ru.kyamshanov.notepen.tablet.WindowsPointerHook
 import com.arkivanov.decompose.DefaultComponentContext
 import com.arkivanov.decompose.extensions.compose.lifecycle.LifecycleController
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
@@ -82,6 +83,9 @@ import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import java.net.InetAddress
 import java.util.UUID
+
+/** См. [WindowsPenFix] — задержка перед повторным проходом по дереву окон Skiko. */
+private const val SKIA_HWND_SETTLE_DELAY_MS: Long = 500L
 
 fun main() {
     // On Windows, AWT DropTarget registration (via dragAndDropTarget) conflicts with
@@ -356,6 +360,17 @@ fun main() {
                         val hwnd = HWND(Native.getComponentPointer(composeWindow))
                         WindowsPenFix.apply(hwnd)
                         c.attach(hwnd)
+                        // Skiko создаёт SkiaLayer Canvas asynchronously: на момент
+                        // первого composition'а child HWND'ы могут ещё не существовать,
+                        // и EnumChildWindows пройдёт мимо реального target'а пера.
+                        // Re-apply через короткий delay ловит поздно-созданные окна.
+                        // (Не идеально, но проще, чем подвешиваться на HierarchyListener.)
+                        kotlinx.coroutines.delay(SKIA_HWND_SETTLE_DELAY_MS)
+                        WindowsPenFix.apply(hwnd)
+                        // DIAG: subclass WndProc на root + child'ы, чтобы посмотреть,
+                        // приходят ли вообще WM_POINTER сообщения (для теории «AWT
+                        // synthesizes WM_MOUSE из них с задержкой 400мс»).
+                        WindowsPointerHook.install(hwnd)
                     }
                     is CocoaTabletInputController -> c.attach()
                     else -> Unit
@@ -363,6 +378,7 @@ fun main() {
             }
             DisposableEffect(Unit) {
                 onDispose {
+                    WindowsPointerHook.uninstall()
                     when (val c = tabletController) {
                         is WinTabTabletInputController -> c.stop()
                         is CocoaTabletInputController -> c.stop()

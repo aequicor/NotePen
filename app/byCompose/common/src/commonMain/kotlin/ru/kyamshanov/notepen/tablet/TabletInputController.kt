@@ -2,8 +2,11 @@ package ru.kyamshanov.notepen.tablet
 
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.geometry.Offset
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 
 /**
  * Stylus / graphics tablet input port.
@@ -58,7 +61,55 @@ interface TabletInputController {
      * of a device reboot.
      */
     val stylusEverSeen: StateFlow<Boolean>
+
+    /**
+     * Native pen event stream, bypasses Compose's pointer pipeline.
+     *
+     * Зачем существует: на Windows AWT синтезирует legacy WM_MOUSE из
+     * WM_POINTER через Tablet Input Service, и этот шаг добавляет ~400мс
+     * задержки на первое движение пера (press-and-hold gesture recognition,
+     * который драйверы Huion не уважают через стандартный SetProp). Compose
+     * получает MouseEvents только после этой задержки → "линия из центра".
+     *
+     * Если платформа умеет читать pen-события напрямую (Windows: WndProc
+     * subclass + WM_POINTER + GetPointerPenInfo), она публикует их сюда
+     * без задержки и с реальным давлением. Drawing-pipeline на десктопе
+     * подписывается на этот flow и драйвит штрих в обход Compose pointerInput.
+     *
+     * Пустой (cold) flow на платформах, где fallback на стандартный Compose
+     * pointer pipeline. UI-код проверяет emission, не наличие источника.
+     */
+    val penPointerEvents: SharedFlow<PenPointerEvent>
+        get() = NoOpPenPointerEvents
 }
+
+/**
+ * Тип события в [TabletInputController.penPointerEvents].
+ */
+enum class PenPointerEventType { DOWN, UPDATE, UP, CANCEL }
+
+/**
+ * Сырое событие пера от native API (Windows WM_POINTER, в будущем — другие).
+ *
+ * @property type фаза жеста.
+ * @property position позиция в window-local координатах (px) — совпадает с
+ *  системой координат, которой оперирует Compose pointerInput root'а окна.
+ * @property pressure нормализованное давление [0..1], `1f` если устройство
+ *  не сообщает давление.
+ * @property tilt нормализованный наклон [0..1], `0f` если не сообщается.
+ * @property timestamp системное время прибытия события в миллисекундах
+ *  (для отладки rate'ов; consume-логика может игнорировать).
+ */
+data class PenPointerEvent(
+    val type: PenPointerEventType,
+    val position: Offset,
+    val pressure: Float,
+    val tilt: Float,
+    val timestamp: Long,
+)
+
+private val NoOpPenPointerEvents: SharedFlow<PenPointerEvent> =
+    MutableSharedFlow<PenPointerEvent>(extraBufferCapacity = 0).asSharedFlow()
 
 /** Fallback controller for platforms without tablet support. */
 object NoOpTabletInputController : TabletInputController {

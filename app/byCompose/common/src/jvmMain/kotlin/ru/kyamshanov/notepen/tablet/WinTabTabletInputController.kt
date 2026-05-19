@@ -63,6 +63,14 @@ class WinTabTabletInputController : TabletInputController {
         MutableStateFlow<androidx.compose.ui.geometry.Offset?>(null).asStateFlow()
     override val stylusEverSeen: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
 
+    // Pen-стрим от WM_POINTER напрямую: bypass AWT'шной 400мс задержки
+    // на синтезации legacy WM_MOUSE из WM_POINTER (см. KDoc у
+    // [WindowsPointerHook]). Drawing-pipeline подписывается на этот flow
+    // через [TabletInputController.penPointerEvents] и драйвит штрих сам,
+    // минуя Compose pointerInput для pen-устройств.
+    override val penPointerEvents: kotlinx.coroutines.flow.SharedFlow<PenPointerEvent>
+        get() = WindowsPointerHook.pointerEvents
+
     private val wintab = AtomicReference<WinTab?>(null)
     private val context = AtomicReference<com.sun.jna.Pointer?>(null)
     private var maxPressure: Float = 1f

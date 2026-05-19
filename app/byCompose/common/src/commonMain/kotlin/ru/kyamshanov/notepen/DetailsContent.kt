@@ -625,6 +625,27 @@ fun DetailsContent(
             { pencilModeProvider.value || stylusEverSeenProvider.value }
         }
 
+        // Native pen-stream (Windows WM_POINTER, bypass AWT'шной 400мс задержки
+        // на синтезации legacy WM_MOUSE). Если контроллер платформы публикует
+        // pen-события в [TabletInputController.penPointerEvents], drawing-pipeline
+        // драйвится отсюда напрямую, минуя Compose pointerInput. На платформах
+        // без native stream'а flow пустой → этот collect просто idle, и
+        // отрисовка идёт обычным Compose-путём (через [pdfMultiPageDrawingInput]).
+        LaunchedEffect(drawingController, tabletController) {
+            tabletController.penPointerEvents.collect { ev ->
+                when (ev.type) {
+                    ru.kyamshanov.notepen.tablet.PenPointerEventType.DOWN ->
+                        drawingController.onDown(ev.position, ev.pressure, ev.tilt)
+                    ru.kyamshanov.notepen.tablet.PenPointerEventType.UPDATE ->
+                        drawingController.onMove(ev.position, ev.pressure, ev.tilt)
+                    ru.kyamshanov.notepen.tablet.PenPointerEventType.UP ->
+                        drawingController.onUp()
+                    ru.kyamshanov.notepen.tablet.PenPointerEventType.CANCEL ->
+                        drawingController.onCancel()
+                }
+            }
+        }
+
         // Drawing-input навешивается на тот же modifier-chain, что и
         // встроенный pointerInput viewer'а (zoom / scroll / pan): два
         // PointerInputModifierNode на одном LayoutNode оба получают

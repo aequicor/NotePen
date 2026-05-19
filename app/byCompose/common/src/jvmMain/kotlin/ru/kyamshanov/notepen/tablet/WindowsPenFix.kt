@@ -4,7 +4,9 @@ import com.sun.jna.Library
 import com.sun.jna.Native
 import com.sun.jna.Platform
 import com.sun.jna.Pointer
+import com.sun.jna.platform.win32.User32
 import com.sun.jna.platform.win32.WinDef.HWND
+import com.sun.jna.platform.win32.WinUser.WNDENUMPROC
 import io.github.oshai.kotlinlogging.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
@@ -67,23 +69,71 @@ object WindowsPenFix {
         }
     }
 
-    /** Apply the fix to [hwnd]. No-op on non-Windows platforms. */
+    /**
+     * Apply the fix to [hwnd] AND to every descendant window.
+     *
+     * Compose Desktop hosts its Skia render surface in a child HWND inside
+     * the JFrame (Skiko `ComposePanel` → `SkiaLayer` → AWT `Canvas` with its
+     * own native peer). Windows looks up [TABLET_SERVICE_PROPERTY] on the
+     * window receiving pen input — that's the inner Skia canvas, not the
+     * outer JFrame. Setting the prop only on the JFrame leaves the Tablet
+     * Input Service free to run its press-and-hold recogniser on the child,
+     * which is exactly the spiral-defect we are trying to disable.
+     *
+     * Так что мы walk'аем всё дерево: ставим property на root и каждое
+     * descendant'ное окно. `EnumChildWindows` сам рекурсирует по всему
+     * дереву потомков (см. MSDN). Если позже Skiko создаст новые child
+     * windows, нужно будет вызвать [apply] снова — отдельная задача.
+     */
     fun apply(hwnd: HWND) {
         val lib = user32 ?: return
         val flags = TABLET_DISABLE_PRESSANDHOLD or
             TABLET_DISABLE_PENTAPFEEDBACK or
             TABLET_DISABLE_PENBARRELFEEDBACK or
             TABLET_DISABLE_FLICKS
+        val data = Pointer.createConstant(flags)
+        val tagged = intArrayOf(0)
+        val failed = intArrayOf(0)
+        applyTo(lib, hwnd, data, tagged, failed, isRoot = true)
         try {
-            val ok = lib.SetPropA(hwnd, TABLET_SERVICE_PROPERTY, Pointer.createConstant(flags))
-            if (ok) {
-                logger.info { "WindowsPenFix: applied (SetPropA returned true)" }
+            User32.INSTANCE.EnumChildWindows(
+                hwnd,
+                WNDENUMPROC { child, _ ->
+                    applyTo(lib, child, data, tagged, failed, isRoot = false)
+                    true
+                },
+                Pointer.NULL,
+            )
+        } catch (t: Throwable) {
+            logger.warn(t) { "WindowsPenFix: EnumChildWindows threw; only root window tagged" }
+        }
+        logger.info {
+            "WindowsPenFix: tagged ${tagged[0]} window(s)" +
+                if (failed[0] > 0) " (${failed[0]} SetPropA failed)" else ""
+        }
+    }
+
+    private fun applyTo(
+        lib: User32Ext,
+        hwnd: HWND,
+        data: Pointer,
+        tagged: IntArray,
+        failed: IntArray,
+        isRoot: Boolean,
+    ) {
+        try {
+            if (lib.SetPropA(hwnd, TABLET_SERVICE_PROPERTY, data)) {
+                tagged[0]++
             } else {
-                val err = Native.getLastError()
-                logger.warn { "WindowsPenFix: SetPropA returned false (GetLastError=$err); pen-stroke start may lag" }
+                failed[0]++
+                if (isRoot) {
+                    val err = Native.getLastError()
+                    logger.warn { "WindowsPenFix: SetPropA on root returned false (GetLastError=$err)" }
+                }
             }
         } catch (t: Throwable) {
-            logger.warn(t) { "WindowsPenFix: SetProp threw; pen-stroke start may lag" }
+            failed[0]++
+            if (isRoot) logger.warn(t) { "WindowsPenFix: SetPropA on root threw" }
         }
     }
 }
