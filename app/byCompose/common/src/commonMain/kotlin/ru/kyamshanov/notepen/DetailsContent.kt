@@ -80,6 +80,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository as SharedAnnotationRepository
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -557,8 +558,11 @@ fun DetailsContent(
                 pageIndex = bundle.currentPage,
                 pageOffsetPx = bundle.currentPageOffset,
             )
-            penSettings = bundle.pen
-            markerSettings = bundle.marker
+            // Sanitize on load: legacy settings persisted strokeWidth as raw
+            // pixels (range ~1..80); the field now means fraction-of-page-width.
+            // Without this, a stale `10f` becomes a 10×-page-wide brush stroke.
+            penSettings = bundle.pen.sanitizedForCurrentScheme()
+            markerSettings = bundle.marker.sanitizedForCurrentScheme()
             eraserSettings = bundle.eraser
             bundle.pages.forEach { (pageIndex, paths) ->
                 val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }

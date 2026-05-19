@@ -14,14 +14,22 @@ class PenSettingsTest {
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
-    // TC-10: PenSettings defaults: colorArgb=BLACK, strokeWidth=10f, alpha=1f
+    // TC-10: PenSettings defaults: black, normalised text-thickness stroke, full alpha
     @Test
-    fun penSettings_defaults_areBlackTenAndOne() {
+    fun penSettings_defaults_areBlackTextThicknessAndFullAlpha() {
         val s = PenSettings()
         assertEquals(DrawingPath.BLACK_ARGB, s.colorArgb, "default color must be Black (ARGB)")
-        assertEquals(10f, s.strokeWidth, "default strokeWidth must be 10f")
+        assertEquals(
+            PenSettings.DEFAULT_STROKE_WIDTH,
+            s.strokeWidth,
+            "default strokeWidth must match DEFAULT_STROKE_WIDTH",
+        )
         assertEquals(1f, s.alpha, "default alpha must be 1f")
-        assertEquals(10f, PenSettings.DEFAULT_STROKE_WIDTH)
+        assertTrue(
+            PenSettings.DEFAULT_STROKE_WIDTH in
+                PenSettings.MIN_STROKE_WIDTH..PenSettings.MAX_STROKE_WIDTH,
+            "default must lie within slider range",
+        )
         assertTrue(PenSettings.PRESET_COLORS.isNotEmpty(), "PRESET_COLORS must not be empty")
     }
 
@@ -30,7 +38,7 @@ class PenSettingsTest {
     fun penSettings_roundTripSerialization_preservesAlpha() {
         val original = PenSettings(
             colorArgb = 0x80FF0000L,
-            strokeWidth = 25f,
+            strokeWidth = 0.01f,
             alpha = 0.5f,
         )
 

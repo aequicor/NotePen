@@ -20,6 +20,8 @@ data class DrawingPath(
 ) {
     companion object {
         const val BLACK_ARGB = 0xFF000000L
-        const val DEFAULT_STROKE_WIDTH = 10f
+
+        /** Default normalised stroke width — matches [PenSettings.DEFAULT_STROKE_WIDTH]. */
+        const val DEFAULT_STROKE_WIDTH = 0.0020f
     }
 }

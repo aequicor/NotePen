@@ -56,13 +56,13 @@ class PenSettingsPanelLogicTest {
     fun `applyStrokeWidth clamps below MIN and above MAX`() {
         val current = PenSettings()
 
-        val tooSmall = current.applyStrokeWidth(PenSettings.MIN_STROKE_WIDTH - 5f)
-        val tooLarge = current.applyStrokeWidth(PenSettings.MAX_STROKE_WIDTH + 5f)
-        val ok = current.applyStrokeWidth(15f)
+        val tooSmall = current.applyStrokeWidth(PenSettings.MIN_STROKE_WIDTH / 2f)
+        val tooLarge = current.applyStrokeWidth(PenSettings.MAX_STROKE_WIDTH * 1.5f)
+        val ok = current.applyStrokeWidth(0.005f)
 
         assertEquals(PenSettings.MIN_STROKE_WIDTH, tooSmall.strokeWidth)
         assertEquals(PenSettings.MAX_STROKE_WIDTH, tooLarge.strokeWidth)
-        assertEquals(15f, ok.strokeWidth)
+        assertEquals(0.005f, ok.strokeWidth)
     }
 
     @Test

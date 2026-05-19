@@ -215,6 +215,8 @@ internal class MultiPageDrawingController(
     ) {
         val pdfWidthPx = viewerState.basePageWidthPx * viewerState.zoom
         if (pdfWidthPx <= 0f) return
+        // strokeWidth is already a fraction of page width (DPI-independent),
+        // so it can be fed straight into normalizedStrokeWidth without /pdfWidthPx.
         val settingsStrokeWidth = when (gestureTool) {
             ToolMode.PEN -> penSettings().strokeWidth
             ToolMode.MARKER -> markerSettings().strokeWidth
@@ -231,7 +233,7 @@ internal class MultiPageDrawingController(
         state.startDrawing(
             x = nx,
             y = ny,
-            normalizedStrokeWidth = settingsStrokeWidth / pdfWidthPx,
+            normalizedStrokeWidth = settingsStrokeWidth,
             pressure = if (gestureTool == ToolMode.PEN) pressure else 1f,
             tilt = if (gestureTool == ToolMode.PEN) tilt else 0f,
         )
