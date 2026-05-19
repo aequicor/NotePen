@@ -113,7 +113,7 @@ import kotlin.time.Duration.Companion.seconds
 private val logger = KotlinLogging.logger {}
 
 /** Куда роутится текущий активный pointer-жест в DetailsContent. */
-private enum class GestureRoute { NONE, DRAWING, LOUPE, MAGNIFIER }
+private enum class GestureRoute { NONE, DRAWING, LOUPE, MAGNIFIER, TARGET_RECT }
 
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 
@@ -710,6 +710,12 @@ fun DetailsContent(
             }
         }
 
+        val magnifierTargetGestureController = remember(pdfViewerState, magnifierState) {
+            ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController(
+                state = magnifierState,
+                viewerState = pdfViewerState,
+            )
+        }
         val loupeSelectionController = remember(pdfViewerState, magnifierState) {
             LoupeSelectionController(
                 viewerState = pdfViewerState,
@@ -741,7 +747,7 @@ fun DetailsContent(
 
         fun routedOnDown(viewportPos: Offset, pressure: Float, tilt: Float) {
             if (magnifierState.enabled) {
-                // Перо над content-областью панели → пишем В лупе.
+                // 1. Перо над content-областью панели → пишем В лупе.
                 val panelLocal = ru.kyamshanov.notepen.magnifier
                     .viewportToPanelLocal(magnifierState, viewportPos)
                 val mc = magnifierInputControllerHolder.value
@@ -750,8 +756,15 @@ fun DetailsContent(
                     gestureRoute.value = GestureRoute.MAGNIFIER
                     return
                 }
-                // Перо вне панели — обычное рисование на странице (skipPage
-                // пропускает magnifier-страницу, остальные доступны).
+                // 2. Перо на target-рамке (move / resize) — перехватываем
+                // ДО drawingController, иначе попытка драг'нуть рамку
+                // съедается skipPage'ом.
+                if (magnifierTargetGestureController.onDown(viewportPos)) {
+                    gestureRoute.value = GestureRoute.TARGET_RECT
+                    return
+                }
+                // 3. Перо вне панели и рамки — обычное рисование на странице
+                // (skipPage пропускает magnifier-страницы).
                 drawingController.onDown(viewportPos, pressure, tilt)
                 gestureRoute.value = GestureRoute.DRAWING
                 return
@@ -777,6 +790,7 @@ fun DetailsContent(
                         mc.onMove(panelLocal, magnifierState.panelSize, pressure, tilt)
                     }
                 }
+                GestureRoute.TARGET_RECT -> magnifierTargetGestureController.onMove(viewportPos)
                 GestureRoute.NONE -> Unit
             }
         }
@@ -787,6 +801,7 @@ fun DetailsContent(
                 GestureRoute.DRAWING -> drawingController.onUp()
                 GestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value
                     ?.onUp(magnifierState.panelSize)
+                GestureRoute.TARGET_RECT -> magnifierTargetGestureController.onUp()
                 GestureRoute.NONE -> Unit
             }
             gestureRoute.value = GestureRoute.NONE
@@ -797,6 +812,7 @@ fun DetailsContent(
                 GestureRoute.LOUPE -> loupeSelectionController.onCancel()
                 GestureRoute.DRAWING -> drawingController.onCancel()
                 GestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value?.onCancel()
+                GestureRoute.TARGET_RECT -> magnifierTargetGestureController.onCancel()
                 GestureRoute.NONE -> Unit
             }
             gestureRoute.value = GestureRoute.NONE
@@ -1047,12 +1063,50 @@ fun DetailsContent(
             if (magnifierState.enabled) {
                 magnifierState.disable()
             } else {
+                val layout = pdfViewerState.layout
+                val zoom = pdfViewerState.zoom
+                val pan = pdfViewerState.pan
+                val basePageW = layout.basePageWidthPx
+                val viewportW = windowSizeInPx.width.toFloat()
+                val viewportH = windowSizeInPx.height.toFloat()
+                // Центр текущего viewport'а в doc-координатах.
+                val viewportCenterDocY = ((viewportH / 2f) - pan.y) / zoom
+                val viewportCenterDocX = ((viewportW / 2f) - pan.x) / zoom
+                // Какая страница содержит центр viewport'а (binary search).
+                val tops = layout.pageTopsPx
+                val pageIdx = when {
+                    tops.isEmpty() -> firstVisiblePage
+                    viewportCenterDocY <= tops[0] -> 0
+                    else -> {
+                        var lo = 0
+                        var hi = tops.size - 1
+                        while (lo < hi) {
+                            val mid = (lo + hi + 1) ushr 1
+                            if (tops[mid] <= viewportCenterDocY) lo = mid else hi = mid - 1
+                        }
+                        lo
+                    }
+                }
+                val pdfH = if (pageIdx in 0 until layout.pageHeightsPx.size) {
+                    layout.pdfHeightsPx[pageIdx]
+                } else 1f
+                val pageTop = if (pageIdx in tops.indices) tops[pageIdx] else 0f
+                // Предзаполняем page-pixel размеры ДО enable() — нужно для
+                // pageAspect.
+                if (basePageW > 0f && zoom > 0f) {
+                    magnifierState.updatePageCanvasPx(
+                        widthPx = basePageW * zoom,
+                        heightPx = pdfH * zoom,
+                    )
+                }
+                val centerN = Offset(
+                    x = (viewportCenterDocX / basePageW.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                    y = ((viewportCenterDocY - pageTop) / pdfH.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                )
                 magnifierState.enable(
-                    onPage = firstVisiblePage,
-                    viewportSize = Size(
-                        windowSizeInPx.width.toFloat(),
-                        windowSizeInPx.height.toFloat(),
-                    ),
+                    onPage = pageIdx,
+                    viewportSize = Size(viewportW, viewportH),
+                    targetCenterOnPage = centerN,
                 )
             }
         }

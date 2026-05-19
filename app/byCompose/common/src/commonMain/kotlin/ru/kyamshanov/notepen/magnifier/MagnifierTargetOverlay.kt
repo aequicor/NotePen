@@ -1,17 +1,14 @@
 package ru.kyamshanov.notepen.magnifier
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 
 /**
  * Оверлей, рисующий рамку-цель magnifier'а на странице и обрабатывающий
@@ -31,41 +28,11 @@ fun MagnifierTargetOverlay(
 ) {
     val segment = state.segments.firstOrNull { it.pageIndex == pageIndex } ?: return
     val isSinglePage = state.segments.size == 1
-    val dragModeRef = remember { arrayOf(DragMode.Move) }
-    Canvas(
-        modifier = modifier
-            .fillMaxSize()
-            .pointerInput(state, pageIndex) {
-                if (!isSinglePage) return@pointerInput
-                detectDragGestures(
-                    onDragStart = { offset ->
-                        if (size.width <= 0 || size.height <= 0) return@detectDragGestures
-                        val nx = offset.x / size.width
-                        val ny = offset.y / size.height
-                        val r = segment.targetOnPage
-                        val nearRight = nx in (r.right - RESIZE_HANDLE_FRAC)..(r.right + RESIZE_HANDLE_FRAC)
-                        val nearBottom = ny in (r.bottom - RESIZE_HANDLE_FRAC)..(r.bottom + RESIZE_HANDLE_FRAC)
-                        dragModeRef[0] = if (nearRight && nearBottom) DragMode.Resize else DragMode.Move
-                    },
-                    onDrag = { change, dragAmount ->
-                        if (size.width <= 0 || size.height <= 0) return@detectDragGestures
-                        val dxN = dragAmount.x / size.width
-                        val dyN = dragAmount.y / size.height
-                        when (dragModeRef[0]) {
-                            DragMode.Move -> state.moveTarget(Offset(dxN, dyN))
-                            DragMode.Resize -> {
-                                val r = segment.targetOnPage
-                                state.resizeTarget(
-                                    newWidth = (r.right - r.left + dxN).coerceAtLeast(MIN_TARGET_DIM),
-                                    newHeight = (r.bottom - r.top + dyN).coerceAtLeast(MIN_TARGET_DIM),
-                                )
-                            }
-                        }
-                        change.consume()
-                    },
-                )
-            },
-    ) {
+    // Жесты move/resize обрабатываются в `DetailsContent.routedOnMove` через
+    // `MagnifierTargetGestureController` — он питается из того же pointer-
+    // input, что и drawing-pipeline, и работает как с мышью, так и с
+    // нативным pen-стримом. Здесь только отрисовка.
+    Canvas(modifier = modifier.fillMaxSize()) {
         val r = segment.targetOnPage
         val left = r.left * size.width
         val top = r.top * size.height
@@ -100,7 +67,6 @@ fun MagnifierTargetOverlay(
     }
 }
 
-private enum class DragMode { Move, Resize }
 
 private const val FRAME_FILL_ALPHA = 0.10f
 private const val FRAME_STROKE_PX = 2f
