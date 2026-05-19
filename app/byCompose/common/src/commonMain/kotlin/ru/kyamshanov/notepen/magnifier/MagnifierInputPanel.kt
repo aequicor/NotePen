@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -815,13 +816,17 @@ private suspend fun PointerInputScope.detectPanelTransformGestures(
             val panelSize = Size(size.width.toFloat(), size.height.toFloat())
             if (pressed.size < 2) {
                 // Single-pointer ветка: pan только если включён pencil mode
-                // (палец гарантированно не пишет — palm rejection).
+                // **и** указатель — это палец/мышь, а не стилус. Stylus в
+                // pencil mode = письмо, его трогать нельзя — иначе рамка лупы
+                // ездит при каждом штрихе.
                 inTransform = false
-                if (!pencilModeEnabled()) {
+                val p = pressed.first()
+                val isStylus = p.type == PointerType.Stylus ||
+                    p.type == PointerType.Eraser
+                if (!pencilModeEnabled() || isStylus) {
                     inSinglePan = false
                     continue
                 }
-                val p = pressed.first()
                 if (inSinglePan) {
                     val pan = p.position - lastSinglePos
                     if (pan != Offset.Zero) {
