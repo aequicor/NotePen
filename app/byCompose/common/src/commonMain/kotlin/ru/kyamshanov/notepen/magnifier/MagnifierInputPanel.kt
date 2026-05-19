@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -150,6 +152,26 @@ fun MagnifierInputPanel(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.weight(1f),
                     )
+                    val pinned = state.attachment == MagnifierAttachment.SCREEN
+                    IconButton(onClick = { state.toggleAttachment() }) {
+                        Icon(
+                            imageVector = if (pinned) {
+                                Icons.Filled.PushPin
+                            } else {
+                                Icons.Outlined.PushPin
+                            },
+                            contentDescription = if (pinned) {
+                                "Открепить от экрана"
+                            } else {
+                                "Закрепить на экране"
+                            },
+                            tint = if (pinned) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
                     IconButton(onClick = { state.toggleAutoScroll() }) {
                         Icon(
                             imageVector = Icons.Default.SwapHoriz,

@@ -8,6 +8,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.ImageBitmap
+import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 
 /**
  * Состояние инструмента «лупа для письма».
@@ -122,6 +123,23 @@ class MagnifierState {
 
     /** Включена ли авто-прокрутка рамки при подходе пера к правому краю панели. */
     var autoScrollEnabled: Boolean by mutableStateOf(true)
+        private set
+
+    /**
+     * Способ привязки target rect лупы:
+     *  - [MagnifierAttachment.PAGE] (по умолчанию) — рамка хранится в
+     *    page-normalized координатах и визуально движется вместе со
+     *    страницей при скролле/зуме;
+     *  - [MagnifierAttachment.SCREEN] — рамка визуально статична во
+     *    viewport: при скролле/зуме контент под ней меняется, а
+     *    `targetOnPage`/`pageIndex` пересчитываются внешним эффектом через
+     *    [repinFromViewportRect].
+     *
+     * GRAB-состояние (пользователь зажимает рамку и тянет/скроллит) —
+     * transient; представлено `MagnifierTargetGestureController.isActive`
+     * и не хранится в [attachment].
+     */
+    var attachment: MagnifierAttachment by mutableStateOf(MagnifierAttachment.PAGE)
         private set
 
     /**
@@ -282,6 +300,7 @@ class MagnifierState {
     /** Выключить лупу. */
     fun disable() {
         enabled = false
+        attachment = MagnifierAttachment.PAGE
         pageBitmapsState.clear()
         highResBitmapsState.clear()
         segments = emptyList()
@@ -289,6 +308,73 @@ class MagnifierState {
 
     fun toggleAutoScroll() {
         autoScrollEnabled = !autoScrollEnabled
+    }
+
+    /** Переключить тип привязки рамки PAGE ↔ SCREEN. */
+    fun toggleAttachment() {
+        attachment = when (attachment) {
+            MagnifierAttachment.PAGE -> MagnifierAttachment.SCREEN
+            MagnifierAttachment.SCREEN -> MagnifierAttachment.PAGE
+        }
+    }
+
+
+    /**
+     * Пересчитывает `targetOnPage` (и при необходимости `pageIndex`) первого
+     * сегмента так, чтобы рамка в viewport-координатах совпала с
+     * [viewportRect]. Используется при включённом [MagnifierAttachment.SCREEN]
+     * для удержания рамки на одном месте на экране при изменении `pan`/`zoom`.
+     *
+     * Multi-page — no-op.
+     */
+    fun repinFromViewportRect(viewportRect: Rect, viewerState: PdfViewerState) {
+        if (segments.size != 1) return
+        val layout = viewerState.layout
+        val zoom = viewerState.zoom
+        val basePageW = layout.basePageWidthPx
+        if (zoom <= 0f || basePageW <= 0f) return
+        val pan = viewerState.pan
+        val docLeft = (viewportRect.left - pan.x) / zoom
+        val docTop = (viewportRect.top - pan.y) / zoom
+        val docRight = (viewportRect.right - pan.x) / zoom
+        val docBottom = (viewportRect.bottom - pan.y) / zoom
+        val pageIdx = resolvePageForDocY(layout.pageTopsPx, docTop)
+            .coerceIn(0, layout.pdfHeightsPx.size - 1)
+        val pageTop = layout.pageTopsPx[pageIdx]
+        val pdfH = layout.pdfHeightsPx[pageIdx]
+        if (pdfH <= 0f) return
+        val leftN = docLeft / basePageW
+        val rightN = docRight / basePageW
+        val topN = (docTop - pageTop) / pdfH
+        val bottomN = (docBottom - pageTop) / pdfH
+        val clamped = clampTargetToPage(Rect(leftN, topN, rightN, bottomN))
+        setSingleSegmentTarget(pageIndex = pageIdx, targetOnPage = clamped)
+    }
+
+    /**
+     * Возвращает текущий viewport-прямоугольник target rect первого сегмента
+     * (для запоминания pinned-позиции). `null` если данных layout'а не хватает
+     * или multi-page.
+     */
+    fun targetRectInViewport(viewerState: PdfViewerState): Rect? {
+        if (segments.size != 1) return null
+        val seg = segments[0]
+        val layout = viewerState.layout
+        val pi = seg.pageIndex
+        if (pi !in 0 until layout.pageHeightsPx.size) return null
+        val zoom = viewerState.zoom
+        if (zoom <= 0f) return null
+        val basePageW = layout.basePageWidthPx
+        val pdfH = layout.pdfHeightsPx[pi]
+        val pageTop = layout.pageTopsPx[pi]
+        val pan = viewerState.pan
+        val t = seg.targetOnPage
+        return Rect(
+            left = pan.x + t.left * basePageW * zoom,
+            top = pan.y + (pageTop + t.top * pdfH) * zoom,
+            right = pan.x + t.right * basePageW * zoom,
+            bottom = pan.y + (pageTop + t.bottom * pdfH) * zoom,
+        )
     }
 
     /**
@@ -479,3 +565,11 @@ class MagnifierState {
 
 /** Направление авто-прокрутки рамки при подходе пера к краю панели. */
 enum class AutoScrollDir { RIGHT }
+
+/**
+ * Способ привязки target rect лупы к содержимому.
+ *
+ *  - [PAGE]: рамка зафиксирована на странице (page-normalized).
+ *  - [SCREEN]: рамка зафиксирована на экране (viewport-координаты).
+ */
+enum class MagnifierAttachment { PAGE, SCREEN }

@@ -54,6 +54,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -752,11 +753,57 @@ fun DetailsContent(
             }
         }
 
+        // Pinned viewport-прямоугольник target rect в режиме SCREEN-attached:
+        // null когда attachment == PAGE; задаётся при входе в SCREEN и
+        // обновляется после GRAB-релиза в SCREEN-режиме.
+        val pinnedRect = remember { mutableStateOf<Rect?>(null) }
+
         val magnifierTargetGestureController = remember(pdfViewerState, magnifierState) {
             ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController(
                 state = magnifierState,
                 viewerState = pdfViewerState,
+                onMoveFinished = {
+                    if (magnifierState.attachment ==
+                        ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN
+                    ) {
+                        pinnedRect.value = magnifierState.targetRectInViewport(pdfViewerState)
+                    }
+                },
             )
+        }
+
+        // Переключение attachment: при входе в SCREEN — снимаем текущий
+        // viewport-rect рамки и запоминаем; при выходе — сбрасываем.
+        LaunchedEffect(magnifierState.attachment, magnifierState.enabled) {
+            if (!magnifierState.enabled) {
+                pinnedRect.value = null
+                return@LaunchedEffect
+            }
+            pinnedRect.value = when (magnifierState.attachment) {
+                ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN ->
+                    magnifierState.targetRectInViewport(pdfViewerState)
+                ru.kyamshanov.notepen.magnifier.MagnifierAttachment.PAGE -> null
+            }
+        }
+
+        // SCREEN-attached: на каждое изменение pan/zoom (вне активного drag'а
+        // рамки) пересчитываем targetOnPage так, чтобы viewport-прямоугольник
+        // совпадал с pinnedRect — рамка остаётся «на экране».
+        LaunchedEffect(
+            magnifierState.attachment,
+            magnifierState.enabled,
+            pdfViewerState.pan,
+            pdfViewerState.zoom,
+        ) {
+            if (!magnifierState.enabled) return@LaunchedEffect
+            if (magnifierState.attachment !=
+                ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN
+            ) {
+                return@LaunchedEffect
+            }
+            if (magnifierTargetGestureController.isActive) return@LaunchedEffect
+            val pinned = pinnedRect.value ?: return@LaunchedEffect
+            magnifierState.repinFromViewportRect(pinned, pdfViewerState)
         }
         val loupeSelectionController = remember(pdfViewerState, magnifierState) {
             LoupeSelectionController(
@@ -940,11 +987,32 @@ fun DetailsContent(
                         pageExtent = extent,
                         magnifierState = if (isMagnifierPage) magnifierState else null,
                         pageIndex = pageIndex,
+                        isMagnifierGrabbing = isMagnifierPage &&
+                            magnifierTargetGestureController.isActive,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     Text("Loading")
                 }
+            }
+        }
+
+        // Viewport-привязанная рамка лупы в SCREEN-режиме: рисуется поверх
+        // PDF-viewer'а по абсолютным координатам, поэтому не дёргается при
+        // скролле (в отличие от page-bound overlay внутри DrawablePdfPage).
+        // Во время GRAB рамка временно отображается на странице — пользователь
+        // тащит её, и она должна следовать за пером.
+        if (magnifierState.enabled &&
+            magnifierState.attachment ==
+            ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN &&
+            !magnifierTargetGestureController.isActive
+        ) {
+            val rect = pinnedRect.value
+            if (rect != null) {
+                ru.kyamshanov.notepen.magnifier.MagnifierScreenPinnedOverlay(
+                    viewportRect = rect,
+                    frameColor = MaterialTheme.colorScheme.primary,
+                )
             }
         }
 

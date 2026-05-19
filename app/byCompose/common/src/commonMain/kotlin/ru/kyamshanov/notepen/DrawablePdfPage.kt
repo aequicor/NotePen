@@ -141,6 +141,12 @@ fun DrawablePdfPage(
     magnifierState: MagnifierState? = null,
     /** Индекс страницы в документе — нужен для multi-page magnifier overlay. */
     pageIndex: Int = 0,
+    /**
+     * Активен ли drag рамки-цели magnifier'а (пользователь зажал и тянет).
+     * Используется только для визуальной подсветки GRAB-состояния в
+     * [MagnifierTargetOverlay]; на собственно жесты не влияет.
+     */
+    isMagnifierGrabbing: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -419,6 +425,9 @@ fun DrawablePdfPage(
                     state = magnifierState,
                     pageIndex = pageIndex,
                     frameColor = MaterialTheme.colorScheme.primary,
+                    isGrabbing = isMagnifierGrabbing,
+                    isScreenPinned = magnifierState.attachment ==
+                        ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN,
                 )
             }
         }
