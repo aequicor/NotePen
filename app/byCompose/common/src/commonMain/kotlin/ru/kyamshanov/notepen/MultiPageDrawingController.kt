@@ -4,10 +4,20 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.CoroutineScope
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesLayout
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.tablet.TabletInputController
+
+/** Длительность удержания pointer'а на месте для триггера shape-recognition (мс). */
+private const val SHAPE_SNAP_HOLD_MS: Long = 700L
+
+/**
+ * Терпимость к джиттеру при удержании — доля нормализованной ширины страницы.
+ * 0.005 ≈ 3 dp на A4, чтобы стилус мог микро-дрожать без сброса таймера.
+ */
+private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
 
 /**
  * Драйвер рисования, поднятый над пер-страничным [DrawablePdfPage].
@@ -40,6 +50,12 @@ internal class MultiPageDrawingController(
     private val onGestureStart: (pageIndex: Int, snapshot: List<DrawingPath>) -> Unit,
     private val onStrokeFinished: (pageIndex: Int, path: DrawingPath) -> Unit,
     private val onEraseFinished: (pageIndex: Int, before: List<DrawingPath>, after: List<DrawingPath>) -> Unit,
+    /**
+     * Scope для таймера hold-to-snap (см. [HoldGestureTracker]). Инжектируется
+     * из composable owner'а (`rememberCoroutineScope`), чтобы не дёргать
+     * `Dispatchers.*` напрямую (KMP-friendly + проверяемо в тестах).
+     */
+    private val scope: CoroutineScope,
 ) {
 
     private enum class Mode { NONE, DRAW, ERASE }
@@ -60,6 +76,13 @@ internal class MultiPageDrawingController(
      * траектория пера пересекла границу где-то между prev и curr.
      */
     private var lastViewportPos: Offset = Offset.Zero
+
+    private val holdTracker = HoldGestureTracker(
+        scope = scope,
+        delayMs = SHAPE_SNAP_HOLD_MS,
+        toleranceNorm = SHAPE_SNAP_TOLERANCE_NORM,
+        onHold = ::triggerShapeSnap,
+    )
 
     fun onDown(viewportPos: Offset, pressure: Float, tilt: Float) {
         cancelActive()
@@ -92,7 +115,10 @@ internal class MultiPageDrawingController(
         }
         val state = drawingStates[pageIndex] ?: return
         when (activeMode) {
-            Mode.DRAW -> state.addPoint(nx, ny, pressure, tilt)
+            Mode.DRAW -> {
+                state.addPoint(nx, ny, pressure, tilt)
+                holdTracker.onMove(nx, ny)
+            }
             Mode.ERASE -> activeErase?.move(nx, ny)
             Mode.NONE -> Unit
         }
@@ -239,13 +265,29 @@ internal class MultiPageDrawingController(
         )
         activePageIndex = pageIndex
         activeMode = Mode.DRAW
+        holdTracker.onDown(nx, ny, pageAspectFor(pageIndex))
     }
 
     private fun finishDraw() {
+        holdTracker.cancel()
         val pageIndex = activePageIndex
         val state = drawingStates[pageIndex] ?: return
         val completed = state.finishDrawing()
         if (completed != null) onStrokeFinished(pageIndex, completed)
+    }
+
+    private fun triggerShapeSnap() {
+        val pageIndex = activePageIndex
+        if (pageIndex < 0 || activeMode != Mode.DRAW) return
+        val state = drawingStates[pageIndex] ?: return
+        state.snapLiveStrokeToShape(pageAspectFor(pageIndex))
+    }
+
+    private fun pageAspectFor(pageIndex: Int): Float {
+        val layout = viewerState.layout
+        val w = layout.basePageWidthPx
+        val h = layout.pdfHeightsPx.getOrNull(pageIndex) ?: return 1f
+        return if (h > 0f) w / h else 1f
     }
 
     private fun startErase(pageIndex: Int, state: PdfDrawingState, nx: Float, ny: Float) {
@@ -268,6 +310,7 @@ internal class MultiPageDrawingController(
     }
 
     private fun cancelActive() {
+        holdTracker.cancel()
         when (activeMode) {
             Mode.DRAW -> {
                 val pageIndex = activePageIndex
@@ -335,10 +378,12 @@ internal fun Modifier.pdfMultiPageDrawingInput(
     controller: MultiPageDrawingController,
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
+    acceptTouch: (Offset) -> Boolean = { false },
 ): Modifier = pdfMultiPageDrawingInput(
     key = controller,
     tablet = tablet,
     palmRejectionActive = palmRejectionActive,
+    acceptTouch = acceptTouch,
     onDown = controller::onDown,
     onMove = controller::onMove,
     onUp = controller::onUp,
@@ -355,6 +400,7 @@ internal fun Modifier.pdfMultiPageDrawingInput(
     key: Any?,
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
+    acceptTouch: (Offset) -> Boolean = { false },
     onDown: (Offset, Float, Float) -> Unit,
     onMove: (Offset, Float, Float) -> Unit,
     onUp: () -> Unit,
@@ -363,6 +409,7 @@ internal fun Modifier.pdfMultiPageDrawingInput(
     detectStylusAwareDrag(
         tablet = tablet,
         isPalmRejectionActive = palmRejectionActive,
+        acceptTouch = acceptTouch,
         onDown = onDown,
         onMove = onMove,
         onUp = onUp,

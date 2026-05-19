@@ -68,10 +68,13 @@ import ru.kyamshanov.notepen.sync.domain.RemoteCatalogHostCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
+import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
 import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseJvm
 import ru.kyamshanov.notepen.createAnnotationRepository
@@ -106,8 +109,15 @@ fun main() {
     val pdfDocumentLoader = JvmPdfDocumentLoader(Dispatchers.IO)
     val pdfPageRenderer = JvmPdfPageRenderer(Dispatchers.IO)
 
-    val historyRepo = FileHistoryRepositoryDesktop()
-    val folderRepo = FolderRepositoryDesktop()
+    val catalogChangeNotifier = InMemoryCatalogChangeNotifier()
+    val historyRepo = NotifyingFileHistoryRepository(
+        delegate = FileHistoryRepositoryDesktop(),
+        notifier = catalogChangeNotifier,
+    )
+    val folderRepo = NotifyingFolderRepository(
+        delegate = FolderRepositoryDesktop(),
+        notifier = catalogChangeNotifier,
+    )
     val availabilityChecker = FileAvailabilityCheckerDesktop()
     val thumbnailRepo = ThumbnailRepositoryDesktop()
     val thumbnailGenerator = PdfThumbnailGeneratorDesktop()
@@ -179,6 +189,15 @@ fun main() {
     // client and that host requests our catalog (for its "Подключённые
     // устройства" tile), reply over the SyncClient transport.
     remoteCatalogProvider.serve(client = syncClient, scope = appScope)
+    // Локальные мутации каталога (создание/удаление/переименование папок,
+    // добавление/удаление файлов в истории) → push RemoteCatalogChanged всем
+    // подключённым пирам, чтобы они подтянули свежий снапшот.
+    remoteCatalogProvider.broadcastChanges(
+        notifier = catalogChangeNotifier,
+        server = peerServer,
+        client = syncClient,
+        scope = appScope,
+    )
     DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider)
         .start(scope = appScope)
 

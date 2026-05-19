@@ -226,4 +226,17 @@ sealed class NetworkMessage {
     data class RemoteCatalogResponse(
         val catalog: RemoteCatalog,
     ) : NetworkMessage()
+
+    /**
+     * Push notification (любая сторона → пир): локальный каталог сменился
+     * (добавлен/удалён/перемещён файл, изменена папка). Получатель в ответ
+     * должен запросить свежий [RemoteCatalogRequest] у того же отправителя.
+     *
+     * Сам пейлоад намеренно пустой — фактический снапшот всегда тянется
+     * через `RemoteCatalogRequest`/`RemoteCatalogResponse`, чтобы не плодить
+     * параллельные пути синхронизации и сохранить per-peer allow-list.
+     */
+    @Serializable
+    @SerialName("remote_catalog_changed")
+    data object RemoteCatalogChanged : NetworkMessage()
 }

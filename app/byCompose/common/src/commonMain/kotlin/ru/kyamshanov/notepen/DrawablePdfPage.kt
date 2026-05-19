@@ -449,12 +449,14 @@ fun DrawablePdfPage(
  *  - no touch-slop wait (fixes the "spiral defect" — initial fast curves
  *    used to be silently swallowed for ~24dp);
  *  - drains `PointerInputChange.historical` for sub-frame stylus samples;
- *  - palm rejection once a stylus event has been seen;
+ *  - finger touches are ignored — only stylus / eraser / mouse draw, чтобы
+ *    палец на Android уходил вниз по chain'у в `Modifier.scrollable`;
  *  - cancel-safe via try / finally.
  */
 internal suspend fun PointerInputScope.detectStylusAwareDrag(
     tablet: TabletInputController,
     isPalmRejectionActive: () -> Boolean,
+    acceptTouch: (position: Offset) -> Boolean = { false },
     onDown: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onMove: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onUp: () -> Unit,
@@ -462,8 +464,15 @@ internal suspend fun PointerInputScope.detectStylusAwareDrag(
 ) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
-        val downIsStylus = down.type == PointerType.Stylus || down.type == PointerType.Eraser
-        if (!downIsStylus && isPalmRejectionActive()) {
+        // Рисуем только стилусом / ластиком / мышью. Палец (Touch) обычно
+        // проходит мимо — иначе на Android он консумится здесь и не доходит
+        // до Modifier.scrollable, ломая вертикальный скролл в дефолтном
+        // режиме. Исключение — [acceptTouch] (быстрая лупа / открытый
+        // трigger / hit-test на target-рамку лупы): тогда пальцем работаем.
+        val isDrawingPointer = down.type == PointerType.Stylus ||
+            down.type == PointerType.Eraser ||
+            down.type == PointerType.Mouse
+        if (!isDrawingPointer && !(down.type == PointerType.Touch && acceptTouch(down.position))) {
             return@awaitEachGesture
         }
 

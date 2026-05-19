@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -713,6 +714,7 @@ fun DetailsContent(
                         engine = syncEngineProvider.value,
                     )
                 },
+                scope = coroutineScope,
             )
         }
         val palmRejectionActive = remember {
@@ -809,6 +811,11 @@ fun DetailsContent(
             val pinned = pinnedRect.value ?: return@LaunchedEffect
             magnifierState.repinFromViewportRect(pinned, pdfViewerState)
         }
+        // Одноразовый «вооружённый» режим быстрой лупы (для touch-устройств без
+        // клавиатуры — там shortcutsSettings.loupeOpen недоступен). Когда
+        // armed, следующий жест по странице роутится в loupeSelectionController
+        // и после успешного выделения автоматически сбрасывается.
+        val quickLoupeArmed = remember { mutableStateOf(false) }
         val loupeSelectionController = remember(pdfViewerState, magnifierState) {
             LoupeSelectionController(
                 viewerState = pdfViewerState,
@@ -822,6 +829,7 @@ fun DetailsContent(
                         selectionSizePx = selectionSizePx,
                         panelCenter = panelCenter,
                     )
+                    quickLoupeArmed.value = false
                 },
             )
         }
@@ -862,7 +870,7 @@ fun DetailsContent(
                 gestureRoute.value = GestureRoute.DRAWING
                 return
             }
-            if (openTriggerProvider.value) {
+            if (openTriggerProvider.value || quickLoupeArmed.value) {
                 loupeSelectionController.onDown(viewportPos)
                 gestureRoute.value = GestureRoute.LOUPE
             } else {
@@ -902,7 +910,10 @@ fun DetailsContent(
 
         fun routedOnCancel() {
             when (gestureRoute.value) {
-                GestureRoute.LOUPE -> loupeSelectionController.onCancel()
+                GestureRoute.LOUPE -> {
+                    loupeSelectionController.onCancel()
+                    quickLoupeArmed.value = false
+                }
                 GestureRoute.DRAWING -> drawingController.onCancel()
                 GestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value?.onCancel()
                 GestureRoute.TARGET_RECT -> magnifierTargetGestureController.onCancel()
@@ -953,6 +964,17 @@ fun DetailsContent(
                     key = drawingController,
                     tablet = tabletController,
                     palmRejectionActive = palmRejectionActive,
+                    // Палец рисует выделение лупы, когда взведён quick-loupe
+                    // FAB или удерживается shortcut открытия (desktop). Иначе
+                    // палец проваливается в scrollable.
+                    acceptTouch = { pos ->
+                        quickLoupeArmed.value ||
+                            openTriggerProvider.value ||
+                            (magnifierState.enabled &&
+                                magnifierTargetGestureController.hitTest(pos) !=
+                                ru.kyamshanov.notepen.magnifier
+                                    .MagnifierTargetGestureController.Mode.NONE)
+                    },
                     onDown = ::routedOnDown,
                     onMove = ::routedOnMove,
                     onUp = ::routedOnUp,
@@ -1174,6 +1196,7 @@ fun DetailsContent(
         }
 
         val onMagnifierToggle: () -> Unit = {
+            quickLoupeArmed.value = false
             if (magnifierState.enabled) {
                 magnifierState.disable()
             } else {
@@ -1425,6 +1448,44 @@ fun DetailsContent(
             }
         }
 
+        if (SupportsQuickLoupe) {
+            // Плавающая FAB «быстрая лупа» — нужна на touch-устройствах, где
+            // hotkey shortcutsSettings.loupeOpen недоступен. Стоит под sync-FAB
+            // (App.kt поднял свою на 152dp), занимая бывшую позицию синхронизации.
+            val armed = quickLoupeArmed.value
+            GlassSurface(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 88.dp, end = 16.dp),
+                shape = CircleShape,
+                tint = if (armed) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                },
+            ) {
+                IconButton(onClick = {
+                    if (magnifierState.enabled) {
+                        magnifierState.disable()
+                        quickLoupeArmed.value = false
+                    } else {
+                        quickLoupeArmed.value = !quickLoupeArmed.value
+                    }
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.ZoomIn,
+                        contentDescription = "Быстрая лупа: выделить область",
+                        tint = if (armed) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
+                        },
+                    )
+                }
+            }
+        }
+
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
@@ -1490,6 +1551,12 @@ fun DetailsContent(
                     onGestureStart = magOnGestureStart,
                     onStrokeFinished = magOnStrokeFinished,
                     onEraseFinished = magOnEraseFinished,
+                    scope = coroutineScope,
+                    pageAspect = { pageIndex ->
+                        val layout = pdfViewerState.layout
+                        val h = layout.pdfHeightsPx.getOrNull(pageIndex) ?: 0f
+                        if (h > 0f) layout.basePageWidthPx / h else 1f
+                    },
                 )
             }
             magnifierInputControllerHolder.value = magnifierInputController

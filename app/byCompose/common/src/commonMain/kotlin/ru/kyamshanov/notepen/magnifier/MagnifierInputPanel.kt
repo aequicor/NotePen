@@ -2,6 +2,8 @@ package ru.kyamshanov.notepen.magnifier
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +44,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -298,6 +301,15 @@ private fun MagnifierContent(
             .onGloballyPositioned { coords ->
                 state.updateContentBounds(coords.boundsInWindow())
             }
+            .then(
+                if (SupportsPanelGestureZoom) {
+                    Modifier.pointerInput(state) {
+                        detectPanelTransformGestures(state)
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .pointerInput(
                 toolMode, penSettings, markerSettings, eraserSettings,
                 state, externalInputController,
@@ -753,4 +765,68 @@ private fun buildMagnifierCompletedLayer(
         }
     }
     return bmp
+}
+
+/**
+ * Two-finger pinch + pan жест внутри content-области панели лупы.
+ *
+ * Single-finger touch не консумится — пролетает дальше по modifier-chain'у в
+ * stylus-aware drag и используется как обычное письмо. Как только в gesture
+ * приходит ≥2 нажатых указателя, мы переключаемся в transform-режим: считаем
+ * центроид и среднее расстояние между пальцами, на каждом тике применяем
+ * дельту масштаба к [MagnifierState.zoomTargetAroundPanelFocus] и
+ * panel-pixel дельту центроида (со сменой знака — content-follows-fingers,
+ * как в Maps / photo viewer'ах) к [MagnifierState.panTargetByPanelPx].
+ *
+ * Подключается условно — только на платформах с [SupportsPanelGestureZoom]
+ * (Android). На desktop'е роль pinch/pan играют мышь+drag рамки на странице
+ * и hotkeys.
+ */
+private suspend fun PointerInputScope.detectPanelTransformGestures(
+    state: MagnifierState,
+) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        var inTransform = false
+        var lastCentroid = Offset.Zero
+        var lastDistance = 0f
+        while (true) {
+            val event = awaitPointerEvent()
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.isEmpty()) break
+            if (pressed.size < 2) {
+                inTransform = false
+                continue
+            }
+            var sx = 0f
+            var sy = 0f
+            pressed.forEach {
+                sx += it.position.x
+                sy += it.position.y
+            }
+            val centroid = Offset(sx / pressed.size, sy / pressed.size)
+            var distSum = 0f
+            pressed.forEach { distSum += (it.position - centroid).getDistance() }
+            val avgDist = distSum / pressed.size
+            val panelSize = Size(size.width.toFloat(), size.height.toFloat())
+            if (inTransform) {
+                val scale = if (lastDistance > 0f && avgDist > 0f) {
+                    avgDist / lastDistance
+                } else {
+                    1f
+                }
+                if (scale != 1f) {
+                    state.zoomTargetAroundPanelFocus(scale, centroid, panelSize)
+                }
+                val pan = centroid - lastCentroid
+                if (pan != Offset.Zero) {
+                    state.panTargetByPanelPx(-pan, panelSize)
+                }
+            }
+            inTransform = true
+            lastCentroid = centroid
+            lastDistance = avgDist
+            pressed.forEach { it.consume() }
+        }
+    }
 }
