@@ -338,6 +338,14 @@ private fun MagnifierContent(
                     // даже когда pencil mode выключен. См. зеркальную правку
                     // в DetailsContent.kt.
                     isPalmRejectionActive = { pencilModeState.value },
+                    // Внутри панели лупы палец допускается к рисованию, когда
+                    // pencil mode выключен. В обычном `DrawablePdfPage` палец
+                    // зарезервирован под scrollable (вертикальный скролл PDF),
+                    // но в magnifier-панели скроллить нечего, и пользователь
+                    // ожидает писать пальцем. При включённом pencil mode
+                    // ветка одноточечного pan'а в `detectPanelTransformGestures`
+                    // поглощает finger-события раньше — сюда они не доходят.
+                    acceptTouch = { !pencilModeState.value },
                     onDown = { offset, pressure, tilt ->
                         externalInputController?.onDown(offset, panelSizeF, pressure, tilt)
                     },
