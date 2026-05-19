@@ -122,7 +122,7 @@ class MagnifierState {
     }
 
     /** Включена ли авто-прокрутка рамки при подходе пера к правому краю панели. */
-    var autoScrollEnabled: Boolean by mutableStateOf(true)
+    var autoScrollEnabled: Boolean by mutableStateOf(false)
         private set
 
     /**

@@ -183,9 +183,17 @@ fun DrawablePdfPage(
     // (каждый pinch-тик) триггерит рекомпозицию всего DrawablePdfPage,
     // даже если порог не пересечён. С derivedStateOf рекомпозиция только
     // когда сам Boolean меняет значение (пересечение 2400px).
-    val lowLatencyOverlayActive by remember(lowLatencyOverlaySupported) {
+    // While the page is in magnifier-mode (`magnifierState != null`), the user
+    // is writing inside the floating panel; running the Android SurfaceView
+    // low-latency overlay on this page is pure waste — its output is mostly
+    // hidden by the panel, and on Android it contends with the panel for the
+    // render thread, producing the lag observed both in the panel and on the
+    // page. Falling back to Compose's frame-bound live-stroke render here is
+    // imperceptible because the user looks at the panel.
+    val lowLatencyOverlayActive by remember(lowLatencyOverlaySupported, magnifierState) {
         derivedStateOf {
             lowLatencyOverlaySupported &&
+                magnifierState == null &&
                 maxOf(canvasSize.value.width, canvasSize.value.height) <= LOW_LATENCY_OVERLAY_MAX_DIM_PX
         }
     }
@@ -386,9 +394,15 @@ fun DrawablePdfPage(
             }
 
             // Hover-индикатор кончика пера. Показывается только пока перо не касается
-            // экрана, только для рисующих инструментов.
+            // экрана, только для рисующих инструментов. На Android некоторые стилусы
+            // (S-Pen / Pencil) продолжают присылать HOVER_MOVE параллельно с ACTION_DOWN,
+            // из-за чего кружок «прилипает» к месту начала штриха — поэтому явно
+            // гасим индикатор, когда идёт активное рисование.
             val hover = hoverPos
-            if (hover != null && (toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER)) {
+            if (hover != null &&
+                !pdfDrawingState.isDrawing.value &&
+                (toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER)
+            ) {
                 val cx = (hover.x - ext.left) * pdfW
                 val cy = (hover.y - ext.top) * pdfH
                 val toolStrokePx = when (toolMode) {

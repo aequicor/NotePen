@@ -685,13 +685,11 @@ fun DetailsContent(
                 markerSettings = { markerSettingsProvider.value },
                 eraserSettings = { eraserSettingsProvider.value },
                 eraserOverride = { eraserOverrideProvider.value },
-                // Magnifier-страница пропускается — там ввод идёт через
-                // [MagnifierInputPanel]. На остальных страницах overlay
-                // работает обычно.
-                skipPage = { idx ->
-                    magnifierState.enabled &&
-                        magnifierState.segments.any { it.pageIndex == idx }
-                },
+                // Пока лупа активна — прямой ввод по PDF полностью блокируется
+                // (рисуется только через [MagnifierInputPanel]). Иначе перо
+                // вне рамки лупы плодит штрихи на «обычной» странице, и на
+                // Android оба пайплайна конкурируют за render-thread.
+                skipPage = { _ -> magnifierState.enabled },
                 onGestureStart = { pageIndex, snapshot ->
                     globalUndoStack.addLast(pageIndex to snapshot)
                     globalRedoStack.clear()
