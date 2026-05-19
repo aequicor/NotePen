@@ -46,13 +46,27 @@ class RemoteCatalogClientCoordinator(
         }
         scope.launch {
             client.incomingMessages.collect { hostMessage ->
-                val msg = hostMessage.message
-                if (msg is NetworkMessage.RemoteCatalogResponse) {
-                    logger.info {
-                        "Received RemoteCatalog from '${hostMessage.host.name}': " +
-                            "${msg.catalog.recent.size} recents, ${msg.catalog.folders.size} folders"
+                when (val msg = hostMessage.message) {
+                    is NetworkMessage.RemoteCatalogResponse -> {
+                        logger.info {
+                            "Received RemoteCatalog from '${hostMessage.host.name}': " +
+                                "${msg.catalog.recent.size} recents, ${msg.catalog.folders.size} folders"
+                        }
+                        cache.update(hostMessage.host, msg.catalog)
                     }
-                    cache.update(hostMessage.host, msg.catalog)
+                    is NetworkMessage.RemoteCatalogChanged -> {
+                        logger.info {
+                            "Host '${hostMessage.host.name}' signalled catalog change — re-requesting"
+                        }
+                        runCatching {
+                            client.send(hostMessage.host.id, NetworkMessage.RemoteCatalogRequest)
+                        }.onFailure {
+                            logger.warn {
+                                "Re-request after RemoteCatalogChanged failed: ${it::class.simpleName}"
+                            }
+                        }
+                    }
+                    else -> Unit
                 }
             }
         }
@@ -89,13 +103,27 @@ class RemoteCatalogHostCoordinator(
         }
         scope.launch {
             server.incomingMessages.collect { peerMessage ->
-                val msg = peerMessage.message
-                if (msg is NetworkMessage.RemoteCatalogResponse) {
-                    logger.info {
-                        "Received RemoteCatalog from peer '${peerMessage.peer.name}': " +
-                            "${msg.catalog.recent.size} recents, ${msg.catalog.folders.size} folders"
+                when (val msg = peerMessage.message) {
+                    is NetworkMessage.RemoteCatalogResponse -> {
+                        logger.info {
+                            "Received RemoteCatalog from peer '${peerMessage.peer.name}': " +
+                                "${msg.catalog.recent.size} recents, ${msg.catalog.folders.size} folders"
+                        }
+                        cache.update(peerMessage.peer, msg.catalog)
                     }
-                    cache.update(peerMessage.peer, msg.catalog)
+                    is NetworkMessage.RemoteCatalogChanged -> {
+                        logger.info {
+                            "Peer '${peerMessage.peer.name}' signalled catalog change — re-requesting"
+                        }
+                        runCatching {
+                            server.send(peerMessage.peer.id, NetworkMessage.RemoteCatalogRequest)
+                        }.onFailure {
+                            logger.warn {
+                                "Re-request after RemoteCatalogChanged failed: ${it::class.simpleName}"
+                            }
+                        }
+                    }
+                    else -> Unit
                 }
             }
         }

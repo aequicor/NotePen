@@ -12,6 +12,7 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
 import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolder
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolderLink
+import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
@@ -84,6 +85,43 @@ class RemoteCatalogProvider(
                         "${catalog.folders.size} folders, ${catalog.folderLinks.size} links"
                 }
                 server.send(peerId, NetworkMessage.RemoteCatalogResponse(catalog))
+            }
+        }
+    }
+
+    /**
+     * Подписывается на [notifier] и при каждом сигнале о смене локального
+     * каталога рассылает [NetworkMessage.RemoteCatalogChanged] всем
+     * подключённым в данный момент пирам (через `server` и/или `client`).
+     *
+     * Сами снапшоты пир тянет уже через `RemoteCatalogRequest` — здесь только
+     * пуш-сигнал «обнови, что у тебя есть про меня». Если активного транспорта
+     * нет — broadcast тихо проходит мимо (нечего рассылать).
+     */
+    fun broadcastChanges(
+        notifier: CatalogChangeNotifier,
+        server: PeerServer? = null,
+        client: SyncClient? = null,
+        scope: CoroutineScope,
+    ) {
+        require(server != null || client != null) {
+            "broadcastChanges: at least one of server/client must be provided"
+        }
+        scope.launch {
+            notifier.changes.collect {
+                logger.info { "Local catalog changed — broadcasting RemoteCatalogChanged" }
+                if (server != null) {
+                    runCatching { server.broadcast(NetworkMessage.RemoteCatalogChanged) }
+                        .onFailure {
+                            logger.warn { "RemoteCatalogChanged broadcast via server failed: ${it::class.simpleName}" }
+                        }
+                }
+                if (client != null) {
+                    runCatching { client.broadcast(NetworkMessage.RemoteCatalogChanged) }
+                        .onFailure {
+                            logger.warn { "RemoteCatalogChanged broadcast via client failed: ${it::class.simpleName}" }
+                        }
+                }
             }
         }
     }

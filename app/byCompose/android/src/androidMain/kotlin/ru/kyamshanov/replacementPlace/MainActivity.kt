@@ -50,10 +50,13 @@ import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
+import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
 import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseAndroid
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
@@ -80,8 +83,15 @@ class MainActivity : ComponentActivity() {
 
         val pdfDocumentLoader = AndroidPdfDocumentLoader(context, Dispatchers.IO)
         val pdfPageRenderer = AndroidPdfPageRenderer(Dispatchers.IO)
-        val historyRepo = FileHistoryRepositoryAndroid(context)
-        val folderRepo = FolderRepositoryAndroid(context)
+        val catalogChangeNotifier = InMemoryCatalogChangeNotifier()
+        val historyRepo = NotifyingFileHistoryRepository(
+            delegate = FileHistoryRepositoryAndroid(context),
+            notifier = catalogChangeNotifier,
+        )
+        val folderRepo = NotifyingFolderRepository(
+            delegate = FolderRepositoryAndroid(context),
+            notifier = catalogChangeNotifier,
+        )
         val availabilityChecker = FileAvailabilityCheckerAndroid(context)
         val thumbnailRepo = ThumbnailRepositoryAndroid(context)
         val thumbnailGenerator = PdfThumbnailGeneratorAndroid(context)
@@ -160,11 +170,19 @@ class MainActivity : ComponentActivity() {
         // Симметричный ответ: если подключённый хост запросит наш каталог
         // (для своей секции «Подключённые устройства»), отдадим ему snapshot
         // нашей локальной истории.
-        RemoteCatalogProvider(
+        val remoteCatalogProvider = RemoteCatalogProvider(
             hostName = selfInfo.name,
             historyRepository = historyRepo,
             folderRepository = folderRepo,
-        ).serve(client = syncClient, scope = appScope)
+        )
+        remoteCatalogProvider.serve(client = syncClient, scope = appScope)
+        // Локальные мутации каталога → push хосту, чтобы он подтянул свежий
+        // снапшот (видимо в его секции «Подключённые устройства»).
+        remoteCatalogProvider.broadcastChanges(
+            notifier = catalogChangeNotifier,
+            client = syncClient,
+            scope = appScope,
+        )
         val localDocumentIdRegistry = JsonLocalDocumentIdRegistry(
             manifestPath = "$receivedDir/.notepen-doc-ids.json",
             ioDispatcher = Dispatchers.IO,

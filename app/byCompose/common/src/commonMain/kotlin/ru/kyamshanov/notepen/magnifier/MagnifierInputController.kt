@@ -4,13 +4,21 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import kotlinx.coroutines.CoroutineScope
 import ru.kyamshanov.notepen.EraseGesture
 import ru.kyamshanov.notepen.EraserSettings
+import ru.kyamshanov.notepen.HoldGestureTracker
 import ru.kyamshanov.notepen.MarkerSettings
 import ru.kyamshanov.notepen.PdfDrawingState
 import ru.kyamshanov.notepen.PenSettings
 import ru.kyamshanov.notepen.ToolMode
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+
+/** Длительность удержания pointer'а на месте для триггера shape-recognition (мс). */
+private const val SHAPE_SNAP_HOLD_MS: Long = 700L
+
+/** Терпимость к джиттеру при удержании — доля нормализованной ширины страницы. */
+private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
 
 /**
  * Управление вводом внутри плавающего окна лупы — теперь с поддержкой
@@ -36,12 +44,35 @@ class MagnifierInputController internal constructor(
         before: List<DrawingPath>,
         after: List<DrawingPath>,
     ) -> Unit,
+    /** Scope для таймера hold-to-snap; инжектируется из owner-composable'а. */
+    private val scope: CoroutineScope,
+    /**
+     * Provider физического аспект-рашио страницы (`pageWidthPx / pageHeightPx`).
+     * Нужен shape-recognizer'у, чтобы метрики считались в физическом
+     * пространстве, а не в нормализованных `[0..1]`.
+     */
+    private val pageAspect: (pageIndex: Int) -> Float,
 ) {
 
     private var activeErase: EraseGesture? = null
     private var activeMode: Mode = Mode.NONE
     private var activePageIndex: Int = -1
     private var activeDrawingState: PdfDrawingState? = null
+
+    private val holdTracker = HoldGestureTracker(
+        scope = scope,
+        delayMs = SHAPE_SNAP_HOLD_MS,
+        toleranceNorm = SHAPE_SNAP_TOLERANCE_NORM,
+        onHold = ::triggerShapeSnap,
+    )
+
+    private fun triggerShapeSnap() {
+        if (activeMode != Mode.DRAW) return
+        val pi = activePageIndex
+        if (pi < 0) return
+        val state = activeDrawingState ?: return
+        state.snapLiveStrokeToShape(pageAspect(pi))
+    }
 
     fun onDown(panelLocal: Offset, panelSize: Size, pressure: Float, tilt: Float) {
         val pageCanvasW = state.pageCanvasWidthPx
@@ -80,6 +111,7 @@ class MagnifierInputController internal constructor(
                     tilt = tilt,
                 )
                 activeMode = Mode.DRAW
+                holdTracker.onDown(page.x, page.y, pageAspect(segment.pageIndex))
             }
             ToolMode.ERASER -> {
                 val pi = segment.pageIndex
@@ -107,6 +139,7 @@ class MagnifierInputController internal constructor(
         when (activeMode) {
             Mode.DRAW -> if (pdfDrawingState.isDrawing.value) {
                 pdfDrawingState.addPoint(x = page.x, y = page.y, pressure = pressure, tilt = tilt)
+                holdTracker.onMove(page.x, page.y)
             }
             Mode.ERASE -> activeErase?.move(page.x, page.y)
             Mode.NONE -> Unit
@@ -114,6 +147,7 @@ class MagnifierInputController internal constructor(
     }
 
     fun onUp(panelSize: Size) {
+        holdTracker.cancel()
         when (activeMode) {
             Mode.DRAW -> finishDraw(panelSize)
             Mode.ERASE -> finishErase()
@@ -125,6 +159,7 @@ class MagnifierInputController internal constructor(
     }
 
     fun onCancel() {
+        holdTracker.cancel()
         when (activeMode) {
             Mode.DRAW -> activeDrawingState?.finishDrawing()
             Mode.ERASE -> activeErase?.cancel()

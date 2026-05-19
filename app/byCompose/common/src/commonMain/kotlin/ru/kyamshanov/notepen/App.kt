@@ -145,7 +145,7 @@ fun App(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .windowInsetsPadding(WindowInsets.navigationBars)
-                            .padding(bottom = 88.dp, end = 16.dp),
+                            .padding(bottom = 152.dp, end = 16.dp),
                         shape = CircleShape,
                         tint = indicator.container,
                     ) {

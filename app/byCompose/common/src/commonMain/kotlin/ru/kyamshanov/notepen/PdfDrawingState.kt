@@ -9,6 +9,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.shape.ShapeRecognizer
+import ru.kyamshanov.notepen.annotation.domain.shape.ShapeResampler
 
 /**
  * Запас, на который extent расширяется наружу при выходе пера за текущую
@@ -72,6 +74,14 @@ class PdfDrawingState {
      */
     val eraserPos = mutableStateOf<Offset?>(null)
 
+    /**
+     * `true`, если активный штрих уже был «снапнут» в фигуру (см.
+     * [snapLiveStrokeToShape]). После снапа [addPoint] игнорирует новые
+     * сэмплы до конца жеста — пользователь не может «утащить» снапнутый
+     * штрих движением пера до lift-off.
+     */
+    private var gestureSnapped: Boolean = false
+
     /** Bump [historyVersion] to invalidate caches keyed on completed-stroke content. */
     fun markHistoryChanged() {
         historyVersion.value++
@@ -115,6 +125,7 @@ class PdfDrawingState {
         tilt: Float = 0f,
     ) {
         isDrawing.value = true
+        gestureSnapped = false
         liveColorArgb.value = strokeColorArgb.value
         liveStrokeWidth.value = normalizedStrokeWidth
         livePoints.clear()
@@ -123,10 +134,37 @@ class PdfDrawingState {
     }
 
     fun addPoint(x: Float, y: Float, pressure: Float = 1f, tilt: Float = 0f) {
-        if (isDrawing.value) {
+        if (isDrawing.value && !gestureSnapped) {
             livePoints.add(DrawingPoint(x, y, pressure = pressure, tilt = tilt))
             growExtentToInclude(x, y)
         }
+    }
+
+    /**
+     * Пробует распознать активный live-штрих как геометрическую фигуру
+     * (см. [ShapeRecognizer]) и, в случае успеха, заменить `livePoints`
+     * плотной выборкой этой фигуры. После успешного снапа дальнейшие
+     * [addPoint] игнорируются до следующего [startDrawing].
+     *
+     * @param pageAspect отношение `pageWidthPx / pageHeightPx` страницы,
+     *   на которой ведётся штрих — нужно, чтобы метрики (длины, радиусы)
+     *   считались в физическом пространстве, а не в нормализованных
+     *   `[0..1]` (иначе круг на A4 выглядит эллипсом).
+     * @return `true`, если штрих был заменён фигурой.
+     */
+    fun snapLiveStrokeToShape(pageAspect: Float): Boolean {
+        if (!isDrawing.value || gestureSnapped || livePoints.size < 2) return false
+        val snapshot = livePoints.toList()
+        val shape = ShapeRecognizer.recognize(snapshot, pageAspect) ?: return false
+        val avgPressure = snapshot.fold(0f) { acc, p -> acc + p.pressure } / snapshot.size
+        val avgTilt = snapshot.fold(0f) { acc, p -> acc + p.tilt } / snapshot.size
+        val replacement = ShapeResampler.toPoints(shape, avgPressure, avgTilt)
+        livePoints.clear()
+        livePoints.addAll(replacement)
+        gestureSnapped = true
+        for (p in replacement) growExtentToInclude(p.x, p.y)
+        markHistoryChanged()
+        return true
     }
 
     fun finishDrawing(): DrawingPath? {
@@ -143,6 +181,7 @@ class PdfDrawingState {
             null
         }
         isDrawing.value = false
+        gestureSnapped = false
         livePoints.clear()
         return completed
     }

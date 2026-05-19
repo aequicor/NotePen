@@ -419,6 +419,66 @@ class MagnifierState {
         alignPanelAspectToTarget()
     }
 
+    /**
+     * Масштабирует `targetOnPage` вокруг фокусной точки [focusPanelLocal]
+     * (в локальных координатах content-области панели). [scaleFactor] > 1
+     * → меньше rect → выше зум (pinch-out). Page-normalized координата под
+     * фокусом сохраняется. Single-page only; multi-page — no-op.
+     *
+     * Aspect-ratio после масштабирования выравнивается под текущий
+     * `panelSize` через [alignTargetAspectToPanel] — pinch управляет
+     * шириной, высота подстраивается.
+     */
+    fun zoomTargetAroundPanelFocus(
+        scaleFactor: Float,
+        focusPanelLocal: Offset,
+        panelSize: Size,
+    ) {
+        if (segments.size != 1) return
+        if (scaleFactor <= 0f || !scaleFactor.isFinite()) return
+        if (panelSize.width <= 0f || panelSize.height <= 0f) return
+        val s = segments[0]
+        val r = s.targetOnPage
+        val tw = r.right - r.left
+        val th = r.bottom - r.top
+        if (tw <= 0f || th <= 0f) return
+
+        val fx = (focusPanelLocal.x / panelSize.width).coerceIn(0f, 1f)
+        val fy = (focusPanelLocal.y / panelSize.height).coerceIn(0f, 1f)
+        val anchorX = r.left + fx * tw
+        val anchorY = r.top + fy * th
+
+        val newW = (tw / scaleFactor).coerceIn(MIN_TARGET_DIM, 1f)
+        val newH = (th / scaleFactor).coerceIn(MIN_TARGET_DIM, 1f)
+        val newLeft = anchorX - fx * newW
+        val newTop = anchorY - fy * newH
+        val clamped = clampTargetToPage(
+            Rect(newLeft, newTop, newLeft + newW, newTop + newH),
+        )
+        segments = listOf(s.copy(targetOnPage = clamped))
+        alignTargetAspectToPanel()
+    }
+
+    /**
+     * Сдвинуть `targetOnPage` на [deltaPanelPx] (panel-pixel дельту),
+     * пересчитав её в page-normalized с учётом текущих `panelSize` и
+     * `targetOnPage`. Single-page only.
+     */
+    fun panTargetByPanelPx(deltaPanelPx: Offset, panelSize: Size) {
+        if (segments.size != 1) return
+        if (panelSize.width <= 0f || panelSize.height <= 0f) return
+        val r = segments[0].targetOnPage
+        val tw = r.right - r.left
+        val th = r.bottom - r.top
+        if (tw <= 0f || th <= 0f) return
+        moveTarget(
+            Offset(
+                x = deltaPanelPx.x / panelSize.width * tw,
+                y = deltaPanelPx.y / panelSize.height * th,
+            ),
+        )
+    }
+
     /** Сдвинуть плавающую панель на [delta] (viewport-пиксели). */
     fun movePanel(delta: Offset) {
         panelTopLeft = panelTopLeft + delta
