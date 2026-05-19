@@ -674,7 +674,6 @@ fun DetailsContent(
         val eraserSettingsProvider = rememberUpdatedState(eraserSettings)
         val eraserOverrideProvider = rememberUpdatedState(eraserOverride)
         val pencilModeProvider = rememberUpdatedState(pencilModeEnabled)
-        val stylusEverSeenProvider = rememberUpdatedState(stylusEverSeen)
         val syncEngineProvider = rememberUpdatedState(syncEngine)
         val drawingController = remember(pdfViewerState, drawingStates, magnifierState) {
             MultiPageDrawingController(
@@ -715,9 +714,16 @@ fun DetailsContent(
                 scope = coroutineScope,
             )
         }
-        val palmRejectionActive = remember {
-            { pencilModeProvider.value || stylusEverSeenProvider.value }
-        }
+        // Palm-rejection держим **только** на pencilModeEnabled — единый гейт,
+        // которым управляет пользователь (включая ручной toggle off). Раньше
+        // здесь был `|| stylusEverSeenProvider.value`, но `stylusEverSeen`
+        // защёлкивается на первом stylus-событии и снимается только через
+        // 25 с тишины пера → после первого касания пера палец навсегда
+        // переставал рисовать, даже если пользователь руками выключил
+        // Pencil Mode. Авто-включение Pencil Mode по `stylusEverSeen`
+        // остаётся в `LaunchedEffect` выше — практическое поведение для
+        // авто-сценария то же, а ручной off наконец-то реально работает.
+        val palmRejectionActive = remember { { pencilModeProvider.value } }
 
         // --- Loupe shortcut routing -------------------------------------
         // Биндинг активен, если ВСЕ его элементы зажаты одновременно. Пустой

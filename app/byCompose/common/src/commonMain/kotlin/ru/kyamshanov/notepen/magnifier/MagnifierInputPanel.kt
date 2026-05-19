@@ -330,10 +330,14 @@ private fun MagnifierContent(
                 val panelW = size.width.toFloat()
                 val panelH = size.height.toFloat()
                 val panelSizeF = Size(panelW, panelH)
-                val stylusEverSeen = tablet.stylusEverSeen
                 detectStylusAwareDrag(
                     tablet = tablet,
-                    isPalmRejectionActive = { pencilModeState.value || stylusEverSeen.value },
+                    // Гейт palm-rejection — только pencil mode, без
+                    // защёлки `stylusEverSeen`: иначе после первого касания
+                    // пера палец навсегда переставал писать внутри лупы,
+                    // даже когда pencil mode выключен. См. зеркальную правку
+                    // в DetailsContent.kt.
+                    isPalmRejectionActive = { pencilModeState.value },
                     onDown = { offset, pressure, tilt ->
                         externalInputController?.onDown(offset, panelSizeF, pressure, tilt)
                     },
