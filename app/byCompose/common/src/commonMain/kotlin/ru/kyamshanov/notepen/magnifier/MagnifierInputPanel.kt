@@ -199,13 +199,6 @@ fun MagnifierInputPanel(
                             },
                         )
                     }
-                    IconButton(onClick = onClose) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Закрыть лупу",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
                 }
 
                 // Содержимое (увеличенная область страницы + штрихи + ввод).
@@ -249,6 +242,22 @@ fun MagnifierInputPanel(
                         },
                 )
             }
+        }
+
+        // Кнопка закрытия — плавающая в правом нижнем углу панели (удобнее
+        // дотягиваться большим пальцем, чем до титул-бара сверху). Отодвинута
+        // вверх от resize-хэндла, чтобы тач-таргеты не пересекались.
+        IconButton(
+            onClick = onClose,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .offset(x = (-4).dp, y = -(RESIZE_HANDLE_DP + 4.dp)),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Close,
+                contentDescription = "Закрыть лупу",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }
@@ -304,7 +313,10 @@ private fun MagnifierContent(
             .then(
                 if (SupportsPanelGestureZoom) {
                     Modifier.pointerInput(state) {
-                        detectPanelTransformGestures(state)
+                        detectPanelTransformGestures(
+                            state = state,
+                            pencilModeEnabled = { pencilModeState.value },
+                        )
                     }
                 } else {
                     Modifier
@@ -768,15 +780,18 @@ private fun buildMagnifierCompletedLayer(
 }
 
 /**
- * Two-finger pinch + pan жест внутри content-области панели лупы.
+ * Pinch/pan жест внутри content-области панели лупы.
  *
- * Single-finger touch не консумится — пролетает дальше по modifier-chain'у в
- * stylus-aware drag и используется как обычное письмо. Как только в gesture
- * приходит ≥2 нажатых указателя, мы переключаемся в transform-режим: считаем
- * центроид и среднее расстояние между пальцами, на каждом тике применяем
- * дельту масштаба к [MagnifierState.zoomTargetAroundPanelFocus] и
- * panel-pixel дельту центроида (со сменой знака — content-follows-fingers,
- * как в Maps / photo viewer'ах) к [MagnifierState.panTargetByPanelPx].
+ * Двухпальцевый pinch + pan работает всегда: ≥2 указателя — масштабируем
+ * через [MagnifierState.zoomTargetAroundPanelFocus] и панорамируем рамку через
+ * [MagnifierState.panTargetByPanelPx] по дельте центроида (со сменой знака —
+ * content-follows-fingers, как в Maps / photo viewer'ах).
+ *
+ * Однопальцевый touch в обычном режиме не консумится — пролетает в
+ * stylus-aware drag ниже и используется как обычное письмо. Но когда включён
+ * **pencil mode** (`pencilModeEnabled() == true`), палец заведомо не пишет
+ * (palm rejection), поэтому один палец = панорама рамки лупы. Это удобнее
+ * двухпальцевого жеста, когда вторая рука держит стилус.
  *
  * Подключается условно — только на платформах с [SupportsPanelGestureZoom]
  * (Android). На desktop'е роль pinch/pan играют мышь+drag рамки на странице
@@ -784,20 +799,41 @@ private fun buildMagnifierCompletedLayer(
  */
 private suspend fun PointerInputScope.detectPanelTransformGestures(
     state: MagnifierState,
+    pencilModeEnabled: () -> Boolean,
 ) {
     awaitEachGesture {
         awaitFirstDown(requireUnconsumed = false)
         var inTransform = false
+        var inSinglePan = false
         var lastCentroid = Offset.Zero
         var lastDistance = 0f
+        var lastSinglePos = Offset.Zero
         while (true) {
             val event = awaitPointerEvent()
             val pressed = event.changes.filter { it.pressed }
             if (pressed.isEmpty()) break
+            val panelSize = Size(size.width.toFloat(), size.height.toFloat())
             if (pressed.size < 2) {
+                // Single-pointer ветка: pan только если включён pencil mode
+                // (палец гарантированно не пишет — palm rejection).
                 inTransform = false
+                if (!pencilModeEnabled()) {
+                    inSinglePan = false
+                    continue
+                }
+                val p = pressed.first()
+                if (inSinglePan) {
+                    val pan = p.position - lastSinglePos
+                    if (pan != Offset.Zero) {
+                        state.panTargetByPanelPx(-pan, panelSize)
+                    }
+                }
+                lastSinglePos = p.position
+                inSinglePan = true
+                p.consume()
                 continue
             }
+            inSinglePan = false
             var sx = 0f
             var sy = 0f
             pressed.forEach {
@@ -808,7 +844,6 @@ private suspend fun PointerInputScope.detectPanelTransformGestures(
             var distSum = 0f
             pressed.forEach { distSum += (it.position - centroid).getDistance() }
             val avgDist = distSum / pressed.size
-            val panelSize = Size(size.width.toFloat(), size.height.toFloat())
             if (inTransform) {
                 val scale = if (lastDistance > 0f && avgDist > 0f) {
                     avgDist / lastDistance
