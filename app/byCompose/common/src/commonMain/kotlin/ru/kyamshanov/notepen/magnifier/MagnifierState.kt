@@ -123,27 +123,57 @@ class MagnifierState {
     // --- mutators -----------------------------------------------------------
 
     /**
-     * Включить лупу на странице [onPage], разместив рамку и панель по
-     * умолчанию. [viewportSize] нужен, чтобы припарковать панель внизу
-     * экрана.
+     * Включить лупу из тулбара. Окно — 1/3 viewport (квадрат) в правом нижнем
+     * углу. Рамка — посередине [targetCenterOnPage] (передаётся вызывающим;
+     * обычно центр текущего видимого viewport'а). Aspect рамки выбирается
+     * так, чтобы её page-pixel размер точно совпадал с aspect панели — без
+     * искажений рендеринга.
      */
-    fun enable(onPage: Int, viewportSize: Size) {
+    fun enable(
+        onPage: Int,
+        viewportSize: Size,
+        targetCenterOnPage: Offset = Offset(0.5f, 0.5f),
+    ) {
+        // Квадратное окно лупы — комфортнее для письма, и совпадает с
+        // квадратной (в page-pixels) дефолтной рамкой.
+        val panelSide = minOf(viewportSize.width * 0.3f, viewportSize.height * 0.5f)
+            .coerceAtLeast(MIN_USABLE_PANEL_W_PX)
+        panelSize = Size(panelSide, panelSide)
+        // Слева от PDF, по центру по вертикали.
+        panelTopLeft = Offset(
+            x = PANEL_BOTTOM_MARGIN_PX,
+            y = ((viewportSize.height - panelSide) / 2f).coerceAtLeast(0f),
+        )
+
+        // target.W/target.H × pageAspect = panel.W/panel.H
+        // → target.H = target.W × pageAspect × panel.H/panel.W
+        // Для квадратной панели panel.H/panel.W = 1, поэтому target.H = target.W × pageAspect.
+        // В page-pixels это даёт квадратную рамку (target.W × basePageW = target.H × pdfH).
+        val targetWidthN = TOOLBAR_DEFAULT_TARGET_WIDTH_FRAC
+        val targetHeightN = (targetWidthN * pageAspect * panelSide / panelSide)
+            .coerceIn(MIN_TARGET_DIM, 1f)
+        val safeWidthN = targetWidthN.coerceIn(MIN_TARGET_DIM, 1f)
+        val left = (targetCenterOnPage.x - safeWidthN / 2f).coerceIn(0f, 1f - safeWidthN)
+        val top = (targetCenterOnPage.y - targetHeightN / 2f).coerceIn(0f, 1f - targetHeightN)
+
         segments = listOf(
             MagnifierPageSegment(
                 pageIndex = onPage,
-                targetOnPage = DEFAULT_TARGET,
+                targetOnPage = Rect(left, top, left + safeWidthN, top + targetHeightN),
                 panelTopFrac = 0f,
                 panelBottomFrac = 1f,
             ),
         )
-        val panelW = (viewportSize.width * 0.6f).coerceAtLeast(MIN_PANEL_DIM_PX)
-        val panelH = panelW * DEFAULT_TARGET.height / DEFAULT_TARGET.width
-        panelSize = Size(panelW, panelH)
-        panelTopLeft = Offset(
-            x = (viewportSize.width - panelW) * 0.5f,
-            y = (viewportSize.height - panelH - PANEL_BOTTOM_MARGIN_PX).coerceAtLeast(0f),
-        )
         enabled = true
+    }
+
+    /**
+     * Перепривязать single-page рамку к (возможно другой) странице с новым
+     * прямоугольником. Используется при cross-page move рамки.
+     */
+    fun setSingleSegmentTarget(pageIndex: Int, targetOnPage: Rect) {
+        if (segments.size != 1) return
+        segments = listOf(segments[0].copy(pageIndex = pageIndex, targetOnPage = targetOnPage))
     }
 
     /**
@@ -405,6 +435,9 @@ class MagnifierState {
 
         /** Минимальная высота окна лупы. */
         const val MIN_USABLE_PANEL_H_PX: Float = 120f
+
+        /** Дефолтная ширина рамки (page-normalized) для тулбар-enable. */
+        const val TOOLBAR_DEFAULT_TARGET_WIDTH_FRAC: Float = 0.25f
 
         internal val DEFAULT_TARGET = Rect(0.4f, 0.4f, 0.6f, 0.45f)
         internal val DEFAULT_PANEL_SIZE = Size(800f, 200f)
