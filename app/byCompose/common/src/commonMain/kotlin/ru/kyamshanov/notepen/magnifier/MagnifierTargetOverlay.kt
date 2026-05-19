@@ -25,23 +25,24 @@ import androidx.compose.ui.input.pointer.pointerInput
 @Composable
 fun MagnifierTargetOverlay(
     state: MagnifierState,
+    pageIndex: Int,
     frameColor: Color,
     modifier: Modifier = Modifier,
 ) {
-    // Mode выбирается на onDragStart и удерживается на протяжении одного
-    // жеста. Используем массив-однотрюк, чтобы не тащить mutableStateOf
-    // (значение не нужно наблюдать рекомпозицией).
+    val segment = state.segments.firstOrNull { it.pageIndex == pageIndex } ?: return
+    val isSinglePage = state.segments.size == 1
     val dragModeRef = remember { arrayOf(DragMode.Move) }
     Canvas(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(state) {
+            .pointerInput(state, pageIndex) {
+                if (!isSinglePage) return@pointerInput
                 detectDragGestures(
                     onDragStart = { offset ->
                         if (size.width <= 0 || size.height <= 0) return@detectDragGestures
                         val nx = offset.x / size.width
                         val ny = offset.y / size.height
-                        val r = state.targetRect
+                        val r = segment.targetOnPage
                         val nearRight = nx in (r.right - RESIZE_HANDLE_FRAC)..(r.right + RESIZE_HANDLE_FRAC)
                         val nearBottom = ny in (r.bottom - RESIZE_HANDLE_FRAC)..(r.bottom + RESIZE_HANDLE_FRAC)
                         dragModeRef[0] = if (nearRight && nearBottom) DragMode.Resize else DragMode.Move
@@ -53,7 +54,7 @@ fun MagnifierTargetOverlay(
                         when (dragModeRef[0]) {
                             DragMode.Move -> state.moveTarget(Offset(dxN, dyN))
                             DragMode.Resize -> {
-                                val r = state.targetRect
+                                val r = segment.targetOnPage
                                 state.resizeTarget(
                                     newWidth = (r.right - r.left + dxN).coerceAtLeast(MIN_TARGET_DIM),
                                     newHeight = (r.bottom - r.top + dyN).coerceAtLeast(MIN_TARGET_DIM),
@@ -65,7 +66,7 @@ fun MagnifierTargetOverlay(
                 )
             },
     ) {
-        val r = state.targetRect
+        val r = segment.targetOnPage
         val left = r.left * size.width
         val top = r.top * size.height
         val w = (r.right - r.left) * size.width
@@ -86,13 +87,16 @@ fun MagnifierTargetOverlay(
                 pathEffect = PathEffect.dashPathEffect(DASH_INTERVALS),
             ),
         )
-        // Маркер ресайз-хэндла в правом-нижнем углу.
-        val handle = RESIZE_HANDLE_FRAC * size.width
-        drawRect(
-            color = frameColor,
-            topLeft = Offset(left + w - handle, top + h - handle),
-            size = Size(handle, handle),
-        )
+        // Маркер ресайз-хэндла — только для single-page (multi-page рамку
+        // в этой версии нельзя интерактивно ресайзить).
+        if (isSinglePage) {
+            val handle = RESIZE_HANDLE_FRAC * size.width
+            drawRect(
+                color = frameColor,
+                topLeft = Offset(left + w - handle, top + h - handle),
+                size = Size(handle, handle),
+            )
+        }
     }
 }
 

@@ -30,6 +30,18 @@ interface TabletInputController {
     val barrelPressed: StateFlow<Boolean>
 
     /**
+     * Текущий набор зажатых кнопок стилуса как множество битовых индексов
+     * (1..N) — у разных моделей пера может быть 1, 2 или больше кнопок.
+     * Пустое множество при отсутствии стилуса.
+     *
+     * Используется системой шорткатов, чтобы биндить произвольные кнопки
+     * (не только традиционный «barrel»). Для платформ без поддержки —
+     * пустой StateFlow.
+     */
+    val penButtons: StateFlow<Set<Int>>
+        get() = NoOpPenButtons
+
+    /**
      * `true` while the pen is touching the screen with its eraser tip
      * (e.g. flipped S-Pen). UI uses this to override the active tool with
      * ERASER, mirroring the barrel-button hold-to-erase behaviour.
@@ -110,6 +122,8 @@ data class PenPointerEvent(
 
 private val NoOpPenPointerEvents: SharedFlow<PenPointerEvent> =
     MutableSharedFlow<PenPointerEvent>(extraBufferCapacity = 0).asSharedFlow()
+
+private val NoOpPenButtons: StateFlow<Set<Int>> = MutableStateFlow(emptySet())
 
 /** Fallback controller for platforms without tablet support. */
 object NoOpTabletInputController : TabletInputController {

@@ -33,8 +33,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -73,17 +76,28 @@ private const val FRAME_FILL_ALPHA = 0.10f
 @Composable
 fun MagnifierInputPanel(
     state: MagnifierState,
-    pdfDrawingState: PdfDrawingState,
+    pdfDrawingStateProvider: (pageIndex: Int) -> PdfDrawingState,
     toolMode: ToolMode,
     penSettings: PenSettings,
     markerSettings: MarkerSettings,
     eraserSettings: EraserSettings,
     eraserOverride: () -> Boolean,
     pencilModeEnabled: Boolean,
-    onGestureStart: (snapshot: List<DrawingPath>) -> Unit,
-    onStrokeFinished: (path: DrawingPath) -> Unit,
-    onEraseFinished: (before: List<DrawingPath>, after: List<DrawingPath>) -> Unit,
+    onGestureStart: (pageIndex: Int, snapshot: List<DrawingPath>) -> Unit,
+    onStrokeFinished: (pageIndex: Int, path: DrawingPath) -> Unit,
+    onEraseFinished: (
+        pageIndex: Int,
+        before: List<DrawingPath>,
+        after: List<DrawingPath>,
+    ) -> Unit,
     onClose: () -> Unit,
+    /**
+     * Внешний контроллер ввода для нативного pen-stream'а (`WindowsPointerHook`).
+     * Compose `pointerInput` его не видит, поэтому контроллер вызывается
+     * напрямую из `DetailsContent`. Если `null` — панель работает только
+     * с мышью/touch'ем через свой собственный `pointerInput`.
+     */
+    externalInputController: MagnifierInputController? = null,
 ) {
     if (!state.enabled) return
 
@@ -163,7 +177,7 @@ fun MagnifierInputPanel(
                 // Содержимое (увеличенная область страницы + штрихи + ввод).
                 MagnifierContent(
                     state = state,
-                    pdfDrawingState = pdfDrawingState,
+                    pdfDrawingStateProvider = pdfDrawingStateProvider,
                     toolMode = toolMode,
                     penSettings = penSettings,
                     markerSettings = markerSettings,
@@ -175,6 +189,7 @@ fun MagnifierInputPanel(
                     onStrokeFinished = onStrokeFinished,
                     onEraseFinished = onEraseFinished,
                     tablet = tablet,
+                    externalInputController = externalInputController,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
@@ -209,7 +224,7 @@ private val RESIZE_HANDLE_DP = 16.dp
 @Composable
 private fun MagnifierContent(
     state: MagnifierState,
-    pdfDrawingState: PdfDrawingState,
+    pdfDrawingStateProvider: (pageIndex: Int) -> PdfDrawingState,
     toolMode: ToolMode,
     penSettings: PenSettings,
     markerSettings: MarkerSettings,
@@ -217,10 +232,11 @@ private fun MagnifierContent(
     eraserOverride: () -> Boolean,
     pencilModeState: androidx.compose.runtime.State<Boolean>,
     eraserPos: androidx.compose.runtime.MutableState<Offset?>,
-    onGestureStart: (List<DrawingPath>) -> Unit,
-    onStrokeFinished: (DrawingPath) -> Unit,
-    onEraseFinished: (List<DrawingPath>, List<DrawingPath>) -> Unit,
+    onGestureStart: (Int, List<DrawingPath>) -> Unit,
+    onStrokeFinished: (Int, DrawingPath) -> Unit,
+    onEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit,
     tablet: ru.kyamshanov.notepen.tablet.TabletInputController,
+    externalInputController: MagnifierInputController?,
     modifier: Modifier = Modifier,
 ) {
     val livePath = remember { Path() }
@@ -230,145 +246,76 @@ private fun MagnifierContent(
     Canvas(
         modifier = modifier
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .pointerInput(toolMode, penSettings, markerSettings, eraserSettings, state) {
+            .onGloballyPositioned { coords ->
+                state.updateContentBounds(coords.boundsInWindow())
+            }
+            .pointerInput(
+                toolMode, penSettings, markerSettings, eraserSettings,
+                state, externalInputController,
+            ) {
                 val panelW = size.width.toFloat()
                 val panelH = size.height.toFloat()
                 val panelSizeF = Size(panelW, panelH)
-                var activeErase: EraseGesture? = null
-
                 val stylusEverSeen = tablet.stylusEverSeen
                 detectStylusAwareDrag(
                     tablet = tablet,
                     isPalmRejectionActive = { pencilModeState.value || stylusEverSeen.value },
                     onDown = { offset, pressure, tilt ->
-                        val pageCanvasW = state.pageCanvasWidthPx
-                        if (pageCanvasW > 0f && panelW > 0f && panelH > 0f) {
-                            val page = panelLocalToPageNormalized(offset, panelSizeF, state.targetRect)
-                            val effectiveTool = if (eraserOverride()) ToolMode.ERASER else toolMode
-                            when (effectiveTool) {
-                                ToolMode.PEN, ToolMode.MARKER -> {
-                                    val widthPx = if (effectiveTool == ToolMode.PEN) {
-                                        penSettings.strokeWidth
-                                    } else {
-                                        markerSettings.strokeWidth
-                                    }
-                                    val colorArgb = if (effectiveTool == ToolMode.PEN) {
-                                        penSettings.colorArgb
-                                    } else {
-                                        markerSettings.colorArgb
-                                    }
-                                    onGestureStart(pdfDrawingState.currentPaths.toList())
-                                    pdfDrawingState.strokeColorArgb.value = colorArgb
-                                    pdfDrawingState.strokeWidth.value = widthPx
-                                    pdfDrawingState.startDrawing(
-                                        x = page.x,
-                                        y = page.y,
-                                        normalizedStrokeWidth = widthPx / pageCanvasW,
-                                        pressure = pressure,
-                                        tilt = tilt,
-                                    )
-                                }
-                                ToolMode.ERASER -> {
-                                    activeErase = EraseGesture(
-                                        pdfDrawingState = pdfDrawingState,
-                                        eraserSettings = eraserSettings,
-                                        eraserPos = eraserPos,
-                                        onGestureStart = onGestureStart,
-                                        onEraseFinished = onEraseFinished,
-                                    ).also { it.start(page.x, page.y) }
-                                }
-                                ToolMode.NONE -> Unit
-                            }
-                        }
+                        externalInputController?.onDown(offset, panelSizeF, pressure, tilt)
                     },
                     onMove = { offset, pressure, tilt ->
-                        if (panelW > 0f && panelH > 0f) {
-                            val page = panelLocalToPageNormalized(offset, panelSizeF, state.targetRect)
-                            val erase = activeErase
-                            if (erase != null) {
-                                erase.move(page.x, page.y)
-                            } else if (pdfDrawingState.isDrawing.value) {
-                                pdfDrawingState.addPoint(
-                                    x = page.x,
-                                    y = page.y,
-                                    pressure = pressure,
-                                    tilt = tilt,
-                                )
-                            }
-                        }
+                        externalInputController?.onMove(offset, panelSizeF, pressure, tilt)
                     },
-                    onUp = {
-                        val erase = activeErase
-                        if (erase != null) {
-                            erase.end()
-                            activeErase = null
-                        } else {
-                            val completed = pdfDrawingState.finishDrawing()
-                            if (completed != null) {
-                                onStrokeFinished(completed)
-                                if (state.autoScrollEnabled) {
-                                    val last = completed.points.lastOrNull()
-                                    if (last != null) {
-                                        val panelLocal = pageNormalizedToPanelLocal(
-                                            Offset(last.x, last.y),
-                                            panelSizeF,
-                                            state.targetRect,
-                                        )
-                                        if (panelLocal.x > panelW * AUTO_SCROLL_TRIGGER_FRAC) {
-                                            state.shiftTargetForAutoscroll(AutoScrollDir.RIGHT)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    onCancel = {
-                        val erase = activeErase
-                        if (erase != null) {
-                            erase.cancel()
-                            activeErase = null
-                        } else {
-                            pdfDrawingState.finishDrawing()
-                        }
-                    },
+                    onUp = { externalInputController?.onUp(panelSizeF) },
+                    onCancel = { externalInputController?.onCancel() },
                 )
             },
     ) {
-        // PDF тайл из исходного битмапа страницы.
-        val bmp = state.pageBitmap
-        val target = state.targetRect
-        if (bmp != null) {
-            val srcOffsetX = (target.left * bmp.width).toInt().coerceAtLeast(0)
-            val srcOffsetY = (target.top * bmp.height).toInt().coerceAtLeast(0)
-            val srcW = ((target.right - target.left) * bmp.width).toInt()
-                .coerceAtLeast(1)
-                .coerceAtMost(bmp.width - srcOffsetX)
-            val srcH = ((target.bottom - target.top) * bmp.height).toInt()
-                .coerceAtLeast(1)
-                .coerceAtMost(bmp.height - srcOffsetY)
-            drawImage(
-                image = bmp,
-                srcOffset = IntOffset(srcOffsetX, srcOffsetY),
-                srcSize = IntSize(srcW, srcH),
-                dstOffset = IntOffset.Zero,
-                dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-            )
-        }
+        val segments = state.segments
+        if (segments.isEmpty()) return@Canvas
 
-        // Завершённые штрихи и live stroke в page-normalized → мап через scale + translate.
-        val tw = target.right - target.left
-        val th = target.bottom - target.top
-        if (tw > 0f && th > 0f) {
-            val virtW = size.width / tw
-            val virtH = size.height / th
+        val panelW = size.width
+        val panelH = size.height
+        val noExtent = ru.kyamshanov.notepen.annotation.domain.model.PageExtent.Pdf
+
+        // Рендерим каждый сегмент в свою «полосу» панели:
+        //  - PDF-тайл из соответствующего битмапа;
+        //  - завершённые и live штрихи этой страницы.
+        segments.forEach { seg ->
+            val segTop = seg.panelTopFrac * panelH
+            val segBottom = seg.panelBottomFrac * panelH
+            val segH = (segBottom - segTop).coerceAtLeast(0f)
+            if (segH <= 0f) return@forEach
+            val target = seg.targetOnPage
+            val tw = target.right - target.left
+            val th = target.bottom - target.top
+            if (tw <= 0f || th <= 0f) return@forEach
+
+            val bmp = state.pageBitmap(seg.pageIndex)
+            if (bmp != null) {
+                val srcOffsetX = (target.left * bmp.width).toInt().coerceAtLeast(0)
+                val srcOffsetY = (target.top * bmp.height).toInt().coerceAtLeast(0)
+                val srcW = (tw * bmp.width).toInt()
+                    .coerceAtLeast(1).coerceAtMost(bmp.width - srcOffsetX)
+                val srcH = (th * bmp.height).toInt()
+                    .coerceAtLeast(1).coerceAtMost(bmp.height - srcOffsetY)
+                drawImage(
+                    image = bmp,
+                    srcOffset = IntOffset(srcOffsetX, srcOffsetY),
+                    srcSize = IntSize(srcW, srcH),
+                    dstOffset = IntOffset(0, segTop.toInt()),
+                    dstSize = IntSize(panelW.toInt(), segH.toInt()),
+                )
+            }
+
+            // Штрихи: clip к полосе сегмента, чтобы соседи не пересекались.
+            val virtW = panelW / tw
+            val virtH = segH / th
             withTransform({
-                translate(left = -target.left * virtW, top = -target.top * virtH)
+                clipRect(left = 0f, top = segTop, right = panelW, bottom = segBottom)
+                translate(left = -target.left * virtW, top = segTop - target.top * virtH)
             }) {
-                // Magnifier render target — в чистых PDF-page координатах,
-                // поэтому extent = Pdf (никакого extent-сдвига внутри draw
-                // функций). Смещение под target.left/top уже сделано
-                // withTransform выше.
-                val noExtent = ru.kyamshanov.notepen.annotation.domain.model.PageExtent.Pdf
+                val pdfDrawingState = pdfDrawingStateProvider(seg.pageIndex)
                 pdfDrawingState.currentPaths.forEach { path ->
                     drawStrokeWithPressure(
                         stroke = path,
@@ -392,42 +339,47 @@ private fun MagnifierContent(
             }
         }
 
-        // Индикатор ластика.
+        // Индикатор ластика — рисуем по первому сегменту (multi-page eraser
+        // hover-индикация — отдельный кейс, не критичный для v1).
         val ePos = eraserPos.value
-        if (toolMode == ToolMode.ERASER && ePos != null) {
-            val panelPos = pageNormalizedToPanelLocal(
-                Offset(ePos.x, ePos.y),
-                Size(size.width, size.height),
-                target,
-            )
-            val sizePx = eraserSettings.sizeNormalized * size.width / (target.right - target.left)
-            val halfPx = sizePx / 2f
-            when (eraserSettings.shape) {
-                EraserShape.CIRCLE -> {
-                    drawCircle(
-                        color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
-                        radius = halfPx,
-                        center = panelPos,
-                    )
-                    drawCircle(
-                        color = frameColor,
-                        radius = halfPx,
-                        center = panelPos,
-                        style = Stroke(width = 2f),
-                    )
-                }
-                EraserShape.SQUARE -> {
-                    drawRect(
-                        color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
-                        topLeft = Offset(panelPos.x - halfPx, panelPos.y - halfPx),
-                        size = Size(sizePx, sizePx),
-                    )
-                    drawRect(
-                        color = frameColor,
-                        topLeft = Offset(panelPos.x - halfPx, panelPos.y - halfPx),
-                        size = Size(sizePx, sizePx),
-                        style = Stroke(width = 2f),
-                    )
+        if (toolMode == ToolMode.ERASER && ePos != null && segments.isNotEmpty()) {
+            val seg = segments.first()
+            val target = seg.targetOnPage
+            val tw = target.right - target.left
+            if (tw > 0f) {
+                val segTop = seg.panelTopFrac * panelH
+                val segH = (seg.panelBottomFrac - seg.panelTopFrac) * panelH
+                val px = (ePos.x - target.left) / tw * panelW
+                val py = segTop + (ePos.y - target.top) / (target.bottom - target.top) * segH
+                val sizePx = eraserSettings.sizeNormalized * panelW / tw
+                val halfPx = sizePx / 2f
+                when (eraserSettings.shape) {
+                    EraserShape.CIRCLE -> {
+                        drawCircle(
+                            color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
+                            radius = halfPx,
+                            center = Offset(px, py),
+                        )
+                        drawCircle(
+                            color = frameColor,
+                            radius = halfPx,
+                            center = Offset(px, py),
+                            style = Stroke(width = 2f),
+                        )
+                    }
+                    EraserShape.SQUARE -> {
+                        drawRect(
+                            color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
+                            topLeft = Offset(px - halfPx, py - halfPx),
+                            size = Size(sizePx, sizePx),
+                        )
+                        drawRect(
+                            color = frameColor,
+                            topLeft = Offset(px - halfPx, py - halfPx),
+                            size = Size(sizePx, sizePx),
+                            style = Stroke(width = 2f),
+                        )
+                    }
                 }
             }
         }

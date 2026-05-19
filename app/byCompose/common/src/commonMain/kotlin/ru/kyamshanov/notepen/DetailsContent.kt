@@ -9,6 +9,7 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,8 +95,12 @@ import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
 import ru.kyamshanov.notepen.magnifier.MagnifierInputPanel
 import ru.kyamshanov.notepen.magnifier.MagnifierState
+import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
+import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
+import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.pdfviewer.rememberPdfViewerState
@@ -106,6 +111,9 @@ import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
 
 private val logger = KotlinLogging.logger {}
+
+/** Куда роутится текущий активный pointer-жест в DetailsContent. */
+private enum class GestureRoute { NONE, DRAWING, LOUPE, MAGNIFIER }
 
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 
@@ -195,14 +203,25 @@ fun DetailsContent(
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     val tabletController = LocalTabletInputController.current
     val barrelPressed by tabletController.barrelPressed.collectAsState()
+    val penButtonsPressed by tabletController.penButtons.collectAsState()
     val eraserTipActive by tabletController.eraserTipActive.collectAsState()
+    val shortcutsSettingsState = rememberShortcutsSettings()
+    val shortcutsSettings = shortcutsSettingsState.value
     // Hold-to-erase: while the pen's barrel button is held *or* the eraser tip
     // is touching the screen (e.g. flipped S-Pen), override the active tool
     // with ERASER. Releasing either returns to the user-selected tool. Because
     // `toolMode` is a key of `pointerInput` in DrawablePdfPage, the gesture
     // handler restarts on the override flip — any in-flight stroke is finalised
     // cleanly via the existing `LaunchedEffect(toolMode)` path.
-    val eraserOverride = barrelPressed || eraserTipActive
+    // Если пользователь биндит barrel на лупу (открыть/закрыть), отключаем
+    // дефолтное eraser-override-on-barrel — иначе одно нажатие сразу
+    // включает и эрейзер, и режим лупы.
+    // Если barrel-бит (1) использован хотя бы в одном loupe-биндинге —
+    // отключаем дефолтное eraser-override-on-barrel, иначе одно нажатие
+    // одновременно включает и эрейзер, и режим лупы.
+    val barrelBoundToLoupe =
+        1 in shortcutsSettings.loupeOpen.penButtons || 1 in shortcutsSettings.loupeClose.penButtons
+    val eraserOverride = (barrelPressed && !barrelBoundToLoupe) || eraserTipActive
     // Do NOT remap `toolMode` to ERASER on override — that flip restarts the
     // `pointerInput` block mid-gesture, and the new ERASER block's
     // `awaitFirstDown` misses the still-held stylus DOWN, so the stylus
@@ -273,6 +292,11 @@ fun DetailsContent(
     // Состояние magnifier'а (рамка-цель + плавающая панель ввода). Создаётся
     // один раз; включается toolbar-кнопкой ниже.
     val magnifierState = remember { MagnifierState() }
+    var showShortcutsDialog by remember { mutableStateOf(false) }
+    var ctrlHeld by remember { mutableStateOf(false) }
+    var altHeld by remember { mutableStateOf(false) }
+    var metaHeld by remember { mutableStateOf(false) }
+    val nonModifierKeysDown = remember { mutableStateMapOf<Long, Unit>() }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
@@ -542,8 +566,20 @@ fun DetailsContent(
             .focusTarget()
             .onKeyEvent { e ->
                 val isShift = e.key == Key.ShiftLeft || e.key == Key.ShiftRight
+                val isCtrl = e.key == Key.CtrlLeft || e.key == Key.CtrlRight
+                val isAlt = e.key == Key.AltLeft || e.key == Key.AltRight
+                val isMeta = e.key == Key.MetaLeft || e.key == Key.MetaRight
                 if (isShift) {
                     shiftHeld = e.type == KeyEventType.KeyDown
+                    false
+                } else if (isCtrl) {
+                    ctrlHeld = e.type == KeyEventType.KeyDown
+                    false
+                } else if (isAlt) {
+                    altHeld = e.type == KeyEventType.KeyDown
+                    false
+                } else if (isMeta) {
+                    metaHeld = e.type == KeyEventType.KeyDown
                     false
                 } else if (e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && !shiftHeld) {
                     if (globalUndoStack.isNotEmpty()) {
@@ -561,7 +597,17 @@ fun DetailsContent(
                         drawingStates[pageIndex]?.restoreSnapshot(snapshot)
                     }
                     true
-                } else false
+                } else {
+                    // Трекаем зажатые не-модификаторные клавиши — нужно для
+                    // матчинга произвольных биндингов (например, «Esc» как
+                    // закрытие лупы).
+                    when (e.type) {
+                        KeyEventType.KeyDown -> nonModifierKeysDown[e.key.keyCode] = Unit
+                        KeyEventType.KeyUp -> nonModifierKeysDown.remove(e.key.keyCode)
+                        else -> Unit
+                    }
+                    false
+                }
             },
     ) {
 
@@ -595,7 +641,8 @@ fun DetailsContent(
                 // [MagnifierInputPanel]. На остальных страницах overlay
                 // работает обычно.
                 skipPage = { idx ->
-                    magnifierState.enabled && magnifierState.pageIndex == idx
+                    magnifierState.enabled &&
+                        magnifierState.segments.any { it.pageIndex == idx }
                 },
                 onGestureStart = { pageIndex, snapshot ->
                     globalUndoStack.addLast(pageIndex to snapshot)
@@ -625,23 +672,153 @@ fun DetailsContent(
             { pencilModeProvider.value || stylusEverSeenProvider.value }
         }
 
+        // --- Loupe shortcut routing -------------------------------------
+        // Биндинг активен, если ВСЕ его элементы зажаты одновременно. Пустой
+        // биндинг (без флагов и без keyCode) считается отключённым и никогда
+        // не срабатывает.
+        fun bindingActive(b: ShortcutBinding): Boolean {
+            if (b.isEmpty) return false
+            if (b.ctrl && !ctrlHeld) return false
+            if (b.shift && !shiftHeld) return false
+            if (b.alt && !altHeld) return false
+            if (b.meta && !metaHeld) return false
+            if (!penButtonsPressed.containsAll(b.penButtons)) return false
+            if (b.keyCode != 0L && !nonModifierKeysDown.containsKey(b.keyCode)) return false
+            return true
+        }
+        val isOpenTriggerActive = bindingActive(shortcutsSettings.loupeOpen)
+        val isCloseTriggerActive = bindingActive(shortcutsSettings.loupeClose)
+        // Закрытие — на rising edge биндинга после того, как лупа открылась.
+        // closeArmed нужен, чтобы лупа, открытая в момент, когда close-trigger
+        // уже зажат (например, тот же биндинг что и open), не закрылась
+        // мгновенно. Армируется при отпускании, разоружается при использовании
+        // или при закрытом состоянии.
+        val closeArmed = remember { mutableStateOf(false) }
+        LaunchedEffect(magnifierState.enabled) {
+            // При смене состояния лупы перестраиваем armed: false когда лупа
+            // выключена; при включении — armed зависит от текущего состояния
+            // биндинга (если он сейчас зажат — НЕ armed, ждём отпускания).
+            closeArmed.value = magnifierState.enabled && !isCloseTriggerActive
+        }
+        LaunchedEffect(isCloseTriggerActive) {
+            if (!magnifierState.enabled) return@LaunchedEffect
+            if (!isCloseTriggerActive) {
+                closeArmed.value = true
+            } else if (closeArmed.value) {
+                closeArmed.value = false
+                magnifierState.disable()
+            }
+        }
+
+        val loupeSelectionController = remember(pdfViewerState, magnifierState) {
+            LoupeSelectionController(
+                viewerState = pdfViewerState,
+                viewportSizeProvider = {
+                    Size(windowSizeInPx.width.toFloat(), windowSizeInPx.height.toFloat())
+                },
+                onSelected = { segments, viewportSize, selectionSizePx, panelCenter ->
+                    magnifierState.enableMulti(
+                        viewportSize = viewportSize,
+                        segs = segments,
+                        selectionSizePx = selectionSizePx,
+                        panelCenter = panelCenter,
+                    )
+                },
+            )
+        }
+        // Текущее «куда роутить активный жест». Фиксируется на DOWN, держится
+        // до UP/CANCEL — иначе отпускание binding'а посреди драга оборвало бы
+        // выделение и часть точек ушла бы в drawingController.
+        val gestureRoute = remember { mutableStateOf(GestureRoute.NONE) }
+        val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
+        // Контроллер магнифир-ввода живёт во внутреннем if-блоке ниже;
+        // эта ссылка обновляется оттуда. Нативные pen-события (минующие
+        // Compose pointerInput из-за WindowsPointerHook) роутятся сюда,
+        // когда позиция пера попадает в content-область панели.
+        val magnifierInputControllerHolder = remember {
+            mutableStateOf<ru.kyamshanov.notepen.magnifier.MagnifierInputController?>(null)
+        }
+
+        fun routedOnDown(viewportPos: Offset, pressure: Float, tilt: Float) {
+            if (magnifierState.enabled) {
+                // Перо над content-областью панели → пишем В лупе.
+                val panelLocal = ru.kyamshanov.notepen.magnifier
+                    .viewportToPanelLocal(magnifierState, viewportPos)
+                val mc = magnifierInputControllerHolder.value
+                if (panelLocal != null && mc != null) {
+                    mc.onDown(panelLocal, magnifierState.panelSize, pressure, tilt)
+                    gestureRoute.value = GestureRoute.MAGNIFIER
+                    return
+                }
+                // Перо вне панели — обычное рисование на странице (skipPage
+                // пропускает magnifier-страницу, остальные доступны).
+                drawingController.onDown(viewportPos, pressure, tilt)
+                gestureRoute.value = GestureRoute.DRAWING
+                return
+            }
+            if (openTriggerProvider.value) {
+                loupeSelectionController.onDown(viewportPos)
+                gestureRoute.value = GestureRoute.LOUPE
+            } else {
+                drawingController.onDown(viewportPos, pressure, tilt)
+                gestureRoute.value = GestureRoute.DRAWING
+            }
+        }
+
+        fun routedOnMove(viewportPos: Offset, pressure: Float, tilt: Float) {
+            when (gestureRoute.value) {
+                GestureRoute.LOUPE -> loupeSelectionController.onMove(viewportPos)
+                GestureRoute.DRAWING -> drawingController.onMove(viewportPos, pressure, tilt)
+                GestureRoute.MAGNIFIER -> {
+                    val panelLocal = ru.kyamshanov.notepen.magnifier
+                        .viewportToPanelLocal(magnifierState, viewportPos)
+                    val mc = magnifierInputControllerHolder.value
+                    if (panelLocal != null && mc != null) {
+                        mc.onMove(panelLocal, magnifierState.panelSize, pressure, tilt)
+                    }
+                }
+                GestureRoute.NONE -> Unit
+            }
+        }
+
+        fun routedOnUp() {
+            when (gestureRoute.value) {
+                GestureRoute.LOUPE -> loupeSelectionController.onUp()
+                GestureRoute.DRAWING -> drawingController.onUp()
+                GestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value
+                    ?.onUp(magnifierState.panelSize)
+                GestureRoute.NONE -> Unit
+            }
+            gestureRoute.value = GestureRoute.NONE
+        }
+
+        fun routedOnCancel() {
+            when (gestureRoute.value) {
+                GestureRoute.LOUPE -> loupeSelectionController.onCancel()
+                GestureRoute.DRAWING -> drawingController.onCancel()
+                GestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value?.onCancel()
+                GestureRoute.NONE -> Unit
+            }
+            gestureRoute.value = GestureRoute.NONE
+        }
+
         // Native pen-stream (Windows WM_POINTER, bypass AWT'шной 400мс задержки
         // на синтезации legacy WM_MOUSE). Если контроллер платформы публикует
         // pen-события в [TabletInputController.penPointerEvents], drawing-pipeline
         // драйвится отсюда напрямую, минуя Compose pointerInput. На платформах
         // без native stream'а flow пустой → этот collect просто idle, и
         // отрисовка идёт обычным Compose-путём (через [pdfMultiPageDrawingInput]).
-        LaunchedEffect(drawingController, tabletController) {
+        LaunchedEffect(drawingController, loupeSelectionController, tabletController) {
             tabletController.penPointerEvents.collect { ev ->
                 when (ev.type) {
                     ru.kyamshanov.notepen.tablet.PenPointerEventType.DOWN ->
-                        drawingController.onDown(ev.position, ev.pressure, ev.tilt)
+                        routedOnDown(ev.position, ev.pressure, ev.tilt)
                     ru.kyamshanov.notepen.tablet.PenPointerEventType.UPDATE ->
-                        drawingController.onMove(ev.position, ev.pressure, ev.tilt)
+                        routedOnMove(ev.position, ev.pressure, ev.tilt)
                     ru.kyamshanov.notepen.tablet.PenPointerEventType.UP ->
-                        drawingController.onUp()
+                        routedOnUp()
                     ru.kyamshanov.notepen.tablet.PenPointerEventType.CANCEL ->
-                        drawingController.onCancel()
+                        routedOnCancel()
                 }
             }
         }
@@ -664,9 +841,13 @@ fun DetailsContent(
             modifier = Modifier
                 .fillMaxSize()
                 .pdfMultiPageDrawingInput(
-                    controller = drawingController,
+                    key = drawingController,
                     tablet = tabletController,
                     palmRejectionActive = palmRejectionActive,
+                    onDown = ::routedOnDown,
+                    onMove = ::routedOnMove,
+                    onUp = ::routedOnUp,
+                    onCancel = ::routedOnCancel,
                 ),
         ) {
                 val bm = bitmap
@@ -681,12 +862,13 @@ fun DetailsContent(
                     val pdfDrawingState = remember(pageIndex) {
                         drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
                     }
-                    val isMagnifierPage = magnifierState.enabled && magnifierState.pageIndex == pageIndex
+                    val isMagnifierPage = magnifierState.enabled &&
+                        magnifierState.segments.any { it.pageIndex == pageIndex }
                     if (isMagnifierPage) {
-                        // Прокидываем актуальный битмап активной страницы
-                        // в magnifier, чтобы панель могла рендерить
-                        // увеличенный PDF-тайл без отдельного запроса.
-                        SideEffect { magnifierState.updatePageBitmap(bm) }
+                        // Прокидываем актуальный битмап страницы в magnifier
+                        // (одной из задетых выделением) — панель рендерит
+                        // увеличенный PDF-тайл из этих битмапов.
+                        SideEffect { magnifierState.updatePageBitmap(pageIndex, bm) }
                     }
                     DrawablePdfPage(
                         bitmap = bm,
@@ -699,11 +881,32 @@ fun DetailsContent(
                         pdfHeight = pdfHeight,
                         pageExtent = extent,
                         magnifierState = if (isMagnifierPage) magnifierState else null,
+                        pageIndex = pageIndex,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     Text("Loading")
                 }
+            }
+        }
+
+        // Пунктирная рамка диагонального выделения области для лупы.
+        // Отображается, только пока активен жест в LoupeSelectionController.
+        val currentSelection = loupeSelectionController.selectionRect.value
+        if (currentSelection != null) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
+                    width = 2f,
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                        floatArrayOf(12f, 8f),
+                    ),
+                )
+                drawRect(
+                    color = androidx.compose.ui.graphics.Color(30, 136, 229),
+                    topLeft = Offset(currentSelection.left, currentSelection.top),
+                    size = Size(currentSelection.width, currentSelection.height),
+                    style = stroke,
+                )
             }
         }
 
@@ -894,6 +1097,7 @@ fun DetailsContent(
                         onPencilModeChange = onPencilModeChangeCallback,
                         magnifierEnabled = magnifierState.enabled,
                         onMagnifierToggle = onMagnifierToggle,
+                        onOpenShortcutsSettings = { showShortcutsDialog = true },
                         onSave = onSaveCallback,
                         onExport = onExportCallback,
                         scale = currentScalePercent,
@@ -1061,42 +1265,70 @@ fun DetailsContent(
         )
 
         if (magnifierState.enabled) {
-            val magPage = magnifierState.pageIndex
-            val magPdfDrawingState = remember(magPage) {
-                drawingStates.getOrPut(magPage) { PdfDrawingState() }
+            val magPdfDrawingStateProvider: (Int) -> PdfDrawingState = remember(drawingStates) {
+                { pageIdx -> drawingStates.getOrPut(pageIdx) { PdfDrawingState() } }
             }
-            val magOnGestureStart = remember(magPage) {
-                { snapshot: List<DrawingPath> ->
-                    globalUndoStack.addLast(magPage to snapshot)
+            val magOnGestureStart: (Int, List<DrawingPath>) -> Unit = remember {
+                { pageIdx, snapshot ->
+                    globalUndoStack.addLast(pageIdx to snapshot)
                     globalRedoStack.clear()
                 }
             }
-            val magOnEraseFinished = remember(magPage, magPdfDrawingState, syncEngine) {
-                { before: List<DrawingPath>, _: List<DrawingPath> ->
-                    handleEraseFinished(
-                        pdfDrawingState = magPdfDrawingState,
-                        pageIndex = magPage,
-                        before = before,
-                        engine = syncEngine,
-                    )
+            val syncEngineRef = rememberUpdatedState(syncEngine)
+            val magOnStrokeFinished: (Int, DrawingPath) -> Unit = remember(drawingStates) {
+                { pageIdx, path ->
+                    val state = drawingStates[pageIdx]
+                    if (state != null) {
+                        handleStrokeFinished(
+                            pdfDrawingState = state,
+                            pageIndex = pageIdx,
+                            path = path,
+                            engine = syncEngineRef.value,
+                        )
+                    }
                 }
             }
-            val magOnStrokeFinished = remember(magPage, magPdfDrawingState, syncEngine) {
-                { path: DrawingPath ->
-                    handleStrokeFinished(
-                        pdfDrawingState = magPdfDrawingState,
-                        pageIndex = magPage,
-                        path = path,
-                        engine = syncEngine,
-                    )
+            val magOnEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit =
+                remember(drawingStates) {
+                    { pageIdx, before, _ ->
+                        val state = drawingStates[pageIdx]
+                        if (state != null) {
+                            handleEraseFinished(
+                                pdfDrawingState = state,
+                                pageIndex = pageIdx,
+                                before = before,
+                                engine = syncEngineRef.value,
+                            )
+                        }
+                    }
                 }
-            }
             val magEraserOverrideState = rememberUpdatedState(eraserOverride)
             val magEraserOverrideProvider = remember { { magEraserOverrideState.value } }
+            val magEraserPos = remember { mutableStateOf<Offset?>(null) }
+            val magToolModeProvider = rememberUpdatedState(effectiveToolMode)
+            val magPenSettingsProvider = rememberUpdatedState(penSettings)
+            val magMarkerSettingsProvider = rememberUpdatedState(markerSettings)
+            val magEraserSettingsProvider = rememberUpdatedState(eraserSettings)
+            val magnifierInputController = remember(magnifierState) {
+                ru.kyamshanov.notepen.magnifier.MagnifierInputController(
+                    state = magnifierState,
+                    pdfDrawingStateProvider = magPdfDrawingStateProvider,
+                    toolMode = { magToolModeProvider.value },
+                    penSettings = { magPenSettingsProvider.value },
+                    markerSettings = { magMarkerSettingsProvider.value },
+                    eraserSettings = { magEraserSettingsProvider.value },
+                    eraserOverride = magEraserOverrideProvider,
+                    eraserPos = magEraserPos,
+                    onGestureStart = magOnGestureStart,
+                    onStrokeFinished = magOnStrokeFinished,
+                    onEraseFinished = magOnEraseFinished,
+                )
+            }
+            magnifierInputControllerHolder.value = magnifierInputController
 
             MagnifierInputPanel(
                 state = magnifierState,
-                pdfDrawingState = magPdfDrawingState,
+                pdfDrawingStateProvider = magPdfDrawingStateProvider,
                 toolMode = effectiveToolMode,
                 penSettings = penSettings,
                 markerSettings = markerSettings,
@@ -1107,6 +1339,16 @@ fun DetailsContent(
                 onStrokeFinished = magOnStrokeFinished,
                 onEraseFinished = magOnEraseFinished,
                 onClose = { magnifierState.disable() },
+                externalInputController = magnifierInputController,
+            )
+        }
+
+        if (showShortcutsDialog) {
+            ShortcutsSettingsDialog(
+                settings = shortcutsSettings,
+                onChange = { shortcutsSettingsState.value = it },
+                onDismiss = { showShortcutsDialog = false },
+                penButtons = tabletController.penButtons,
             )
         }
     }

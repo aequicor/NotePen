@@ -23,6 +23,13 @@ private val logger = KotlinLogging.logger {}
  */
 private const val BARREL_BUTTON_BIT: Int = 1
 
+/**
+ * Сколько младших бит маски `PACKET.buttons` сканируется на состояние
+ * кнопок пера. У Huion / Wacom-перьев максимум 2-3 кнопки; запас в 8 бит
+ * с лихвой покрывает все реальные случаи.
+ */
+private const val MAX_PEN_BUTTON_BITS: Int = 8
+
 /** How many packets to drain per polling tick. The context queue size is matched. */
 private const val PACKET_BATCH: Int = 64
 
@@ -54,9 +61,19 @@ private const val POLL_INTERVAL_MS: Long = 4
 class WinTabTabletInputController : TabletInputController {
     private val pressureFlow = MutableStateFlow(1f)
     private val buttonFlow = MutableStateFlow(false)
+    private val penButtonsFlow = MutableStateFlow<Set<Int>>(emptySet())
+
+    @Volatile private var winTabButtonBits: Set<Int> = emptySet()
+    @Volatile private var hookButtonBits: Set<Int> = emptySet()
+
+    private fun mergePenButtons() {
+        val merged = winTabButtonBits + hookButtonBits
+        if (merged != penButtonsFlow.value) penButtonsFlow.value = merged
+    }
 
     override val latestPressure: StateFlow<Float> = pressureFlow.asStateFlow()
     override val barrelPressed: StateFlow<Boolean> = buttonFlow.asStateFlow()
+    override val penButtons: StateFlow<Set<Int>> = penButtonsFlow.asStateFlow()
     override val eraserTipActive: StateFlow<Boolean> = MutableStateFlow(false).asStateFlow()
     override val tilt: StateFlow<Float> = MutableStateFlow(0f).asStateFlow()
     override val hoverPosition: StateFlow<androidx.compose.ui.geometry.Offset?> =
@@ -81,6 +98,13 @@ class WinTabTabletInputController : TabletInputController {
         if (!Platform.isWindows()) {
             logger.info { "TabletInput: non-Windows platform, staying in no-op mode" }
             return
+        }
+        // Подписка на кнопки пера из WM_POINTER-стрима — независимо от WinTab.
+        // Это покрывает планшеты без WinTab-драйвера (Microsoft Pen) и
+        // планшеты, где barrel выведен только через POINTER_FLAG_SECONDBUTTON.
+        WindowsPointerHook.penButtonsListener = { bits ->
+            hookButtonBits = bits
+            mergePenButtons()
         }
         val lib = try {
             Native.load("Wintab32", WinTab::class.java)
@@ -107,6 +131,10 @@ class WinTabTabletInputController : TabletInputController {
 
     /** Stop polling and release the Wintab context. Safe to call repeatedly. */
     fun stop() {
+        WindowsPointerHook.penButtonsListener = null
+        hookButtonBits = emptySet()
+        winTabButtonBits = emptySet()
+        mergePenButtons()
         scheduler?.shutdownNow()
         scheduler = null
         val ctx = context.getAndSet(null) ?: return
@@ -167,6 +195,20 @@ class WinTabTabletInputController : TabletInputController {
                 pressureFlow.value = (last.pressure / maxPressure).coerceIn(0f, 1f)
                 val pressed = (last.buttons shr BARREL_BUTTON_BIT) and 1 == 1
                 if (pressed != buttonFlow.value) buttonFlow.value = pressed
+                // Биты кнопок пера для биндингов. Бит 0 — это «pen tip down»
+                // (касание тиром, а не физическая кнопка), его в шорткаты
+                // не пропускаем — иначе любое касание во время записи
+                // сохраняется как «Pen0». Сканируем биты [1..MAX_PEN_BUTTON_BITS).
+                val bits = last.buttons
+                val newSet = buildSet {
+                    for (bit in 1 until MAX_PEN_BUTTON_BITS) {
+                        if ((bits shr bit) and 1 == 1) add(bit)
+                    }
+                }
+                if (newSet != winTabButtonBits) {
+                    winTabButtonBits = newSet
+                    mergePenButtons()
+                }
             } catch (t: Throwable) {
                 logger.warn(t) { "TabletInput: poll failed" }
             }
