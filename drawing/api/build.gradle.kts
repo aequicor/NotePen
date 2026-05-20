@@ -6,10 +6,10 @@ plugins {
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 kotlin {
-    explicitApi()
     applyDefaultHierarchyTemplate()
     jvm()
     androidTarget {
@@ -21,9 +21,8 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            implementation(projects.shared)
-            implementation(projects.drawing.api)
             implementation(compose.runtime)
+            implementation(libs.kotlinx.serialization.core)
             implementation(libs.kotlinx.coroutines.core)
         }
         commonTest.dependencies {
@@ -34,7 +33,7 @@ kotlin {
 }
 
 android {
-    namespace = "ru.kyamshanov.notepen.rendering.api"
+    namespace = "ru.kyamshanov.notepen.drawing.api"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

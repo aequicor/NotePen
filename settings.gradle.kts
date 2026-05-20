@@ -42,4 +42,6 @@ include(":qr-connect")
 include(":server")
 include(":rendering:api")
 include(":rendering:impl")
+include(":drawing:api")
+include(":drawing:impl")
 

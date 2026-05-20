@@ -2,7 +2,7 @@ package ru.kyamshanov.notepen.lowlatency
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import ru.kyamshanov.notepen.rendering.api.PdfDrawingState
+import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 
 /** Desktop has no front-buffered surface — Compose Canvas renders the live stroke. */
 @Composable

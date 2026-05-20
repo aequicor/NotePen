@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.rendering.api
+package ru.kyamshanov.notepen.drawing.api
 
 /**
  * Active tool on the details screen.

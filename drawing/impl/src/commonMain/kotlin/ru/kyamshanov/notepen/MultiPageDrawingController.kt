@@ -1,19 +1,15 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.runtime.snapshots.SnapshotStateMap
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.pointer.pointerInput
 import kotlinx.coroutines.CoroutineScope
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
-import ru.kyamshanov.notepen.pdfviewer.PdfPagesLayout
-import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
-import ru.kyamshanov.notepen.rendering.api.PdfDrawingState
-import ru.kyamshanov.notepen.rendering.api.ToolMode
-import ru.kyamshanov.notepen.tablet.TabletInputController
+import ru.kyamshanov.notepen.drawing.api.EraseGesture
+import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 
 /** Длительность удержания pointer'а на месте для триггера shape-recognition (мс). */
 private const val SHAPE_SNAP_HOLD_MS: Long = 700L
@@ -25,17 +21,18 @@ private const val SHAPE_SNAP_HOLD_MS: Long = 700L
 private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
 
 /**
- * Драйвер рисования, поднятый над пер-страничным [DrawablePdfPage].
+ * Драйвер рисования, поднятый над пер-страничным `DrawablePdfPage`.
  *
  * Раньше каждая страница имела собственный `pointerInput` и захватывала жест
  * целиком: при пересечении пером границы вниз стилус-DOWN оставался у верхней
  * страницы, а нижняя ничего не получала — штрих обрывался.
  *
  * Контроллер живёт на уровне всего viewer'а: получает viewport-координаты
- * жеста, переводит их в `(pageIndex, nx, ny)` и роутит вызовы в нужный
- * [PdfDrawingState]. При уходе пера на соседнюю PDF-страницу текущий штрих
- * финализируется на старой, и стартует новый на новой — визуально для
- * пользователя это одна непрерывная линия (страницы стоят без зазоров).
+ * жеста, переводит их в `(pageIndex, nx, ny)` через [PageLayoutGeometry] и
+ * роутит вызовы в нужный [PdfDrawingState]. При уходе пера на соседнюю
+ * PDF-страницу текущий штрих финализируется на старой, и стартует новый на
+ * новой — визуально для пользователя это одна непрерывная линия (страницы
+ * стоят без зазоров).
  *
  * Эрейзер ведёт себя аналогично: при пересечении границы — `end()` сессии
  * на одной странице и `start()` на соседней.
@@ -45,7 +42,7 @@ private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
  */
 class MultiPageDrawingController(
     private val drawingStates: SnapshotStateMap<Int, PdfDrawingState>,
-    private val viewerState: PdfViewerState,
+    private val geometry: PageLayoutGeometry,
     private val toolMode: () -> ToolMode,
     private val penSettings: () -> PenSettings,
     private val markerSettings: () -> MarkerSettings,
@@ -164,18 +161,17 @@ class MultiPageDrawingController(
         val oldBoundaryNy = if (goingDown) 1f else 0f
         val newBoundaryNy = if (goingDown) 0f else 1f
         val boundaryDocY = if (goingDown) {
-            viewerState.layout.pageTopsPx[activePageIndex] +
-                viewerState.layout.pdfHeightsPx[activePageIndex]
+            geometry.pageTopPx(activePageIndex) + geometry.pdfHeightPx(activePageIndex)
         } else {
-            viewerState.layout.pageTopsPx[activePageIndex]
+            geometry.pageTopPx(activePageIndex)
         }
-        val boundaryViewportY = viewerState.pan.y + boundaryDocY * viewerState.zoom
+        val boundaryViewportY = geometry.pan.y + boundaryDocY * geometry.zoom
         val prev = lastViewportPos
         val dy = viewportPos.y - prev.y
         val t = if (dy != 0f) ((boundaryViewportY - prev.y) / dy).coerceIn(0f, 1f) else 0.5f
         val boundaryViewportX = prev.x + t * (viewportPos.x - prev.x)
-        val boundaryNx = ((boundaryViewportX - viewerState.pan.x) / viewerState.zoom) /
-            viewerState.layout.basePageWidthPx
+        val boundaryNx = ((boundaryViewportX - geometry.pan.x) / geometry.zoom) /
+            geometry.basePageWidthPx
         // Бесшовная стыковка: оба штриха ПРОДЛЕВАЮТСЯ через границу в зону
         // extent соседней страницы, чтобы их «настоящие» конечные/стартовые
         // cap'ы оказались СКРЫТЫ под bitmap'ом другой страницы. В видимой
@@ -193,20 +189,17 @@ class MultiPageDrawingController(
         //
         // Координаты «через границу»: pdfH у соседних страниц обычно
         // одинаков, поэтому boundary-крест ровно в 1f / 0f.
-        val prevDocX = (prev.x - viewerState.pan.x) / viewerState.zoom
-        val prevDocY = (prev.y - viewerState.pan.y) / viewerState.zoom
-        val prevNxShared = prevDocX / viewerState.layout.basePageWidthPx
+        val prevDocX = (prev.x - geometry.pan.x) / geometry.zoom
+        val prevDocY = (prev.y - geometry.pan.y) / geometry.zoom
+        val prevNxShared = prevDocX / geometry.basePageWidthPx
         // Прев в координатах НОВОЙ страницы (для goingDown ny < 0).
         val newExtrapolatedNy =
-            (prevDocY - viewerState.layout.pageTopsPx[newPageIndex]) /
-                viewerState.layout.pdfHeightsPx[newPageIndex]
+            (prevDocY - geometry.pageTopPx(newPageIndex)) / geometry.pdfHeightPx(newPageIndex)
         // Текущий sample в координатах СТАРОЙ страницы (для goingDown ny > 1).
         val oldExtrapolatedNy = if (goingDown) {
-            1f + ny * viewerState.layout.pdfHeightsPx[newPageIndex] /
-                viewerState.layout.pdfHeightsPx[activePageIndex]
+            1f + ny * geometry.pdfHeightPx(newPageIndex) / geometry.pdfHeightPx(activePageIndex)
         } else {
-            0f - (1f - ny) * viewerState.layout.pdfHeightsPx[newPageIndex] /
-                viewerState.layout.pdfHeightsPx[activePageIndex]
+            0f - (1f - ny) * geometry.pdfHeightPx(newPageIndex) / geometry.pdfHeightPx(activePageIndex)
         }
         when (activeMode) {
             Mode.DRAW -> {
@@ -244,7 +237,7 @@ class MultiPageDrawingController(
         pressure: Float,
         tilt: Float,
     ) {
-        val pdfWidthPx = viewerState.basePageWidthPx * viewerState.zoom
+        val pdfWidthPx = geometry.basePageWidthPx * geometry.zoom
         if (pdfWidthPx <= 0f) return
         // strokeWidth is already a fraction of page width (DPI-independent),
         // so it can be fed straight into normalizedStrokeWidth without /pdfWidthPx.
@@ -289,9 +282,9 @@ class MultiPageDrawingController(
     }
 
     private fun pageAspectFor(pageIndex: Int): Float {
-        val layout = viewerState.layout
-        val w = layout.basePageWidthPx
-        val h = layout.pdfHeightsPx.getOrNull(pageIndex) ?: return 1f
+        val w = geometry.basePageWidthPx
+        if (pageIndex !in 0 until geometry.pageCount) return 1f
+        val h = geometry.pdfHeightPx(pageIndex)
         return if (h > 0f) w / h else 1f
     }
 
@@ -354,84 +347,29 @@ class MultiPageDrawingController(
      * страниц нет или viewport не измерен, возвращает `null`.
      */
     private fun hitTest(vp: Offset): Triple<Int, Float, Float>? {
-        val layout: PdfPagesLayout = viewerState.layout
-        val n = layout.pageHeightsPx.size
-        if (n == 0 || layout.basePageWidthPx <= 0f || viewerState.zoom <= 0f) return null
-        val docX = (vp.x - viewerState.pan.x) / viewerState.zoom
-        val docY = (vp.y - viewerState.pan.y) / viewerState.zoom
-        val tops = layout.pageTopsPx
-        // Бинпоиск страницы по docY: ищем последнюю с tops[i] <= docY,
+        val n = geometry.pageCount
+        if (n == 0 || geometry.basePageWidthPx <= 0f || geometry.zoom <= 0f) return null
+        val docX = (vp.x - geometry.pan.x) / geometry.zoom
+        val docY = (vp.y - geometry.pan.y) / geometry.zoom
+        // Бинпоиск страницы по docY: ищем последнюю с pageTopPx(i) <= docY,
         // клампим в [0, n-1] для случая, когда палец ушёл выше первой
         // страницы или ниже последней (extent одной из крайних страниц
         // может покрывать эту зону).
         val pageIndex = when {
-            docY <= tops[0] -> 0
+            docY <= geometry.pageTopPx(0) -> 0
             else -> {
                 var lo = 0
                 var hi = n - 1
                 while (lo < hi) {
                     val mid = (lo + hi + 1) ushr 1
-                    if (tops[mid] <= docY) lo = mid else hi = mid - 1
+                    if (geometry.pageTopPx(mid) <= docY) lo = mid else hi = mid - 1
                 }
                 lo
             }
         }
-        val pdfH = layout.pdfHeightsPx[pageIndex]
-        val nx = docX / layout.basePageWidthPx
-        val ny = (docY - tops[pageIndex]) / pdfH
+        val pdfH = geometry.pdfHeightPx(pageIndex)
+        val nx = docX / geometry.basePageWidthPx
+        val ny = (docY - geometry.pageTopPx(pageIndex)) / pdfH
         return Triple(pageIndex, nx, ny)
     }
 }
-
-/**
- * Pointer-input overlay, лифтнутый над PdfPagesViewer. Захватывает
- * стилус-жесты (на Android — с palm-rejection; на десктопе — мышь как
- * стилус) и делегирует их [controller], который сам разруливает переходы
- * между страницами.
- *
- * Не консумит touch-DOWN на Android при активной palm-rejection — palm/pan
- * по-прежнему попадают в viewer (scrollable / pinch).
- */
-fun Modifier.pdfMultiPageDrawingInput(
-    controller: MultiPageDrawingController,
-    tablet: TabletInputController,
-    palmRejectionActive: () -> Boolean,
-    captureGesture: (Offset) -> Boolean = { false },
-): Modifier = pdfMultiPageDrawingInput(
-    key = controller,
-    tablet = tablet,
-    palmRejectionActive = palmRejectionActive,
-    captureGesture = captureGesture,
-    onDown = controller::onDown,
-    onMove = controller::onMove,
-    onUp = controller::onUp,
-    onCancel = controller::onCancel,
-)
-
-/**
- * Перегрузка с явными колбэками — используется, когда события маршрутизируются
- * между несколькими получателями (например, drawing vs loupe selection). [key]
- * задаёт identity для `pointerInput`: смена ключа пересоздаёт обработчик и
- * обрывает активный жест.
- */
-fun Modifier.pdfMultiPageDrawingInput(
-    key: Any?,
-    tablet: TabletInputController,
-    palmRejectionActive: () -> Boolean,
-    captureGesture: (Offset) -> Boolean = { false },
-    onDown: (Offset, Float, Float) -> Unit,
-    onMove: (Offset, Float, Float) -> Unit,
-    onUp: () -> Unit,
-    onCancel: () -> Unit,
-): Modifier = this.pointerInput(key) {
-    detectStylusAwareDrag(
-        tablet = tablet,
-        isPalmRejectionActive = palmRejectionActive,
-        captureGesture = captureGesture,
-        onDown = onDown,
-        onMove = onMove,
-        onUp = onUp,
-        onCancel = onCancel,
-    )
-}
-

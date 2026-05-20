@@ -1,9 +1,8 @@
-package ru.kyamshanov.notepen
+package ru.kyamshanov.notepen.drawing.api
 
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
-import ru.kyamshanov.notepen.rendering.api.erasePointsInZone
-import ru.kyamshanov.notepen.rendering.api.eraseStrokesInZone
+import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse

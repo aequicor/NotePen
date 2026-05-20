@@ -36,6 +36,8 @@ kotlin {
         commonMain.dependencies {
             //module with logic
             implementation(projects.shared)
+            implementation(projects.drawing.api)
+            implementation(projects.drawing.impl)
             implementation(projects.sync)
             implementation(projects.qrConnect)
             implementation(projects.rendering.api)

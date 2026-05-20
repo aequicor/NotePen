@@ -23,6 +23,7 @@ kotlin {
             implementation(projects.sync)
             implementation(projects.qrConnect)
             implementation(projects.shared)
+            implementation(projects.drawing.api)
             implementation(projects.app.byCompose.common)
             implementation(projects.rendering.api)
             implementation(projects.rendering.impl)

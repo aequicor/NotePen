@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.rendering.api
+package ru.kyamshanov.notepen.drawing.api
 
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableFloatStateOf

@@ -33,8 +33,9 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
-            // Domain models live here (StrokeDelta -> DrawingPath) — read-only dependency on shared.
+            // Domain models live here (StrokeDelta -> DrawingPath) — read-only dependency.
             implementation(projects.shared)
+            implementation(projects.drawing.api)
 
             implementation(libs.kotlin.logging.common)
             implementation(libs.kotlinx.serialization.core)

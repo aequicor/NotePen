@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen
+package ru.kyamshanov.notepen.drawing.api
 
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
