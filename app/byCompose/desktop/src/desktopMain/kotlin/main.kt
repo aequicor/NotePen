@@ -423,7 +423,6 @@ fun main() {
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
-                    pickPdfPath = { FilePicker().pickPdfFile() },
                 )
             }
         }

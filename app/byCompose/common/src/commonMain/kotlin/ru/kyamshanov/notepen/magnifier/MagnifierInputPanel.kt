@@ -345,7 +345,11 @@ private fun MagnifierContent(
                     // ожидает писать пальцем. При включённом pencil mode
                     // ветка одноточечного pan'а в `detectPanelTransformGestures`
                     // поглощает finger-события раньше — сюда они не доходят.
-                    acceptTouch = { !pencilModeState.value },
+                    //
+                    // captureGesture ANY pointer type — в панели нет конкурирующего
+                    // scrollable, поэтому PointerType.Unknown захватывается наравне
+                    // с Touch; иначе первое касание (Unknown) уходило бы в никуда.
+                    captureGesture = { !pencilModeState.value },
                     onDown = { offset, pressure, tilt ->
                         externalInputController?.onDown(offset, panelSizeF, pressure, tilt)
                     },

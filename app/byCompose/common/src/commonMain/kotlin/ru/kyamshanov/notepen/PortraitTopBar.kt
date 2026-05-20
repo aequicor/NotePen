@@ -16,7 +16,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
@@ -37,7 +36,7 @@ import androidx.compose.ui.unit.dp
  *
  * Contains, left to right: back button, page counter, spacer, tool toggle
  * buttons (Pen / Marker / Eraser / PencilMode / Magnifier / Thumbnails),
- * Save, Export, and Zoom controls. Replaces the separate floating toolbar and
+ * Export, and Zoom controls. Replaces the separate floating toolbar and
  * page-indicator airbar in portrait orientation.
  *
  * Tool-settings are NOT shown here; when a tool is selected, the caller renders
@@ -50,9 +49,7 @@ fun PortraitTopBar(
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
     hasAnnotations: Boolean,
-    isSaving: Boolean,
     isExporting: Boolean,
-    onSave: () -> Unit,
     onExport: () -> Unit,
     scale: Int,
     onZoomIn: () -> Unit,
@@ -135,29 +132,6 @@ fun PortraitTopBar(
                 selected = showThumbnails,
                 onClick = onToggleThumbnails,
             )
-
-            IconButton(
-                onClick = onSave,
-                enabled = hasAnnotations && !isSaving,
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(PORTRAIT_BAR_PROGRESS_SIZE),
-                        strokeWidth = PORTRAIT_BAR_PROGRESS_STROKE,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Save,
-                        contentDescription = "Сохранить аннотации",
-                        tint = if (hasAnnotations) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = PORTRAIT_BAR_DISABLED_ALPHA)
-                        },
-                    )
-                }
-            }
 
             IconButton(
                 onClick = onExport,

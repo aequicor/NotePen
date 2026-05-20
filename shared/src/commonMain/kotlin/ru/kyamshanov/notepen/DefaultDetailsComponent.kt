@@ -19,12 +19,18 @@ private val logger = KotlinLogging.logger {}
  * @param title Путь/URI открытого файла (используется как заголовок и ключ истории).
  * @param historyRepository Порт для обновления lastPageIndex в истории.
  * @param onBackListener Обратный вызов для навигации назад.
+ * @param onOpenLibraryListener Обратный вызов для открытия библиотеки поверх документа.
+ * @param pendingTabUri Разделяемое значение «файл, выбранный в библиотеке, ждёт открытия вкладкой».
+ * @param onPendingTabHandledListener Сброс [pendingTabUri] после открытия вкладки.
  */
 class DefaultDetailsComponent(
     componentContext: ComponentContext,
     title: String,
     private val historyRepository: FileHistoryRepository,
     private val onBackListener: () -> Unit,
+    private val onOpenLibraryListener: () -> Unit,
+    override val pendingTabUri: Value<String>,
+    private val onPendingTabHandledListener: () -> Unit,
 ) : DetailsComponent, ComponentContext by componentContext {
 
     private val scope = coroutineScope()
@@ -36,6 +42,14 @@ class DefaultDetailsComponent(
 
     override fun onBack() {
         onBackListener()
+    }
+
+    override fun openLibrary() {
+        onOpenLibraryListener()
+    }
+
+    override fun onPendingTabHandled() {
+        onPendingTabHandledListener()
     }
 
     /**

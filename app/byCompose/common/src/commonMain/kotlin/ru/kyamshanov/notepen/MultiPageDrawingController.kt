@@ -329,6 +329,19 @@ internal class MultiPageDrawingController(
     }
 
     /**
+     * Возвращает `true`, если [viewportPos] попадает внутрь видимой PDF-страницы
+     * (nx ∈ [0..1], ny ∈ [0..1] в нормализованных page-координатах).
+     *
+     * Annotation-зона (extent) снаружи [0..1] не считается «внутри PDF».
+     * Используется в `captureGesture`-гейте: когда pencil mode выключен и
+     * инструмент активен, палец рисует внутри страницы, но скроллит снаружи.
+     */
+    fun isInsidePdfPage(viewportPos: Offset): Boolean {
+        val (_, nx, ny) = hitTest(viewportPos) ?: return false
+        return nx in 0f..1f && ny in 0f..1f
+    }
+
+    /**
      * Преобразует viewport-пиксель в `(pageIndex, nx, ny)` PDF-страницы.
      *
      * `nx` / `ny` нормализованы к PDF-странице ([0..1] = внутри PDF; за
@@ -378,12 +391,12 @@ internal fun Modifier.pdfMultiPageDrawingInput(
     controller: MultiPageDrawingController,
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
-    acceptTouch: (Offset) -> Boolean = { false },
+    captureGesture: (Offset) -> Boolean = { false },
 ): Modifier = pdfMultiPageDrawingInput(
     key = controller,
     tablet = tablet,
     palmRejectionActive = palmRejectionActive,
-    acceptTouch = acceptTouch,
+    captureGesture = captureGesture,
     onDown = controller::onDown,
     onMove = controller::onMove,
     onUp = controller::onUp,
@@ -400,7 +413,7 @@ internal fun Modifier.pdfMultiPageDrawingInput(
     key: Any?,
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
-    acceptTouch: (Offset) -> Boolean = { false },
+    captureGesture: (Offset) -> Boolean = { false },
     onDown: (Offset, Float, Float) -> Unit,
     onMove: (Offset, Float, Float) -> Unit,
     onUp: () -> Unit,
@@ -409,7 +422,7 @@ internal fun Modifier.pdfMultiPageDrawingInput(
     detectStylusAwareDrag(
         tablet = tablet,
         isPalmRejectionActive = palmRejectionActive,
-        acceptTouch = acceptTouch,
+        captureGesture = captureGesture,
         onDown = onDown,
         onMove = onMove,
         onUp = onUp,

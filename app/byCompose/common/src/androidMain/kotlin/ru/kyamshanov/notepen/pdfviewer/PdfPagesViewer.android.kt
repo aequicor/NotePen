@@ -86,6 +86,7 @@ actual fun PdfPagesViewer(
     pages: List<PdfPageInfo>,
     renderer: PdfPageRenderer,
     modifier: Modifier,
+    gestureModifier: Modifier,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
@@ -192,7 +193,14 @@ actual fun PdfPagesViewer(
                 orientation = Orientation.Vertical,
                 flingBehavior = ScrollableDefaults.flingBehavior(),
                 reverseDirection = false,
-            ),
+            )
+            // gestureModifier должен быть ПОСЛЕ scrollable: в Main-pass
+            // события идут inner→outer, т.е. этот modifier обрабатывает
+            // события раньше scrollable. Если gesture-handler потребил
+            // событие (consume), scrollable видит isConsumed=true и
+            // awaitPointerSlopOrCancellation возвращает null — скролл
+            // не запускается параллельно с рисованием / выделением лупой.
+            .then(gestureModifier),
     ) {
         SubcomposeLayout(
             modifier = Modifier

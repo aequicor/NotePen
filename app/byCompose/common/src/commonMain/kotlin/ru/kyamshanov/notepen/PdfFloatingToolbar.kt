@@ -15,7 +15,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ZoomIn
@@ -33,7 +32,7 @@ import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /**
- * Vertical floating PDF toolbar with the Pen / Eraser / Save / Zoom controls.
+ * Vertical floating PDF toolbar with the Pen / Eraser / Export / Zoom controls.
  *
  * Tool-settings (color / thickness / alpha for pen, shape / size for eraser)
  * are now rendered as a separate [ToolSettingsFloatingPanel] docked at
@@ -51,9 +50,7 @@ fun PdfFloatingToolbar(
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
     hasAnnotations: Boolean,
-    isSaving: Boolean,
     isExporting: Boolean,
-    onSave: () -> Unit,
     onExport: () -> Unit,
     scale: Int,
     onZoomIn: () -> Unit,
@@ -140,29 +137,6 @@ fun PdfFloatingToolbar(
                     contentDescription = "Шорткаты",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-            }
-
-            IconButton(
-                onClick = onSave,
-                enabled = hasAnnotations && !isSaving,
-            ) {
-                if (isSaving) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(SAVE_PROGRESS_SIZE),
-                        strokeWidth = SAVE_PROGRESS_STROKE,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Save,
-                        contentDescription = "Сохранить аннотации",
-                        tint = if (hasAnnotations) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SAVE_DISABLED_ALPHA)
-                        },
-                    )
-                }
             }
 
             IconButton(
@@ -264,6 +238,9 @@ internal const val MIN_SCALE = 25
 internal const val MAX_SCALE = 800
 
 private val TOOLBAR_PADDING = 4.dp
+
+/** Ширина вертикального тулбара: кнопка 48dp + отступы по бокам. */
+internal val FLOATING_TOOLBAR_WIDTH = 48.dp + TOOLBAR_PADDING * 2
 private val SAVE_PROGRESS_SIZE = 24.dp
 private val SAVE_PROGRESS_STROKE = 2.dp
 private const val SAVE_DISABLED_ALPHA = 0.38f

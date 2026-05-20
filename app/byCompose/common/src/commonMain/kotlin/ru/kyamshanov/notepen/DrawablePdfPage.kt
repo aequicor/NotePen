@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
@@ -156,6 +158,13 @@ fun DrawablePdfPage(
      * [MagnifierTargetOverlay]; на собственно жесты не влияет.
      */
     isMagnifierGrabbing: Boolean = false,
+    /**
+     * Лямбда, возвращающая `true` пока активен pinch-жест (zoom). Читается
+     * в Draw-фазе через [graphicsLayer], поэтому скрытие чернил происходит
+     * в том же кадре, что и GPU-трансформа [PdfViewerState.gestureScale] —
+     * без рекомпозиции и без визуального скачка.
+     */
+    isZooming: () -> Boolean = { false },
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -292,7 +301,8 @@ fun DrawablePdfPage(
             contentDescription = "PDF Page",
             modifier = Modifier
                 .offset(x = pdfOffsetXDp, y = pdfOffsetYDp)
-                .size(width = pdfWDp, height = pdfHDp),
+                .size(width = pdfWDp, height = pdfHDp)
+                .border(width = androidx.compose.ui.unit.Dp(0.5f), color = indicatorColor.copy(alpha = 0.35f)),
             // FillBounds (не Fit) — Box и bitmap могут иметь aspect-ratio,
             // отличающиеся на доли пикселя из-за rounding при вычислении
             // визуальной высоты / target render-resolution. С Fit это даёт
@@ -308,7 +318,13 @@ fun DrawablePdfPage(
         // single Path per frame for the in-flight stroke.
         val livePath = remember { Path() }
 
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        // Чернила скрываются во время пинча: растровый кэш сформирован под
+        // текущий zoom, а graphicsLayer растягивает его вместе с PDF — это
+        // заметно при большом δ-масштабе. Прятать чернила чище, чем
+        // показывать пиксельные артефакты. Страница под ними остаётся видимой.
+        // Лямбда isZooming вычисляется в Draw-фазе — в том же кадре, что и
+        // GPU-трансформа gestureScale, без рекомпозиции.
+        Canvas(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (isZooming()) 0f else 1f }) {
             // Completed strokes — bitmap blit, single draw call regardless of
             // how much ink is on the page. Cache may be rasterised at a lower
             // resolution than the canvas (see INK_CACHE_MAX_DIMENSION_PX), so
@@ -427,7 +443,7 @@ fun DrawablePdfPage(
         if (lowLatencyOverlayActive) {
             LowLatencyStrokeOverlay(
                 drawingState = pdfDrawingState,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (isZooming()) 0f else 1f },
             )
         }
 
@@ -470,7 +486,7 @@ fun DrawablePdfPage(
 internal suspend fun PointerInputScope.detectStylusAwareDrag(
     tablet: TabletInputController,
     isPalmRejectionActive: () -> Boolean,
-    acceptTouch: (position: Offset) -> Boolean = { false },
+    captureGesture: (position: Offset) -> Boolean = { false },
     onDown: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onMove: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onUp: () -> Unit,
@@ -478,15 +494,20 @@ internal suspend fun PointerInputScope.detectStylusAwareDrag(
 ) {
     awaitEachGesture {
         val down = awaitFirstDown(requireUnconsumed = false)
-        // Рисуем только стилусом / ластиком / мышью. Палец (Touch) обычно
-        // проходит мимо — иначе на Android он консумится здесь и не доходит
-        // до Modifier.scrollable, ломая вертикальный скролл в дефолтном
-        // режиме. Исключение — [acceptTouch] (быстрая лупа / открытый
-        // трigger / hit-test на target-рамку лупы): тогда пальцем работаем.
+        // Рисуем только стилусом / ластиком / мышью. Касания пальцем обычно
+        // проходят мимо — иначе на Android они консумятся здесь и не доходят
+        // до Modifier.scrollable, ломая вертикальный скролл.
+        //
+        // Исключение: [captureGesture] = true (быстрая лупа, shortcut лупы,
+        // hit-test target-рамки лупы). Жест захватывается НЕЗАВИСИМО от типа
+        // указателя, включая PointerType.Unknown. На части Android-устройств
+        // первый DOWN приходит с Unknown (TOOL_TYPE_UNKNOWN = 0 — hardware
+        // ещё не классифицировал касание); ограничение по типу пропускало
+        // такой DOWN в scrollable и начинался скролл вместо выделения лупой.
         val isDrawingPointer = down.type == PointerType.Stylus ||
             down.type == PointerType.Eraser ||
             down.type == PointerType.Mouse
-        if (!isDrawingPointer && !(down.type == PointerType.Touch && acceptTouch(down.position))) {
+        if (!isDrawingPointer && !captureGesture(down.position)) {
             return@awaitEachGesture
         }
 

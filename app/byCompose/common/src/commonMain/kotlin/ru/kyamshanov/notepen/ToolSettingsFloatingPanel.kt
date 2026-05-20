@@ -11,15 +11,19 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -28,9 +32,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size as CanvasSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.LineWeight
@@ -57,18 +60,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
@@ -80,7 +78,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.sliderPositionToStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.strokeWidthToSliderPosition
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
-import kotlin.math.roundToInt
 
 /**
  * Greedy left-to-right layout decision for adaptive settings rows.
@@ -337,7 +334,29 @@ private fun CollapsibleSettingsRail(
     }
 
     when (orientation) {
-        RailOrientation.VERTICAL -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        RailOrientation.VERTICAL -> Column(
+            modifier = Modifier.width(IntrinsicSize.Max),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // Width-reservation ghost: all slot contents composed simultaneously
+            // inside a Box (so IntrinsicSize.Max sees the widest possible slot
+            // from the very first frame). The layout modifier forces measured
+            // height to 0 and never places the content, so it is invisible
+            // and adds nothing to the Column's height.
+            // AnimatedVisibility alone cannot fix this because it does not
+            // compose its child until visible = true for the first time.
+            Box(
+                modifier = Modifier.layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, 0) {}
+                },
+            ) {
+                slots.forEach { slot ->
+                    Box(Modifier.padding(horizontal = PANEL_EXPANSION_PADDING_H, vertical = PANEL_EXPANSION_PADDING_V)) {
+                        slot.content(RailOrientation.VERTICAL)
+                    }
+                }
+            }
             // Expansion panel sits ABOVE the icon strip and grows upward:
             // the rail is bottom-aligned to the tool toolbar in landscape, so
             // expanding upward keeps the icons anchored to that baseline.
@@ -418,9 +437,6 @@ private fun penSlots(
                 value = settings.alpha,
                 onValueChange = { onChange(settings.applyAlpha(it)) },
                 valueRange = 0f..1f,
-                formatDisplay = { (it * 100f).roundToInt().toString() },
-                parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
-                suffix = "%",
             )
         },
     ),
@@ -506,9 +522,6 @@ private fun eraserSlots(
                 value = settings.sizeNormalized,
                 onValueChange = { onChange(settings.applySize(it)) },
                 valueRange = EraserSettings.MIN_SIZE_NORMALIZED..EraserSettings.MAX_SIZE_NORMALIZED,
-                formatDisplay = { (it * 100f).roundToInt().toString() },
-                parseInput = { it.trim().trimEnd('%').trim().toIntOrNull()?.div(100f) },
-                suffix = "%",
             )
         },
     ),
@@ -613,23 +626,8 @@ private fun StrokeWidthSlider(
         value = strokeWidthToSliderPosition(strokeWidth, min, max),
         onValueChange = { t -> onWidthChange(sliderPositionToStrokeWidth(t, min, max)) },
         valueRange = 0f..1f,
-        formatDisplay = { t ->
-            val widthMm = sliderPositionToStrokeWidth(t, min, max) * A4_WIDTH_MM
-            val tenths = (widthMm * 10f).roundToInt()
-            "${tenths / 10}.${tenths % 10}"
-        },
-        parseInput = { raw ->
-            val cleaned = raw.trim().trimEnd('м', 'm').trim().replace(',', '.')
-            cleaned.toFloatOrNull()?.let { mm ->
-                val width = (mm / A4_WIDTH_MM).coerceIn(min, max)
-                strokeWidthToSliderPosition(width, min, max)
-            }
-        },
-        suffix = " мм",
     )
 }
-
-private const val A4_WIDTH_MM: Float = 210f
 
 @Composable
 private fun OrientedSlider(
@@ -637,40 +635,32 @@ private fun OrientedSlider(
     value: Float,
     onValueChange: (Float) -> Unit,
     valueRange: ClosedFloatingPointRange<Float>,
-    formatDisplay: (Float) -> String,
-    parseInput: (String) -> Float?,
-    suffix: String,
 ) {
     when (orientation) {
-        RailOrientation.HORIZONTAL -> Row(verticalAlignment = Alignment.CenterVertically) {
-            HorizontalAdjustableSlider(
-                value = value,
-                onValueChange = onValueChange,
-                valueRange = valueRange,
-                width = SLIDER_LENGTH,
-            )
-            Spacer(Modifier.width(VALUE_FIELD_INLINE_GAP))
-            ValueField(value, onValueChange, formatDisplay, parseInput, suffix)
-        }
-        RailOrientation.VERTICAL -> Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(VALUE_FIELD_INLINE_GAP),
-        ) {
-            VerticalAdjustableSlider(
-                value = value,
-                onValueChange = onValueChange,
-                valueRange = valueRange,
-                length = SLIDER_LENGTH,
-            )
-            ValueField(value, onValueChange, formatDisplay, parseInput, suffix)
-        }
+        RailOrientation.HORIZONTAL -> HorizontalAdjustableSlider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            width = SLIDER_LENGTH,
+        )
+        RailOrientation.VERTICAL -> VerticalAdjustableSlider(
+            value = value,
+            onValueChange = onValueChange,
+            valueRange = valueRange,
+            length = SLIDER_LENGTH,
+        )
     }
 }
 
 /**
  * Standard horizontal Material 3 slider with the inactive track always visible
- * end-to-end (Material 3 1.8.x leaves a gap between thumb and track at min/max
- * extremes by default).
+ * end-to-end.
+ *
+ * We use a custom track instead of [SliderDefaults.Track] because Material 3 renders
+ * the active and inactive segments separately: at min/max the zero-length segment
+ * simply disappears (a round-cap on a zero-length stroke draws nothing). Drawing a
+ * full-width background first and then the active portion on top keeps both ends
+ * visible at all positions.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -680,22 +670,32 @@ private fun HorizontalAdjustableSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     width: Dp,
 ) {
-    val colors = SliderDefaults.colors(
-        inactiveTrackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f),
-    )
+    val activeColor = MaterialTheme.colorScheme.primary
+    val inactiveColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f)
     Slider(
         value = value,
         onValueChange = onValueChange,
         valueRange = valueRange,
         modifier = Modifier.width(width),
-        colors = colors,
+        colors = SliderDefaults.colors(
+            thumbColor = activeColor,
+            activeTrackColor = activeColor,
+            inactiveTrackColor = inactiveColor,
+        ),
         track = { state ->
-            SliderDefaults.Track(
-                sliderState = state,
-                colors = colors,
-                thumbTrackGapSize = 0.dp,
-                drawStopIndicator = null,
-            )
+            val fraction = ((state.value - state.valueRange.start) /
+                (state.valueRange.endInclusive - state.valueRange.start)).coerceIn(0f, 1f)
+            Canvas(Modifier.fillMaxWidth().height(SLIDER_TRACK_HEIGHT)) {
+                val r = CornerRadius(size.height / 2f)
+                drawRoundRect(color = inactiveColor, cornerRadius = r)
+                if (fraction > 0f) {
+                    drawRoundRect(
+                        color = activeColor,
+                        size = CanvasSize(size.width * fraction, size.height),
+                        cornerRadius = r,
+                    )
+                }
+            }
         },
     )
 }
@@ -707,6 +707,9 @@ private fun HorizontalAdjustableSlider(
  * Bottom = min, top = max — natural "more = up" mental model. Material 3 has
  * no first-class vertical slider; this rotation pattern is the standard
  * workaround until one ships.
+ *
+ * Uses the same full-background custom track as [HorizontalAdjustableSlider]
+ * so the inactive portion stays visible when the slider is at min or max.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -716,9 +719,8 @@ private fun VerticalAdjustableSlider(
     valueRange: ClosedFloatingPointRange<Float>,
     length: Dp,
 ) {
-    val colors = SliderDefaults.colors(
-        inactiveTrackColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f),
-    )
+    val activeColor = MaterialTheme.colorScheme.primary
+    val inactiveColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.2f)
     Box(
         modifier = Modifier.size(width = VERT_SLIDER_TRACK_BREADTH, height = length),
         contentAlignment = Alignment.Center,
@@ -727,14 +729,25 @@ private fun VerticalAdjustableSlider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
-            colors = colors,
+            colors = SliderDefaults.colors(
+                thumbColor = activeColor,
+                activeTrackColor = activeColor,
+                inactiveTrackColor = inactiveColor,
+            ),
             track = { state ->
-                SliderDefaults.Track(
-                    sliderState = state,
-                    colors = colors,
-                    thumbTrackGapSize = 0.dp,
-                    drawStopIndicator = null,
-                )
+                val fraction = ((state.value - state.valueRange.start) /
+                    (state.valueRange.endInclusive - state.valueRange.start)).coerceIn(0f, 1f)
+                Canvas(Modifier.fillMaxWidth().height(SLIDER_TRACK_HEIGHT)) {
+                    val r = CornerRadius(size.height / 2f)
+                    drawRoundRect(color = inactiveColor, cornerRadius = r)
+                    if (fraction > 0f) {
+                        drawRoundRect(
+                            color = activeColor,
+                            size = CanvasSize(size.width * fraction, size.height),
+                            cornerRadius = r,
+                        )
+                    }
+                }
             },
             modifier = Modifier
                 .graphicsLayer {
@@ -758,73 +771,6 @@ private fun VerticalAdjustableSlider(
     }
 }
 
-/**
- * Compact editable value field. Width pinned to [VALUE_FIELD_WIDTH] so the
- * vertical and horizontal layouts have a predictable, identical visual size.
- * Font size = line height (no extra leading) so the suffix Text aligns
- * pixel-perfectly with the BasicTextField across platforms.
- */
-@Composable
-private fun ValueField(
-    value: Float,
-    onValueChange: (Float) -> Unit,
-    formatDisplay: (Float) -> String,
-    parseInput: (String) -> Float?,
-    suffix: String,
-) {
-    val displayed = formatDisplay(value)
-    var text by remember { mutableStateOf(displayed) }
-    LaunchedEffect(displayed) { if (text != displayed) text = displayed }
-    val commit: () -> Unit = commit@{
-        val parsed = parseInput(text) ?: run {
-            text = displayed
-            return@commit
-        }
-        onValueChange(parsed)
-    }
-    val onSurface = MaterialTheme.colorScheme.onSurface
-    val outline = MaterialTheme.colorScheme.outlineVariant
-    val textStyle = MaterialTheme.typography.bodySmall.copy(
-        color = onSurface,
-        fontSize = VALUE_FIELD_FONT_SIZE,
-        lineHeight = VALUE_FIELD_FONT_SIZE,
-        textAlign = TextAlign.Center,
-    )
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .width(VALUE_FIELD_WIDTH)
-                .background(
-                    color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.08f),
-                    shape = RoundedCornerShape(VALUE_FIELD_CORNER_RADIUS),
-                )
-                .border(
-                    width = VALUE_FIELD_BORDER_WIDTH,
-                    color = outline,
-                    shape = RoundedCornerShape(VALUE_FIELD_CORNER_RADIUS),
-                )
-                .padding(horizontal = VALUE_FIELD_PADDING_H, vertical = VALUE_FIELD_PADDING_V),
-            contentAlignment = Alignment.Center,
-        ) {
-            BasicTextField(
-                value = text,
-                onValueChange = { text = it },
-                singleLine = true,
-                textStyle = textStyle,
-                cursorBrush = SolidColor(onSurface),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
-                    imeAction = ImeAction.Done,
-                ),
-                keyboardActions = KeyboardActions(onDone = { commit() }),
-            )
-        }
-        if (suffix.isNotEmpty()) {
-            Text(suffix, style = textStyle, modifier = Modifier.padding(start = 2.dp))
-        }
-    }
-}
-
 private val PANEL_OUTER_PADDING = 16.dp
 private val PANEL_EXPANSION_PADDING_H = 12.dp
 private val PANEL_EXPANSION_PADDING_V = 8.dp
@@ -833,16 +779,10 @@ private val RAIL_STRIP_PADDING_V = 6.dp
 private val RAIL_ITEM_GAP = 4.dp
 private val RAIL_ICON_BUTTON_SIZE = 40.dp
 private val SLIDER_LENGTH = 140.dp
+private val SLIDER_TRACK_HEIGHT = 12.dp
 private val VERT_SLIDER_TRACK_BREADTH = 40.dp
 private val PRESET_GAP = 8.dp
 private val PRESET_SIZE = 28.dp
 private val PRESET_BORDER_DEFAULT = 1.dp
 private val PRESET_BORDER_SELECTED = 2.dp
 private val CHIP_GAP = 6.dp
-private val VALUE_FIELD_WIDTH = 52.dp
-private val VALUE_FIELD_CORNER_RADIUS = 6.dp
-private val VALUE_FIELD_BORDER_WIDTH = 1.dp
-private val VALUE_FIELD_PADDING_H = 6.dp
-private val VALUE_FIELD_PADDING_V = 2.dp
-private val VALUE_FIELD_INLINE_GAP = 8.dp
-private val VALUE_FIELD_FONT_SIZE = 12.sp

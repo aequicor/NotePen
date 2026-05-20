@@ -72,13 +72,16 @@ class MagnifierStateAutoScrollTest {
         height: Float = 0.05f,
     ): MagnifierState = MagnifierState().also { s ->
         s.enable(onPage = 0, viewportSize = Size(1000f, 800f))
+        // Resize before moving: moveTarget clamps top against the *current*
+        // frame height, so a tall default frame would cap top well above the
+        // requested value. Shrink first, then position.
+        s.resizeTarget(newWidth = width, newHeight = height)
         s.moveTarget(
             androidx.compose.ui.geometry.Offset(
                 x = initialLeft - s.targetRect.left,
                 y = top - s.targetRect.top,
             ),
         )
-        s.resizeTarget(newWidth = width, newHeight = height)
     }
 
     private fun assertNear(expected: Float, actual: Float, eps: Float = 1e-3f) {

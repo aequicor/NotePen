@@ -108,12 +108,28 @@ class TabSession internal constructor(
      */
     fun openTab(side: PanelSide, filePath: String, displayName: String?): DocumentId {
         val tab = createTab(filePath, displayName)
+        // Find a pre-existing state for the same file BEFORE adding the new tab.
+        val existingState = documentStatesMap.values.firstOrNull { it.filePath == filePath }
         val next = requireNotNull(
             layout.transformTabs(side) { it.addTab(tab) },
         ) { "addTab cannot produce empty OpenDocuments" }
         layout = next
-        // Pre-create the state so the editor body finds it on first read.
-        stateOf(tab)
+        // Pre-populate the map so stateOf() finds it on first read.
+        // When the same file is already open, share annotation state (strokes,
+        // undo/redo, favourites) so edits appear in both tabs immediately.
+        // Scroll position is always independent (createSharing gives a fresh PdfViewerState).
+        documentStatesMap[tab.id] = if (existingState != null) {
+            PdfDocumentState.createSharing(
+                filePath = filePath,
+                documentId = syncDocumentIdFor(filePath),
+                from = existingState,
+            )
+        } else {
+            PdfDocumentState.create(
+                filePath = filePath,
+                documentId = syncDocumentIdFor(filePath),
+            )
+        }
         return tab.id
     }
 
