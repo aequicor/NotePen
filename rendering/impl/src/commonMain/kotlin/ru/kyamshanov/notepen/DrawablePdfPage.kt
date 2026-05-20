@@ -45,10 +45,10 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
-import ru.kyamshanov.notepen.rendering.api.EraserPosition
-import ru.kyamshanov.notepen.rendering.api.PdfDrawingState
-import ru.kyamshanov.notepen.rendering.api.ToolMode
-import ru.kyamshanov.notepen.rendering.api.eraseInZone
+import ru.kyamshanov.notepen.drawing.api.EraserPosition
+import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+import ru.kyamshanov.notepen.drawing.api.ToolMode
+import ru.kyamshanov.notepen.drawing.api.eraseInZone
 import ru.kyamshanov.notepen.lowlatency.LowLatencyStrokeOverlay
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
 import ru.kyamshanov.notepen.magnifier.MagnifierState
@@ -752,102 +752,6 @@ fun DrawScope.drawStrokeWithPressure(
  * independent smooth curves. Segments shorter than 3 points fall back to
  * straight lines so every recorded point is still included.
  */
-/**
- * Per-gesture eraser state machine, reused by the ERASER pointer-input branch
- * and by the PEN/MARKER branches when the stylus eraser-override is detected
- * at gesture start. Encapsulates:
- *  - the pre-gesture snapshot used for sync diffing,
- *  - the distance gate (skip mutation if pointer hasn't moved enough), and
- *  - the bitmap-rebuild throttle (visual refresh ≤ ~12 fps during the gesture
- *    to keep the main thread responsive on dense pages).
- */
-class EraseGesture(
-    private val pdfDrawingState: PdfDrawingState,
-    private val eraserSettings: EraserSettings,
-    private val eraserPos: androidx.compose.runtime.MutableState<ru.kyamshanov.notepen.rendering.api.EraserPosition?>,
-    private val onGestureStart: (snapshot: List<DrawingPath>) -> Unit,
-    private val onEraseFinished: (before: List<DrawingPath>, after: List<DrawingPath>) -> Unit,
-) {
-    private var preEraseSnapshot: List<DrawingPath> = emptyList()
-    private var lastEraseX = Float.NaN
-    private var lastEraseY = Float.NaN
-    private val halfSize = eraserSettings.sizeNormalized / 2f
-    private val moveThresholdSq = (halfSize * 0.25f).let { it * it }
-    private var lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
-    private var pendingBump = false
-
-    fun start(nx: Float, ny: Float) {
-        preEraseSnapshot = pdfDrawingState.currentPaths.toList()
-        onGestureStart(preEraseSnapshot)
-        eraserPos.value = ru.kyamshanov.notepen.rendering.api.EraserPosition(nx, ny)
-        lastEraseX = nx
-        lastEraseY = ny
-        val changed = pdfDrawingState.eraseInZone(
-            centerX = nx,
-            centerY = ny,
-            halfSizeNormalized = halfSize,
-            settings = eraserSettings,
-            bumpHistory = false,
-        )
-        if (changed) {
-            pdfDrawingState.markHistoryChanged()
-            lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
-            pendingBump = false
-        }
-    }
-
-    fun move(nx: Float, ny: Float) {
-        eraserPos.value = ru.kyamshanov.notepen.rendering.api.EraserPosition(nx, ny)
-        val dx = nx - lastEraseX
-        val dy = ny - lastEraseY
-        if (dx * dx + dy * dy < moveThresholdSq) return
-        lastEraseX = nx
-        lastEraseY = ny
-        val changed = pdfDrawingState.eraseInZone(
-            centerX = nx,
-            centerY = ny,
-            halfSizeNormalized = halfSize,
-            settings = eraserSettings,
-            bumpHistory = false,
-        )
-        if (changed) {
-            pendingBump = true
-            if (lastHistoryBump.elapsedNow().inWholeMilliseconds >= 80L) {
-                pdfDrawingState.markHistoryChanged()
-                lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
-                pendingBump = false
-            }
-        }
-    }
-
-    fun end() {
-        eraserPos.value = null
-        if (pendingBump) {
-            pdfDrawingState.markHistoryChanged()
-            pendingBump = false
-        }
-        onEraseFinished(preEraseSnapshot, pdfDrawingState.currentPaths.toList())
-    }
-
-    fun cancel() {
-        eraserPos.value = null
-        if (pendingBump) {
-            pdfDrawingState.markHistoryChanged()
-            pendingBump = false
-        }
-        // Жест мог быть отменён pointerInput-restart'ом (смена ключей,
-        // рекомпозиция родителя) уже после того, как eraseInZone реально
-        // изменил currentPaths. Если не уведомить sync — пир остаётся со
-        // старыми штрихами. Сравниваем по identity: ничего не стёрто →
-        // ничего не шлём.
-        val after = pdfDrawingState.currentPaths.toList()
-        if (after.size != preEraseSnapshot.size ||
-            after.zip(preEraseSnapshot).any { (a, b) -> a !== b }
-        ) {
-            onEraseFinished(preEraseSnapshot, after)
-        }
-    }
-}
 
 private fun List<DrawingPoint>.appendCatmullRomTo(
     target: Path,

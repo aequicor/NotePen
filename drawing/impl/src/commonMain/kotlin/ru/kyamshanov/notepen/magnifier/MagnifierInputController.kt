@@ -5,14 +5,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import kotlinx.coroutines.CoroutineScope
-import ru.kyamshanov.notepen.EraseGesture
 import ru.kyamshanov.notepen.HoldGestureTracker
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
-import ru.kyamshanov.notepen.rendering.api.PdfDrawingState
-import ru.kyamshanov.notepen.rendering.api.ToolMode
-import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.drawing.api.EraseGesture
+import ru.kyamshanov.notepen.drawing.api.EraserPosition
+import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 
 /** Длительность удержания pointer'а на месте для триггера shape-recognition (мс). */
 private const val SHAPE_SNAP_HOLD_MS: Long = 700L
@@ -29,14 +30,14 @@ private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
  * для соответствующей страницы.
  */
 class MagnifierInputController(
-    private val state: MagnifierState,
+    private val geometry: MagnifierGeometry,
     private val pdfDrawingStateProvider: (pageIndex: Int) -> PdfDrawingState,
     private val toolMode: () -> ToolMode,
     private val penSettings: () -> PenSettings,
     private val markerSettings: () -> MarkerSettings,
     private val eraserSettings: () -> EraserSettings,
     private val eraserOverride: () -> Boolean,
-    private val eraserPos: MutableState<ru.kyamshanov.notepen.rendering.api.EraserPosition?>,
+    private val eraserPos: MutableState<EraserPosition?>,
     private val onGestureStart: (pageIndex: Int, snapshot: List<DrawingPath>) -> Unit,
     private val onStrokeFinished: (pageIndex: Int, path: DrawingPath) -> Unit,
     private val onEraseFinished: (
@@ -75,7 +76,7 @@ class MagnifierInputController(
     }
 
     fun onDown(panelLocal: Offset, panelSize: Size, pressure: Float, tilt: Float) {
-        val pageCanvasW = state.pageCanvasWidthPx
+        val pageCanvasW = geometry.pageCanvasWidthPx
         if (pageCanvasW <= 0f || panelSize.width <= 0f || panelSize.height <= 0f) return
         val segment = segmentForPanelY(panelLocal.y, panelSize.height) ?: return
         val page = panelLocalToPage(panelLocal, panelSize, segment)
@@ -133,7 +134,7 @@ class MagnifierInputController(
         if (panelSize.width <= 0f || panelSize.height <= 0f) return
 
         val pi = activePageIndex
-        val segment = state.segments.firstOrNull { it.pageIndex == pi } ?: return
+        val segment = geometry.segments.firstOrNull { it.pageIndex == pi } ?: return
         val page = panelLocalToPage(panelLocal, panelSize, segment)
         val pdfDrawingState = activeDrawingState ?: return
         when (activeMode) {
@@ -182,9 +183,9 @@ class MagnifierInputController(
         // сторону на AUTO_SCROLL_LIFT_OFF_FRAC своего размера. Только для
         // single-page (для multi-page понятие «следующая строка» сейчас
         // не определено).
-        if (!state.autoScrollEnabled || state.segments.size != 1) return
+        if (!geometry.autoScrollEnabled || geometry.segments.size != 1) return
         if (panelSize.width <= 0f || panelSize.height <= 0f) return
-        val seg = state.segments.firstOrNull { it.pageIndex == pi } ?: return
+        val seg = geometry.segments.firstOrNull { it.pageIndex == pi } ?: return
         val last = completed.points.lastOrNull() ?: return
         val target = seg.targetOnPage
         val width = target.right - target.left
@@ -211,7 +212,7 @@ class MagnifierInputController(
         val newLeft = (target.left + shiftX).coerceIn(0f, maxLeft)
         val newTop = (target.top + shiftY).coerceIn(0f, maxTop)
         if (newLeft == target.left && newTop == target.top) return
-        state.setSingleSegmentTarget(
+        geometry.setSingleSegmentTarget(
             pageIndex = pi,
             targetOnPage = Rect(newLeft, newTop, newLeft + width, newTop + height),
         )
@@ -230,7 +231,7 @@ class MagnifierInputController(
         val frac = (panelY / panelHeight).coerceIn(0f, 1f)
         // Берём первый сегмент, у которого frac < panelBottomFrac. Граничный
         // случай (frac == 0): возвращаем самый верхний.
-        return state.segments.firstOrNull { frac < it.panelBottomFrac || it === state.segments.last() }
+        return geometry.segments.firstOrNull { frac < it.panelBottomFrac || it === geometry.segments.last() }
     }
 
     /**
@@ -259,7 +260,7 @@ class MagnifierInputController(
 
     private fun loupeMagnification(panelSize: Size, segment: MagnifierPageSegment): Float {
         val targetW = segment.targetOnPage.right - segment.targetOnPage.left
-        val pageCanvasW = state.pageCanvasWidthPx
+        val pageCanvasW = geometry.pageCanvasWidthPx
         if (targetW <= 0f || pageCanvasW <= 0f || panelSize.width <= 0f) return 1f
         return (panelSize.width / (pageCanvasW * targetW)).coerceAtLeast(1f)
     }
@@ -280,16 +281,4 @@ class MagnifierInputController(
         /** Lower bound for stroke width as a fraction of page width (~0.04 mm on A4). */
         const val MIN_NORMALIZED_STROKE: Float = 0.0002f
     }
-}
-
-/**
- * Перевод позиции из viewport-координат в panel-local content. Возвращает
- * `null`, если позиция вне content-области.
- */
-fun viewportToPanelLocal(state: MagnifierState, viewportPos: Offset): Offset? {
-    val r = state.contentBoundsInViewport
-    if (r.width <= 0f || r.height <= 0f) return null
-    val local = Offset(viewportPos.x - r.left, viewportPos.y - r.top)
-    if (local.x < 0f || local.y < 0f || local.x > r.width || local.y > r.height) return null
-    return local
 }

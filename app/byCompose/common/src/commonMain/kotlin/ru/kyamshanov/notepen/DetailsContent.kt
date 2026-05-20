@@ -111,11 +111,13 @@ import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
 import ru.kyamshanov.notepen.magnifier.MagnifierInputPanel
+import ru.kyamshanov.notepen.magnifier.asMagnifierGeometry
 import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
+import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tabs.PanelLayout
 import ru.kyamshanov.notepen.tabs.PanelSide
@@ -899,7 +901,7 @@ fun DetailsContent(
         val drawingController = remember(pdfViewerState, drawingStates, magnifierState) {
             MultiPageDrawingController(
                 drawingStates = drawingStates,
-                viewerState = pdfViewerState,
+                geometry = pdfViewerState.asPageLayoutGeometry(),
                 toolMode = { toolModeProvider.value },
                 penSettings = { penSettingsProvider.value },
                 markerSettings = { markerSettingsProvider.value },
@@ -1746,14 +1748,14 @@ fun DetailsContent(
                 }
             val magEraserOverrideState = rememberUpdatedState(eraserOverride)
             val magEraserOverrideProvider = remember { { magEraserOverrideState.value } }
-            val magEraserPos = remember { mutableStateOf<ru.kyamshanov.notepen.rendering.api.EraserPosition?>(null) }
+            val magEraserPos = remember { mutableStateOf<ru.kyamshanov.notepen.drawing.api.EraserPosition?>(null) }
             val magToolModeProvider = rememberUpdatedState(effectiveToolMode)
             val magPenSettingsProvider = rememberUpdatedState(penSettings)
             val magMarkerSettingsProvider = rememberUpdatedState(markerSettings)
             val magEraserSettingsProvider = rememberUpdatedState(eraserSettings)
             val magnifierInputController = remember(magnifierState) {
                 ru.kyamshanov.notepen.magnifier.MagnifierInputController(
-                    state = magnifierState,
+                    geometry = magnifierState.asMagnifierGeometry(),
                     pdfDrawingStateProvider = magPdfDrawingStateProvider,
                     toolMode = { magToolModeProvider.value },
                     penSettings = { magPenSettingsProvider.value },

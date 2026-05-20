@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.rendering.api
+package ru.kyamshanov.notepen.drawing.api
 
 /**
  * Позиция курсора ластика в нормализованных координатах страницы `[0..1]`.

@@ -2,7 +2,7 @@ package ru.kyamshanov.notepen.lowlatency
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import ru.kyamshanov.notepen.rendering.api.PdfDrawingState
+import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 
 /**
  * Platform-specific low-latency overlay for the in-flight pen stroke.

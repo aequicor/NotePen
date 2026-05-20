@@ -61,13 +61,13 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
-import ru.kyamshanov.notepen.rendering.api.PdfDrawingState
-import ru.kyamshanov.notepen.rendering.api.ToolMode
+import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.detectStylusAwareDrag
 import ru.kyamshanov.notepen.drawLiveStroke
 import ru.kyamshanov.notepen.drawStrokeWithPressure
-import ru.kyamshanov.notepen.EraseGesture
+import ru.kyamshanov.notepen.drawing.api.EraseGesture
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 
 private const val FRAME_FILL_ALPHA = 0.10f
@@ -119,7 +119,7 @@ fun MagnifierInputPanel(
     val density = LocalDensity.current
     val tablet = LocalTabletInputController.current
     val pencilModeState = rememberUpdatedState(pencilModeEnabled)
-    val eraserPos = remember { mutableStateOf<ru.kyamshanov.notepen.rendering.api.EraserPosition?>(null) }
+    val eraserPos = remember { mutableStateOf<ru.kyamshanov.notepen.drawing.api.EraserPosition?>(null) }
 
     LaunchedEffect(toolMode) {
         if (toolMode != ToolMode.ERASER) eraserPos.value = null
@@ -275,7 +275,7 @@ private fun MagnifierContent(
     eraserSettings: EraserSettings,
     eraserOverride: () -> Boolean,
     pencilModeState: androidx.compose.runtime.State<Boolean>,
-    eraserPos: androidx.compose.runtime.MutableState<ru.kyamshanov.notepen.rendering.api.EraserPosition?>,
+    eraserPos: androidx.compose.runtime.MutableState<ru.kyamshanov.notepen.drawing.api.EraserPosition?>,
     onGestureStart: (Int, List<DrawingPath>) -> Unit,
     onStrokeFinished: (Int, DrawingPath) -> Unit,
     onEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit,

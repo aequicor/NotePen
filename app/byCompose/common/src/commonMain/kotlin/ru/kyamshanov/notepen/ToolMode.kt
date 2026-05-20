@@ -1,3 +1,3 @@
 package ru.kyamshanov.notepen
 
-typealias ToolMode = ru.kyamshanov.notepen.rendering.api.ToolMode
+typealias ToolMode = ru.kyamshanov.notepen.drawing.api.ToolMode
