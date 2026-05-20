@@ -1746,7 +1746,7 @@ fun DetailsContent(
                 }
             val magEraserOverrideState = rememberUpdatedState(eraserOverride)
             val magEraserOverrideProvider = remember { { magEraserOverrideState.value } }
-            val magEraserPos = remember { mutableStateOf<Offset?>(null) }
+            val magEraserPos = remember { mutableStateOf<ru.kyamshanov.notepen.rendering.api.EraserPosition?>(null) }
             val magToolModeProvider = rememberUpdatedState(effectiveToolMode)
             val magPenSettingsProvider = rememberUpdatedState(penSettings)
             val magMarkerSettingsProvider = rememberUpdatedState(markerSettings)

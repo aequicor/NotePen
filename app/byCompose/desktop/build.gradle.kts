@@ -24,6 +24,8 @@ kotlin {
             implementation(projects.qrConnect)
             implementation(projects.shared)
             implementation(projects.app.byCompose.common)
+            implementation(projects.rendering.api)
+            implementation(projects.rendering.impl)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.jna)
             implementation(libs.jna.platform)

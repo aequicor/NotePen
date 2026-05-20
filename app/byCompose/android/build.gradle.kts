@@ -23,6 +23,8 @@ kotlin {
             implementation(projects.sync)
             implementation(projects.qrConnect)
             implementation(projects.app.byCompose.common)
+            implementation(projects.rendering.api)
+            implementation(projects.rendering.impl)
 
             implementation(libs.androidx.compose.ui.tooling.preview)
             implementation(libs.androidx.activity.compose)

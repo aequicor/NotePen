@@ -1,10 +1,3 @@
 package ru.kyamshanov.notepen
 
-/**
- * Активный инструмент на экране деталей.
- *
- * Тип enum гарантирует взаимоисключаемость пера и ластика — одно значение
- * в момент времени. [NONE] означает, что ни один инструмент не активен
- * (жесты на canvas интерпретируются как pan / zoom).
- */
-enum class ToolMode { NONE, PEN, MARKER, ERASER }
+typealias ToolMode = ru.kyamshanov.notepen.rendering.api.ToolMode
