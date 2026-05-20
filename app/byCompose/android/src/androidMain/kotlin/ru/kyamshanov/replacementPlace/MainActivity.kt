@@ -273,7 +273,6 @@ class MainActivity : ComponentActivity() {
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
-                    pickPdfPath = { filePicker.pickPdfFile() },
                 )
             }
         }

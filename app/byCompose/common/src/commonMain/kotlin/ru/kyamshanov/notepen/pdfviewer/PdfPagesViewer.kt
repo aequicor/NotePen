@@ -35,6 +35,16 @@ expect fun PdfPagesViewer(
     pages: List<PdfPageInfo>,
     renderer: PdfPageRenderer,
     modifier: Modifier = Modifier,
+    /**
+     * Gesture-handler modifier applied **after** the viewer's built-in scroll /
+     * pan / zoom modifier so that it is **inner** in the modifier chain. In
+     * Compose's Main pass events flow inner → outer, meaning this modifier runs
+     * first and can consume events before [Modifier.scrollable] gets a chance to
+     * claim a drag. Pass drawing / loupe input here instead of [modifier] to
+     * prevent simultaneous scrolling while a gesture is routed to the drawing
+     * pipeline.
+     */
+    gestureModifier: Modifier = Modifier,
     pageContent: PdfPageContent,
 )
 
@@ -96,6 +106,14 @@ expect class PdfViewerState {
     /** Текущий зум (1.0 = 100%). */
     var zoom: Float
         private set
+
+    /**
+     * Транзитный коэффициент масштаба, применяемый поверх [zoom] во время
+     * активного pinch-жеста через `Modifier.graphicsLayer`. Равен `1f`, когда
+     * пинча нет; любое другое значение означает, что жест ещё не закоммичен.
+     */
+    var gestureScale: Float
+        internal set
 
     /** PDF-ширина колонки страниц при `zoom = 1`. */
     internal val basePageWidthPx: Float

@@ -132,6 +132,7 @@ actual fun PdfPagesViewer(
     pages: List<PdfPageInfo>,
     renderer: PdfPageRenderer,
     modifier: Modifier,
+    gestureModifier: Modifier,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
@@ -253,7 +254,8 @@ actual fun PdfPagesViewer(
                 }
             }
             .clipToBounds()
-            .pdfDesktopPointerInput(state, pendingZoom),
+            .pdfDesktopPointerInput(state, pendingZoom)
+            .then(gestureModifier),
     ) {
         SubcomposeLayout(
             modifier = Modifier

@@ -78,6 +78,16 @@ private class FakeDetailsComponent(title: String = "test-title") : DetailsCompon
         onBackCallCount++
     }
 
+    override fun openLibrary() {
+        // no-op for test double
+    }
+
+    override val pendingTabUri: Value<String> = MutableValue("")
+
+    override fun onPendingTabHandled() {
+        // no-op for test double
+    }
+
     override fun saveLastPageIndex(pageIndex: Int) {
         // no-op for test double
     }

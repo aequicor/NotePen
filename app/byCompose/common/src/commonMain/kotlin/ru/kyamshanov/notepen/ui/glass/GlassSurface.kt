@@ -21,12 +21,13 @@ internal fun GlassSurface(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(GlassCornerRadius),
     tint: Color = MaterialTheme.colorScheme.surface,
+    fillAlpha: Float = GlassFillAlpha,
     content: @Composable () -> Unit,
 ) {
     Surface(
         modifier = modifier.glassBackdrop(),
         shape = shape,
-        color = tint.copy(alpha = GlassFillAlpha),
+        color = tint.copy(alpha = fillAlpha),
         tonalElevation = 0.dp,
         border = BorderStroke(
             width = GlassBorderWidth,

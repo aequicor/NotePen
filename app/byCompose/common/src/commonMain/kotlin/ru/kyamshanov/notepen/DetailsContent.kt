@@ -11,13 +11,18 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -45,6 +50,8 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,6 +75,10 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
@@ -144,6 +155,14 @@ private const val TOOLBAR_ZOOM_STEP_OUT = 1f / TOOLBAR_ZOOM_STEP_IN
 private val REPLAY_DEADLINE = 10.seconds
 
 /**
+ * Пауза бездействия, после которой активная вкладка тихо автосохраняется на
+ * диск. Сигнал — изменение [PdfDrawingState.historyVersion] / списка избранных;
+ * во время самого штриха версия не растёт, поэтому запись не происходит посреди
+ * жеста, а только когда пользователь сделал паузу.
+ */
+private const val AUTOSAVE_DEBOUNCE = 2_000L
+
+/**
  * Размер high-res рендеринга страницы под лупой (макс. сторона в пикселях).
  * Дополнительно к viewer-битмапу — даёт чёткое изображение в панели при
  * сильной магнификации. 4000 px ≈ хватает на 3-8× зум поверх baseline.
@@ -191,13 +210,6 @@ fun DetailsContent(
      * заново из локального пути — это давало бы другой hash и ломало синк).
      */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
-    /**
-     * Platform PDF picker, invoked by the `+` tab button. Returns the
-     * picked file path / URI, or `null` if the user dismissed the
-     * dialog. Reuse [ru.kyamshanov.notepen.mainscreen.platform.FilePicker.pickPdfFile]
-     * at the application root.
-     */
-    onPickPdf: suspend () -> String?,
     modifier: Modifier = Modifier,
 ) {
     val localWindowInfo = LocalWindowInfo.current
@@ -222,10 +234,48 @@ fun DetailsContent(
                 fromRegistry ?: documentIdFromFilePath(path)
             }
         }
+    // Пути дополнительных вкладок (помимо начальной). Сохраняется через
+    // rememberSaveable — Decompose сохраняет это состояние в SaveableStateHolder
+    // для back-stack элементов, поэтому список переживает навигацию в Library и обратно.
+    var savedExtraTabPaths by rememberSaveable { mutableStateOf("") }
+
     val tabSession = rememberTabSession(
         initialFilePath = initialFilePath,
         syncDocumentIdFor = syncDocumentIdFor,
     )
+
+    // При входе в composition восстанавливаем ранее открытые вкладки, затем
+    // непрерывно синхронизируем savedExtraTabPaths с фактическим layout.
+    LaunchedEffect(tabSession) {
+        savedExtraTabPaths.lines().filter { it.isNotBlank() }.forEach { path ->
+            tabSession.openTab(
+                side = PanelSide.PRIMARY,
+                filePath = path,
+                displayName = displayNameForFilePath(path),
+            )
+        }
+        snapshotFlow { tabSession.layout }
+            .collect { layout ->
+                val extra = (layout as? PanelLayout.Single)
+                    ?.tabs?.tabs?.drop(1)?.map { it.filePath }
+                    .orEmpty()
+                savedExtraTabPaths = extra.joinToString("\n")
+            }
+    }
+
+    // Файл, выбранный в библиотеке (кнопка «+»), открываем новой вкладкой в
+    // текущем tabSession — так у каждой вкладки своя страница/скролл, а возврат
+    // к редактору не «схлопывает» обе копии на одну страницу.
+    val pendingTabUri by component.pendingTabUri.subscribeAsState()
+    LaunchedEffect(pendingTabUri) {
+        if (pendingTabUri.isBlank()) return@LaunchedEffect
+        tabSession.openTab(
+            side = PanelSide.PRIMARY,
+            filePath = pendingTabUri,
+            displayName = displayNameForFilePath(pendingTabUri),
+        )
+        component.onPendingTabHandled()
+    }
 
     val singleLayout = tabSession.layout as? PanelLayout.Single
         ?: error("Commit 2 only supports PanelLayout.Single (no split yet)")
@@ -236,11 +286,14 @@ fun DetailsContent(
     // magnifier, viewer position, favourites) come from the active
     // tab's [PdfDocumentState]. When the user switches tab, `pdfState`
     // identity changes — `remember(pdfState) { ... }` blocks below
-    // reset accordingly. When the workspace has no active tab (the
-    // moment after closing the last one, before we pop), `Stub` carries
-    // an empty placeholder so the rest of the body stays expressible.
-    val pdfState = activeTab?.let { tabSession.stateOf(it) }
-        ?: error("DetailsContent invariant: tabSession must always have one active tab here")
+    // reset accordingly.
+    //
+    // `activeTab` is null only in the transient frame right after the
+    // last tab is closed (closeTab → AllClosed sets OpenDocuments.Empty),
+    // just before the editor is popped off the stack. Render nothing for
+    // that frame instead of crashing — the pop lands on the next frame.
+    if (activeTab == null) return
+    val pdfState = tabSession.stateOf(activeTab)
     val filePath = pdfState.filePath
     val documentId = pdfState.documentId
     val pdfDocument: PdfDocument? = pdfState.pdfDocument
@@ -300,7 +353,6 @@ fun DetailsContent(
         pencilModeEnabled = stylusEverSeen
     }
     var showThumbnails by remember { mutableStateOf(false) }
-    var isSaving by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     val drawingStates = pdfState.drawingStates
     val favoritePageIndices = pdfState.favoritePageIndices
@@ -327,13 +379,13 @@ fun DetailsContent(
             drawingStates[pageIndex]?.extent?.value ?: PageExtent.Pdf
         }
     }
-    val firstVisiblePage by remember {
+    val firstVisiblePage by remember(pdfState) {
         derivedStateOf { pdfViewerState.firstVisiblePageIndex }
     }
-    val currentScalePercent: Int by remember {
+    val currentScalePercent: Int by remember(pdfState) {
         derivedStateOf { pdfViewerState.scalePercent }
     }
-    val currentPageOffsetPx: Int by remember {
+    val currentPageOffsetPx: Int by remember(pdfState) {
         derivedStateOf { pdfViewerState.firstVisiblePageOffsetPx }
     }
     val globalUndoStack = pdfState.undoStack
@@ -393,6 +445,8 @@ fun DetailsContent(
     // не уезжал под top bar / панель настроек.
     val density = LocalDensity.current
     var portraitTopChromeHeightDp by remember { mutableStateOf(0.dp) }
+    var landscapeToolbarWidthDp by remember { mutableStateOf(FLOATING_TOOLBAR_WIDTH) }
+    var landscapePageCounterHeightDp by remember { mutableStateOf(TAB_BAR_HEIGHT) }
     // В портретном режиме сайдбар миниатюр выезжает слева на всю высоту
     // и сдвигает PDF + top bar вправо (не перекрывает их, как в landscape).
     // tween — чтобы синхронизироваться со slideOutHorizontally самого
@@ -573,12 +627,49 @@ fun DetailsContent(
         // whose PdfDocument is already cached in [pdfState] skips the
         // re-open — drawing state, undo stack and viewer position were
         // preserved by [tabSession.stateOf].
-        if (pdfState.pdfDocument == null) {
-            pdfState.pdfDocument = try {
-                loader.load(filePath)
+        // isPdfLoading guard prevents a duplicate load if the background
+        // preloader already started loading this tab's document.
+        if (pdfState.pdfDocument == null && !pdfState.isPdfLoading) {
+            pdfState.isPdfLoading = true
+            try {
+                pdfState.pdfDocument = loader.load(filePath)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 logger.warn { "Failed to open PDF: ${e::class.simpleName}" }
-                null
+                pdfState.pdfDocument = null
+            } finally {
+                pdfState.isPdfLoading = false
+            }
+        }
+    }
+
+    // Eagerly load PDFs for every tab when the tab list changes so that
+    // switching to a tab that was never active doesn't trigger a cold load.
+    // Keyed on [openDocs.tabs] — not on [openDocs] — so it does NOT restart
+    // on active-tab changes (only on tabs being added or removed).
+    // Tabs sharing a filePath with an already-loading tab are skipped to
+    // avoid concurrent same-file loader.load() calls; they load lazily when activated.
+    LaunchedEffect(openDocs.tabs) {
+        openDocs.tabs.forEach { tab ->
+            val state = tabSession.stateOf(tab)
+            if (state.pdfDocument == null && !state.isPdfLoading) {
+                val sameFileIsLoading = openDocs.tabs.any { other ->
+                    other.id != tab.id &&
+                        tabSession.stateOf(other).let { s -> s.filePath == state.filePath && s.isPdfLoading }
+                }
+                if (sameFileIsLoading) return@forEach
+                state.isPdfLoading = true
+                try {
+                    state.pdfDocument = loader.load(state.filePath)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    logger.warn { "Preload failed for ${tab.displayName}: ${e::class.simpleName}" }
+                    state.pdfDocument = null
+                } finally {
+                    state.isPdfLoading = false
+                }
             }
         }
     }
@@ -607,8 +698,8 @@ fun DetailsContent(
             // ручным lazyListState.scrollToItem.
             pdfViewerState.applyInitialState(
                 scalePercent = bundle.scale,
-                pageIndex = bundle.currentPage,
-                pageOffsetPx = bundle.currentPageOffset,
+                pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,
+                pageOffsetPx = if (pdfState.skipPageRestore) 0 else bundle.currentPageOffset,
             )
             // Sanitize on load: legacy settings persisted strokeWidth as raw
             // pixels (range ~1..80); the field now means fraction-of-page-width.
@@ -632,68 +723,115 @@ fun DetailsContent(
 
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
+    // Persist a single tab locally. Shared by the debounce auto-save and the
+    // save-on-leave path so the argument assembly lives in one place.
+    val saveTab: suspend (PdfDocumentState) -> Unit = save@{ state ->
+        val annotations = state.drawingStates.mapValues { (_, s) ->
+            s.currentPaths.toList()
+        }
+        val extents = state.drawingStates.mapValues { (_, s) -> s.extent.value }
+        annotationRepository.save(
+            pdfPath = state.filePath,
+            annotations = annotations,
+            scale = state.pdfViewerState.scalePercent,
+            pen = penSettings,
+            marker = markerSettings,
+            eraser = eraserSettings,
+            currentPage = state.pdfViewerState.firstVisiblePageIndex,
+            currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
+            favoritePageIndices = state.favoritePageIndices.toSet(),
+            pageExtents = extents,
+        ).onFailure { e ->
+            logger.warn {
+                "Auto-save failed for ${state.filePath}: ${e::class.simpleName}"
+            }
+        }
+    }
+
+    // Save every open tab — the user expects edits on background tabs to
+    // survive leaving the editor, not just the active one.
+    val saveAllOpenTabs: suspend () -> Unit = {
+        for (tab in openDocs.tabs) {
+            saveTab(tabSession.stateOf(tab))
+        }
+    }
+
+    // Debounced auto-save of the active tab: ~2s after the user stops drawing /
+    // erasing / toggling favourites, the current state is silently written to
+    // disk. Drawing can only happen in the active tab, so saving just it covers
+    // every edit. Keyed on [pdfState] so switching tabs restarts the collector.
+    LaunchedEffect(pdfState) {
+        snapshotFlow {
+            var acc = 0
+            for ((_, s) in pdfState.drawingStates) {
+                acc += s.historyVersion.value
+            }
+            acc + pdfState.favoritePageIndices.size
+        }
+            // First emission is the value already on disk (just loaded) — and
+            // the load itself bumps historyVersion. Dropping it avoids writing
+            // back what we just read.
+            .drop(1)
+            .distinctUntilChanged()
+            .debounce(AUTOSAVE_DEBOUNCE)
+            .collect { saveTab(pdfState) }
+    }
+
+    // Если этот девайс подключён клиентом к чужому host-у — попросить host
+    // сохранить документ у себя. На host-инстансе (PC) peerClient тоже не null,
+    // но ни к кому не подключён: тогда remote-сохранение не требуется (локальная
+    // запись делается через saveAllOpenTabs). Дожидаемся ответа host-а (с
+    // таймаутом), чтобы SaveRequest гарантированно ушёл до навигации назад.
+    val requestRemoteSaveIfConnected: suspend () -> Unit = {
+        if (peerClient != null && clientPairingState is PairingState.Connected) {
+            val requestId = "save-${Random.nextLong().toString(16)}"
+            logger.info { "[save-diag tablet] sending SaveRequest id=$requestId doc=$documentId" }
+            // Multi-host: ask every connected host. The first reply wins —
+            // typically only one host actually holds the document.
+            peerClient.broadcast(
+                NetworkMessage.SaveRequest(
+                    requestId = requestId,
+                    documentId = documentId,
+                ),
+            )
+            val reply = withTimeoutOrNull(5.seconds) {
+                peerClient.incomingMessages
+                    .filter { it.message is NetworkMessage.SaveResult }
+                    .map { it.message as NetworkMessage.SaveResult }
+                    .filter { it.requestId == requestId }
+                    .first()
+            }
+            logger.info { "[save-diag tablet] SaveRequest id=$requestId reply=$reply" }
+        }
+    }
+
     val onBackWithSave: () -> Unit = {
         coroutineScope.launch {
-            // Save every open tab — the user expects edits on background
-            // tabs to survive the back gesture, not just the active one.
-            for (tab in openDocs.tabs) {
-                val state = tabSession.stateOf(tab)
-                val annotations = state.drawingStates.mapValues { (_, s) ->
-                    s.currentPaths.toList()
-                }
-                val extents = state.drawingStates.mapValues { (_, s) -> s.extent.value }
-                annotationRepository.save(
-                    pdfPath = state.filePath,
-                    annotations = annotations,
-                    scale = state.pdfViewerState.scalePercent,
-                    pen = penSettings,
-                    marker = markerSettings,
-                    eraser = eraserSettings,
-                    currentPage = state.pdfViewerState.firstVisiblePageIndex,
-                    currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
-                    favoritePageIndices = state.favoritePageIndices.toSet(),
-                    pageExtents = extents,
-                ).onFailure { e ->
-                    logger.warn {
-                        "Auto-save on back failed for ${state.filePath}: ${e::class.simpleName}"
-                    }
-                }
-            }
+            saveAllOpenTabs()
+            requestRemoteSaveIfConnected()
             component.saveLastPageIndex(firstVisiblePage)
             component.onBack()
         }
     }
 
+    // «+» открывает библиотеку поверх текущего документа: сначала сохраняем
+    // открытые вкладки (документ остаётся в стеке и доступен по жесту «назад»).
+    val onOpenLibrary: () -> Unit = {
+        coroutineScope.launch {
+            saveAllOpenTabs()
+            requestRemoteSaveIfConnected()
+            component.saveLastPageIndex(firstVisiblePage)
+            component.openLibrary()
+        }
+    }
+
+    val statusBarsTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        TabBar(
-            side = PanelSide.PRIMARY,
-            openDocs = openDocs,
-            onSelect = { _, id -> tabSession.setActiveTab(PanelSide.PRIMARY, id) },
-            onClose = { _, id ->
-                val result = tabSession.closeTab(PanelSide.PRIMARY, id)
-                if (result == TabCloseResult.AllClosed) onBackWithSave()
-            },
-            onAddTab = { _ ->
-                coroutineScope.launch {
-                    val path = onPickPdf() ?: return@launch
-                    tabSession.openTab(
-                        side = PanelSide.PRIMARY,
-                        filePath = path,
-                        displayName = displayNameForFilePath(path),
-                    )
-                }
-            },
-            // Split-view rendering is set up in a follow-up. PanelContainer
-            // and the per-tab context menu are in place; once DetailsContent
-            // wraps the editor body in a PanelContainer slot, pass a real
-            // [PanelOrientation] lambda here.
-            onOpenInSplit = null,
-            modifier = Modifier.align(Alignment.TopStart),
-        )
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(top = TAB_BAR_HEIGHT)
+                .consumeWindowInsets(WindowInsets.statusBars)
+                .padding(top = TAB_BAR_HEIGHT + statusBarsTop)
                 .focusRequester(focusRequester)
                 .focusTarget()
                 .onKeyEvent { e ->
@@ -985,7 +1123,16 @@ fun DetailsContent(
 
         fun routedOnUp() {
             when (gestureRoute.value) {
-                GestureRoute.LOUPE -> loupeSelectionController.onUp()
+                GestureRoute.LOUPE -> {
+                    loupeSelectionController.onUp()
+                    // Всегда снимаем взвод лупы после UP. LoupeSelectionController
+                    // сбрасывает quickLoupeArmed внутри onSelected (только для
+                    // валидного выделения ≥ MIN_SELECTION_PX). При маленьком
+                    // выделении onSelected не вызывается — quickLoupeArmed
+                    // оставался true, и captureGesture захватывал все
+                    // последующие касания, блокируя скролл PDF.
+                    quickLoupeArmed.value = false
+                }
                 GestureRoute.DRAWING -> drawingController.onUp()
                 GestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value
                     ?.onUp(magnifierState.panelSize)
@@ -1036,6 +1183,13 @@ fun DetailsContent(
         // события. Если развести их по сиблингам в Box'е, верхний сиблинг
         // эксклюзивно забирает события (sharePointerInputWithSiblings =
         // false по умолчанию) — и колесо мыши перестаёт скроллить.
+        //
+        // gestureModifier передаётся отдельно от modifier (не через .then()),
+        // чтобы PdfPagesViewer мог поставить его ПОСЛЕ scrollable в цепочке.
+        // В Main-pass события идут inner→outer — drawing-handler, будучи inner,
+        // обрабатывает события первым и потребляет их до того, как scrollable
+        // успевает детектировать drag-slop. Это предотвращает одновременный
+        // скролл при рисовании пальцем или выделении области лупой.
         PdfPagesViewer(
             state = pdfViewerState,
             pdfDocument = pdfDocument,
@@ -1045,28 +1199,41 @@ fun DetailsContent(
             // сайдбар оверлеит его слева (так же, как в landscape). Сдвиг
             // через translationX/padding делал бы правый край PDF за экраном
             // или дёргал бы тяжёлый SubcomposeLayout каждый кадр анимации.
-            modifier = Modifier
-                .fillMaxSize()
-                .pdfMultiPageDrawingInput(
-                    key = drawingController,
-                    tablet = tabletController,
-                    palmRejectionActive = palmRejectionActive,
-                    // Палец рисует выделение лупы, когда взведён quick-loupe
-                    // FAB или удерживается shortcut открытия (desktop). Иначе
-                    // палец проваливается в scrollable.
-                    acceptTouch = { pos ->
-                        quickLoupeArmed.value ||
-                            openTriggerProvider.value ||
-                            (magnifierState.enabled &&
-                                magnifierTargetGestureController.hitTest(pos) !=
-                                ru.kyamshanov.notepen.magnifier
-                                    .MagnifierTargetGestureController.Mode.NONE)
-                    },
-                    onDown = ::routedOnDown,
-                    onMove = ::routedOnMove,
-                    onUp = ::routedOnUp,
-                    onCancel = ::routedOnCancel,
-                ),
+            modifier = Modifier.fillMaxSize(),
+            gestureModifier = Modifier.pdfMultiPageDrawingInput(
+                key = drawingController,
+                tablet = tabletController,
+                palmRejectionActive = palmRejectionActive,
+                // captureGesture (случаи 1–3): жест захватывается вне
+                // зависимости от типа указателя, включая PointerType.Unknown.
+                // На части Android-устройств первый DOWN приходит с Unknown
+                // (TOOL_TYPE_UNKNOWN = 0); ограничение по типу упускало бы
+                // такой DOWN в scrollable вместо лупы.
+                // 1. Взведён quick-loupe FAB.
+                // 2. Удерживается shortcut открытия лупы (desktop).
+                // 3. Лупа открыта и палец попадает на рамку-цель (drag/resize).
+                captureGesture = { pos ->
+                    quickLoupeArmed.value ||
+                        openTriggerProvider.value ||
+                        (magnifierState.enabled &&
+                            magnifierTargetGestureController.hitTest(pos) !=
+                            ru.kyamshanov.notepen.magnifier
+                                .MagnifierTargetGestureController.Mode.NONE) ||
+                        // Рисование пальцем (pencil mode выключен): захватываем
+                        // касание ЛЮБОГО типа (Touch и Unknown) только если
+                        // инструмент активен И палец внутри PDF-страницы.
+                        // Без инструмента палец скроллит — captureGesture = false.
+                        // Unknown-тип намеренно включён: первый DOWN нередко
+                        // приходит как Unknown до классификации hardware'ом.
+                        (!pencilModeProvider.value &&
+                            toolModeProvider.value != ToolMode.NONE &&
+                            drawingController.isInsidePdfPage(pos))
+                },
+                onDown = ::routedOnDown,
+                onMove = ::routedOnMove,
+                onUp = ::routedOnUp,
+                onCancel = ::routedOnCancel,
+            ),
         ) {
                 val bm = bitmap
                 // Размер страницы уже задан Constraints.fixed(w,h) из
@@ -1102,10 +1269,20 @@ fun DetailsContent(
                         pageIndex = pageIndex,
                         isMagnifierGrabbing = isMagnifierPage &&
                             magnifierTargetGestureController.isActive,
+                        isZooming = { pdfViewerState.gestureScale != 1f },
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
-                    Text("Loading")
+                    // Пока битмап страницы рендерится — показываем пустую рамку
+                    // того же размера, что и страница, без текста-плейсхолдера.
+                    Box(
+                        modifier = Modifier
+                            .size(width = pdfWidth, height = pdfHeight)
+                            .border(
+                                width = androidx.compose.ui.unit.Dp(0.5f),
+                                color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                            ),
+                    )
                 }
             }
         }
@@ -1188,62 +1365,6 @@ fun DetailsContent(
                     }
                 },
             )
-        }
-
-        val onSaveCallback: () -> Unit = {
-            isSaving = true
-            coroutineScope.launch {
-                // Remote save (через peerClient) имеет смысл только если этот
-                // девайс реально подключён как клиент к чужому host-у.
-                // На host-инстансе (PC) peerClient тоже не null, но не
-                // подключён ни к кому — в этом случае сохраняем локально.
-                val message = if (peerClient != null && clientPairingState is PairingState.Connected) {
-                    val requestId = "save-${Random.nextLong().toString(16)}"
-                    logger.info { "[save-diag tablet] sending SaveRequest id=$requestId doc=$documentId" }
-                    // Multi-host: ask every connected host. The first reply wins —
-                    // typically only one host actually holds the document.
-                    peerClient.broadcast(
-                        NetworkMessage.SaveRequest(
-                            requestId = requestId,
-                            documentId = documentId,
-                        ),
-                    )
-                    logger.info { "[save-diag tablet] SaveRequest id=$requestId dispatched, awaiting SaveResult (5s)" }
-                    val reply = withTimeoutOrNull(5.seconds) {
-                        peerClient.incomingMessages
-                            .filter { it.message is NetworkMessage.SaveResult }
-                            .map { it.message as NetworkMessage.SaveResult }
-                            .filter { it.requestId == requestId }
-                            .first()
-                    }
-                    logger.info { "[save-diag tablet] await done id=$requestId reply=$reply" }
-                    when {
-                        reply == null -> "Нет ответа от ПК"
-                        reply.success -> "Сохранено на ПК"
-                        else -> "Ошибка на ПК: ${reply.errorMessage.orEmpty()}"
-                    }
-                } else {
-                    val annotations = drawingStates.mapValues { (_, state) ->
-                        state.currentPaths.toList()
-                    }
-                    val extents = drawingStates.mapValues { (_, state) -> state.extent.value }
-                    val result = annotationRepository.save(
-                        pdfPath = filePath,
-                        annotations = annotations,
-                        scale = currentScalePercent,
-                        pen = penSettings,
-                        marker = markerSettings,
-                        eraser = eraserSettings,
-                        currentPage = firstVisiblePage,
-                        currentPageOffset = currentPageOffsetPx,
-                        favoritePageIndices = favoritePageIndices.toSet(),
-                        pageExtents = extents,
-                    )
-                    if (result.isSuccess) "Аннотации сохранены" else "Ошибка сохранения"
-                }
-                isSaving = false
-                snackbarHostState.showSnackbar(message)
-            }
         }
 
         val onExportCallback: () -> Unit = {
@@ -1351,7 +1472,36 @@ fun DetailsContent(
                 label = "landscape-sidebar-offset",
             )
 
-            // Landscape: vertical left rail toolbar + vertical settings panel in a Row.
+            // Landscape: back button near tabs, tool rail + settings panel in centre.
+            AnimatedVisibility(
+                visible = true,
+                enter = slideInHorizontally { -it } + fadeIn(),
+                exit = slideOutHorizontally { -it } + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(start = 16.dp + sidebarOffset, top = 8.dp),
+            ) {
+                // Симметрично портрету: пока сайдбар миниатюр раскрыт,
+                // back-кнопка сначала схлопывает его, и только повторным
+                // нажатием уходит со страницы.
+                GlassSurface(
+                    shape = CircleShape,
+                    modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp),
+                ) {
+                    IconButton(onClick = {
+                        if (showThumbnails) showThumbnails = false
+                        else onBackWithSave()
+                    }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = BACK_CONTENT_DESCRIPTION,
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                }
+            }
+
             AnimatedVisibility(
                 visible = true,
                 enter = slideInHorizontally { -it } + fadeIn(),
@@ -1366,7 +1516,6 @@ fun DetailsContent(
                         toolMode = toolMode,
                         onToolModeChange = { toolMode = it },
                         hasAnnotations = hasAnnotations,
-                        isSaving = isSaving,
                         isExporting = isExporting,
                         showThumbnails = showThumbnails,
                         onToggleThumbnails = { showThumbnails = !showThumbnails },
@@ -1376,11 +1525,13 @@ fun DetailsContent(
                         magnifierEnabled = magnifierState.enabled,
                         onMagnifierToggle = onMagnifierToggle,
                         onOpenShortcutsSettings = { showShortcutsDialog = true },
-                        onSave = onSaveCallback,
                         onExport = onExportCallback,
                         scale = currentScalePercent,
                         onZoomIn = onZoomInCallback,
                         onZoomOut = onZoomOutCallback,
+                        modifier = Modifier.onSizeChanged {
+                            landscapeToolbarWidthDp = with(density) { it.width.toDp() }
+                        },
                     )
                     Spacer(Modifier.width(12.dp))
                     ToolSettingsFloatingPanel(
@@ -1412,6 +1563,9 @@ fun DetailsContent(
                     PageIndicatorAirbar(
                         currentPage = firstVisiblePage + 1,
                         totalPages = pages.size,
+                        modifier = Modifier.onSizeChanged {
+                            landscapePageCounterHeightDp = with(density) { it.height.toDp() }
+                        },
                     )
                 }
                 if (showOfflineBanner) {
@@ -1429,29 +1583,6 @@ fun DetailsContent(
                             modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         )
                     }
-                }
-            }
-
-            // Landscape: floating back button at the top-start corner.
-            GlassSurface(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .windowInsetsPadding(WindowInsets.systemBars)
-                    .padding(start = 16.dp + sidebarOffset, top = 16.dp, end = 16.dp, bottom = 16.dp),
-                shape = CircleShape,
-            ) {
-                // Симметрично портрету: пока сайдбар миниатюр раскрыт,
-                // back-кнопка сначала схлопывает его, и только повторным
-                // нажатием уходит со страницы.
-                IconButton(onClick = {
-                    if (showThumbnails) showThumbnails = false
-                    else onBackWithSave()
-                }) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = BACK_CONTENT_DESCRIPTION,
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
                 }
             }
         } else {
@@ -1475,9 +1606,7 @@ fun DetailsContent(
                     toolMode = toolMode,
                     onToolModeChange = { toolMode = it },
                     hasAnnotations = hasAnnotations,
-                    isSaving = isSaving,
                     isExporting = isExporting,
-                    onSave = onSaveCallback,
                     onExport = onExportCallback,
                     scale = currentScalePercent,
                     onZoomIn = onZoomInCallback,
@@ -1671,6 +1800,20 @@ fun DetailsContent(
             )
         }
         }
+        TabBar(
+            side = PanelSide.PRIMARY,
+            openDocs = openDocs,
+            onSelect = { _, id -> tabSession.setActiveTab(PanelSide.PRIMARY, id) },
+            onClose = { _, id ->
+                val result = tabSession.closeTab(PanelSide.PRIMARY, id)
+                if (result == TabCloseResult.AllClosed) onBackWithSave()
+            },
+            onAddTab = { _ -> onOpenLibrary() },
+            onOpenInSplit = null,
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .windowInsetsPadding(WindowInsets.statusBars),
+        )
     }
 }
 

@@ -8,6 +8,7 @@ import com.arkivanov.decompose.router.stack.childStack
 import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.popTo
 import com.arkivanov.decompose.router.stack.push
+import com.arkivanov.decompose.value.MutableValue
 import com.arkivanov.decompose.value.Value
 import kotlinx.serialization.Serializable
 import ru.kyamshanov.notepen.RootComponent.Child.DetailsChild
@@ -56,8 +57,32 @@ class DefaultRootComponent(
             childFactory = ::child,
         )
 
+    // Decompose требует уникальности конфигураций в пределах стека. Чтобы
+    // разрешить дубликаты (один документ открыт дважды, библиотека открыта
+    // поверх документа несколько раз), каждому пушу выдаём уникальный id.
+    // Засеиваем счётчик от восстановленного стека, чтобы пережить смерть процесса.
+    private var instanceCounter: Long =
+        stack.value.items.maxOf { item ->
+            when (val config = item.configuration) {
+                is Config.Library -> config.instanceId
+                is Config.Details -> config.instanceId
+                else -> -1L
+            }
+        } + 1L
+
+    private fun nextInstanceId(): Long = instanceCounter++
+
+    /**
+     * Файл, выбранный в библиотеке, открытой поверх редактора (кнопкой «+»).
+     * Библиотека выставляет его и возвращается в редактор; активный
+     * [DefaultDetailsComponent] забирает значение и открывает файл новой
+     * вкладкой (в том же `tabSession` — так у каждой вкладки своя страница).
+     */
+    private val pendingTabUri = MutableValue("")
+
     private fun child(config: Config, ctx: ComponentContext): RootComponent.Child = when (config) {
         is Config.Main -> MainChild(mainComponent(ctx))
+        is Config.Library -> MainChild(libraryComponent(ctx))
         is Config.Details -> DetailsChild(detailsComponent(ctx, config))
         is Config.PeerCatalog -> PeerCatalogChild(peerCatalogComponent(ctx, config))
     }
@@ -66,16 +91,34 @@ class DefaultRootComponent(
     private fun mainComponent(ctx: ComponentContext): MainComponent =
         mainComponentFactory(
             ctx,
-            { uri, lastPageIndex -> navigation.push(Config.Details(uri, lastPageIndex)) },
+            { uri, lastPageIndex -> navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId())) },
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName)) },
         )
 
+    /**
+     * Библиотека, открытая поверх редактора: выбор файла не пушит новый
+     * экран, а возвращает в редактор и просит открыть файл новой вкладкой.
+     */
+    private fun libraryComponent(ctx: ComponentContext): MainComponent =
+        mainComponentFactory(
+            ctx,
+            { uri, _ ->
+                pendingTabUri.value = uri
+                navigation.pop()
+            },
+            { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName)) },
+        )
+
+    @OptIn(DelicateDecomposeApi::class)
     private fun detailsComponent(ctx: ComponentContext, config: Config.Details): DetailsComponent =
         DefaultDetailsComponent(
             componentContext = ctx,
             title = config.uri,
             historyRepository = historyRepository,
             onBackListener = navigation::pop,
+            onOpenLibraryListener = { navigation.push(Config.Library(nextInstanceId())) },
+            pendingTabUri = pendingTabUri,
+            onPendingTabHandledListener = { pendingTabUri.value = "" },
         )
 
     @OptIn(DelicateDecomposeApi::class)
@@ -86,7 +129,7 @@ class DefaultRootComponent(
             config.displayName,
             navigation::pop,
         ) { uri, lastPageIndex ->
-            navigation.push(Config.Details(uri, lastPageIndex))
+            navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId()))
         }
 
     override fun onBackClicked(toIndex: Int) {
@@ -95,7 +138,7 @@ class DefaultRootComponent(
 
     @OptIn(DelicateDecomposeApi::class)
     override fun openDetailsExternally(uri: String) {
-        navigation.push(Config.Details(uri = uri, lastPageIndex = 0))
+        navigation.push(Config.Details(uri = uri, lastPageIndex = 0, instanceId = nextInstanceId()))
     }
 
     @Serializable
@@ -103,8 +146,20 @@ class DefaultRootComponent(
         @Serializable
         data object Main : Config
 
+        /**
+         * Библиотека, открытая поверх документа (кнопкой «+»). Отдельная от
+         * [Main] конфигурация с уникальным [instanceId] — чтобы не нарушать
+         * требование уникальности конфигураций в стеке.
+         */
         @Serializable
-        data class Details(val uri: String, val lastPageIndex: Int = 0) : Config
+        data class Library(val instanceId: Long) : Config
+
+        @Serializable
+        data class Details(
+            val uri: String,
+            val lastPageIndex: Int = 0,
+            val instanceId: Long = 0L,
+        ) : Config
 
         @Serializable
         data class PeerCatalog(val peerId: String, val displayName: String) : Config

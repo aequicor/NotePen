@@ -70,7 +70,7 @@ actual class PdfViewerState internal constructor(
      * через render node. На commit жеста (`commitPinchGesture`) множитель и
      * трансляция «впекаются» в `zoom` и `pan` атомарно, gestureScale → 1f.
      */
-    var gestureScale: Float by mutableFloatStateOf(1f)
+    actual var gestureScale: Float by mutableFloatStateOf(1f)
         internal set
 
     /** Transient трансляция layer'а для активного pinch'а; см. [gestureScale]. */

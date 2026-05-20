@@ -6,6 +6,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.arkivanov.decompose.extensions.compose.stack.Children
+import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.arkivanov.decompose.extensions.compose.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
 import kotlinx.coroutines.flow.Flow
@@ -41,15 +42,12 @@ fun RootContent(
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     /** Forwarded to [DetailsContent] for remote-cached documentId lookup. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
-    /**
-     * Platform PDF picker. Used both by [MainContent] (to open the first
-     * file from the home screen) and by [DetailsContent] (the `+` button
-     * on the tab bar). Same suspend semantics as
-     * [MainScreenComponent.onOpenFilePicker].
-     */
-    pickPdfPath: suspend () -> String?,
     modifier: Modifier = Modifier,
 ) {
+    val childStack by component.stack.subscribeAsState()
+    // Библиотека, открытая поверх документа (кнопкой «+»), не является корнем
+    // стека — тогда показываем кнопку «назад» для возврата к документу.
+    val libraryHasBack = childStack.backStack.isNotEmpty()
     Children(
         stack = component.stack,
         modifier = modifier,
@@ -93,6 +91,11 @@ fun RootContent(
                 MainContent(
                     state = state,
                     onIntent = { mainScreenComponent.viewModel.onIntent(it) },
+                    onBack = if (libraryHasBack) {
+                        { component.onBackClicked(toIndex = childStack.backStack.size - 1) }
+                    } else {
+                        null
+                    },
                     modifier = modifier,
                 )
             }
@@ -107,7 +110,6 @@ fun RootContent(
                 receivedPdfDir = receivedPdfDir,
                 openDocumentRegistry = openDocumentRegistry,
                 localDocumentIdRegistry = localDocumentIdRegistry,
-                onPickPdf = pickPdfPath,
                 modifier = modifier,
             )
             is RootComponent.Child.PeerCatalogChild -> {

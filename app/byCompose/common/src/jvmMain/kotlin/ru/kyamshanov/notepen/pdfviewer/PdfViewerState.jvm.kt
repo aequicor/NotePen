@@ -71,7 +71,7 @@ actual class PdfViewerState internal constructor(
      * jvm.kt`) [commitPinchGesture] «впекает» множитель и трансляцию в
      * `zoom` / `pan` атомарно, gestureScale → 1f.
      */
-    var gestureScale: Float by mutableFloatStateOf(1f)
+    actual var gestureScale: Float by mutableFloatStateOf(1f)
         internal set
 
     /** Transient трансляция layer'а для активного zoom-бёрста; см. [gestureScale]. */

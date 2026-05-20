@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material3.CircularProgressIndicator
@@ -60,6 +61,9 @@ private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
  *
  * @param state Текущее состояние экрана.
  * @param onIntent Обработчик интентов.
+ * @param onBack Возврат к предыдущему документу, когда библиотека открыта поверх
+ *        редактора (кнопкой «+»). `null` — когда главный экран является корнем
+ *        навигации; в этом случае кнопка «назад» не показывается.
  * @param modifier Модификатор компонента.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +71,7 @@ private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 fun MainContent(
     state: MainScreenUiState,
     onIntent: (MainScreenIntent) -> Unit,
+    onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val windowWidth = LocalWindowInfo.current.containerSize.width
@@ -110,6 +115,16 @@ fun MainContent(
         topBar = {
             TopAppBar(
                 title = { Text("NotePen") },
+                navigationIcon = {
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Назад к документу",
+                            )
+                        }
+                    }
+                },
                 actions = {
                     if (isWide) {
                         TextButton(onClick = { onIntent(MainScreenIntent.OpenFilePicker) }) {
