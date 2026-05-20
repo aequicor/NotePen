@@ -40,4 +40,6 @@ include(":shared")
 include(":sync")
 include(":qr-connect")
 include(":server")
+include(":rendering:api")
+include(":rendering:impl")
 
