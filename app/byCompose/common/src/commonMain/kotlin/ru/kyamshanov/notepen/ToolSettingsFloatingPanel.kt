@@ -1,37 +1,20 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandHorizontally
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size as CanvasSize
 import androidx.compose.material.icons.Icons
@@ -51,11 +34,6 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,7 +55,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.applySize
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.sliderPositionToStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.strokeWidthToSliderPosition
-import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /**
  * Greedy left-to-right layout decision for adaptive settings rows.
@@ -109,156 +86,7 @@ internal fun greedyFit(
     return fits
 }
 
-/**
- * Floating "glass" settings panel for the active tool.
- *
- * Always renders a [CollapsibleSettingsRail] inside a [GlassSurface]:
- *  - `vertical = true`  → vertical rail (landscape left side); icons sit at
- *    the bottom and expansion extends UPWARD with a vertical slider /
- *    vertical color column.
- *  - `vertical = false` → horizontal rail (portrait, centered); expansion
- *    extends to the RIGHT along the rail axis with a horizontal slider /
- *    horizontal color row.
- *
- * Visibility — driven by [toolMode]: any of PEN/MARKER/ERASER shows the panel,
- * NONE hides it with a slide+fade exit.
- *
- * [applyInsets] — when true (default) the panel pads itself around system bars
- * (status or navigation depending on [atTop]); when false, the caller is
- * responsible for positioning.
- */
-@Composable
-fun ToolSettingsFloatingPanel(
-    toolMode: ToolMode,
-    penSettings: PenSettings,
-    onPenSettingsChange: (PenSettings) -> Unit,
-    markerSettings: MarkerSettings,
-    onMarkerSettingsChange: (MarkerSettings) -> Unit,
-    eraserSettings: EraserSettings,
-    onEraserSettingsChange: (EraserSettings) -> Unit,
-    modifier: Modifier = Modifier,
-    atTop: Boolean = false,
-    vertical: Boolean = false,
-    applyInsets: Boolean = true,
-) {
-    val visible = toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER || toolMode == ToolMode.ERASER
-
-    val finalModifier = when {
-        !applyInsets || vertical -> modifier
-        atTop -> modifier
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .padding(top = PANEL_OUTER_PADDING)
-        else -> modifier
-            .windowInsetsPadding(WindowInsets.navigationBars)
-            .padding(bottom = PANEL_OUTER_PADDING)
-    }
-
-    val slots: List<SlotItem> = when (toolMode) {
-        ToolMode.PEN -> penSlots(penSettings, onPenSettingsChange)
-        ToolMode.MARKER -> markerSlots(markerSettings, onMarkerSettingsChange)
-        ToolMode.ERASER -> eraserSlots(eraserSettings, onEraserSettingsChange)
-        ToolMode.NONE -> emptyList()
-    }
-
-    AnimatedVisibility(
-        visible = visible,
-        enter = if (vertical) slideInHorizontally { -it } + fadeIn()
-                else slideInVertically(initialOffsetY = { if (atTop) -it else it }) + fadeIn(),
-        exit = if (vertical) slideOutHorizontally { -it } + fadeOut()
-               else slideOutVertically(targetOffsetY = { if (atTop) -it else it }) + fadeOut(),
-        modifier = finalModifier,
-    ) {
-        GlassSurface(tint = MaterialTheme.colorScheme.secondaryContainer) {
-            CollapsibleSettingsRail(
-                slots = slots,
-                orientation = if (vertical) RailOrientation.VERTICAL else RailOrientation.HORIZONTAL,
-                resetKey = toolMode,
-            )
-        }
-    }
-}
-
-private enum class RailOrientation { VERTICAL, HORIZONTAL }
-
-/**
- * Inline tool settings without outer surface decoration — for embedding into
- * an existing container (e.g. [PortraitTopAirbar]).
- *
- * Icon buttons are always laid out horizontally. When [expandDownward] is true
- * the expansion panel opens below the icons; otherwise it opens to the right.
- */
-@Composable
-fun ToolSettingsContent(
-    toolMode: ToolMode,
-    penSettings: PenSettings,
-    onPenSettingsChange: (PenSettings) -> Unit,
-    markerSettings: MarkerSettings,
-    onMarkerSettingsChange: (MarkerSettings) -> Unit,
-    eraserSettings: EraserSettings,
-    onEraserSettingsChange: (EraserSettings) -> Unit,
-    expandDownward: Boolean = false,
-    modifier: Modifier = Modifier,
-) {
-    val slots: List<SlotItem> = when (toolMode) {
-        ToolMode.PEN -> penSlots(penSettings, onPenSettingsChange)
-        ToolMode.MARKER -> markerSlots(markerSettings, onMarkerSettingsChange)
-        ToolMode.ERASER -> eraserSlots(eraserSettings, onEraserSettingsChange)
-        ToolMode.NONE -> return
-    }
-    var expandedIndex by remember(toolMode) { mutableStateOf<Int?>(null) }
-
-    val iconStrip: @Composable () -> Unit = {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(RAIL_ITEM_GAP),
-            modifier = Modifier.padding(
-                horizontal = RAIL_STRIP_PADDING_H,
-                vertical = RAIL_STRIP_PADDING_V,
-            ),
-        ) {
-            slots.forEachIndexed { i, slot ->
-                SlotIconButton(slot, expandedIndex == i) {
-                    expandedIndex = if (expandedIndex == i) null else i
-                }
-            }
-        }
-    }
-
-    val expansionContent: @Composable () -> Unit = {
-        val idx = expandedIndex
-        if (idx != null && idx in slots.indices) {
-            Box(
-                modifier = Modifier.padding(
-                    horizontal = PANEL_EXPANSION_PADDING_H,
-                    vertical = PANEL_EXPANSION_PADDING_V,
-                ),
-            ) {
-                val orientation = if (expandDownward) RailOrientation.VERTICAL else RailOrientation.HORIZONTAL
-                slots[idx].content(orientation)
-            }
-        }
-    }
-
-    if (expandDownward) {
-        Column(modifier = modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-            iconStrip()
-            AnimatedVisibility(
-                visible = expandedIndex != null,
-                enter = expandVertically(expandFrom = Alignment.Top) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Top) + fadeOut(),
-            ) { expansionContent() }
-        }
-    } else {
-        Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-            iconStrip()
-            AnimatedVisibility(
-                visible = expandedIndex != null,
-                enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
-                exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
-            ) { expansionContent() }
-        }
-    }
-}
+internal enum class RailOrientation { VERTICAL, HORIZONTAL }
 
 private class SlotItem(
     val icon: ImageVector,
@@ -267,126 +95,16 @@ private class SlotItem(
     val content: @Composable (RailOrientation) -> Unit,
 )
 
-/**
- * Rail of icon buttons (one per slot). Tapping a button toggles an expansion
- * panel that extends along the rail axis — vertical rail → expand down with
- * vertical slider; horizontal rail → expand right with horizontal slider.
- *
- * Only one slot is expanded at a time. Tapping the active slot's icon collapses
- * the panel; switching to a different slot swaps the content. [resetKey]
- * collapses the panel when it changes — caller should pass the tool identity
- * so switching tools always closes any open expansion. We deliberately do NOT
- * key on [slots] because settings changes (slider drag) rebuild the slot list
- * and would otherwise snap the panel shut mid-interaction.
- */
-@Composable
-private fun CollapsibleSettingsRail(
-    slots: List<SlotItem>,
-    orientation: RailOrientation,
-    resetKey: Any?,
-) {
-    var expandedIndex by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(resetKey) { expandedIndex = null }
-
-    val stripModifier = Modifier.padding(
-        horizontal = RAIL_STRIP_PADDING_H,
-        vertical = RAIL_STRIP_PADDING_V,
-    )
-
-    val iconStrip: @Composable () -> Unit = {
-        val onToggle: (Int) -> Unit = { i ->
-            expandedIndex = if (expandedIndex == i) null else i
-        }
-        when (orientation) {
-            RailOrientation.VERTICAL -> Column(
-                modifier = stripModifier,
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(RAIL_ITEM_GAP),
-            ) {
-                slots.forEachIndexed { i, slot ->
-                    SlotIconButton(slot, expandedIndex == i) { onToggle(i) }
-                }
-            }
-            RailOrientation.HORIZONTAL -> Row(
-                modifier = stripModifier,
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(RAIL_ITEM_GAP),
-            ) {
-                slots.forEachIndexed { i, slot ->
-                    SlotIconButton(slot, expandedIndex == i) { onToggle(i) }
-                }
-            }
-        }
-    }
-
-    val expansionContent: @Composable () -> Unit = {
-        val idx = expandedIndex
-        if (idx != null && idx in slots.indices) {
-            Box(
-                modifier = Modifier.padding(
-                    horizontal = PANEL_EXPANSION_PADDING_H,
-                    vertical = PANEL_EXPANSION_PADDING_V,
-                ),
-            ) {
-                slots[idx].content(orientation)
-            }
-        }
-    }
-
-    when (orientation) {
-        RailOrientation.VERTICAL -> Column(
-            modifier = Modifier.width(IntrinsicSize.Max),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            // Width-reservation ghost: all slot contents composed simultaneously
-            // inside a Box (so IntrinsicSize.Max sees the widest possible slot
-            // from the very first frame). The layout modifier forces measured
-            // height to 0 and never places the content, so it is invisible
-            // and adds nothing to the Column's height.
-            // AnimatedVisibility alone cannot fix this because it does not
-            // compose its child until visible = true for the first time.
-            Box(
-                modifier = Modifier.layout { measurable, constraints ->
-                    val placeable = measurable.measure(constraints)
-                    layout(placeable.width, 0) {}
-                },
-            ) {
-                slots.forEach { slot ->
-                    Box(Modifier.padding(horizontal = PANEL_EXPANSION_PADDING_H, vertical = PANEL_EXPANSION_PADDING_V)) {
-                        slot.content(RailOrientation.VERTICAL)
-                    }
-                }
-            }
-            // Expansion panel sits ABOVE the icon strip and grows upward:
-            // the rail is bottom-aligned to the tool toolbar in landscape, so
-            // expanding upward keeps the icons anchored to that baseline.
-            AnimatedVisibility(
-                visible = expandedIndex != null,
-                enter = expandVertically(expandFrom = Alignment.Bottom) + fadeIn(),
-                exit = shrinkVertically(shrinkTowards = Alignment.Bottom) + fadeOut(),
-            ) { expansionContent() }
-            iconStrip()
-        }
-        RailOrientation.HORIZONTAL -> Row(verticalAlignment = Alignment.CenterVertically) {
-            iconStrip()
-            AnimatedVisibility(
-                visible = expandedIndex != null,
-                enter = expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
-                exit = shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut(),
-            ) { expansionContent() }
-        }
-    }
-}
-
 @Composable
 private fun SlotIconButton(
     slot: SlotItem,
     isExpanded: Boolean,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     IconButton(
         onClick = onToggle,
-        modifier = Modifier.size(RAIL_ICON_BUTTON_SIZE),
+        modifier = modifier.size(RAIL_ICON_BUTTON_SIZE),
     ) {
         Icon(
             imageVector = slot.icon,
@@ -394,6 +112,110 @@ private fun SlotIconButton(
             tint = if (isExpanded) MaterialTheme.colorScheme.primary
                    else MaterialTheme.colorScheme.onSecondaryContainer,
         )
+    }
+}
+
+/** Builds the settings slots for [toolMode] (empty list for [ToolMode.NONE]). */
+private fun slotsFor(
+    toolMode: ToolMode,
+    penSettings: PenSettings,
+    onPenSettingsChange: (PenSettings) -> Unit,
+    markerSettings: MarkerSettings,
+    onMarkerSettingsChange: (MarkerSettings) -> Unit,
+    eraserSettings: EraserSettings,
+    onEraserSettingsChange: (EraserSettings) -> Unit,
+): List<SlotItem> = when (toolMode) {
+    ToolMode.PEN -> penSlots(penSettings, onPenSettingsChange)
+    ToolMode.MARKER -> markerSlots(markerSettings, onMarkerSettingsChange)
+    ToolMode.ERASER -> eraserSlots(eraserSettings, onEraserSettingsChange)
+    ToolMode.NONE -> emptyList()
+}
+
+/**
+ * Compact strip of slot icon-buttons for the active tool's settings.
+ *
+ * Icons are laid out along the rail axis ([orientation]); the [expandedIndex]
+ * slot is highlighted. Tapping a slot calls [onToggle] with its index — the
+ * caller owns the expanded state so the expansion content can live in a sibling
+ * surface (the landscape "budding" side rail, or the portrait below-bar strip).
+ */
+@Composable
+internal fun ToolSettingsIconStrip(
+    toolMode: ToolMode,
+    penSettings: PenSettings,
+    onPenSettingsChange: (PenSettings) -> Unit,
+    markerSettings: MarkerSettings,
+    onMarkerSettingsChange: (MarkerSettings) -> Unit,
+    eraserSettings: EraserSettings,
+    onEraserSettingsChange: (EraserSettings) -> Unit,
+    orientation: RailOrientation,
+    expandedIndex: Int?,
+    onToggle: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    expandedButtonModifier: Modifier = Modifier,
+) {
+    val slots = slotsFor(
+        toolMode,
+        penSettings, onPenSettingsChange,
+        markerSettings, onMarkerSettingsChange,
+        eraserSettings, onEraserSettingsChange,
+    )
+    val buttons: @Composable () -> Unit = {
+        slots.forEachIndexed { i, slot ->
+            SlotIconButton(
+                slot = slot,
+                isExpanded = expandedIndex == i,
+                onToggle = { onToggle(i) },
+                modifier = if (expandedIndex == i) expandedButtonModifier else Modifier,
+            )
+        }
+    }
+    when (orientation) {
+        RailOrientation.VERTICAL -> Column(
+            modifier = modifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(RAIL_ITEM_GAP),
+        ) { buttons() }
+        RailOrientation.HORIZONTAL -> Row(
+            modifier = modifier,
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(RAIL_ITEM_GAP),
+        ) { buttons() }
+    }
+}
+
+/**
+ * Renders the expanded content (color picker / slider / chips) for the slot at
+ * [index] of the active tool. No-op when [index] is out of range.
+ */
+@Composable
+internal fun ToolSettingsExpansionContent(
+    toolMode: ToolMode,
+    penSettings: PenSettings,
+    onPenSettingsChange: (PenSettings) -> Unit,
+    markerSettings: MarkerSettings,
+    onMarkerSettingsChange: (MarkerSettings) -> Unit,
+    eraserSettings: EraserSettings,
+    onEraserSettingsChange: (EraserSettings) -> Unit,
+    orientation: RailOrientation,
+    index: Int,
+    modifier: Modifier = Modifier,
+) {
+    val slots = slotsFor(
+        toolMode,
+        penSettings, onPenSettingsChange,
+        markerSettings, onMarkerSettingsChange,
+        eraserSettings, onEraserSettingsChange,
+    )
+    if (index in slots.indices) {
+        Box(
+            modifier = modifier.padding(
+                horizontal = PANEL_EXPANSION_PADDING_H,
+                vertical = PANEL_EXPANSION_PADDING_V,
+            ),
+        ) {
+            slots[index].content(orientation)
+        }
     }
 }
 
@@ -771,11 +593,8 @@ private fun VerticalAdjustableSlider(
     }
 }
 
-private val PANEL_OUTER_PADDING = 16.dp
 private val PANEL_EXPANSION_PADDING_H = 12.dp
 private val PANEL_EXPANSION_PADDING_V = 8.dp
-private val RAIL_STRIP_PADDING_H = 6.dp
-private val RAIL_STRIP_PADDING_V = 6.dp
 private val RAIL_ITEM_GAP = 4.dp
 private val RAIL_ICON_BUTTON_SIZE = 40.dp
 private val SLIDER_LENGTH = 140.dp
