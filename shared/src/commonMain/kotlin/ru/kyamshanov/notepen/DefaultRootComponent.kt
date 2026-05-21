@@ -85,6 +85,27 @@ class DefaultRootComponent(
     private fun nextInstanceId(): Long = instanceCounter++
 
     /**
+     * Opens [uri]. When the navigation was started by the "+" button — i.e. a
+     * [Config.Library] sits over an open [Config.Details] — the file is added
+     * as a new tab to that editor (set [pendingTabUri], pop back to it),
+     * preserving its panel split. This holds even after drilling through
+     * folders. Otherwise (opening from the root library) a fresh editor is
+     * pushed as before.
+     */
+    @OptIn(DelicateDecomposeApi::class)
+    private fun openEditorOrAddTab(uri: String, lastPageIndex: Int) {
+        val items = stack.value.items
+        val libraryIndex = items.indexOfLast { it.configuration is Config.Library }
+        val editorIndex = libraryIndex - 1
+        if (libraryIndex > 0 && items[editorIndex].configuration is Config.Details) {
+            pendingTabUri.value = uri
+            navigation.popTo(index = editorIndex)
+        } else {
+            navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId()))
+        }
+    }
+
+    /**
      * Файл, выбранный в библиотеке, открытой поверх редактора (кнопкой «+»).
      * Библиотека выставляет его и возвращается в редактор; активный
      * [DefaultDetailsComponent] забирает значение и открывает файл новой
@@ -116,10 +137,7 @@ class DefaultRootComponent(
     private fun libraryComponent(ctx: ComponentContext): MainComponent =
         mainComponentFactory(
             ctx,
-            { uri, _ ->
-                pendingTabUri.value = uri
-                navigation.pop()
-            },
+            { uri, lastPageIndex -> openEditorOrAddTab(uri, lastPageIndex) },
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
         )
@@ -154,7 +172,7 @@ class DefaultRootComponent(
             config.folderId,
             config.folderName,
             navigation::pop,
-            { uri, lastPageIndex -> navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId())) },
+            { uri, lastPageIndex -> openEditorOrAddTab(uri, lastPageIndex) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
         )
 

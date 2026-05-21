@@ -779,6 +779,11 @@ fun EditorPanel(
     }
 
     if (isFocused) {
+        // Read showThumbnails here in the composition (not only inside SideEffect)
+        // so the composition subscribes to it: a SideEffect block's state reads do
+        // not register a recomposition dependency, so without this read toggling
+        // thumbnails would never re-run the effect nor republish PanelControls.
+        val thumbnailsVisible = showThumbnails
         SideEffect {
             onControlsChanged(
                 PanelControls(
@@ -788,7 +793,7 @@ fun EditorPanel(
                     hasAnnotations = hasAnnotations,
                     isExporting = isExporting,
                     magnifierEnabled = magnifierState.enabled,
-                    showThumbnails = showThumbnails,
+                    showThumbnails = thumbnailsVisible,
                     quickLoupeArmed = quickLoupeArmed.value,
                     zoomIn = onZoomIn,
                     zoomOut = onZoomOut,

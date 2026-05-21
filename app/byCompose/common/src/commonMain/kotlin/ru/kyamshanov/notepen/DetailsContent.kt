@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -94,11 +95,14 @@ import ru.kyamshanov.notepen.tabs.LayoutTemplate
 import ru.kyamshanov.notepen.tabs.WorkspaceLayout
 import ru.kyamshanov.notepen.tabs.PdfDocumentState
 import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
+import ru.kyamshanov.notepen.tabs.DIVIDER_HIT
 import ru.kyamshanov.notepen.tabs.GridContainer
 import ru.kyamshanov.notepen.tabs.LayoutPickerOverlay
 import ru.kyamshanov.notepen.tabs.PanelId
 import ru.kyamshanov.notepen.tabs.TabCloseResult
+import ru.kyamshanov.notepen.tabs.WorkspaceSnapshot
 import ru.kyamshanov.notepen.tabs.rememberTabSession
+import ru.kyamshanov.notepen.tabs.toSnapshot
 
 private val logger = KotlinLogging.logger {}
 
@@ -150,29 +154,20 @@ fun DetailsContent(
             }
         }
 
-    var savedExtraTabPaths by rememberSaveable { mutableStateOf("") }
+    var savedLayout by rememberSaveable { mutableStateOf("") }
     val tabSession = rememberTabSession(
         initialFilePath = initialFilePath,
         syncDocumentIdFor = syncDocumentIdFor,
     )
     val layout = tabSession.layout
 
-    // Restore previously-opened extra tabs into the (initial) focused panel,
-    // then keep savedExtraTabPaths in sync with the focused panel's tabs.
+    // Restore the full workspace split (all panels + tabs) saved before the
+    // editor was torn down — e.g. while the user picked a file in the library.
+    // Then keep the snapshot in sync with every layout change.
     LaunchedEffect(tabSession) {
-        savedExtraTabPaths.lines().filter { it.isNotBlank() }.forEach { path ->
-            tabSession.openTab(
-                panelId = tabSession.layout.focusedPanelId,
-                filePath = path,
-                displayName = resolveDocumentDisplayName(path),
-            )
-        }
+        WorkspaceSnapshot.decode(savedLayout)?.let { tabSession.restore(it) }
         snapshotFlow { tabSession.layout }
-            .collect { l ->
-                val focused = l.panelOf(l.focusedPanelId) ?: l.panels.firstOrNull()
-                val extra = focused?.tabs?.tabs?.drop(1)?.map { it.filePath }.orEmpty()
-                savedExtraTabPaths = extra.joinToString("\n")
-            }
+            .collect { l -> savedLayout = WorkspaceSnapshot.encode(l.toSnapshot()) }
     }
 
     // Library "+" opens a file into the focused panel as a new tab.
@@ -308,6 +303,14 @@ fun DetailsContent(
             component.openLibrary()
         }
     }
+    // Both the tab "+" and the "Новая вкладка" menu item open the library so
+    // the user can pick a document there. The new tab lands in whichever panel
+    // requested it (we focus it first); the full split is preserved across the
+    // library round-trip via the workspace snapshot below.
+    val onAddTabToPanel: (PanelId) -> Unit = { panelId ->
+        tabSession.focusPanel(panelId)
+        onOpenLibrary()
+    }
 
     EditorBackHandler(enabled = true) { onBackWithSave() }
 
@@ -320,6 +323,11 @@ fun DetailsContent(
     }
 
     val statusBarsTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
+    // Measured height of the workspace grid in px. Panel ratios are relative to
+    // this — using it (rather than deriving from window size minus the status
+    // bar) keeps the airbar / sidebar vertical placement exact across platforms.
+    var gridHeightPx by remember { mutableStateOf(0f) }
 
     Box(
         modifier
@@ -371,7 +379,12 @@ fun DetailsContent(
     ) {
         // Workspace grid. Each panel draws its own tab strip at its top; the
         // grid only clears the status bar so the top-row tab strips sit below it.
-        Box(Modifier.fillMaxSize().padding(top = statusBarsTop)) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                .padding(top = statusBarsTop)
+                .onSizeChanged { gridHeightPx = it.height.toFloat() },
+        ) {
             GridContainer(
                 layout = layout,
                 onSetRatio = { index, value -> tabSession.setRatio(index, value) },
@@ -413,7 +426,7 @@ fun DetailsContent(
                         markerWidthPinned = true
                         eraserSettings = eraser
                     },
-                    onAddTab = onOpenLibrary,
+                    onAddTab = { onAddTabToPanel(panel.id) },
                     onAllTabsClosed = onBackWithSave,
                     onOpenPanelPicker = if (templates.isNotEmpty() && panel.tabs.tabs.size > 1) {
                         { tabId ->
@@ -447,12 +460,29 @@ fun DetailsContent(
                 .padding(top = TAB_BAR_HEIGHT + statusBarsTop),
         ) {
         if (isLandscape) {
+            // When the thumbnail sidebar is open at the screen's left edge it would
+            // otherwise sit on top of the back button and tool rail; push them right
+            // by the sidebar width so they sit beside the sidebar instead of under it.
+            val railShift by animateDpAsState(
+                targetValue = if (
+                    showThumbnails &&
+                    tabSession.focusedActiveState?.pages?.isNotEmpty() == true &&
+                    focusedPanelStartXFraction(layout) == 0f
+                ) {
+                    SIDEBAR_WIDTH
+                } else {
+                    0.dp
+                },
+                animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS),
+                label = "railShift",
+            )
             AnimatedVisibility(
                 visible = true,
                 enter = slideInHorizontally { -it } + fadeIn(),
                 exit = slideOutHorizontally { -it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.TopStart)
+                    .offset(x = railShift)
                     .padding(start = 16.dp, top = 8.dp),
             ) {
                 GlassSurface(
@@ -475,6 +505,7 @@ fun DetailsContent(
                 exit = slideOutHorizontally { -it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.CenterStart)
+                    .offset(x = railShift)
                     .windowInsetsPadding(WindowInsets.systemBars)
                     .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
             ) {
@@ -527,6 +558,15 @@ fun DetailsContent(
                 ),
                 label = "airbarCenter",
             )
+            val dividerPx = with(density) { DIVIDER_HIT.toPx() }
+            val airbarTopPx by animateFloatAsState(
+                targetValue = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+                label = "airbarTop",
+            )
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -534,6 +574,10 @@ fun DetailsContent(
                     .graphicsLayer {
                         translationX =
                             (airbarCenterFraction - 0.5f) * windowSizeInPx.width.toFloat()
+                        // The grid's top sits exactly one tab-strip below this airbar's
+                        // natural position, so translating by the focused panel's top
+                        // offset (relative to the grid) lands it on that panel.
+                        translationY = airbarTopPx
                     }
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(top = 8.dp),
@@ -558,6 +602,9 @@ fun DetailsContent(
             // Rendered here (after LandscapeToolRail) so it draws on top of the toolbar.
             val focusedState = tabSession.focusedActiveState
             val focusedStartFraction = focusedPanelStartXFraction(layout)
+            val focusedTopPx = focusedPanelStartYPx(layout, gridHeightPx, dividerPx)
+            val focusedContentHeightPx =
+                focusedPanelHeightPx(layout, gridHeightPx, dividerPx) - with(density) { TAB_BAR_HEIGHT.toPx() }
             if (focusedState != null) {
                 val drawingStates = focusedState.drawingStates
                 val annotatedPageIndices by remember(drawingStates) {
@@ -578,14 +625,15 @@ fun DetailsContent(
                     exit = slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
                         fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
                     modifier = Modifier
-                        .align(Alignment.CenterStart)
+                        .align(Alignment.TopStart)
                         .offset {
                             IntOffset(
                                 x = (focusedStartFraction * windowSizeInPx.width.toFloat())
                                     .roundToInt(),
-                                y = 0,
+                                y = focusedTopPx.roundToInt(),
                             )
-                        },
+                        }
+                        .height(with(density) { focusedContentHeightPx.toDp() }),
                 ) {
                     PageThumbnailsSidebar(
                         pages = focusedState.pages,
@@ -719,6 +767,8 @@ private fun focusedPanelStartXFraction(layout: WorkspaceLayout): Float {
     val r = layout.ratios
     return when (layout.template) {
         LayoutTemplate.FULL -> 0f
+        // Both rows span the full width — sidebar aligns to the left edge either way.
+        LayoutTemplate.ROWS_2 -> 0f
         LayoutTemplate.COLUMNS_2 -> if (idx == 0) 0f else r[0]
         LayoutTemplate.COLUMNS_3 -> when (idx) {
             0 -> 0f
@@ -739,6 +789,8 @@ private fun focusedPanelCenterXFraction(layout: WorkspaceLayout): Float {
     val r = layout.ratios
     return when (layout.template) {
         LayoutTemplate.FULL -> 0.5f
+        // Both rows are full width — the airbar stays centred for either row.
+        LayoutTemplate.ROWS_2 -> 0.5f
         LayoutTemplate.COLUMNS_2 ->
             if (idx == 0) r[0] / 2f else r[0] + (1f - r[0]) / 2f
         LayoutTemplate.COLUMNS_3 -> when (idx) {
@@ -750,5 +802,50 @@ private fun focusedPanelCenterXFraction(layout: WorkspaceLayout): Float {
             if (idx == 0) r[0] / 2f else r[0] + (1f - r[0]) / 2f
         LayoutTemplate.GRID_2X2 ->
             if (idx == 0 || idx == 2) r[0] / 2f else r[0] + (1f - r[0]) / 2f
+    }
+}
+
+/**
+ * Returns the top-edge position of the focused panel in pixels, measured from
+ * the top of the workspace grid ([gridHeightPx] tall). A horizontal divider
+ * occupies a fixed [dividerPx] that is taken off the weighted split before the
+ * rows share the remainder, so a stacked panel's top is
+ * `ratio·(gridHeight − divider) + divider`, not `ratio·gridHeight`. Ignoring
+ * the divider made the page-indicator stick to the panel's tab strip the taller
+ * the lower panel got. Used to push the airbar / thumbnail sidebar onto a
+ * stacked (lower) focused panel.
+ */
+private fun focusedPanelStartYPx(layout: WorkspaceLayout, gridHeightPx: Float, dividerPx: Float): Float {
+    val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
+    val r = layout.ratios
+    fun belowDivider(topRatio: Float) = topRatio * (gridHeightPx - dividerPx) + dividerPx
+    return when (layout.template) {
+        // Templates with no horizontal divider — every panel starts at the top.
+        LayoutTemplate.FULL, LayoutTemplate.COLUMNS_2, LayoutTemplate.COLUMNS_3 -> 0f
+        LayoutTemplate.ROWS_2 -> if (idx == 0) 0f else belowDivider(r[0])
+        LayoutTemplate.LEFT_PLUS_STACK -> if (idx == 2) belowDivider(r[1]) else 0f
+        LayoutTemplate.GRID_2X2 -> if (idx >= 2) belowDivider(r[1]) else 0f
+    }
+}
+
+/**
+ * Returns the height of the focused panel in pixels, accounting for the fixed
+ * [dividerPx] taken out of any horizontal split (see [focusedPanelStartYPx]).
+ * Used to clamp the thumbnail sidebar to the focused panel so it stops at the
+ * row divider instead of covering the divider's drag zone and the other panel.
+ */
+private fun focusedPanelHeightPx(layout: WorkspaceLayout, gridHeightPx: Float, dividerPx: Float): Float {
+    val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
+    val r = layout.ratios
+    val split = gridHeightPx - dividerPx
+    return when (layout.template) {
+        LayoutTemplate.FULL, LayoutTemplate.COLUMNS_2, LayoutTemplate.COLUMNS_3 -> gridHeightPx
+        LayoutTemplate.ROWS_2 -> if (idx == 0) r[0] * split else (1f - r[0]) * split
+        LayoutTemplate.LEFT_PLUS_STACK -> when (idx) {
+            0 -> gridHeightPx
+            1 -> r[1] * split
+            else -> (1f - r[1]) * split
+        }
+        LayoutTemplate.GRID_2X2 -> if (idx >= 2) (1f - r[1]) * split else r[1] * split
     }
 }

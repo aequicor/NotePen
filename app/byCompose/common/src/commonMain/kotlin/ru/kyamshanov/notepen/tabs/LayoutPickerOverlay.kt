@@ -30,6 +30,7 @@ import androidx.compose.ui.window.Dialog
 private fun LayoutTemplate.title(): String = when (this) {
     LayoutTemplate.FULL -> "Одна панель"
     LayoutTemplate.COLUMNS_2 -> "Две колонки"
+    LayoutTemplate.ROWS_2 -> "Две строки"
     LayoutTemplate.COLUMNS_3 -> "Три колонки"
     LayoutTemplate.LEFT_PLUS_STACK -> "Большая + две"
     LayoutTemplate.GRID_2X2 -> "Сетка 2×2"
@@ -105,6 +106,10 @@ private fun TemplateThumb(template: LayoutTemplate) {
             LayoutTemplate.COLUMNS_2 -> Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
                 Slot(false, Modifier.fillMaxHeight().weight(1f))
                 Slot(true, Modifier.fillMaxHeight().weight(1f))
+            }
+            LayoutTemplate.ROWS_2 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                Slot(false, Modifier.fillMaxWidth().weight(1f))
+                Slot(true, Modifier.fillMaxWidth().weight(1f))
             }
             LayoutTemplate.COLUMNS_3 -> Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
                 Slot(false, Modifier.fillMaxHeight().weight(1f))

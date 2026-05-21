@@ -183,6 +183,46 @@ class TabSession internal constructor(
         layout = layout.setRatio(index, value)
     }
 
+    /**
+     * Rebuilds the whole workspace from [snapshot], replacing the initial
+     * single-panel seed. Used to restore the full split after the editor is
+     * recreated (e.g. on return from the library). Fresh [PanelId]s /
+     * [DocumentId]s are generated; tabs that point at the same file share a
+     * [PdfDocumentState] (shared annotations, independent scroll), mirroring
+     * [openTab]. No-op when [snapshot] has no panels.
+     */
+    fun restore(snapshot: WorkspaceSnapshot) {
+        val panelSnapshots = snapshot.panels.filter { it.tabs.isNotEmpty() }
+        if (panelSnapshots.isEmpty()) return
+        documentStatesMap.clear()
+        val stateByPath = mutableMapOf<String, PdfDocumentState>()
+        val panels = panelSnapshots.map { ps ->
+            val tabs = ps.tabs.map { ts ->
+                val tab = DocumentTab(id = idGenerator.next(), filePath = ts.filePath, displayName = ts.displayName)
+                val state = stateForNewTab(ts.filePath, stateByPath[ts.filePath])
+                documentStatesMap[tab.id] = state
+                stateByPath.getOrPut(ts.filePath) { state }
+                tab
+            }
+            val activeIndex = ps.activeTabIndex.coerceIn(0, tabs.lastIndex)
+            Panel(id = nextPanelId(), tabs = OpenDocuments(tabs = tabs, activeId = tabs[activeIndex].id))
+        }
+        val parsed = LayoutTemplate.entries.firstOrNull { it.name == snapshot.template }
+        val template = if (parsed?.capacity == panels.size) parsed else WorkspaceLayout.templateForCount(panels.size)
+        val focusIndex = snapshot.focusedPanelIndex.coerceIn(0, panels.lastIndex)
+        val ratios = if (snapshot.ratios.size == WorkspaceLayout.defaultRatios(template).size) {
+            snapshot.ratios
+        } else {
+            WorkspaceLayout.defaultRatios(template)
+        }
+        layout = WorkspaceLayout(
+            panels = panels,
+            template = template,
+            focusedPanelId = panels[focusIndex].id,
+            ratios = ratios,
+        )
+    }
+
     private fun stateForNewTab(filePath: String, existingState: PdfDocumentState?): PdfDocumentState =
         if (existingState != null) {
             PdfDocumentState.createSharing(
