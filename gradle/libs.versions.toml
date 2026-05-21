@@ -41,6 +41,7 @@ kotlin-logging-android = { module = "io.github.oshai:kotlin-logging", version.re
 slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 apache-pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "apache-pdfbox" }
+apache-pdfbox-jbig2 = { module = "org.apache.pdfbox:jbig2-imageio", version = "3.0.4" }
 ktor-server-core = { module = "io.ktor:ktor-server-core-jvm", version.ref = "ktor" }
 ktor-server-cio = { module = "io.ktor:ktor-server-cio-jvm", version.ref = "ktor" }
 ktor-server-websockets = { module = "io.ktor:ktor-server-websockets-jvm", version.ref = "ktor" }
