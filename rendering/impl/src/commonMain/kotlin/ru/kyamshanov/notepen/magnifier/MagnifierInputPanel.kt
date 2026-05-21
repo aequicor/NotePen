@@ -56,6 +56,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
@@ -282,6 +285,7 @@ private fun MagnifierContent(
     tablet: ru.kyamshanov.notepen.tablet.TabletInputController,
     externalInputController: MagnifierInputController?,
     modifier: Modifier = Modifier,
+    rasterDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     val livePath = remember { Path() }
     val frameColor = MaterialTheme.colorScheme.primary
@@ -293,7 +297,7 @@ private fun MagnifierContent(
     // инка на странице. Здесь штрихи запекаются в off-screen `ImageBitmap`
     // размера PDF-битмапа сегмента и инвалидируются только при бампе
     // `historyVersion` (finishDrawing / undo / redo / eraser).
-    val completedLayers = rememberMagnifierCompletedLayers(state, pdfDrawingStateProvider)
+    val completedLayers = rememberMagnifierCompletedLayers(state, pdfDrawingStateProvider, rasterDispatcher)
 
     // Инкрементальный кэш live-штриха для активной страницы. «Стабильные»
     // сегменты (у которых уже устоялись соседи p[i-1]/p[i+2]) запекаются
@@ -398,11 +402,18 @@ private fun MagnifierContent(
                 )
             }
 
+            val pdfDrawingState = pdfDrawingStateProvider(seg.pageIndex)
+            // virtW/virtH — маппинг нормализованных PDF-координат в panel-пиксели
+            // полосы сегмента (используется и anti-flicker'ом, и live-tail'ом).
+            val virtW = panelW / tw
+            val virtH = segH / th
+
             // Завершённые штрихи — один блит из закэшированного слоя
             // (см. `rememberMagnifierCompletedLayers`). Слой имеет ту же
             // размерность, что и PDF-битмап сегмента, поэтому src/dst-маппинг
             // совпадает 1:1 с PDF выше.
-            val completed = completedLayers[seg.pageIndex]
+            val completedLayer = completedLayers[seg.pageIndex]
+            val completed = completedLayer?.bitmap
             if (completed != null) {
                 val srcOffsetX = (target.left * completed.width).toInt().coerceAtLeast(0)
                 val srcOffsetY = (target.top * completed.height).toInt().coerceAtLeast(0)
@@ -419,7 +430,31 @@ private fun MagnifierContent(
                 )
             }
 
-            val pdfDrawingState = pdfDrawingStateProvider(seg.pageIndex)
+            // Anti-flicker: фоновая растеризация completed-слоя могла ещё не
+            // вобрать недавно завершённые штрихи (прерывистое письмо каждый раз
+            // перезапускает rebuild). Дорисовываем хвост `currentPaths`, не
+            // вошедший в кэш (`strokeCount`), в panel-координатах — тот же
+            // transform, что и live-tail. Живой (незавершённый) штрих здесь не
+            // рисуется (он в `livePoints`, не в `currentPaths`) → нет двойного рендера.
+            val drawnCount = completedLayer?.strokeCount ?: 0
+            val tailPaths = pdfDrawingState.currentPaths
+            if (tailPaths.size > drawnCount) {
+                withTransform({
+                    clipRect(left = 0f, top = segTop, right = panelW, bottom = segBottom)
+                    translate(left = -target.left * virtW, top = segTop - target.top * virtH)
+                }) {
+                    for (i in drawnCount until tailPaths.size) {
+                        drawStrokeWithPressure(
+                            stroke = tailPaths[i],
+                            pdfWidth = virtW,
+                            pdfHeight = virtH,
+                            extent = noExtent,
+                            scratch = livePath,
+                        )
+                    }
+                }
+            }
+
             val activeLayer = liveLayer?.takeIf { it.pageIndex == seg.pageIndex }
             val liveBmp = activeLayer?.bitmap
             if (liveBmp != null) {
@@ -438,8 +473,6 @@ private fun MagnifierContent(
             // Хвост live-штриха: запечённые сегменты уже в `liveBmp`, рисуем
             // только последние [MAGNIFIER_LIVE_TIP_SEGMENTS] (или весь штрих,
             // если он короче порога).
-            val virtW = panelW / tw
-            val virtH = segH / th
             if (pdfDrawingState.isDrawing.value && pdfDrawingState.livePoints.size > 1) {
                 val totalSegments = pdfDrawingState.livePoints.size - 1
                 val tipFrom = activeLayer?.bakedSegments?.coerceAtMost(totalSegments) ?: 0
@@ -584,34 +617,54 @@ private fun magnifierLiveCacheDim(panelSize: Size): IntSize {
  * сведена к одиночному `drawImage` среза вместо итерации `currentPaths`
  * на каждый сэмпл пера.
  */
+/**
+ * Закэшированный слой завершённых штрихов лупы + число запечённых штрихов
+ * (зеркало `CachedInk` в [DrawablePdfPage]): `strokeCount` нужен для
+ * anti-flicker — пока фоновая растеризация догоняет, ещё не вошедший в битмап
+ * хвост `currentPaths` дорисовывается в Canvas.
+ */
+private data class MagnifierCompletedLayer(val strokeCount: Int, val bitmap: ImageBitmap?)
+
 @Composable
 private fun rememberMagnifierCompletedLayers(
     state: MagnifierState,
     pdfDrawingStateProvider: (Int) -> PdfDrawingState,
-): Map<Int, ImageBitmap?> {
+    rasterDispatcher: CoroutineDispatcher,
+): Map<Int, MagnifierCompletedLayer?> {
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
-    val result = mutableMapOf<Int, ImageBitmap?>()
+    val result = mutableMapOf<Int, MagnifierCompletedLayer?>()
     state.segments.forEach { seg ->
         key(seg.pageIndex) {
             val pdfDrawingState = pdfDrawingStateProvider(seg.pageIndex)
             val cacheDim = magnifierCompletedCacheDim(state.pageBitmap(seg.pageIndex))
             val historyVersion = pdfDrawingState.historyVersion.value
-            val pathsEmpty = pdfDrawingState.currentPaths.isEmpty()
-            val layer = remember(cacheDim, historyVersion, pathsEmpty) {
-                if (pathsEmpty) {
-                    null
-                } else {
+            // Растеризация вынесена с composition-потока ([rasterDispatcher]):
+            // синхронный rebuild всех штрихов на каждый pen-up/смену разрешения
+            // фризил кадр на странице с сотнями штрихов. Пока фон строит новый
+            // слой, на экране остаётся прежний битмап, а хвост дорисовывается
+            // в Canvas через strokeCount (anti-flicker).
+            val layerState = remember { mutableStateOf<MagnifierCompletedLayer?>(null) }
+            LaunchedEffect(seg.pageIndex, cacheDim, historyVersion) {
+                if (cacheDim.width <= 0 || cacheDim.height <= 0 || pdfDrawingState.currentPaths.isEmpty()) {
+                    layerState.value = null
+                    return@LaunchedEffect
+                }
+                // Снимок состояния — на composition-потоке: нельзя итерировать
+                // SnapshotStateList из фонового диспетчера (конкурентная мутация вводом).
+                val paths = pdfDrawingState.currentPaths.toList()
+                val bmp = withContext(rasterDispatcher) {
                     buildMagnifierCompletedLayer(
-                        paths = pdfDrawingState.currentPaths.toList(),
+                        paths = paths,
                         cacheW = cacheDim.width,
                         cacheH = cacheDim.height,
                         density = density,
                         layoutDirection = layoutDirection,
                     )
                 }
+                layerState.value = MagnifierCompletedLayer(paths.size, bmp)
             }
-            result[seg.pageIndex] = layer
+            result[seg.pageIndex] = layerState.value
         }
     }
     return result
