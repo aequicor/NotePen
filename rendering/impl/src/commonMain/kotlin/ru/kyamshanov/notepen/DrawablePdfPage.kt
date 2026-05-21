@@ -61,7 +61,6 @@ import ru.kyamshanov.notepen.magnifier.MagnifierTargetOverlay
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.effectivePressure
-import ru.kyamshanov.notepen.tablet.stylusEventSink
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
@@ -347,12 +346,10 @@ fun DrawablePdfPage(
 
     // Ввод рисования поднят на уровень PdfPagesViewer'а (см.
     // [MultiPageDrawingController]) — страница только рендерит штрихи и
-    // индикаторы. `stylusEventSink` остаётся пассивным наблюдателем для
-    // tablet pressure/tilt.
+    // индикаторы.
     Box(
         modifier = modifier
-            .onSizeChanged { canvasSize.value = it }
-            .stylusEventSink(tablet),
+            .onSizeChanged { canvasSize.value = it },
     ) {
         // PDF-битмап располагается строго внутри слота со сдвигом
         // (-extent.left * pdfW, -extent.top * pdfH) и размером pdfW × pdfH.

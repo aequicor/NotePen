@@ -36,11 +36,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.isSecondaryPressed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
@@ -67,18 +74,24 @@ private val TAB_SHAPE = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
  */
 @Composable
 fun TabBar(
-    side: PanelSide,
+    side: PanelId,
     openDocs: OpenDocuments,
-    onSelect: (PanelSide, DocumentId) -> Unit,
-    onClose: (PanelSide, DocumentId) -> Unit,
-    onAddTab: (PanelSide) -> Unit,
+    onSelect: (PanelId, DocumentId) -> Unit,
+    onClose: (PanelId, DocumentId) -> Unit,
+    onAddTab: (PanelId) -> Unit,
     /**
-     * Invoked from the per-tab context menu ("Open in split right" /
-     * "Open in split bottom"). `null` when the workspace already has a
-     * split — the spec disallows nesting deeper than one level, so the
-     * menu items are hidden.
+     * Invoked with the long-pressed tab's id from the per-tab context menu
+     * ("Открыть в новой панели"), which opens the layout preset picker and
+     * then moves that tab into a new panel. `null` when the action is
+     * unavailable (only one tab in this panel, or the workspace is already at
+     * the maximum number of panels), hiding the menu item.
      */
-    onOpenInSplit: ((PanelSide, PanelOrientation) -> Unit)?,
+    onOpenInNewPanel: ((DocumentId) -> Unit)?,
+    /**
+     * Invoked from the per-tab context menu ("Закрыть панель"). `null` when
+     * only one panel is open, hiding the menu item.
+     */
+    onClosePanel: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
     GlassSurface(
@@ -137,9 +150,8 @@ fun TabBar(
                             showClose = tab.id == openDocs.activeId && tabCount > 1,
                             onSelect = { onSelect(side, tab.id) },
                             onClose = { onClose(side, tab.id) },
-                            onOpenInSplit = onOpenInSplit?.let { callback ->
-                                { orientation -> callback(side, orientation) }
-                            },
+                            onOpenInNewPanel = onOpenInNewPanel?.let { cb -> { cb(tab.id) } },
+                            onClosePanel = onClosePanel,
                             modifier = Modifier.width(tabWidth),
                         )
                     }
@@ -169,9 +181,11 @@ private fun TabChip(
     showClose: Boolean,
     onSelect: () -> Unit,
     onClose: () -> Unit,
-    onOpenInSplit: ((PanelOrientation) -> Unit)?,
+    onOpenInNewPanel: (() -> Unit)?,
+    onClosePanel: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val hasMenu = onOpenInNewPanel != null || onClosePanel != null
     // Active tab: subtle highlight that lets the outer glass bar show through.
     // Inactive tab: fully transparent — the glass bar background is the visual context.
     val chipBackground: Color = if (isActive) {
@@ -185,14 +199,48 @@ private fun TabChip(
         MaterialTheme.colorScheme.onSurfaceVariant
     }
     var menuExpanded by remember { mutableStateOf(false) }
+    // Position the context menu at the press / cursor point rather than the
+    // chip's corner. Updated on every press (long-press on touch, right-click
+    // on desktop).
+    var menuOffset by remember { mutableStateOf(Offset.Zero) }
+    val density = LocalDensity.current
     Box(
         modifier = modifier
             .height(TAB_BAR_HEIGHT)
             .background(color = chipBackground, shape = TAB_SHAPE)
+            .pointerInput(Unit) {
+                // Non-consuming press tracker (initial pass) so long-press can
+                // open the menu where the finger went down.
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        event.changes.firstOrNull { it.pressed }?.let { menuOffset = it.position }
+                    }
+                }
+            }
+            .then(
+                if (hasMenu && !SupportsLongPressMenu) {
+                    Modifier.pointerInput(Unit) {
+                        // Desktop: open on secondary (right) click at the cursor.
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                    menuOffset = event.changes.first().position
+                                    event.changes.forEach { it.consume() }
+                                    menuExpanded = true
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    Modifier
+                },
+            )
             .combinedClickable(
                 enabled = true,
                 onClick = { if (!isActive) onSelect() },
-                onLongClick = if (onOpenInSplit != null) {
+                onLongClick = if (hasMenu && SupportsLongPressMenu) {
                     { menuExpanded = true }
                 } else {
                     null
@@ -232,25 +280,30 @@ private fun TabChip(
                 Spacer(modifier = Modifier.width(TAB_CLOSE_SLOT))
             }
         }
-        if (onOpenInSplit != null) {
+        if (hasMenu) {
             DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = { menuExpanded = false },
+                offset = with(density) { DpOffset(menuOffset.x.toDp(), menuOffset.y.toDp() - TAB_BAR_HEIGHT) },
             ) {
-                DropdownMenuItem(
-                    text = { Text("Open in split right") },
-                    onClick = {
-                        menuExpanded = false
-                        onOpenInSplit(PanelOrientation.HORIZONTAL)
-                    },
-                )
-                DropdownMenuItem(
-                    text = { Text("Open in split bottom") },
-                    onClick = {
-                        menuExpanded = false
-                        onOpenInSplit(PanelOrientation.VERTICAL)
-                    },
-                )
+                onOpenInNewPanel?.let { open ->
+                    DropdownMenuItem(
+                        text = { Text("Открыть в новой панели") },
+                        onClick = {
+                            menuExpanded = false
+                            open()
+                        },
+                    )
+                }
+                onClosePanel?.let { close ->
+                    DropdownMenuItem(
+                        text = { Text("Закрыть панель") },
+                        onClick = {
+                            menuExpanded = false
+                            close()
+                        },
+                    )
+                }
             }
         }
     }
