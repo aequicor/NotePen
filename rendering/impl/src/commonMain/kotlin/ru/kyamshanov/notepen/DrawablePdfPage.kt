@@ -1,8 +1,6 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
@@ -30,12 +28,12 @@ import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.offset
@@ -180,8 +178,14 @@ private fun buildCompletedInk(
         canvas = gCanvas,
         size = Size(bw.toFloat(), bh.toFloat()),
     ) {
+        // Marker strokes are NOT baked here: they must be composited against the
+        // PDF with BlendMode.Multiply (so text stays readable), which only works
+        // when drawn directly onto the canvas that already holds the PDF — see the
+        // marker pass in DrawablePdfPage. This bitmap is pen ink only.
         paths.forEach { path ->
-            drawCompletedStroke(path, pdfBw, pdfBh, ext, scratch)
+            if (path.toolType != ToolKind.MARKER) {
+                drawStrokeWithPressure(path, pdfBw, pdfBh, ext, scratch)
+            }
         }
     }
     return bmp
@@ -353,35 +357,15 @@ fun DrawablePdfPage(
         modifier = modifier
             .onSizeChanged { canvasSize.value = it },
     ) {
-        // PDF-битмап располагается строго внутри слота со сдвигом
-        // (-extent.left * pdfW, -extent.top * pdfH) и размером pdfW × pdfH.
-        // При extent = Pdf этот сдвиг — нулевой, а pdfW/pdfH совпадают со
-        // слотом → визуально полностью совместимо с прежним поведением.
-        // ВАЖНО: extent берётся из параметра pageExtent (известного на том же
-        // layout-pass'е, что и slot-размеры) — НЕ через state.extent.value,
-        // иначе при росте extent slot уже сжатый/растянутый меряется
-        // мгновенно, а Image позиционируется со старым offset один кадр →
-        // PDF дёргается под пером. См. KDoc у [DrawablePdfPage.pdfWidth].
+        // The PDF bitmap is drawn INSIDE the ink Canvas below (not as a separate
+        // composable) so the marker can blend against the PDF pixels with
+        // BlendMode.Multiply — a sibling layer would only blend against empty ink.
+        // These pdf-only offset/size values position the magnifier target frame
+        // (which is normalised to the PDF area, not the full extent).
         val pdfWDp = pdfWidth
         val pdfHDp = pdfHeight
         val pdfOffsetXDp = with(density) { (-pageExtent.left * pdfWidthPx).toDp() }
         val pdfOffsetYDp = with(density) { (-pageExtent.top * pdfHeightPx).toDp() }
-        Image(
-            bitmap = bitmap,
-            contentDescription = "PDF Page",
-            modifier = Modifier
-                .offset(x = pdfOffsetXDp, y = pdfOffsetYDp)
-                .size(width = pdfWDp, height = pdfHDp)
-                .border(width = androidx.compose.ui.unit.Dp(0.5f), color = indicatorColor.copy(alpha = 0.35f)),
-            // FillBounds (не Fit) — Box и bitmap могут иметь aspect-ratio,
-            // отличающиеся на доли пикселя из-за rounding при вычислении
-            // визуальной высоты / target render-resolution. С Fit это даёт
-            // letterbox-полосу сверху или снизу страницы — выглядит как
-            // зазор между страницами при continuous-зуме. FillBounds
-            // растягивает битмап точно по Box (sub-pixel искажение
-            // незаметно), стыки идеально совпадают.
-            contentScale = ContentScale.FillBounds,
-        )
 
         // Scratch Path reused across frames for the live stroke. The cached
         // `completedLayer` already holds all finished strokes; we only need a
@@ -395,10 +379,58 @@ fun DrawablePdfPage(
         // их полное исчезновение на время жеста. После коммита зума кэш
         // ре-растеризуется в резкость.
         Canvas(modifier = Modifier.fillMaxSize()) {
-            // Completed strokes — bitmap blit, single draw call regardless of
-            // how much ink is on the page. Cache may be rasterised at a lower
-            // resolution than the canvas (see INK_CACHE_MAX_DIMENSION_PX), so
-            // stretch via dstSize.
+            val ext = pdfDrawingState.extent.value
+            val pdfW = if (ext.width > 0f) size.width / ext.width else size.width
+            val pdfH = if (ext.height > 0f) size.height / ext.height else size.height
+
+            // PDF page bitmap. Drawn here (not as a sibling composable) so the
+            // marker pass below can multiply against the page's actual pixels.
+            // Positioned from `pageExtent` (the layout-pass value) — NOT
+            // state.extent — so the page doesn't jitter one frame when extent
+            // grows mid-stroke (see KDoc on [pdfWidth]).
+            val pdfDstOffset = IntOffset(
+                (-pageExtent.left * pdfWidthPx).toInt(),
+                (-pageExtent.top * pdfHeightPx).toInt(),
+            )
+            val pdfDstSize = IntSize(pdfWidthPx.toInt(), pdfHeightPx.toInt())
+            drawImage(
+                image = bitmap,
+                srcOffset = IntOffset.Zero,
+                srcSize = IntSize(bitmap.width, bitmap.height),
+                dstOffset = pdfDstOffset,
+                dstSize = pdfDstSize,
+            )
+            drawRect(
+                color = indicatorColor.copy(alpha = 0.35f),
+                topLeft = Offset(pdfDstOffset.x.toFloat(), pdfDstOffset.y.toFloat()),
+                size = Size(pdfDstSize.width.toFloat(), pdfDstSize.height.toFloat()),
+                style = Stroke(width = 0.5.dp.toPx()),
+            )
+
+            val paths = pdfDrawingState.currentPaths
+
+            // Completed MARKER strokes — drawn here, directly over the PDF, with
+            // multiply blend (inside drawMarkerStroke) so highlighted text stays
+            // readable and the highlight sits visually behind the pen ink below.
+            // Not cached: highlights are few and each is a single fill path.
+            for (i in 0 until paths.size) {
+                val p = paths[i]
+                if (p.toolType == ToolKind.MARKER) {
+                    drawMarkerStroke(
+                        points = p.points,
+                        colorArgb = p.colorArgb,
+                        normalizedStrokeWidth = p.strokeWidth,
+                        pdfWidth = pdfW,
+                        pdfHeight = pdfH,
+                        extent = ext,
+                        scratch = livePath,
+                    )
+                }
+            }
+
+            // Completed PEN ink — single bitmap blit. Cache may be rasterised at
+            // a lower resolution than the canvas (see INK_CACHE_MAX_DIMENSION_PX),
+            // so stretch via dstSize. Pen ink sits on top of the marker pass.
             val cached = completedInk.value
             cached?.let { c ->
                 drawImage(
@@ -410,21 +442,6 @@ fun DrawablePdfPage(
                 )
             }
 
-            // Live stroke. Rendered with a single drawPath at uniform width
-            // (average pressure of the existing samples × base) for minimum
-            // per-frame cost. On `finishDrawing` the stroke is re-rasterised
-            // into `completedLayer` with full per-segment varying-width fidelity
-            // (`drawStrokeWithPressure`), so the user sees the higher-quality
-            // render exactly when they lift the pen.
-            //
-            // Skipped when a low-latency overlay is in charge of the live
-            // stroke on this platform (Android API 29+) — otherwise the
-            // stroke would be drawn twice (once with frame-bound latency,
-            // once with sub-frame latency).
-            val ext = pdfDrawingState.extent.value
-            val pdfW = if (ext.width > 0f) size.width / ext.width else size.width
-            val pdfH = if (ext.height > 0f) size.height / ext.height else size.height
-
             // Anti-flicker: асинхронный кэш мог ещё не вобрать недавно
             // завершённые штрихи. При прерывистом письме (буквы) каждый новый
             // штрих перезапускает async-ребилд, поэтому кэш не догоняет, пока не
@@ -434,10 +451,10 @@ fun DrawablePdfPage(
             // `currentPaths`, ещё не вошедший в кэш (`strokeCount`) — в т.ч. во
             // время активного рисования. Это дёшево: кэш держит всё до последней
             // паузы, так что в хвосте лишь несколько штрихов текущего слова.
-            // Живой (ещё не завершённый) штрих сюда не попадает — он в
+            // Маркеры здесь пропускаются — они уже отрисованы в marker-проходе
+            // выше. Живой (ещё не завершённый) штрих сюда не попадает — он в
             // `livePoints`, не в `currentPaths`, поэтому двойного рендера нет.
             val cachedCount = cached?.strokeCount ?: 0
-            val paths = pdfDrawingState.currentPaths
             if (paths.size > cachedCount) {
                 // Лимитируем хвост: при холодном кэше (cachedCount = 0 на первом
                 // рендере) иначе перерисовывали бы всю страницу каждый кадр на
@@ -445,7 +462,10 @@ fun DrawablePdfPage(
                 // лишь последние штрихи, чтобы только что написанное не «пропадало».
                 val tailStart = maxOf(cachedCount, paths.size - MAX_UNCACHED_TAIL_STROKES)
                 for (i in tailStart until paths.size) {
-                    drawCompletedStroke(paths[i], pdfW, pdfH, ext, livePath)
+                    val p = paths[i]
+                    if (p.toolType != ToolKind.MARKER) {
+                        drawStrokeWithPressure(p, pdfW, pdfH, ext, livePath)
+                    }
                 }
             }
 
@@ -767,33 +787,6 @@ fun DrawScope.drawLiveStroke(
  *
  * Segments are joined with [StrokeCap.Round] so the width steps are invisible.
  */
-/**
- * Renders a completed [stroke] with the renderer matching its [DrawingPath.toolType]:
- * the marker's chisel-nib ribbon (multiply blend) or the pen's pressure-modulated
- * round-nib path. Used by both the off-screen cache bake and the uncached tail.
- */
-fun DrawScope.drawCompletedStroke(
-    stroke: DrawingPath,
-    pdfWidth: Float,
-    pdfHeight: Float,
-    extent: PageExtent,
-    scratch: Path,
-) {
-    if (stroke.toolType == ToolKind.MARKER) {
-        drawMarkerStroke(
-            points = stroke.points,
-            colorArgb = stroke.colorArgb,
-            normalizedStrokeWidth = stroke.strokeWidth,
-            pdfWidth = pdfWidth,
-            pdfHeight = pdfHeight,
-            extent = extent,
-            scratch = scratch,
-        )
-    } else {
-        drawStrokeWithPressure(stroke, pdfWidth, pdfHeight, extent, scratch)
-    }
-}
-
 fun DrawScope.drawStrokeWithPressure(
     stroke: DrawingPath,
     pdfWidth: Float,
