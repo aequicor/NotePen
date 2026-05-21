@@ -69,6 +69,8 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -1280,7 +1282,12 @@ fun DetailsContent(
             // сайдбар оверлеит его слева (так же, как в landscape). Сдвиг
             // через translationX/padding делал бы правый край PDF за экраном
             // или дёргал бы тяжёлый SubcomposeLayout каждый кадр анимации.
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerHoverIcon(
+                    if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default,
+                ),
+            primaryDragPanEnabled = { toolMode == ToolMode.NONE },
             gestureModifier = Modifier.pdfMultiPageDrawingInput(
                 key = drawingController,
                 tablet = tabletController,
