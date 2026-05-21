@@ -1,12 +1,20 @@
 package ru.kyamshanov.notepen.pdfviewer
 
+import androidx.compose.foundation.HorizontalScrollbar
+import androidx.compose.foundation.VerticalScrollbar
+import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -16,6 +24,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -133,6 +142,7 @@ actual fun PdfPagesViewer(
     renderer: PdfPageRenderer,
     modifier: Modifier,
     gestureModifier: Modifier,
+    primaryDragPanEnabled: () -> Boolean,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
@@ -255,7 +265,7 @@ actual fun PdfPagesViewer(
                 }
             }
             .clipToBounds()
-            .pdfDesktopPointerInput(state, pendingZoom)
+            .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
             .then(gestureModifier),
     ) {
         SubcomposeLayout(
@@ -337,6 +347,33 @@ actual fun PdfPagesViewer(
                 items.forEach { it.placeable.place(it.placeableX, it.placeableY) }
             }
         }
+
+        val hAdapter = remember(state) { PanScrollbarAdapter(state, horizontal = true) }
+        val vAdapter = remember(state) { PanScrollbarAdapter(state, horizontal = false) }
+        val showH by remember {
+            derivedStateOf {
+                (state.layout.contentRightPx - state.layout.contentLeftPx) * state.zoom >
+                    state.viewportSize.width
+            }
+        }
+        val showV by remember {
+            derivedStateOf {
+                (state.layout.contentBottomPx - state.layout.contentTopPx) * state.zoom >
+                    state.viewportSize.height
+            }
+        }
+        if (showH) {
+            HorizontalScrollbar(
+                adapter = hAdapter,
+                modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth(),
+            )
+        }
+        if (showV) {
+            VerticalScrollbar(
+                adapter = vAdapter,
+                modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
+            )
+        }
     }
 }
 
@@ -360,16 +397,22 @@ private data class ImmutablePdfPageScope(
 
 /**
  * Pointer-input десктоп-вьювера: zoom вокруг курсора, скролл колесом,
- * горизонтальный скролл с Shift, pan средней кнопкой.
+ * горизонтальный скролл с Shift, pan средней и (опционально) левой кнопкой.
+ *
+ * [primaryDragPanEnabled] возвращает `true`, когда левая кнопка должна
+ * перетаскивать документ (а не рисовать) — передаётся из `DetailsContent`
+ * как `{ toolMode == ToolMode.NONE }`.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 private fun Modifier.pdfDesktopPointerInput(
     state: PdfViewerState,
     pendingZoom: PendingZoom,
+    primaryDragPanEnabled: () -> Boolean,
 ): Modifier = this.pointerInput(state) {
     awaitPointerEventScope {
         var lastCursor = Offset.Zero
         var middleDragOrigin: Offset? = null
+        var primaryDragOrigin: Offset? = null
         var zoomBurstFocus: Offset? = null
         while (true) {
             val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -384,16 +427,24 @@ private fun Modifier.pdfDesktopPointerInput(
                         }
                         lastCursor = newPos
                     }
-                    val origin = middleDragOrigin
-                    if (origin != null && event.buttons.isTertiaryPressed && change != null) {
+                    val middleOrigin = middleDragOrigin
+                    if (middleOrigin != null && event.buttons.isTertiaryPressed && change != null) {
                         // Bake любую pending-gesture transform до пана:
                         // pan-дельта в viewport-пикселях, и если оставить
                         // gestureScale != 1, 1px движения мыши даст scale*1
                         // пикселей визуально — рассинхрон с курсором.
                         state.commitPinchGesture()
-                        val delta = change.position - origin
-                        state.panBy(delta)
+                        state.panBy(change.position - middleOrigin)
                         middleDragOrigin = change.position
+                        change.consume()
+                    }
+                    val primOrigin = primaryDragOrigin
+                    if (primOrigin != null && event.buttons.isPrimaryPressed &&
+                        primaryDragPanEnabled() && change != null
+                    ) {
+                        state.commitPinchGesture()
+                        state.panBy(change.position - primOrigin)
+                        primaryDragOrigin = change.position
                         change.consume()
                     }
                 }
@@ -402,10 +453,17 @@ private fun Modifier.pdfDesktopPointerInput(
                         state.commitPinchGesture()
                         middleDragOrigin = change.position
                         change.consume()
+                    } else if (event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
+                        change != null
+                    ) {
+                        state.commitPinchGesture()
+                        primaryDragOrigin = change.position
+                        change.consume()
                     }
                 }
                 PointerEventType.Release -> {
                     if (!event.buttons.isTertiaryPressed) middleDragOrigin = null
+                    if (!event.buttons.isPrimaryPressed) primaryDragOrigin = null
                 }
                 PointerEventType.Scroll -> {
                     if (change == null) continue
@@ -418,7 +476,19 @@ private fun Modifier.pdfDesktopPointerInput(
                                 ?: change.position.takeIf { it != Offset.Zero }
                                 ?: lastCursor
                             zoomBurstFocus = focus
-                            val factor = ZOOM_BASE.pow(-delta.y)
+                            // macOS trackpad pinch arrives via JBR as Ctrl+Scroll with
+                            // |delta.y| ≈ 0.01–0.05 per event (NSEventTypeMagnify value).
+                            // ZOOM_BASE.pow(-delta.y) ≈ 0.3% zoom per event — imperceptible.
+                            // For continuous input we use 1 - delta.y directly:
+                            //   magnify-in  → delta.y < 0 → factor > 1 (zoom in) ✓
+                            //   magnify-out → delta.y > 0 → factor < 1 (zoom out) ✓
+                            // Discrete mouse wheel gives |delta.y| ≥ 1.0, so the old
+                            // exponential formula is preserved for that path.
+                            val factor = if (kotlin.math.abs(delta.y) < 0.5f) {
+                                1f - delta.y
+                            } else {
+                                ZOOM_BASE.pow(-delta.y)
+                            }
                             pendingZoom.accumulate(factor, focus)
                         }
                         shift -> {
@@ -434,6 +504,51 @@ private fun Modifier.pdfDesktopPointerInput(
                 }
                 else -> Unit
             }
+        }
+    }
+}
+
+private class PanScrollbarAdapter(
+    private val state: PdfViewerState,
+    private val horizontal: Boolean,
+) : ScrollbarAdapter {
+
+    override val scrollOffset: Double
+        get() {
+            val layout = state.layout
+            return if (horizontal) {
+                -(state.pan.x + layout.contentLeftPx * state.zoom).toDouble()
+            } else {
+                -(state.pan.y + layout.contentTopPx * state.zoom).toDouble()
+            }
+        }
+
+    override val contentSize: Double
+        get() {
+            val l = state.layout
+            val z = state.zoom
+            return if (horizontal) {
+                ((l.contentRightPx - l.contentLeftPx) * z).toDouble()
+            } else {
+                ((l.contentBottomPx - l.contentTopPx) * z).toDouble()
+            }
+        }
+
+    override val viewportSize: Double
+        get() = if (horizontal) {
+            state.viewportSize.width.toDouble()
+        } else {
+            state.viewportSize.height.toDouble()
+        }
+
+    override suspend fun scrollTo(scrollOffset: Double) {
+        val layout = state.layout
+        if (horizontal) {
+            val newPanX = -(scrollOffset.toFloat() + layout.contentLeftPx * state.zoom)
+            state.panBy(Offset(newPanX - state.pan.x, 0f))
+        } else {
+            val newPanY = -(scrollOffset.toFloat() + layout.contentTopPx * state.zoom)
+            state.panBy(Offset(0f, newPanY - state.pan.y))
         }
     }
 }

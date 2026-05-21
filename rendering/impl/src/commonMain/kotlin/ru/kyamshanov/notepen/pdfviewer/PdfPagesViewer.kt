@@ -45,6 +45,7 @@ expect fun PdfPagesViewer(
      * pipeline.
      */
     gestureModifier: Modifier = Modifier,
+    primaryDragPanEnabled: () -> Boolean = { false },
     pageContent: PdfPageContent,
 )
 
