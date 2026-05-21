@@ -104,6 +104,13 @@ compose.desktop {
             configurationFiles.from("proguard-rules.pro")
         }
 
-        jvmArgs += listOf("-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG")
+        jvmArgs += listOf(
+            "-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG",
+            // In dev (:run), compose.application.resources.dir may not be set,
+            // so JNA won't find dylibs in assets/ automatically. Point it there
+            // explicitly; in packaged builds CocoaTabletInputController.addComposeResourcesToJnaPath()
+            // does the same at runtime.
+            "-Djna.library.path=${project.layout.projectDirectory.file("assets").asFile.absolutePath}",
+        )
     }
 }

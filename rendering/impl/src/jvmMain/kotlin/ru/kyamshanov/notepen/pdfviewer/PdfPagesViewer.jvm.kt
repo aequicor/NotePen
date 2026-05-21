@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -21,9 +22,13 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.input.pointer.PointerEventPass
+import com.sun.jna.Native
+import com.sun.jna.Platform
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
 import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
@@ -95,18 +100,22 @@ private const val STALE_SCALE_RATIO_THRESHOLD = 2f
  * мультипликативно коммутативен (`N` тиков по `f` == один тик `f^N`
  * вокруг той же точки), батч даёт идентичный визуальный результат при
  * меньшей нагрузке.
+ *
+ * Thread-safe: [accumulate] вызывается с Compose main thread (wheel через
+ * [pdfDesktopPointerInput]) и с AppKit main thread (pinch через
+ * [MacosGestureBridge]). [consume] работает на Compose main thread.
  */
 private class PendingZoom {
-    var factor: Float = 1f
-        private set
-    var focus: Offset? = null
-        private set
+    @Volatile private var factor: Float = 1f
+    @Volatile private var focus: Offset? = null
 
+    @Synchronized
     fun accumulate(f: Float, p: Offset) {
         factor *= f
         focus = p
     }
 
+    @Synchronized
     fun consume(): Pair<Float, Offset>? {
         val f = factor
         val p = focus ?: return null
@@ -148,7 +157,43 @@ actual fun PdfPagesViewer(
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
     val density = LocalDensity.current
     val pendingZoom = remember { PendingZoom() }
+    // Shared cursor position: updated by pointer-input on Compose thread,
+    // read by macOS gesture callback on AppKit thread → AtomicReference.
+    val lastCursorRef = remember { java.util.concurrent.atomic.AtomicReference(Offset.Zero) }
     val renderDispatcher = Dispatchers.Default
+
+    // macOS trackpad pinch: NSEventMaskMagnify via libnotepen_gesture.dylib.
+    // Skiko intercepts NSView.magnifyWithEvent: natively and never forwards it
+    // to Compose's PointerInputScope, so we bypass Skiko entirely with an
+    // NSEvent local monitor — same technique as the tablet pressure bridge.
+    DisposableEffect(state, pendingZoom) {
+        if (!Platform.isMac()) return@DisposableEffect onDispose {}
+        // Mirror addComposeResourcesToJnaPath() from CocoaTabletInputController:
+        // in dev (:run) compose.application.resources.dir may be absent, but
+        // build.gradle.kts already adds -Djna.library.path=assets/, so this
+        // is belt-and-suspenders for packaged distributions.
+        System.getProperty("compose.application.resources.dir")?.let { dir ->
+            val cur = System.getProperty("jna.library.path").orEmpty()
+            if (dir !in cur.split(java.io.File.pathSeparator)) {
+                System.setProperty(
+                    "jna.library.path",
+                    if (cur.isEmpty()) dir else "$dir${java.io.File.pathSeparator}$cur",
+                )
+            }
+        }
+        val bridge = runCatching {
+            Native.load("notepen_gesture", MacosGestureBridge::class.java)
+        }.getOrNull()
+        if (bridge == null) return@DisposableEffect onDispose {}
+        val callbackRef = MacosGestureBridge.OnMagnify { magnification, _, _ ->
+            // Typical per-event magnification is ±0.01…0.05 for a smooth gesture.
+            // factor = 1 + magnification: pinch-out → factor > 1 (zoom in).
+            val factor = 1f + magnification
+            if (factor > 0f) pendingZoom.accumulate(factor, lastCursorRef.get())
+        }
+        bridge.notepen_gesture_start(callbackRef)
+        onDispose { bridge.notepen_gesture_stop() }
+    }
 
     LaunchedEffect(pages) {
         state.pages = pages
@@ -273,7 +318,7 @@ actual fun PdfPagesViewer(
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
-                .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
+                .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled, lastCursorRef)
                 .then(gestureModifier),
         ) {
         SubcomposeLayout(
@@ -417,6 +462,7 @@ private fun Modifier.pdfDesktopPointerInput(
     state: PdfViewerState,
     pendingZoom: PendingZoom,
     primaryDragPanEnabled: () -> Boolean,
+    lastCursorRef: java.util.concurrent.atomic.AtomicReference<Offset>,
 ): Modifier = this.pointerInput(state) {
     awaitPointerEventScope {
         var lastCursor = Offset.Zero
@@ -435,6 +481,7 @@ private fun Modifier.pdfDesktopPointerInput(
                             zoomBurstFocus = null
                         }
                         lastCursor = newPos
+                        lastCursorRef.set(newPos)
                     }
                     val middleOrigin = middleDragOrigin
                     if (middleOrigin != null && event.buttons.isTertiaryPressed && change != null) {
@@ -477,7 +524,10 @@ private fun Modifier.pdfDesktopPointerInput(
                 PointerEventType.Scroll -> {
                     if (change == null) continue
                     val delta = change.scrollDelta
-                    val ctrl = event.keyboardModifiers.isCtrlPressed
+                    val awtEvent = event.awtEventOrNull as? java.awt.event.MouseWheelEvent
+                    val ctrl = event.keyboardModifiers.isCtrlPressed ||
+                        event.keyboardModifiers.isMetaPressed ||
+                        awtEvent?.isControlDown == true
                     val shift = event.keyboardModifiers.isShiftPressed
                     when {
                         ctrl -> {
@@ -491,16 +541,24 @@ private fun Modifier.pdfDesktopPointerInput(
                             // so factor = 1 + delta.y > 1 → zoom in ✓.
                             // Discrete mouse wheel: |delta.y| ≥ 1.0,
                             // exponential formula gives ~7% per click ✓.
-                            val factor = if (kotlin.math.abs(delta.y) < 0.5f) {
-                                1f + delta.y
+                            val rawDelta = awtEvent?.preciseWheelRotation?.toFloat() ?: delta.y
+                            val factor = if (kotlin.math.abs(rawDelta) < 0.5f) {
+                                1f + rawDelta
                             } else {
-                                ZOOM_BASE.pow(-delta.y)
+                                ZOOM_BASE.pow(-rawDelta)
                             }
                             pendingZoom.accumulate(factor, focus)
                         }
                         shift -> {
                             state.commitPinchGesture()
-                            state.panBy(Offset(-delta.y * WHEEL_SCROLL_PX_PER_TICK, 0f))
+                            // On macOS, horizontal trackpad swipe arrives as delta.x with
+                            // shift=true; Shift+mouse-wheel uses delta.y. Handle both.
+                            state.panBy(
+                                Offset(
+                                    -delta.x * WHEEL_SCROLL_PX_PER_TICK,
+                                    -delta.y * WHEEL_SCROLL_PX_PER_TICK,
+                                ),
+                            )
                         }
                         else -> {
                             state.commitPinchGesture()
