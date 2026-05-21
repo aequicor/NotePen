@@ -69,6 +69,7 @@ enum class ClientPairingScreen {
  * @param manualViewModel drives the manual host/port/code form
  * @param peerClient multi-host client; backs the connections list and disconnect actions
  * @param onClose called when the user dismisses the dialog via "Отмена"
+ * @param onConnected called when a new host connection is established
  */
 @Composable
 fun ClientPairingPanel(
@@ -76,6 +77,7 @@ fun ClientPairingPanel(
     manualViewModel: ManualConnectViewModel,
     peerClient: SyncClient,
     onClose: () -> Unit,
+    onConnected: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val connectedHosts by peerClient.connectedHosts.collectAsState(emptySet())
@@ -87,12 +89,11 @@ fun ClientPairingPanel(
             else ClientPairingScreen.Onboarding,
         )
     }
-    // When a new host appears mid-flow, jump to the connections list so the
-    // user sees the confirmation.
+    // When a new host appears mid-flow, the pairing succeeded — close the dialog.
     val prevHostCount = remember { mutableStateOf(connectedHosts.size) }
     LaunchedEffect(connectedHosts.size) {
         if (connectedHosts.size > prevHostCount.value) {
-            screen = ClientPairingScreen.Connections
+            onConnected()
         }
         prevHostCount.value = connectedHosts.size
     }

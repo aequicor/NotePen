@@ -183,11 +183,15 @@ actual fun PdfPagesViewer(
         }
         val bridge = runCatching {
             Native.load("notepen_gesture", MacosGestureBridge::class.java)
-        }.getOrNull()
-        if (bridge == null) return@DisposableEffect onDispose {}
-        val callbackRef = MacosGestureBridge.OnMagnify { magnification, _, _ ->
-            // Typical per-event magnification is ±0.01…0.05 for a smooth gesture.
-            // factor = 1 + magnification: pinch-out → factor > 1 (zoom in).
+        }.onFailure { println("[GestureBridge] load FAILED: ${it.message}") }
+            .getOrNull()
+        if (bridge == null) {
+            println("[GestureBridge] bridge is null, pinch zoom disabled")
+            return@DisposableEffect onDispose {}
+        }
+        println("[GestureBridge] loaded OK, installing NSEvent monitor")
+        val callbackRef = MacosGestureBridge.OnMagnify { magnification, x, y ->
+            println("[GestureBridge] magnify=$magnification x=$x y=$y")
             val factor = 1f + magnification
             if (factor > 0f) pendingZoom.accumulate(factor, lastCursorRef.get())
         }
