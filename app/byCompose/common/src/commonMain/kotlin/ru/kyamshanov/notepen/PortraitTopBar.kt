@@ -138,12 +138,12 @@ fun PortraitTopBar(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = PORTRAIT_BAR_PAGE_PADDING),
                 )
+                Spacer(Modifier.weight(1f))
                 ToolSelector(
                     toolMode = toolMode,
                     onToolModeChange = onToolModeChange,
                     orientation = RailOrientation.HORIZONTAL,
                 )
-                Spacer(Modifier.weight(1f))
                 VerticalDivider()
                 AnimatedContent(targetState = toolMode, label = "portrait-segment-b") { mode ->
                     if (mode != ToolMode.NONE) {
@@ -192,8 +192,10 @@ fun PortraitTopBar(
                 .padding(top = PORTRAIT_EXPANSION_TOP_PADDING),
         ) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(end = PORTRAIT_BAR_PADDING_H),
+                horizontalArrangement = Arrangement.End,
             ) {
                 GlassSurface(tint = MaterialTheme.colorScheme.secondaryContainer) {
                     ToolSettingsExpansionContent(
