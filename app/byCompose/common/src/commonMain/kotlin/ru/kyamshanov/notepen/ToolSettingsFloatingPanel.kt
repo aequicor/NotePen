@@ -18,7 +18,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size as CanvasSize
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Category
+import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
@@ -45,15 +47,22 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
+import ru.kyamshanov.notepen.annotation.domain.model.EraserPreset
+import ru.kyamshanov.notepen.annotation.domain.model.MarkerPreset
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PenPreset
+import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.applyAlpha
 import ru.kyamshanov.notepen.annotation.domain.model.applyMode
 import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
 import ru.kyamshanov.notepen.annotation.domain.model.applyShape
 import ru.kyamshanov.notepen.annotation.domain.model.applySize
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
+import ru.kyamshanov.notepen.annotation.domain.model.isBuiltinPresetId
 import ru.kyamshanov.notepen.annotation.domain.model.sliderPositionToStrokeWidth
+import ru.kyamshanov.notepen.mainscreen.domain.model.generateUuid
 import ru.kyamshanov.notepen.tools.marker.markerSlots
 
 /**
@@ -308,6 +317,93 @@ private fun eraserSlots(
         },
     ),
 )
+
+/* ---------------- presets zone ---------------- */
+
+/**
+ * Separate "presets" zone for the active tool: built-in + user presets that
+ * apply a full settings snapshot on tap, plus an add button. No-op for
+ * [ToolMode.NONE]. The caller owns [presets]; changes are reported via
+ * [onPresetsChange] for persistence.
+ */
+@Composable
+internal fun ToolPresetsZone(
+    toolMode: ToolMode,
+    penSettings: PenSettings,
+    onPenSettingsChange: (PenSettings) -> Unit,
+    markerSettings: MarkerSettings,
+    onMarkerSettingsChange: (MarkerSettings) -> Unit,
+    eraserSettings: EraserSettings,
+    onEraserSettingsChange: (EraserSettings) -> Unit,
+    presets: StoredToolPresets,
+    onPresetsChange: (StoredToolPresets) -> Unit,
+    orientation: RailOrientation,
+) {
+    when (toolMode) {
+        ToolMode.PEN -> {
+            val all = BuiltinToolPresets.pen + presets.pen
+            ToolPresetStrip(
+                items = all.map {
+                    ToolPresetItem(
+                        id = it.id,
+                        colorArgb = it.settings.colorArgb,
+                        icon = null,
+                        deletable = !isBuiltinPresetId(it.id),
+                        selected = it.settings == penSettings,
+                    )
+                },
+                addIcon = Icons.Default.Add,
+                onApply = { id -> all.firstOrNull { it.id == id }?.let { onPenSettingsChange(it.settings) } },
+                onAdd = { onPresetsChange(presets.copy(pen = presets.pen + PenPreset(generateUuid(), penSettings))) },
+                onDelete = { id -> onPresetsChange(presets.copy(pen = presets.pen.filterNot { it.id == id })) },
+                orientation = orientation,
+            )
+        }
+        ToolMode.MARKER -> {
+            val all = BuiltinToolPresets.marker + presets.marker
+            ToolPresetStrip(
+                items = all.map {
+                    ToolPresetItem(
+                        id = it.id,
+                        colorArgb = it.settings.colorArgb,
+                        icon = null,
+                        deletable = !isBuiltinPresetId(it.id),
+                        selected = it.settings == markerSettings,
+                    )
+                },
+                addIcon = Icons.Default.Add,
+                onApply = { id -> all.firstOrNull { it.id == id }?.let { onMarkerSettingsChange(it.settings) } },
+                onAdd = {
+                    onPresetsChange(presets.copy(marker = presets.marker + MarkerPreset(generateUuid(), markerSettings)))
+                },
+                onDelete = { id -> onPresetsChange(presets.copy(marker = presets.marker.filterNot { it.id == id })) },
+                orientation = orientation,
+            )
+        }
+        ToolMode.ERASER -> {
+            val all = BuiltinToolPresets.eraser + presets.eraser
+            ToolPresetStrip(
+                items = all.map {
+                    ToolPresetItem(
+                        id = it.id,
+                        colorArgb = null,
+                        icon = Icons.Default.CleaningServices,
+                        deletable = !isBuiltinPresetId(it.id),
+                        selected = it.settings == eraserSettings,
+                    )
+                },
+                addIcon = Icons.Default.Add,
+                onApply = { id -> all.firstOrNull { it.id == id }?.let { onEraserSettingsChange(it.settings) } },
+                onAdd = {
+                    onPresetsChange(presets.copy(eraser = presets.eraser + EraserPreset(generateUuid(), eraserSettings)))
+                },
+                onDelete = { id -> onPresetsChange(presets.copy(eraser = presets.eraser.filterNot { it.id == id })) },
+                orientation = orientation,
+            )
+        }
+        ToolMode.NONE -> Unit
+    }
+}
 
 /* ---------------- oriented expanded-content widgets ---------------- */
 

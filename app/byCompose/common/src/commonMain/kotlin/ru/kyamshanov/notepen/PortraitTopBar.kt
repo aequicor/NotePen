@@ -57,6 +57,7 @@ import kotlinx.coroutines.delay
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /**
@@ -83,6 +84,8 @@ fun PortraitTopBar(
     onMarkerSettingsChange: (MarkerSettings) -> Unit,
     eraserSettings: EraserSettings,
     onEraserSettingsChange: (EraserSettings) -> Unit,
+    toolPresets: StoredToolPresets,
+    onToolPresetsChange: (StoredToolPresets) -> Unit,
     hasAnnotations: Boolean,
     isExporting: Boolean,
     onExport: () -> Unit,
@@ -197,6 +200,21 @@ fun PortraitTopBar(
                             onOpenShortcutsSettings = onOpenShortcutsSettings,
                         )
                     }
+                }
+                if (toolActive) {
+                    VerticalDivider()
+                    ToolPresetsZone(
+                        toolMode = toolMode,
+                        penSettings = penSettings,
+                        onPenSettingsChange = onPenSettingsChange,
+                        markerSettings = markerSettings,
+                        onMarkerSettingsChange = onMarkerSettingsChange,
+                        eraserSettings = eraserSettings,
+                        onEraserSettingsChange = onEraserSettingsChange,
+                        presets = toolPresets,
+                        onPresetsChange = onToolPresetsChange,
+                        orientation = RailOrientation.HORIZONTAL,
+                    )
                 }
             }
         }
