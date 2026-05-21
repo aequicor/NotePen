@@ -11,9 +11,29 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
+import kotlin.math.abs
+import kotlin.math.exp
 import kotlin.math.roundToInt
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
+
+/**
+ * Максимальное визуальное overscroll-смещение контента (px). И «перелёт» пальца
+ * при drag, и накопление от колеса демпфируются к этому пределу — сколько ни
+ * тяни/крути в край, контент не уедет дальше. Им же насыщается краевая тень.
+ */
+private const val OVERSCROLL_MAX_OFFSET_PX = 90f
+
+/**
+ * Постоянная времени пружинного возврата overscroll-смещения к нулю (мс): за
+ * ~TAU смещение спадает до ~37%. Во время инерции колеса у края держится
+ * равновесие ∝ скорости и само сходит к нулю, когда инерция гаснет. Меньше →
+ * резче возврат; больше → мягче.
+ */
+private const val OVERSCROLL_SPRING_TAU_MS = 130f
+
+/** Порог (px), ниже которого overscroll-смещение считается нулевым. */
+private const val OVERSCROLL_EPS_PX = 0.3f
 
 /**
  * Desktop-реализация [PdfViewerState]: один `zoom: Float`, [pan] —
@@ -229,12 +249,14 @@ actual class PdfViewerState internal constructor(
         val newZoom = (zoom * s).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
         val newPan = Offset(x = pan.x * s + t.x, y = pan.y * s + t.y)
         zoom = newZoom
-        // Если после пинча страница умещается по ширине во вьюпорт — центрируем
-        // её (zoom-out до размера меньше окна встаёт по центру). Пока ширина
-        // переполняет, pan НЕ трогаем: edge-clamp в этой точке дал бы видимый
-        // «прыжок» к краю при off-center пинч-зуме (см. KDoc выше).
-        val contentW = (layout.contentRightPx - layout.contentLeftPx) * newZoom
-        pan = if (contentW <= viewportSize.width) centeredAndClamped(newPan) else newPan
+        // Если после пинча лист PDF умещается по ширине во вьюпорт — центрируем
+        // его (zoom-out до размера меньше окна встаёт по центру). Меряем по
+        // самому листу (basePageWidthPx), а НЕ по слоту с extent: иначе штрих,
+        // заехавший за лист, расширял бы слот и ломал бы это условие — лист
+        // переставал бы центрироваться. Пока лист переполняет ширину, pan НЕ
+        // трогаем: edge-clamp здесь дал бы «прыжок» к краю при off-center пинче.
+        val pdfW = layout.basePageWidthPx * newZoom
+        pan = if (pdfW <= viewportSize.width) centeredAndClamped(newPan) else newPan
         gestureScale = 1f
         gestureTranslation = Offset.Zero
     }
@@ -259,6 +281,115 @@ actual class PdfViewerState internal constructor(
             x = if (delta.x == 0f) pan.x else c.x,
             y = if (delta.y == 0f) pan.y else c.y,
         )
+    }
+
+    // ===== Overscroll =====
+    // [pan] всегда жёстко кламплен; «перелёт» за край показывается отдельным
+    // визуальным смещением контента [overscrollOffset] (GPU-трансляция во
+    // вьювере), которое пружинит к нулю в [relaxOverscroll]. Тем же вектором
+    // рисуется краевая тень. И колесо, и drag дают пружину + тень, не двигая
+    // саму позицию скролла — поэтому на обычном скролле нет тряски, а
+    // центрирование/кламп не ломаются.
+
+    /**
+     * Визуальное overscroll-смещение контента (viewport-px). Знак = направление
+     * «перелёта»: `x > 0` тянет вправо (упор в левый край), `y > 0` — вниз
+     * (упор в верх) и т.д. Применяется вьювером как GPU-трансляция и как тень.
+     */
+    var overscrollOffset: Offset by mutableStateOf(Offset.Zero)
+        private set
+
+    /** Палец активного drag «держит» смещение: пока true, [relaxOverscroll] не затухает. */
+    private var overscrollHeld = false
+
+    /** «Сырое» абсолютное положение пальца во время drag (для расчёта перелёта). */
+    private var dragRawPan = Offset.Zero
+
+    /** Начало drag-to-pan: фиксирует сырое положение пальца и режим удержания. */
+    fun beginPanGesture() {
+        dragRawPan = pan
+        overscrollHeld = true
+    }
+
+    /**
+     * Drag-сдвиг: [pan] жёстко кламплен, а «перелёт» пальца за окно clamp'а уходит
+     * в демпфированное [overscrollOffset] — контент тянется за пальцем, как в
+     * `LazyColumn`. На отпускании вызови [endPanGesture] (пружинный возврат).
+     */
+    fun panGestureBy(delta: Offset) {
+        dragRawPan = Offset(
+            x = if (delta.x == 0f) dragRawPan.x else dragRawPan.x + delta.x,
+            y = if (delta.y == 0f) dragRawPan.y else dragRawPan.y + delta.y,
+        )
+        val c = clamped(dragRawPan)
+        pan = Offset(
+            x = if (delta.x == 0f) pan.x else c.x,
+            y = if (delta.y == 0f) pan.y else c.y,
+        )
+        overscrollOffset = Offset(
+            x = if (delta.x == 0f) overscrollOffset.x else softDampOverscroll(dragRawPan.x - c.x),
+            y = if (delta.y == 0f) overscrollOffset.y else softDampOverscroll(dragRawPan.y - c.y),
+        )
+    }
+
+    /** Конец drag: снимает удержание — [overscrollOffset] пружинит к нулю в [relaxOverscroll]. */
+    fun endPanGesture() {
+        overscrollHeld = false
+    }
+
+    /**
+     * Скролл колесом/трекпадом: [pan] жёстко кламплен, «непогашенная» у края
+     * дельта демпфированно копится в [overscrollOffset] (резина у края), а
+     * [relaxOverscroll] непрерывно возвращает его к нулю — равновесие во время
+     * инерции ∝ скорости, без debounce и без сдвига позиции скролла.
+     */
+    fun wheelScrollBy(delta: Offset) {
+        overscrollHeld = false
+        val candidate = pan + delta
+        val c = clamped(candidate)
+        pan = Offset(
+            x = if (delta.x == 0f) pan.x else c.x,
+            y = if (delta.y == 0f) pan.y else c.y,
+        )
+        val unX = if (delta.x == 0f) 0f else candidate.x - c.x
+        val unY = if (delta.y == 0f) 0f else candidate.y - c.y
+        if (unX != 0f || unY != 0f) {
+            overscrollOffset = Offset(
+                x = addWheelOverscroll(overscrollOffset.x, unX),
+                y = addWheelOverscroll(overscrollOffset.y, unY),
+            )
+        }
+    }
+
+    /**
+     * Per-frame пружинный возврат [overscrollOffset] к нулю (экспоненциально по
+     * [dtMillis] с постоянной [OVERSCROLL_SPRING_TAU_MS]). No-op, пока палец
+     * держит drag ([overscrollHeld]) или смещения нет. Вызывать каждый кадр.
+     */
+    fun relaxOverscroll(dtMillis: Long) {
+        if (overscrollHeld) return
+        val o = overscrollOffset
+        if (o == Offset.Zero) return
+        val factor = exp(-dtMillis.toFloat() / OVERSCROLL_SPRING_TAU_MS)
+        val nx = o.x * factor
+        val ny = o.y * factor
+        overscrollOffset = Offset(
+            x = if (abs(nx) < OVERSCROLL_EPS_PX) 0f else nx,
+            y = if (abs(ny) < OVERSCROLL_EPS_PX) 0f else ny,
+        )
+    }
+
+    /** Перелёт пальца [v] (px) → ограниченное смещение: 0 → 0, ±∞ → ±[OVERSCROLL_MAX_OFFSET_PX]. */
+    private fun softDampOverscroll(v: Float): Float {
+        val m = OVERSCROLL_MAX_OFFSET_PX
+        val damped = m * (1f - 1f / (abs(v) / m + 1f))
+        return if (v < 0f) -damped else damped
+    }
+
+    /** Прибавляет к смещению вклад [delta] с резиновым ослаблением у предела [OVERSCROLL_MAX_OFFSET_PX]. */
+    private fun addWheelOverscroll(cur: Float, delta: Float): Float {
+        val gain = (1f - abs(cur) / OVERSCROLL_MAX_OFFSET_PX).coerceIn(0f, 1f)
+        return (cur + delta * gain).coerceIn(-OVERSCROLL_MAX_OFFSET_PX, OVERSCROLL_MAX_OFFSET_PX)
     }
 
     actual fun scrollToPage(pageIndex: Int, offsetPx: Int) {
@@ -292,6 +423,18 @@ actual class PdfViewerState internal constructor(
         pan = PdfViewerMath.panForPageTop(layout, pageIndex, newZoom, vp.width).let(::clamped)
     }
 
+    /**
+     * Перецентровка после изменения размера вьюпорта (открытие/закрытие
+     * панели, перетаскивание разделителя, ресайз окна). Лист, помещающийся в
+     * новую ширину/высоту, встаёт по центру; зумленный лист, выходящий за
+     * вьюпорт, лишь edge-кламп'ится — без рывка к центру. Скролл по
+     * переполняющей оси сохраняется.
+     */
+    fun reCenterAfterResize() {
+        if (viewportSize.width <= 0 || pages.isEmpty()) return
+        pan = centeredAndClamped(pan)
+    }
+
     /** Сбрасывает на 100% и верх документа. */
     fun resetView() {
         if (viewportSize.width <= 0) return
@@ -308,15 +451,27 @@ actual class PdfViewerState internal constructor(
     )
 
     /**
-     * Центрирует [p] по тем осям, на которых контент помещается во вьюпорт
-     * (через [PdfViewerMath.centeringClamp]), затем кламп'ит к границам. Нужно
-     * для зума: когда после уменьшения масштаба страница стала меньше окна, она
-     * автоматически встаёт по центру; по переполняющим осям — обычный edge-clamp.
+     * Центрирует [p] по тем осям, на которых лист PDF помещается во вьюпорт
+     * (через [PdfViewerMath.centeringClamp]); по переполняющим осям — обычный
+     * edge-clamp. Нужно для зума: когда после уменьшения масштаба страница стала
+     * меньше окна, она автоматически встаёт по центру.
+     *
+     * Edge-clamp применяется ТОЛЬКО к переполняющим осям. На помещающейся оси
+     * центрированное значение оставляем как есть: иначе [PdfViewerMath.clampPan]
+     * (он считает границы по слоту с [PageExtent]) загнал бы в экран весь слот,
+     * включая штрих за листом, и сдвинул бы лист от центра — лист центрировался
+     * бы «по документу со штрихами», а не по самому листу.
      */
     private fun centeredAndClamped(p: Offset): Offset {
         val vp = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat())
         val centered = PdfViewerMath.centeringClamp(p, layout, zoom, vp)
-        return PdfViewerMath.clampPan(centered, layout, zoom, vp)
+        val clampedPan = PdfViewerMath.clampPan(centered, layout, zoom, vp)
+        val pdfFitsWidth = layout.basePageWidthPx * zoom <= vp.width
+        val pdfFitsHeight = layout.totalHeightPx * zoom <= vp.height
+        return Offset(
+            x = if (pdfFitsWidth) centered.x else clampedPan.x,
+            y = if (pdfFitsHeight) centered.y else clampedPan.y,
+        )
     }
 
     companion object {

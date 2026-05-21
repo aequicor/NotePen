@@ -19,7 +19,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.awt.awtEventOrNull
@@ -92,6 +96,19 @@ private const val SCROLL_EMA_ALPHA = 0.3f
  * затухает, горизонталь разблокируется уже через 1–2 тика.
  */
 private const val SCROLL_H_SUPPRESS_RATIO = 2.0f
+
+/**
+ * Px «непогашенной» дельты, при которых краевое overscroll-свечение достигает
+ * максимальной непрозрачности [OVERSCROLL_GLOW_MAX_ALPHA]. Совпадает с потолком
+ * накопления в `PdfViewerState`.
+ */
+private const val OVERSCROLL_GLOW_REF_PX = 90f
+
+/** Максимальная непрозрачность краевого свечения. */
+private const val OVERSCROLL_GLOW_MAX_ALPHA = 0.28f
+
+/** Глубина свечения от кромки внутрь — доля меньшей стороны вьюпорта. */
+private const val OVERSCROLL_GLOW_DEPTH_FRACTION = 0.12f
 
 /**
  * Допустимое отклонение pan.x от центрированного положения (в пикселях),
@@ -296,8 +313,11 @@ actual fun PdfPagesViewer(
     LaunchedEffect(state) {
         var lastZoomMillis = 0L
         var hasPendingCommit = false
+        var lastFrameMillis = 0L
         while (true) {
             val now = withFrameMillis { it }
+            val dt = if (lastFrameMillis == 0L) 16L else (now - lastFrameMillis).coerceAtLeast(1L)
+            lastFrameMillis = now
             val pair = pendingZoom.consume()
             if (pair != null) {
                 val focus = pair.second
@@ -308,6 +328,8 @@ actual fun PdfPagesViewer(
                 state.commitPinchGesture()
                 hasPendingCommit = false
             }
+            // Затухание краевого overscroll-свечения (self-gated).
+            state.relaxOverscroll(dt)
         }
     }
 
@@ -392,8 +414,12 @@ actual fun PdfPagesViewer(
         modifier = modifier
             .onSizeChanged { size ->
                 if (state.viewportSize != size) {
+                    val hadWidth = state.viewportSize.width > 0
                     state.viewportSize = size
                     state.applyPendingInitialScrollIfNeeded()
+                    // A genuine resize (panel opened/closed, divider dragged,
+                    // window resized) re-centres the page in the new viewport.
+                    if (hadWidth && size.width > 0) state.reCenterAfterResize()
                 }
             },
     ) {
@@ -401,6 +427,7 @@ actual fun PdfPagesViewer(
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
+                .overscrollGlow { state.overscrollOffset }
                 .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
                 .then(gestureModifier),
         ) {
@@ -419,8 +446,10 @@ actual fun PdfPagesViewer(
                     scaleX = s
                     scaleY = s
                     transformOrigin = TransformOrigin(0f, 0f)
-                    translationX = state.gestureTranslation.x
-                    translationY = state.gestureTranslation.y
+                    // overscrollOffset — визуальный «перелёт» за край (пружинит к
+                    // нулю), сам pan жёстко кламплен.
+                    translationX = state.gestureTranslation.x + state.overscrollOffset.x
+                    translationY = state.gestureTranslation.y + state.overscrollOffset.y
                 },
         ) { constraints ->
             val layout = state.layout
@@ -549,6 +578,70 @@ private data class ImmutablePdfPageScope(
  * перетаскивать документ (а не рисовать) — передаётся из `DetailsContent`
  * как `{ toolMode == ToolMode.NONE }`.
  */
+/**
+ * Рисует краевую overscroll-тень (RecyclerView-style) поверх контента по текущему
+ * [glow] (= `PdfViewerState.overscrollOffset`): затемнённый градиент у прижатой
+ * кромки, гаснущий внутрь. Дополняет визуальный сдвиг контента — вместе дают
+ * ощущение «дальше некуда» + пружину.
+ */
+private fun Modifier.overscrollGlow(glow: () -> Offset): Modifier = this.drawWithContent {
+    drawContent()
+    val g = glow()
+    if (g == Offset.Zero) return@drawWithContent
+    val w = size.width
+    val h = size.height
+    val depth = minOf(w, h) * OVERSCROLL_GLOW_DEPTH_FRACTION
+    if (depth <= 0f) return@drawWithContent
+    fun alpha(px: Float): Float =
+        (kotlin.math.abs(px) / OVERSCROLL_GLOW_REF_PX).coerceIn(0f, 1f) * OVERSCROLL_GLOW_MAX_ALPHA
+    if (g.y > 0f) {
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to Color.Black.copy(alpha = alpha(g.y)),
+                1f to Color.Transparent,
+                startY = 0f,
+                endY = depth,
+            ),
+            topLeft = Offset.Zero,
+            size = Size(w, depth),
+        )
+    } else if (g.y < 0f) {
+        drawRect(
+            brush = Brush.verticalGradient(
+                0f to Color.Transparent,
+                1f to Color.Black.copy(alpha = alpha(g.y)),
+                startY = h - depth,
+                endY = h,
+            ),
+            topLeft = Offset(0f, h - depth),
+            size = Size(w, depth),
+        )
+    }
+    if (g.x > 0f) {
+        drawRect(
+            brush = Brush.horizontalGradient(
+                0f to Color.Black.copy(alpha = alpha(g.x)),
+                1f to Color.Transparent,
+                startX = 0f,
+                endX = depth,
+            ),
+            topLeft = Offset.Zero,
+            size = Size(depth, h),
+        )
+    } else if (g.x < 0f) {
+        drawRect(
+            brush = Brush.horizontalGradient(
+                0f to Color.Transparent,
+                1f to Color.Black.copy(alpha = alpha(g.x)),
+                startX = w - depth,
+                endX = w,
+            ),
+            topLeft = Offset(w - depth, 0f),
+            size = Size(depth, h),
+        )
+    }
+}
+
 @OptIn(ExperimentalComposeUiApi::class)
 private fun Modifier.pdfDesktopPointerInput(
     state: PdfViewerState,
@@ -587,7 +680,7 @@ private fun Modifier.pdfDesktopPointerInput(
                         // gestureScale != 1, 1px движения мыши даст scale*1
                         // пикселей визуально — рассинхрон с курсором.
                         state.commitPinchGesture()
-                        state.panBy(change.position - middleOrigin)
+                        state.panGestureBy(change.position - middleOrigin)
                         middleDragOrigin = change.position
                         change.consume()
                     }
@@ -596,7 +689,7 @@ private fun Modifier.pdfDesktopPointerInput(
                         primaryDragPanEnabled() && change != null
                     ) {
                         state.commitPinchGesture()
-                        state.panBy(change.position - primOrigin)
+                        state.panGestureBy(change.position - primOrigin)
                         primaryDragOrigin = change.position
                         change.consume()
                     }
@@ -604,19 +697,25 @@ private fun Modifier.pdfDesktopPointerInput(
                 PointerEventType.Press -> {
                     if (event.buttons.isTertiaryPressed && change != null) {
                         state.commitPinchGesture()
+                        state.beginPanGesture()
                         middleDragOrigin = change.position
                         change.consume()
                     } else if (event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
                         change != null
                     ) {
                         state.commitPinchGesture()
+                        state.beginPanGesture()
                         primaryDragOrigin = change.position
                         change.consume()
                     }
                 }
                 PointerEventType.Release -> {
+                    val wasDragging = middleDragOrigin != null || primaryDragOrigin != null
                     if (!event.buttons.isTertiaryPressed) middleDragOrigin = null
                     if (!event.buttons.isPrimaryPressed) primaryDragOrigin = null
+                    val stillDragging = middleDragOrigin != null || primaryDragOrigin != null
+                    // Drag завершён — overscroll-смещение пружинит к нулю (per-frame).
+                    if (wasDragging && !stillDragging) state.endPanGesture()
                 }
                 PointerEventType.Scroll -> {
                     if (change == null) continue
@@ -667,7 +766,7 @@ private fun Modifier.pdfDesktopPointerInput(
                             val absDx = kotlin.math.abs(delta.x)
                             val hPx = if (suppressH || absDx < SCROLL_H_DEAD_ZONE) 0f
                             else -delta.x * WHEEL_SCROLL_PX_PER_TICK
-                            state.panBy(Offset(hPx, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
+                            state.wheelScrollBy(Offset(hPx, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
                         }
                         else -> {
                             state.commitPinchGesture()
@@ -676,7 +775,7 @@ private fun Modifier.pdfDesktopPointerInput(
                                 kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
                             hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
                                 kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
-                            state.panBy(Offset(0f, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
+                            state.wheelScrollBy(Offset(0f, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
                         }
                     }
                     change.consume()

@@ -272,6 +272,33 @@ actual class PdfViewerState internal constructor(
         viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
     )
 
+    /**
+     * Центрирует [p] по тем осям, где лист помещается во вьюпорт; по
+     * переполняющим осям — обычный edge-clamp (без рывка к центру).
+     */
+    private fun centeredAndClamped(p: Offset): Offset {
+        val vp = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat())
+        val centered = PdfViewerMath.centeringClamp(p, layout, zoom, vp)
+        val clampedPan = PdfViewerMath.clampPan(centered, layout, zoom, vp)
+        val pdfFitsWidth = layout.basePageWidthPx * zoom <= vp.width
+        val pdfFitsHeight = layout.totalHeightPx * zoom <= vp.height
+        return Offset(
+            x = if (pdfFitsWidth) centered.x else clampedPan.x,
+            y = if (pdfFitsHeight) centered.y else clampedPan.y,
+        )
+    }
+
+    /**
+     * Перецентровка после изменения размера вьюпорта (открытие/закрытие
+     * панели, перетаскивание разделителя, ресайз окна). Помещающийся лист
+     * встаёт по центру; зумленный — лишь edge-кламп'ится. Скролл по
+     * переполняющей оси сохраняется.
+     */
+    fun reCenterAfterResize() {
+        if (viewportSize.width <= 0 || pages.isEmpty()) return
+        pan = centeredAndClamped(pan)
+    }
+
     companion object {
 
         /** Доля ширины окна, занимаемая страничной колонкой при zoom = 1. */

@@ -5,6 +5,8 @@ import androidx.compose.foundation.gestures.ScrollableDefaults
 import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.overscroll
+import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -105,13 +107,17 @@ actual fun PdfPagesViewer(
     val scrollableState = remember(state) {
         // Возвращаем фактически потреблённую дельту: PdfViewerMath.clampPan
         // не даст сдвинуть документ за край, и fling сам остановится у
-        // границы вместо проскальзывания.
+        // границы вместо проскальзывания. Непотреблённый остаток уходит в
+        // [overscrollEffect] → растяжение/отскок как в LazyColumn.
         ScrollableState { delta ->
             val before = state.pan.y
             state.panBy(Offset(0f, delta))
             state.pan.y - before
         }
     }
+    // Платформенный overscroll (stretch + bounce) для вертикального скролла —
+    // тот же эффект, что у LazyColumn. На API < 12 деградирует до glow.
+    val overscrollEffect = rememberOverscrollEffect()
 
     LaunchedEffect(pdfDocument, state, renderer) {
         val doc = pdfDocument ?: return@LaunchedEffect
@@ -180,8 +186,12 @@ actual fun PdfPagesViewer(
         modifier = modifier
             .onSizeChanged { size ->
                 if (state.viewportSize != size) {
+                    val hadWidth = state.viewportSize.width > 0
                     state.viewportSize = size
                     state.applyPendingInitialScrollIfNeeded()
+                    // A genuine resize (panel opened/closed, divider dragged)
+                    // re-centres the page in the new viewport.
+                    if (hadWidth && size.width > 0) state.reCenterAfterResize()
                 }
             }
             .clipToBounds()
@@ -196,7 +206,10 @@ actual fun PdfPagesViewer(
                 orientation = Orientation.Vertical,
                 flingBehavior = ScrollableDefaults.flingBehavior(),
                 reverseDirection = false,
+                overscrollEffect = overscrollEffect,
             )
+            // Рисует растяжение/отскок от непотреблённой scrollable дельты.
+            .overscroll(overscrollEffect)
             // gestureModifier должен быть ПОСЛЕ scrollable: в Main-pass
             // события идут inner→outer, т.е. этот modifier обрабатывает
             // события раньше scrollable. Если gesture-handler потребил

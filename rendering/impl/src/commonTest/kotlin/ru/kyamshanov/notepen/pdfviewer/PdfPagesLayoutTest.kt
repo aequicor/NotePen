@@ -151,7 +151,7 @@ class PdfPagesLayoutTest {
     fun `clampPan grants horizontal overscroll buffer when content overflows width`() {
         val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 200f) // 200×200
         // Viewport 100×400: X overflow → края [100-200, 0] = [-100, 0];
-        // буфер = 200 * 0.5 = 100 → допустимо [-200, 100]. Y помещается → [0, 200].
+        // буфер = 200 * 0.25 = 50 → допустимо [-150, 50]. Y помещается → [0, 200].
         val viewportSize = FloatSize(100f, 400f)
         val maxed = PdfViewerMath.clampPan(
             pan = Offset(999f, 0f),
@@ -159,7 +159,7 @@ class PdfPagesLayoutTest {
             zoom = 1f,
             viewportSize = viewportSize,
         )
-        assertEquals(100f, maxed.x) // hi + buffer
+        assertEquals(50f, maxed.x) // hi + buffer
         assertEquals(0f, maxed.y)
         val minned = PdfViewerMath.clampPan(
             pan = Offset(-999f, 0f),
@@ -167,7 +167,7 @@ class PdfPagesLayoutTest {
             zoom = 1f,
             viewportSize = viewportSize,
         )
-        assertEquals(-200f, minned.x) // lo - buffer
+        assertEquals(-150f, minned.x) // lo - buffer
         val within = PdfViewerMath.clampPan(
             pan = Offset(-50f, 0f),
             layout = layout,
