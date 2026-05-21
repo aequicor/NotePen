@@ -168,7 +168,12 @@ class RemoteCatalogProvider(
         val uriToDocumentId = recentFiles.associate { it.uri to documentIdFromFilePath(it.uri) }
         val foldersDomain = folderRepository.getAll()
         val folders = foldersDomain.map { folder ->
-            RemoteFolder(folderId = folder.id, name = folder.name, createdAt = folder.createdAt)
+            RemoteFolder(
+                folderId = folder.id,
+                name = folder.name,
+                createdAt = folder.createdAt,
+                parentFolderId = folder.parentId,
+            )
         }
         val folderLinks = foldersDomain.flatMap { folder ->
             val uris = runCatching { folderRepository.getFilesInFolder(folder.id) }

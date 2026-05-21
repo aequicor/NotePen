@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.EditorBackHandler
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteEntryCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteFolderCard
 
@@ -49,6 +50,10 @@ fun PeerCatalogContent(
     val state by component.viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
 
+    EditorBackHandler(enabled = state.currentFolderId != null) {
+        component.viewModel.exitFolder()
+    }
+
     LaunchedEffect(state.errorMessage) {
         val msg = state.errorMessage ?: return@LaunchedEffect
         snackbarHostState.showSnackbar(msg)
@@ -62,11 +67,16 @@ fun PeerCatalogContent(
         topBar = {
             TopAppBar(
                 title = {
-                    val subtitle = if (state.isDisconnected) " (не в сети)" else ""
-                    Text(state.peerName + subtitle)
+                    val suffix = when {
+                        state.currentFolderName != null -> " / ${state.currentFolderName}"
+                        state.isDisconnected -> " (не в сети)"
+                        else -> ""
+                    }
+                    Text(state.peerName + suffix)
                 },
                 navigationIcon = {
-                    IconButton(onClick = component.onBack) {
+                    // Внутри папки «назад» возвращает в корень каталога, а не выходит с экрана.
+                    IconButton(onClick = { if (!component.viewModel.exitFolder()) component.onBack() }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",
@@ -96,7 +106,10 @@ fun PeerCatalogContent(
                     if (state.folders.isNotEmpty()) {
                         item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Папки") }
                         gridItems(state.folders, key = { "folder_${it.folderId}" }) { folder ->
-                            RemoteFolderCard(model = folder)
+                            RemoteFolderCard(
+                                model = folder,
+                                onClick = { component.viewModel.openFolder(folder.folderId) },
+                            )
                         }
                     }
                     if (state.entries.isNotEmpty()) {
@@ -123,6 +136,7 @@ fun PeerCatalogContent(
                         items(state.folders, key = { "folder_${it.folderId}" }) { folder ->
                             RemoteFolderCard(
                                 model = folder,
+                                onClick = { component.viewModel.openFolder(folder.folderId) },
                                 modifier = Modifier.padding(vertical = 4.dp),
                             )
                         }

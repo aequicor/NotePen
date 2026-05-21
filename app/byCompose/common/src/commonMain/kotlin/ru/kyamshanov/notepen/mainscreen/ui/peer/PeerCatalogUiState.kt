@@ -11,6 +11,9 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteFolderUiModel
  * @property folders Папки пира.
  * @property isDisconnected true, если пир пропал из подключённых — каталог последний известный.
  * @property errorMessage Одноразовое сообщение об ошибке открытия документа.
+ * @property currentFolderId id папки, внутрь которой пользователь вошёл, или null —
+ *           тогда показывается корень каталога (недавние + список папок).
+ * @property currentFolderName имя текущей папки для подзаголовка, когда [currentFolderId] != null.
  */
 data class PeerCatalogUiState(
     val peerName: String = "",
@@ -18,4 +21,6 @@ data class PeerCatalogUiState(
     val folders: List<RemoteFolderUiModel> = emptyList(),
     val isDisconnected: Boolean = false,
     val errorMessage: String? = null,
+    val currentFolderId: String? = null,
+    val currentFolderName: String? = null,
 )

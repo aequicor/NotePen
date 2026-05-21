@@ -10,6 +10,7 @@ import kotlinx.serialization.json.Json
 import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
 import ru.kyamshanov.notepen.mainscreen.domain.model.FileHistoryManager
 import ru.kyamshanov.notepen.mainscreen.domain.model.RecentFile
+import ru.kyamshanov.notepen.mainscreen.domain.model.isAnnotationSidecarUri
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.infrastructure.dto.RecentFileDto
 
@@ -38,6 +39,7 @@ class FileHistoryRepositoryDesktop(
                 ?: return@withContext emptyList()
             json.decodeFromString<List<RecentFileDto>>(text)
                 .map { it.toDomain() }
+                .filterNot { isAnnotationSidecarUri(it.uri) }
                 .sortedByDescending { it.openedAt }
         } catch (_: Exception) {
             emptyList()

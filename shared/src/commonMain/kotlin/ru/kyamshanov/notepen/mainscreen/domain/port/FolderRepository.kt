@@ -20,16 +20,19 @@ interface FolderRepository {
      *
      * @param name Имя папки. Не может быть пустым или состоять только из пробелов.
      *             Максимум 255 символов. Символы: Unicode letters + digits + `-` + `_`.
+     * @param parentId Идентификатор родительской папки или `null` для папки верхнего уровня.
      * @return Созданная папка с присвоенным UUID и временной меткой createdAt.
      * @throws FolderLimitExceededException если уже существует 100 папок (AC-41).
      * @throws FolderNameInvalidException если name пустое или состоит только из пробелов.
      * @throws FolderNameTooLongException если name.length > 255 (AC-34).
+     * @throws FolderNotFoundException если [parentId] != null и родитель не существует.
      */
-    suspend fun create(name: String): Folder
+    suspend fun create(name: String, parentId: String? = null): Folder
 
     /**
      * Удаляет папку по идентификатору.
-     * Каскадно удаляет все FolderFileLink для данной папки. RecentFile-записи не удаляются.
+     * Каскадно удаляет вложенные папки (на любую глубину) и все FolderFileLink
+     * удаляемых папок. RecentFile-записи не удаляются.
      * Если папка не существует — операция игнорируется (idempotent).
      */
     suspend fun delete(id: String)

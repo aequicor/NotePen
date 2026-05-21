@@ -46,6 +46,7 @@ class MainScreenComponent(
     val onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
     val onOpenFilePicker: suspend () -> String?,
     val onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
+    val onOpenFolder: (folderId: String, folderName: String) -> Unit,
     private val remoteCatalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>? = null,
     /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,

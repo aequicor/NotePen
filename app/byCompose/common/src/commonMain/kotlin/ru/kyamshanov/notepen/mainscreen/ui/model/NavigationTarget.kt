@@ -21,4 +21,12 @@ sealed class NavigationTarget {
      * @property displayName Имя пира — используется как заголовок sub-экрана.
      */
     data class PeerCatalog(val peerId: String, val displayName: String) : NavigationTarget()
+
+    /**
+     * Открыть sub-экран содержимого папки.
+     *
+     * @property folderId UUID папки.
+     * @property folderName Имя папки — заголовок sub-экрана.
+     */
+    data class Folder(val folderId: String, val folderName: String) : NavigationTarget()
 }

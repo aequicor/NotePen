@@ -60,18 +60,32 @@ class PeerCatalogViewModel(
 
     private var isOpening = false
 
+    /**
+     * Путь вложенных папок, в которые вошёл пользователь (id, от корня вниз).
+     * Пустой список = корень каталога. Последний элемент — текущая папка.
+     */
+    private val folderPath = MutableStateFlow<List<String>>(emptyList())
+
     init {
         val onlineFlow = onlinePeerIdsFlow ?: flowOf(null)
         scope.launch {
-            combine(catalogsFlow, onlineFlow) { catalogs, onlineIds ->
-                catalogs.entries.firstOrNull { it.key.id == peerId } to onlineIds
-            }.collect { (entry, onlineIds) ->
+            combine(catalogsFlow, onlineFlow, folderPath) { catalogs, onlineIds, path ->
+                Triple(catalogs.entries.firstOrNull { it.key.id == peerId }, onlineIds, path)
+            }.collect { (entry, onlineIds, path) ->
                 if (entry == null) {
                     _state.update { it.copy(isDisconnected = true) }
                     return@collect
                 }
                 val (device, catalog) = entry
                 val isOffline = onlineIds != null && peerId !in onlineIds
+                // Элементы пути могли исчезнуть из обновлённого каталога — обрезаем
+                // путь до самого длинного валидного префикса (цепочки parent → child).
+                val validPath = longestValidPath(path, catalog.folders)
+                if (validPath != path) {
+                    folderPath.value = validPath
+                    return@collect
+                }
+                val currentFolderId = validPath.lastOrNull()
                 val rawEntries = catalog.recent.map { e ->
                     RemoteEntryUiModel(
                         documentId = e.documentId,
@@ -80,35 +94,84 @@ class PeerCatalogViewModel(
                         lastOpenedAt = e.lastOpenedAt,
                     )
                 }
-                val entries = if (isOffline) {
-                    rawEntries.filter { hasCachedCopy(it.documentId, it.displayName) }
-                } else {
-                    rawEntries
+                val entries = when {
+                    // Внутри папки показываем только её файлы (folderLinks ⊆ recent).
+                    currentFolderId != null -> {
+                        val ids = catalog.folderLinks
+                            .filter { it.folderId == currentFolderId }
+                            .map { it.documentId }
+                            .toSet()
+                        rawEntries.filter { it.documentId in ids }
+                    }
+                    isOffline -> rawEntries.filter { hasCachedCopy(it.documentId, it.displayName) }
+                    else -> rawEntries
                 }
-                // Папки оставляем только когда пир онлайн — иначе содержимое
-                // папок недоступно (мы не качаем содержимое наперёд).
+                // Подпапки текущего уровня (parentFolderId == текущая папка / null в корне).
+                // Когда пир офлайн — папки скрываем: их содержимое недоступно (не качаем наперёд).
                 val folders = if (isOffline) {
                     emptyList()
                 } else {
                     val countsByFolder = catalog.folderLinks.groupingBy { it.folderId }.eachCount()
-                    catalog.folders.map { f ->
-                        RemoteFolderUiModel(
-                            folderId = f.folderId,
-                            name = f.name,
-                            fileCount = countsByFolder[f.folderId] ?: 0,
-                        )
-                    }
+                    catalog.folders
+                        .filter { it.parentFolderId == currentFolderId }
+                        .map { f ->
+                            RemoteFolderUiModel(
+                                folderId = f.folderId,
+                                name = f.name,
+                                fileCount = countsByFolder[f.folderId] ?: 0,
+                            )
+                        }
                 }
+                val currentName = currentFolderId?.let { id -> catalog.folders.firstOrNull { it.folderId == id }?.name }
                 _state.update {
                     it.copy(
                         peerName = catalog.hostName.ifBlank { device.name },
                         entries = entries,
                         folders = folders,
                         isDisconnected = isOffline,
+                        currentFolderId = currentFolderId,
+                        currentFolderName = currentName,
                     )
                 }
             }
         }
+    }
+
+    /** Войти в подпапку пира — показать её содержимое. */
+    fun openFolder(folderId: String) {
+        folderPath.value = folderPath.value + folderId
+    }
+
+    /**
+     * Подняться на уровень вверх (выйти из текущей папки). Возвращает true, если
+     * подъём был выполнен (мы были внутри папки) — UI использует это, чтобы решить,
+     * перехватить ли «назад» или покинуть экран.
+     */
+    fun exitFolder(): Boolean {
+        val path = folderPath.value
+        if (path.isEmpty()) return false
+        folderPath.value = path.dropLast(1)
+        return true
+    }
+
+    /**
+     * Обрезает [path] до самого длинного префикса, образующего корректную цепочку
+     * `parent → child` в [folders]. Защищает от исчезнувших/перемещённых папок.
+     */
+    private fun longestValidPath(
+        path: List<String>,
+        folders: List<ru.kyamshanov.notepen.sync.domain.model.RemoteFolder>,
+    ): List<String> {
+        val byId = folders.associateBy { it.folderId }
+        val result = mutableListOf<String>()
+        var expectedParent: String? = null
+        for (id in path) {
+            val folder = byId[id] ?: break
+            if (folder.parentFolderId != expectedParent) break
+            result.add(id)
+            expectedParent = id
+        }
+        return result
     }
 
     private fun hasCachedCopy(documentId: String, displayName: String): Boolean {

@@ -18,7 +18,7 @@ actual class FilePicker {
 
     /**
      * Инициализирует FilePicker с [ActivityResultLauncher].
-     * Должен вызываться до [pickPdfFile].
+     * Должен вызываться до [pickDocument].
      */
     fun init(launcher: ActivityResultLauncher<Array<String>>) {
         this.launcher = launcher
@@ -31,9 +31,9 @@ actual class FilePicker {
         resultChannel.trySend(uri?.toString())
     }
 
-    actual suspend fun pickPdfFile(): String? {
+    actual suspend fun pickDocument(): String? {
         val activeLauncher = launcher ?: return null
-        activeLauncher.launch(arrayOf("application/pdf"))
+        activeLauncher.launch(arrayOf("application/pdf", "image/png", "image/jpeg"))
         return resultChannel.receive()
     }
 }

@@ -45,6 +45,17 @@ class FileHistoryRepositoryDesktopTest {
             lastPageIndex = 0,
         )
 
+    // Сайдкар-файлы аннотаций (.notepen.json) не должны попадать в историю документов
+    @Test
+    fun `getAll excludes annotation sidecar entries`() = runTest {
+        repository.upsert(makeFile("doc", uri = "/tmp/book.pdf"), 0)
+        repository.upsert(makeFile("sidecar", uri = "/tmp/book.pdf.notepen.json"), 0)
+
+        val result = repository.getAll()
+        assertEquals(1, result.size)
+        assertEquals("doc", result[0].id)
+    }
+
     // TC-02: upsert persists entry and getAll returns it sorted
     @Test
     fun `upsert then getAll returns entry sorted by openedAt desc`() = runTest {

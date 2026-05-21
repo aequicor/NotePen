@@ -29,3 +29,14 @@ internal actual fun DragAndDropEvent.dragEventMimeTypes(): Set<String> =
         logger.warn { "dragEventMimeTypes failed: ${e::class.simpleName}" }
         emptySet()
     }
+
+/**
+ * Android-реализация: внешний DnD из ОС не поддерживается (нет файлового менеджера-источника
+ * уровня Finder/проводника). Всегда false.
+ */
+internal actual fun DragAndDropEvent.isExternalFileDrop(): Boolean = false
+
+/**
+ * Android-реализация: внешний OS-drop не поддерживается — см. [isExternalFileDrop].
+ */
+internal actual fun extractExternalFileUris(event: DragAndDropEvent): List<String> = emptyList()

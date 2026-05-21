@@ -1,7 +1,7 @@
 package ru.kyamshanov.notepen.mainscreen.platform
 
 /**
- * Платформенный диалог выбора PDF-файла.
+ * Платформенный диалог выбора документа (PDF или изображение PNG/JPEG).
  *
  * Реализации предоставляются в `androidMain` и `jvmMain`.
  * Возвращает нормализованный URI выбранного файла или null, если пользователь отменил выбор.
@@ -9,9 +9,9 @@ package ru.kyamshanov.notepen.mainscreen.platform
 expect class FilePicker {
 
     /**
-     * Открывает системный диалог выбора PDF.
+     * Открывает системный диалог выбора документа (PDF, PNG или JPEG).
      *
      * @return Нормализованный URI выбранного файла или null при отмене.
      */
-    suspend fun pickPdfFile(): String?
+    suspend fun pickDocument(): String?
 }
