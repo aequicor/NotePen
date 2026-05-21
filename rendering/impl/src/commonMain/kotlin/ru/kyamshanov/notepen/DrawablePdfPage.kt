@@ -326,13 +326,13 @@ fun DrawablePdfPage(
         // single Path per frame for the in-flight stroke.
         val livePath = remember { Path() }
 
-        // Чернила скрываются во время пинча: растровый кэш сформирован под
-        // текущий zoom, а graphicsLayer растягивает его вместе с PDF — это
-        // заметно при большом δ-масштабе. Прятать чернила чище, чем
-        // показывать пиксельные артефакты. Страница под ними остаётся видимой.
-        // Лямбда isZooming вычисляется в Draw-фазе — в том же кадре, что и
-        // GPU-трансформа gestureScale, без рекомпозиции.
-        Canvas(modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (isZooming()) 0f else 1f }) {
+        // Чернила во время пинча масштабируются тем же `gestureScale`
+        // graphicsLayer'ом, что и PDF-битмап (контейнер страницы общий), поэтому
+        // едут вместе с ним. Растровый кэш на доли секунды выглядит мягче (как
+        // и сам растянутый PDF), но штрихи остаются видимыми — это лучше, чем
+        // их полное исчезновение на время жеста. После коммита зума кэш
+        // ре-растеризуется в резкость.
+        Canvas(modifier = Modifier.fillMaxSize()) {
             // Completed strokes — bitmap blit, single draw call regardless of
             // how much ink is on the page. Cache may be rasterised at a lower
             // resolution than the canvas (see INK_CACHE_MAX_DIMENSION_PX), so
