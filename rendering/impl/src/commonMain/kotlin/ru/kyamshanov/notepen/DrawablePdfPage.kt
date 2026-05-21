@@ -413,16 +413,19 @@ fun DrawablePdfPage(
             val pdfH = if (ext.height > 0f) size.height / ext.height else size.height
 
             // Anti-flicker: асинхронный кэш мог ещё не вобрать недавно
-            // завершённые штрихи (на тяжёлой странице rebuild идёт >50 мс —
-            // дольше hand-off'а low-latency overlay; быстрые штрихи подряд тоже
-            // обгоняют ребилд). Дорисуем хвост `currentPaths`, ещё не вошедший в
-            // кэш (`strokeCount`), поверх битмапа — дёшево (обычно 1 штрих) и
-            // закрывает «пропадание» штриха, пока он растеризуется под масштаб.
-            // Не делаем во время активного рисования — его показывает live-ветка
-            // / overlay.
+            // завершённые штрихи. При прерывистом письме (буквы) каждый новый
+            // штрих перезапускает async-ребилд, поэтому кэш не догоняет, пока не
+            // сделаешь паузу. Чтобы уже завершённые буквы не «пропадали» (а они
+            // пропадали, пока мы рисуем следующую — overlay показывает только
+            // текущий штрих), дорисовываем поверх битмапа весь хвост
+            // `currentPaths`, ещё не вошедший в кэш (`strokeCount`) — в т.ч. во
+            // время активного рисования. Это дёшево: кэш держит всё до последней
+            // паузы, так что в хвосте лишь несколько штрихов текущего слова.
+            // Живой (ещё не завершённый) штрих сюда не попадает — он в
+            // `livePoints`, не в `currentPaths`, поэтому двойного рендера нет.
             val cachedCount = cached?.strokeCount ?: 0
             val paths = pdfDrawingState.currentPaths
-            if (!pdfDrawingState.isDrawing.value && paths.size > cachedCount) {
+            if (paths.size > cachedCount) {
                 for (i in cachedCount until paths.size) {
                     drawStrokeWithPressure(paths[i], pdfW, pdfH, ext, livePath)
                 }
