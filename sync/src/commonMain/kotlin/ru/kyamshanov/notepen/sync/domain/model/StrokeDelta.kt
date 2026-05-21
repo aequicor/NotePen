@@ -4,6 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 
 /**
  * Atomic change to a page's stroke list.
@@ -66,6 +67,11 @@ data class DrawingPathDto(
     val colorArgb: Long,
     val strokeWidth: Float,
     val points: List<PointDto>,
+    /**
+     * Tool that produced the stroke. Default [ToolKind.PEN] keeps backward-compat
+     * with payloads serialised before the marker tool existed (absent field → PEN).
+     */
+    val toolType: ToolKind = ToolKind.PEN,
 )
 
 @Serializable
@@ -92,6 +98,7 @@ fun DrawingPath.toDto(strokeId: String): DrawingPathDto =
         colorArgb = colorArgb,
         strokeWidth = strokeWidth,
         points = points.map { PointDto(it.x, it.y, it.isNewPath, it.pressure, it.tilt) },
+        toolType = toolType,
     )
 
 fun DrawingPathDto.toDomain(): DrawingPath =
@@ -108,4 +115,5 @@ fun DrawingPathDto.toDomain(): DrawingPath =
         colorArgb = colorArgb,
         strokeWidth = strokeWidth,
         strokeId = strokeId,
+        toolType = toolType,
     )
