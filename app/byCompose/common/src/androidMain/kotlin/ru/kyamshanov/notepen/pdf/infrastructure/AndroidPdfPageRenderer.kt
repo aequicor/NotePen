@@ -48,4 +48,10 @@ class AndroidPdfPageRenderer(private val ioDispatcher: CoroutineDispatcher) : Pd
 
         PdfPageData(widthPx = widthPx, heightPx = heightPx, pixels = pixels)
     }
+
+    /**
+     * Возвращает `null`: [android.graphics.pdf.PdfRenderer] не предоставляет
+     * доступа к текстовой геометрии страницы.
+     */
+    override suspend fun documentTextLineHeight(document: PdfDocument): Float? = null
 }

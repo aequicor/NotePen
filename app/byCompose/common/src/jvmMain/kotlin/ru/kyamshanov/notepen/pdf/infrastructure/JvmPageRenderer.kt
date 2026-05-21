@@ -23,4 +23,9 @@ class JvmPageRenderer(
         val renderer = if (document is ImageBackedDocument) imageRenderer else pdfRenderer
         return renderer.renderPage(document, pageIndex, widthPx, heightPx)
     }
+
+    override suspend fun documentTextLineHeight(document: PdfDocument): Float? {
+        val renderer = if (document is ImageBackedDocument) imageRenderer else pdfRenderer
+        return renderer.documentTextLineHeight(document)
+    }
 }

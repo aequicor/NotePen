@@ -51,4 +51,7 @@ class JvmImagePageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfP
         val pixels = target.getRGB(0, 0, widthPx, heightPx, null, 0, widthPx)
         PdfPageData(widthPx = widthPx, heightPx = heightPx, pixels = pixels)
     }
+
+    /** Возвращает `null`: документы-изображения не несут текстовой геометрии. */
+    override suspend fun documentTextLineHeight(document: PdfDocument): Float? = null
 }

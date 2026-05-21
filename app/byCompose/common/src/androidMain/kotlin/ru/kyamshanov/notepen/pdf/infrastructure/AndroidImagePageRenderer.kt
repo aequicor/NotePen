@@ -49,4 +49,7 @@ class AndroidImagePageRenderer(private val ioDispatcher: CoroutineDispatcher) : 
 
         PdfPageData(widthPx = widthPx, heightPx = heightPx, pixels = pixels)
     }
+
+    /** Возвращает `null`: документы-изображения не несут текстовой геометрии. */
+    override suspend fun documentTextLineHeight(document: PdfDocument): Float? = null
 }

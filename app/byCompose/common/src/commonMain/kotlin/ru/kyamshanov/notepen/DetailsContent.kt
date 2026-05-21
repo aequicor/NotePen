@@ -65,6 +65,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
@@ -181,9 +182,25 @@ fun DetailsContent(
     var toolMode by remember { mutableStateOf(ToolMode.NONE) }
     var penSettings by remember { mutableStateOf(PenSettings()) }
     var markerSettings by remember { mutableStateOf(MarkerSettings()) }
+    // The marker default width is auto-derived from the document's text line
+    // height; once the user tweaks it or a saved width is restored, lock it.
+    var markerWidthPinned by remember { mutableStateOf(false) }
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
     var pencilModeEnabled by remember { mutableStateOf(false) }
     var pencilModeManuallyTouched by remember { mutableStateOf(false) }
+
+    // Derive the marker's default thickness from the focused document's text
+    // line height (where the PDF engine exposes it). Skipped once the width is
+    // pinned by a manual change or a restored saved value.
+    LaunchedEffect(tabSession, markerWidthPinned) {
+        if (markerWidthPinned) return@LaunchedEffect
+        snapshotFlow { tabSession.focusedActiveState?.pdfDocument }
+            .collect { document ->
+                if (markerWidthPinned || document == null) return@collect
+                val lineHeight = renderer.documentTextLineHeight(document) ?: return@collect
+                markerSettings = markerSettings.applyStrokeWidth(lineHeight)
+            }
+    }
 
     val tabletController = LocalTabletInputController.current
     val barrelPressed by tabletController.barrelPressed.collectAsState()
@@ -370,6 +387,8 @@ fun DetailsContent(
                     onRestoreToolSettings = { pen, marker, eraser ->
                         penSettings = pen
                         markerSettings = marker
+                        // A restored width is the user's own choice — don't override it.
+                        markerWidthPinned = true
                         eraserSettings = eraser
                     },
                     onAddTab = onOpenLibrary,
@@ -443,7 +462,10 @@ fun DetailsContent(
                     penSettings = penSettings,
                     onPenSettingsChange = { penSettings = it },
                     markerSettings = markerSettings,
-                    onMarkerSettingsChange = { markerSettings = it },
+                    onMarkerSettingsChange = {
+                        if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                        markerSettings = it
+                    },
                     eraserSettings = eraserSettings,
                     onEraserSettingsChange = { eraserSettings = it },
                     hasAnnotations = hasAnnotations,
@@ -451,12 +473,14 @@ fun DetailsContent(
                     onExport = { controls?.export?.invoke() },
                     scale = scale,
                     onZoomIn = {
-                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@LandscapeToolRail
-                        vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                            vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        }
                     },
                     onZoomOut = {
-                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@LandscapeToolRail
-                        vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                            vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        }
                     },
                     showThumbnails = showThumbnails,
                     onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
@@ -507,7 +531,10 @@ fun DetailsContent(
                     penSettings = penSettings,
                     onPenSettingsChange = { penSettings = it },
                     markerSettings = markerSettings,
-                    onMarkerSettingsChange = { markerSettings = it },
+                    onMarkerSettingsChange = {
+                        if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                        markerSettings = it
+                    },
                     eraserSettings = eraserSettings,
                     onEraserSettingsChange = { eraserSettings = it },
                     hasAnnotations = hasAnnotations,
@@ -515,12 +542,14 @@ fun DetailsContent(
                     onExport = { controls?.export?.invoke() },
                     scale = scale,
                     onZoomIn = {
-                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@PortraitTopBar
-                        vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                            vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        }
                     },
                     onZoomOut = {
-                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@PortraitTopBar
-                        vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                            vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                        }
                     },
                     showThumbnails = showThumbnails,
                     onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },

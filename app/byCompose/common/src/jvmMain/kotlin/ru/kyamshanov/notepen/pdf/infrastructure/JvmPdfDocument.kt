@@ -34,6 +34,16 @@ internal class JvmPdfDocument(
         block(renderer)
     }
 
+    /**
+     * Выполняет [block] над [PDDocument] под тем же монитором, что и [useRenderer].
+     *
+     * Если документ уже закрыт — выбрасывает [CancellationException].
+     */
+    internal fun <R> useDocument(block: (PDDocument) -> R): R = synchronized(lock) {
+        if (closed) throw CancellationException("PDF document is closed")
+        block(document)
+    }
+
     override fun close() {
         synchronized(lock) {
             if (closed) return
