@@ -125,7 +125,6 @@ import ru.kyamshanov.notepen.tabs.PdfDocumentState
 import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
 import ru.kyamshanov.notepen.tabs.TabBar
 import ru.kyamshanov.notepen.tabs.TabCloseResult
-import ru.kyamshanov.notepen.tabs.displayNameForFilePath
 import ru.kyamshanov.notepen.tabs.rememberTabSession
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.geometry.Size
@@ -253,7 +252,7 @@ fun DetailsContent(
             tabSession.openTab(
                 side = PanelSide.PRIMARY,
                 filePath = path,
-                displayName = displayNameForFilePath(path),
+                displayName = resolveDocumentDisplayName(path),
             )
         }
         snapshotFlow { tabSession.layout }
@@ -274,7 +273,7 @@ fun DetailsContent(
         tabSession.openTab(
             side = PanelSide.PRIMARY,
             filePath = pendingTabUri,
-            displayName = displayNameForFilePath(pendingTabUri),
+            displayName = resolveDocumentDisplayName(pendingTabUri),
         )
         component.onPendingTabHandled()
     }
@@ -768,7 +767,11 @@ fun DetailsContent(
             for ((_, s) in pdfState.drawingStates) {
                 acc += s.historyVersion.value
             }
-            acc + pdfState.favoritePageIndices.size
+            // Include tool settings so a thickness/color/eraser change is
+            // persisted by the debounce even when the user doesn't draw — the
+            // historyVersion alone wouldn't bump for a settings-only edit.
+            acc + pdfState.favoritePageIndices.size +
+                penSettings.hashCode() + markerSettings.hashCode() + eraserSettings.hashCode()
         }
             // First emission is the value already on disk (just loaded) — and
             // the load itself bumps historyVersion. Dropping it avoids writing
@@ -826,6 +829,11 @@ fun DetailsContent(
             component.openLibrary()
         }
     }
+
+    // Системный жест/кнопка «назад»: перехватываем, чтобы гарантированно
+    // сохранить аннотации перед уходом с экрана (debounce-автосейв мог ещё не
+    // сработать). onBackWithSave сам выполнит навигацию после сохранения.
+    EditorBackHandler(enabled = true) { onBackWithSave() }
 
     val statusBarsTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     Box(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {

@@ -18,7 +18,15 @@ import java.io.IOException
 // ── JSON DTO ─────────────────────────────────────────────────────────────────
 
 @Serializable
-private data class DrawingPointDto(val x: Float, val y: Float, val isNewPath: Boolean = false)
+private data class DrawingPointDto(
+    val x: Float,
+    val y: Float,
+    val isNewPath: Boolean = false,
+    // Defaults preserve backward compatibility with strokes serialised before
+    // pressure/tilt were persisted (they load as mouse-like 1f/0f).
+    val pressure: Float = 1f,
+    val tilt: Float = 0f,
+)
 
 @Serializable
 private data class DrawingPathDto(
@@ -76,14 +84,14 @@ private data class AnnotationDataDto(
 
 // ── Mappers ──────────────────────────────────────────────────────────────────
 
-private fun DrawingPointDto.toDomain() = DrawingPoint(x, y, isNewPath)
+private fun DrawingPointDto.toDomain() = DrawingPoint(x, y, isNewPath, pressure, tilt)
 private fun DrawingPathDto.toDomain() = DrawingPath(points.map { it.toDomain() }, colorArgb, strokeWidth)
 private fun PenSettingsDto.toDomain() = PenSettings(colorArgb, strokeWidth, alpha)
 private fun EraserShapeDto.toDomain() = if (this == EraserShapeDto.CIRCLE) EraserShape.CIRCLE else EraserShape.SQUARE
 private fun EraserModeDto.toDomain() = if (this == EraserModeDto.OBJECT) EraserMode.OBJECT else EraserMode.POINT
 private fun EraserSettingsDto.toDomain() = EraserSettings(shape.toDomain(), sizeNormalized, mode.toDomain())
 
-private fun DrawingPoint.toDto() = DrawingPointDto(x, y, isNewPath)
+private fun DrawingPoint.toDto() = DrawingPointDto(x, y, isNewPath, pressure, tilt)
 private fun DrawingPath.toDto() = DrawingPathDto(points.map { it.toDto() }, colorArgb, strokeWidth)
 private fun PenSettings.toDto() = PenSettingsDto(colorArgb, strokeWidth, alpha)
 private fun EraserShape.toDto() = if (this == EraserShape.CIRCLE) EraserShapeDto.CIRCLE else EraserShapeDto.SQUARE
@@ -96,7 +104,15 @@ private fun PageExtent.toDto() = PageExtentDto(left, top, right, bottom)
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
-class AnnotationRepositoryJvmAndroid : AnnotationRepository {
+/**
+ * @param storeFileFor resolves the on-disk JSON sidecar for a given document path.
+ *   Desktop maps it next to the PDF (`"$path.notepen.json"`); Android can't write
+ *   next to a `content://` URI, so it maps to app-private storage keyed by a hash
+ *   of the URI.
+ */
+class AnnotationRepositoryJvmAndroid(
+    private val storeFileFor: (pdfPath: String) -> File = { File("$it.notepen.json") },
+) : AnnotationRepository {
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
@@ -127,7 +143,9 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
                 .mapKeys { it.key.toString() }
                 .mapValues { (_, e) -> e.toDto() },
         )
-        File("$pdfPath.notepen.json").writeText(json.encodeToString(AnnotationDataDto.serializer(), dto))
+        val file = storeFileFor(pdfPath)
+        file.parentFile?.mkdirs()
+        file.writeText(json.encodeToString(AnnotationDataDto.serializer(), dto))
         Result.success(Unit)
     } catch (e: IOException) {
         Result.failure(e)
@@ -135,7 +153,7 @@ class AnnotationRepositoryJvmAndroid : AnnotationRepository {
 
     override suspend fun load(pdfPath: String): Result<AnnotationBundle> {
         return try {
-            val file = File("$pdfPath.notepen.json")
+            val file = storeFileFor(pdfPath)
             if (!file.exists()) return Result.success(AnnotationBundle())
             val dto = json.decodeFromString(AnnotationDataDto.serializer(), file.readText())
             val pages = dto.pages.mapKeys {

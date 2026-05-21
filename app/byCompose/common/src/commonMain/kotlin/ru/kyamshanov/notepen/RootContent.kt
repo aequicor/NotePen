@@ -73,8 +73,7 @@ fun RootContent(
                                 ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent.FilePickerResult(
                                     uri = pickedPath,
                                     displayName = pickedPath
-                                        ?.substringAfterLast('/')
-                                        ?.substringAfterLast('\\')
+                                        ?.let { resolveDocumentDisplayName(it) }
                                         ?: "",
                                     fileSize = null,
                                 ),

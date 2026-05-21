@@ -7,20 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
-
-/**
- * Derives the human-readable label for a tab from its [filePath].
- * Strips both POSIX and Windows path separators so the tab shows the
- * basename regardless of the platform that produced the path. Returns
- * `null` when no usable basename can be extracted — the caller falls
- * back to [FallbackNameCounter].
- */
-fun displayNameForFilePath(filePath: String): String? {
-    val basename = filePath
-        .substringAfterLast('/')
-        .substringAfterLast('\\')
-    return basename.ifBlank { null }
-}
+import ru.kyamshanov.notepen.resolveDocumentDisplayName
 
 /**
  * Creates and remembers a [TabSession] seeded with one initial tab for
@@ -39,7 +26,7 @@ fun rememberTabSession(
         fallbackNameCounter = FallbackNameCounter(),
         syncDocumentIdFor = syncDocumentIdFor,
         initialFilePath = initialFilePath,
-        initialDisplayName = displayNameForFilePath(initialFilePath),
+        initialDisplayName = resolveDocumentDisplayName(initialFilePath),
     )
 }
 
