@@ -256,6 +256,10 @@ actual fun PdfPagesViewer(
             }
     }
 
+    // Outer Box measures viewport size and hosts scrollbars as siblings of the
+    // pointer-capturing inner Box. Siblings receive hit-tested events directly,
+    // bypassing the Initial-pass handler on the inner Box — so scrollbar thumb
+    // drags are never consumed by drag-to-pan.
     Box(
         modifier = modifier
             .onSizeChanged { size ->
@@ -263,11 +267,15 @@ actual fun PdfPagesViewer(
                     state.viewportSize = size
                     state.applyPendingInitialScrollIfNeeded()
                 }
-            }
-            .clipToBounds()
-            .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
-            .then(gestureModifier),
+            },
     ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clipToBounds()
+                .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
+                .then(gestureModifier),
+        ) {
         SubcomposeLayout(
             modifier = Modifier
                 .fillMaxSize()
@@ -347,6 +355,7 @@ actual fun PdfPagesViewer(
                 items.forEach { it.placeable.place(it.placeableX, it.placeableY) }
             }
         }
+        } // inner Box
 
         val hAdapter = remember(state) { PanScrollbarAdapter(state, horizontal = true) }
         val vAdapter = remember(state) { PanScrollbarAdapter(state, horizontal = false) }
@@ -374,7 +383,7 @@ actual fun PdfPagesViewer(
                 modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight(),
             )
         }
-    }
+    } // outer Box
 }
 
 private data class VisibleSnapshot(
@@ -476,16 +485,14 @@ private fun Modifier.pdfDesktopPointerInput(
                                 ?: change.position.takeIf { it != Offset.Zero }
                                 ?: lastCursor
                             zoomBurstFocus = focus
-                            // macOS trackpad pinch arrives via JBR as Ctrl+Scroll with
-                            // |delta.y| ≈ 0.01–0.05 per event (NSEventTypeMagnify value).
-                            // ZOOM_BASE.pow(-delta.y) ≈ 0.3% zoom per event — imperceptible.
-                            // For continuous input we use 1 - delta.y directly:
-                            //   magnify-in  → delta.y < 0 → factor > 1 (zoom in) ✓
-                            //   magnify-out → delta.y > 0 → factor < 1 (zoom out) ✓
-                            // Discrete mouse wheel gives |delta.y| ≥ 1.0, so the old
-                            // exponential formula is preserved for that path.
+                            // macOS trackpad pinch via JBR: NSEventTypeMagnify →
+                            // Ctrl+Scroll with |delta.y| ≈ 0.01–0.05.
+                            // JBR sign: pinch-out (zoom in) → delta.y > 0,
+                            // so factor = 1 + delta.y > 1 → zoom in ✓.
+                            // Discrete mouse wheel: |delta.y| ≥ 1.0,
+                            // exponential formula gives ~7% per click ✓.
                             val factor = if (kotlin.math.abs(delta.y) < 0.5f) {
-                                1f - delta.y
+                                1f + delta.y
                             } else {
                                 ZOOM_BASE.pow(-delta.y)
                             }
@@ -493,11 +500,18 @@ private fun Modifier.pdfDesktopPointerInput(
                         }
                         shift -> {
                             state.commitPinchGesture()
-                            state.panBy(Offset(-delta.y * WHEEL_SCROLL_PX_PER_TICK, 0f))
+                            state.panBy(Offset(delta.y * WHEEL_SCROLL_PX_PER_TICK, 0f))
                         }
                         else -> {
                             state.commitPinchGesture()
-                            state.panBy(Offset(0f, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
+                            // delta.x/y from Skiko on macOS match natural-scroll direction:
+                            // positive = content should move in positive direction.
+                            state.panBy(
+                                Offset(
+                                    delta.x * WHEEL_SCROLL_PX_PER_TICK,
+                                    delta.y * WHEEL_SCROLL_PX_PER_TICK,
+                                ),
+                            )
                         }
                     }
                     change.consume()
