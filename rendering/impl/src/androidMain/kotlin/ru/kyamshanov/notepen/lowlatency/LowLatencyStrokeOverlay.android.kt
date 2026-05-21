@@ -1,8 +1,10 @@
 package ru.kyamshanov.notepen.lowlatency
 
+import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Path
 import android.os.Build
 import android.view.SurfaceView
 import androidx.compose.runtime.Composable
@@ -19,6 +21,9 @@ import kotlinx.coroutines.flow.collect
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
  * Width modulation factor applied per tilt unit, mirroring the gain used in
@@ -47,6 +52,7 @@ private data class StrokeSegment(
     val colorArgb: Int,
     val widthPx: Float,
     val extent: PageExtent,
+    val toolKind: ToolKind,
 )
 
 @Composable
@@ -80,12 +86,24 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
         if (sv == null) {
             onDispose { }
         } else {
-            val paint = Paint().apply {
+            val penPaint = Paint().apply {
                 isAntiAlias = true
                 style = Paint.Style.STROKE
                 strokeCap = Paint.Cap.ROUND
                 strokeJoin = Paint.Join.ROUND
             }
+            // Marker chisel ribbon: filled quads composited with Multiply so the
+            // semi-transparent ink darkens content underneath and self-overlap
+            // does not compound — mirroring `drawMarkerStroke`. `setBlendMode`
+            // (and `BlendMode.MULTIPLY`) require API 29, guaranteed by the SDK
+            // gate above. The path is reused across segments to avoid per-frame
+            // allocation on the render thread.
+            val markerPaint = Paint().apply {
+                isAntiAlias = true
+                style = Paint.Style.FILL
+                blendMode = BlendMode.MULTIPLY
+            }
+            val markerPath = Path()
             val callback = object : CanvasFrontBufferedRenderer.Callback<StrokeSegment> {
                 override fun onDrawFrontBufferedLayer(
                     canvas: Canvas,
@@ -93,7 +111,7 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
                     bufferHeight: Int,
                     param: StrokeSegment,
                 ) {
-                    drawSegment(canvas, bufferWidth, bufferHeight, param, paint)
+                    drawSegment(canvas, bufferWidth, bufferHeight, param, penPaint, markerPaint, markerPath)
                 }
 
                 override fun onDrawMultiBufferedLayer(
@@ -103,7 +121,7 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
                     params: Collection<StrokeSegment>,
                 ) {
                     for (segment in params) {
-                        drawSegment(canvas, bufferWidth, bufferHeight, segment, paint)
+                        drawSegment(canvas, bufferWidth, bufferHeight, segment, penPaint, markerPaint, markerPath)
                     }
                 }
             }
@@ -159,6 +177,7 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
                 0f
             }
             val colorArgb = drawingState.liveColorArgb.value.toInt()
+            val toolKind = drawingState.liveToolKind.value
             // Detect a new stroke that started while the collector was busy
             // (e.g. paused in `delay(HANDOFF_HOLD_MS)` after a previous commit,
             // or because snapshotFlow conflated the `isDrawing=false` edge).
@@ -188,6 +207,7 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
                         colorArgb = colorArgb,
                         widthPx = widthPx,
                         extent = ext,
+                        toolKind = toolKind,
                     ),
                 )
             }
@@ -199,16 +219,18 @@ actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modi
 actual fun rememberLowLatencyOverlayAvailable(): Boolean =
     remember { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q }
 
+/** Angle of the marker's chisel nib, in radians (~45°); mirrors `drawMarkerStroke`. */
+private const val MARKER_NIB_ANGLE_RADIANS = 0.7853982f
+
 private fun drawSegment(
     canvas: Canvas,
     bufferWidth: Int,
     bufferHeight: Int,
     segment: StrokeSegment,
-    paint: Paint,
+    penPaint: Paint,
+    markerPaint: Paint,
+    markerPath: Path,
 ) {
-    paint.color = segment.colorArgb
-    val tiltBoost = 1f + TILT_WIDTH_GAIN * segment.curr.tilt
-    paint.strokeWidth = (segment.widthPx * segment.curr.pressure * tiltBoost).coerceAtLeast(1f)
     val prev = segment.prev
     val curr = segment.curr
     val ext = segment.extent
@@ -218,11 +240,38 @@ private fun drawSegment(
     val offY = -ext.top
     val x = (curr.x + offX) * pdfW
     val y = (curr.y + offY) * pdfH
+
+    if (segment.toolKind == ToolKind.MARKER) {
+        // Marker has no single-sample dot — its ribbon is the area swept by the
+        // chisel edge between two samples, so a lone start point renders nothing
+        // (same as `drawMarkerStroke`, which requires ≥2 points).
+        if (prev == null) return
+        markerPaint.color = segment.colorArgb
+        // Constant nib breadth, independent of pressure/tilt — like the renderer.
+        val halfWidthPx = segment.widthPx * 0.5f
+        if (halfWidthPx <= 0f) return
+        val nibX = cos(MARKER_NIB_ANGLE_RADIANS) * halfWidthPx
+        val nibY = sin(MARKER_NIB_ANGLE_RADIANS) * halfWidthPx
+        val x1 = (prev.x + offX) * pdfW
+        val y1 = (prev.y + offY) * pdfH
+        markerPath.reset()
+        markerPath.moveTo(x1 + nibX, y1 + nibY)
+        markerPath.lineTo(x1 - nibX, y1 - nibY)
+        markerPath.lineTo(x - nibX, y - nibY)
+        markerPath.lineTo(x + nibX, y + nibY)
+        markerPath.close()
+        canvas.drawPath(markerPath, markerPaint)
+        return
+    }
+
+    penPaint.color = segment.colorArgb
+    val tiltBoost = 1f + TILT_WIDTH_GAIN * curr.tilt
+    penPaint.strokeWidth = (segment.widthPx * curr.pressure * tiltBoost).coerceAtLeast(1f)
     if (prev == null) {
         // Single-sample "dot" at stroke start — draw a tiny line to itself so
         // the round cap renders a visible point.
-        canvas.drawLine(x, y, x, y, paint)
+        canvas.drawLine(x, y, x, y, penPaint)
     } else {
-        canvas.drawLine((prev.x + offX) * pdfW, (prev.y + offY) * pdfH, x, y, paint)
+        canvas.drawLine((prev.x + offX) * pdfW, (prev.y + offY) * pdfH, x, y, penPaint)
     }
 }
