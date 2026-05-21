@@ -88,6 +88,25 @@ class HostAnnotationProjection(
         }
     }
 
+    /**
+     * Принимает дельту, пришедшую от пира, напрямую в проекцию — минуя
+     * подписку на [SyncEngine.mergedDeltas].
+     *
+     * Это закрывает гонку: проекция начинала `follow` только при первом
+     * `SaveRequest`/`AnnotationSnapshotRequest`, а движок не хранит штрихи и
+     * эмитит их в `SharedFlow` без replay. Поэтому штрихи, нарисованные на
+     * планшете до первого запроса, терялись — при сохранении на хост писался
+     * лишь старый baseline с диска. Здесь baseline гарантированно загружается
+     * до применения дельты, а вызовы упорядочены вызывающим (по одному на
+     * сообщение из `incomingMessages`).
+     *
+     * No-op, если документа нет в опубликованном каталоге (чужой/неизвестный id).
+     */
+    suspend fun ingestPeerDelta(documentId: String, delta: StrokeDelta) {
+        ensureLoaded(documentId) ?: return
+        apply(documentId, delta)
+    }
+
     private suspend fun ensureLoaded(documentId: String): Unit? {
         // Cheap fast path under lock.
         mutex.withLock { if (states.containsKey(documentId)) return Unit }
