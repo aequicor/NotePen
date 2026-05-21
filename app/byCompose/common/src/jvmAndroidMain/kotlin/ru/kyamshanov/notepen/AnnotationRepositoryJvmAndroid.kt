@@ -3,9 +3,13 @@ package ru.kyamshanov.notepen
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromStream
+import kotlinx.serialization.json.encodeToStream
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationBundle
+import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
@@ -17,6 +21,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import java.io.File
 import java.io.IOException
+import java.io.OutputStream
 
 // ── JSON DTO ─────────────────────────────────────────────────────────────────
 
@@ -73,6 +78,13 @@ private data class PageExtentDto(
 )
 
 @Serializable
+private data class AnnotationViewStateDto(
+    val scale: Int = 100,
+    val currentPage: Int = 0,
+    val currentPageOffset: Int = 0,
+)
+
+@Serializable
 private data class AnnotationDataDto(
     val pages: Map<String, List<DrawingPathDto>>,
     val scale: Int = 100,
@@ -122,6 +134,11 @@ class AnnotationRepositoryJvmAndroid(
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
 
+    // Запись без encodeDefaults: не пишем isNewPath=false/pressure=1.0/tilt=0.0 у каждой
+    // точки — заметно ужимает файл. Чтение терпимо к отсутствующим полям (дефолты в DTO).
+    private val writeJson = Json { encodeDefaults = false; ignoreUnknownKeys = true }
+
+    @OptIn(ExperimentalSerializationApi::class)
     override suspend fun save(
         pdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,
@@ -152,20 +169,35 @@ class AnnotationRepositoryJvmAndroid(
             )
             val file = storeFileFor(pdfPath)
             file.parentFile?.mkdirs()
-            file.writeText(json.encodeToString(AnnotationDataDto.serializer(), dto))
+            // Поток + временный файл: не строим гигантскую String в памяти (был OOM при
+            // сотнях тысяч точек), и прерывание записи не оставляет битый JSON.
+            writeAtomically(file) { out ->
+                writeJson.encodeToStream(AnnotationDataDto.serializer(), dto, out)
+            }
+            // Лёгкий сайдкар с состоянием вида — читается при открытии отдельно и быстро,
+            // чтобы зум/страница восстанавливались до парсинга всех штрихов.
+            writeAtomically(viewFileFor(file)) { out ->
+                val viewDto = AnnotationViewStateDto(scale, currentPage, currentPageOffset)
+                writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+            }
             Result.success(Unit)
         } catch (e: IOException) {
             Result.failure(e)
         }
     }
 
+    @OptIn(ExperimentalSerializationApi::class)
     override suspend fun load(pdfPath: String): Result<AnnotationBundle> = withContext(ioDispatcher) {
         try {
             val file = storeFileFor(pdfPath)
             if (!file.exists()) {
                 Result.success(AnnotationBundle())
             } else {
-                val dto = json.decodeFromString(AnnotationDataDto.serializer(), file.readText())
+                // Потоковый декод: не держим весь файл в String (был риск OOM и
+                // лишняя задержка парсинга на больших документах).
+                val dto = file.inputStream().buffered().use { input ->
+                    json.decodeFromStream(AnnotationDataDto.serializer(), input)
+                }
                 val pages = dto.pages.mapNotNull { (k, paths) ->
                     k.toIntOrNull()?.let { it to paths.map { p -> p.toDomain() } }
                 }.toMap()
@@ -188,6 +220,38 @@ class AnnotationRepositoryJvmAndroid(
             }
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    override suspend fun loadViewState(pdfPath: String): Result<AnnotationViewState?> = withContext(ioDispatcher) {
+        try {
+            val viewFile = viewFileFor(storeFileFor(pdfPath))
+            if (!viewFile.exists()) {
+                Result.success(null)
+            } else {
+                val dto = viewFile.inputStream().buffered().use { input ->
+                    json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
+                }
+                Result.success(AnnotationViewState(dto.scale, dto.currentPage, dto.currentPageOffset))
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    /** Имя лёгкого сайдкара состояния вида рядом с основным файлом аннотаций. */
+    private fun viewFileFor(annotationFile: File): File =
+        File(annotationFile.parentFile, "${annotationFile.name}.view")
+
+    /** Пишет [file] через временный файл + rename, чтобы прерывание не оставило битый JSON. */
+    private fun writeAtomically(file: File, write: (OutputStream) -> Unit) {
+        file.parentFile?.mkdirs()
+        val tmp = File(file.parentFile, "${file.name}.tmp")
+        tmp.outputStream().buffered().use(write)
+        if (!tmp.renameTo(file)) {
+            tmp.copyTo(file, overwrite = true)
+            tmp.delete()
         }
     }
 }

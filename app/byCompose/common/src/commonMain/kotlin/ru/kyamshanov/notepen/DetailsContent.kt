@@ -703,6 +703,16 @@ fun DetailsContent(
         // returns to the tab keep the user's in-memory edits.
         if (pdfState.annotationsLoaded) return@LaunchedEffect
         pdfState.annotationsLoaded = true
+        // Сначала — лёгкий view-state (масштаб/страница) отдельным быстрым чтением,
+        // ДО парсинга всех штрихов. Иначе зум восстанавливался только после полной
+        // загрузки аннотаций (1–2 с) и страница резко «доворачивалась» к нему.
+        val restoredView = annotationRepository.loadViewState(filePath).getOrNull()?.also { view ->
+            pdfViewerState.applyInitialState(
+                scalePercent = view.scale,
+                pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
+                pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
+            )
+        }
         // Host-side «виртуальный файл»: проекция (in-memory) — источник истины
         // по штрихам (= диск + правки пира). Если она доступна и не пуста, ПК
         // открывает документ через неё, минуя дисковую копию — иначе только что
@@ -721,15 +731,18 @@ fun DetailsContent(
                     "${bundle.pages.values.sumOf { it.size }} projection-strokes=${projectionStrokes.size} " +
                     "pages=${bundle.pages.size}"
             }
-            // applyInitialState откладывает scroll/zoom до момента, когда
-            // viewport измерится и страницы загрузятся — работает одинаково
-            // на обеих платформах, без отдельной Android-ветки с
-            // ручным lazyListState.scrollToItem.
-            pdfViewerState.applyInitialState(
-                scalePercent = bundle.scale,
-                pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,
-                pageOffsetPx = if (pdfState.skipPageRestore) 0 else bundle.currentPageOffset,
-            )
+            // Fallback для старых документов без .view-сайдкара: восстанавливаем вид
+            // из основного bundle. Если view-state уже применён выше (restoredView != null),
+            // повторно не трогаем — иначе перебили бы более ранний (правильный) вызов.
+            // applyInitialState откладывает scroll/zoom до момента, когда viewport
+            // измерится и страницы загрузятся — одинаково на обеих платформах.
+            if (restoredView == null) {
+                pdfViewerState.applyInitialState(
+                    scalePercent = bundle.scale,
+                    pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,
+                    pageOffsetPx = if (pdfState.skipPageRestore) 0 else bundle.currentPageOffset,
+                )
+            }
             // Sanitize on load: legacy settings persisted strokeWidth as raw
             // pixels (range ~1..80); the field now means fraction-of-page-width.
             // Without this, a stale `10f` becomes a 10×-page-wide brush stroke.
