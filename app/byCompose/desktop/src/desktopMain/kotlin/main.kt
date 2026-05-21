@@ -85,11 +85,9 @@ import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
-import java.awt.Taskbar
-import java.io.ByteArrayInputStream
 import java.net.InetAddress
 import java.util.UUID
-import javax.imageio.ImageIO
+import kotlin.system.exitProcess
 
 /** См. [WindowsPenFix] — задержка перед повторным проходом по дереву окон Skiko. */
 private const val SKIA_HWND_SETTLE_DELAY_MS: Long = 500L
@@ -101,6 +99,21 @@ fun main() {
     // macOS doesn't support OPENGL via Skiko (Metal only), so scope this to Windows.
     if (System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)) {
         System.setProperty("skiko.renderApi", "OPENGL")
+    }
+
+    // Must be set BEFORE any AWT class is loaded — Taskbar.isTaskbarSupported() already
+    // initialises AWT Toolkit, so this has to come first.
+    // The system property is read by the macOS AWT port when it first touches NSApplication
+    // and stays in effect for the whole process lifetime, including during shutdown.
+    if (Platform.isMac()) {
+        runCatching {
+            val resourcePath = "composeResources/notepen.app.bycompose.desktop.generated.resources/files/app_icon_dock.png"
+            Thread.currentThread().contextClassLoader
+                .getResource(resourcePath)
+                ?.takeIf { it.protocol == "file" }
+                ?.let { java.io.File(it.toURI()).absolutePath }
+                ?.let { System.setProperty("apple.awt.application.icon", it) }
+        }
     }
 
     val lifecycle = LifecycleRegistry()
@@ -385,7 +398,10 @@ fun main() {
         Window(
             onCloseRequest = {
                 serviceRegistrar.unregister()
-                exitApplication()
+                // exitApplication() tears down Compose/AWT asynchronously, leaving the JVM
+                // alive long enough for macOS to flash the parent process icon (Terminal.app)
+                // in the Dock. exitProcess terminates the JVM immediately after cleanup.
+                exitProcess(0)
             },
             state = windowState,
             title = "NotePen",
@@ -399,19 +415,6 @@ fun main() {
                 }
             }
             val composeWindow: ComposeWindow = window
-
-            // macOS doesn't derive the Dock icon from the Compose window icon;
-            // it must be set explicitly via the AWT Taskbar API at runtime.
-            // Use the padded variant so the Dock icon matches the macOS icon grid
-            // (rounded square at ~82% with transparent margins) and isn't oversized.
-            if (Platform.isMac() && Taskbar.isTaskbarSupported()) {
-                LaunchedEffect(Unit) {
-                    runCatching {
-                        val bytes = Res.readBytes("files/app_icon_dock.png")
-                        Taskbar.getTaskbar().iconImage = ImageIO.read(ByteArrayInputStream(bytes))
-                    }
-                }
-            }
 
             // Attach the platform-specific tablet input after the window peer
             // exists. `window.isDisplayable` is guaranteed by the time the

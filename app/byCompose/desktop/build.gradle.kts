@@ -111,6 +111,22 @@ compose.desktop {
             // explicitly; in packaged builds CocoaTabletInputController.addComposeResourcesToJnaPath()
             // does the same at runtime.
             "-Djna.library.path=${project.layout.projectDirectory.file("assets").asFile.absolutePath}",
+            // macOS: register the Dock icon at the OS level for the entire process lifetime.
+            // Taskbar.setIconImage() only works while AWT is alive; this flag persists through shutdown.
+            "-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon.icns").asFile.absolutePath}",
         )
     }
+}
+
+// runDistributable launches the binary as a child of the Gradle/shell process.
+// macOS then associates the Dock entry with the parent (Terminal/IntelliJ), and
+// their icon flashes briefly when the AWT window closes before JVM exits.
+// This task uses 'open -a' so macOS registers the bundle via NSWorkspace/Launch
+// Services — the icon from CFBundleIconFile stays correct throughout shutdown.
+tasks.register<Exec>("openApp") {
+    dependsOn("createDistributable")
+    commandLine(
+        "open",
+        layout.buildDirectory.file("compose/binaries/main/app/NotePen.app").get().asFile.absolutePath,
+    )
 }

@@ -68,6 +68,32 @@ private const val WHEEL_SCROLL_PX_PER_TICK = 60f
 private const val ZOOM_BASE = 1.075f
 
 /**
+ * Горизонтальная составляющая скролла без Shift применяется только если
+ * `|dx| >= |dy| * ratio`. Ratio=4 означает: движение должно быть в 4 раза
+ * горизонтальнее, чем вертикально — подавляет случайный дрейф при вертикальном
+ * двухпальцевом свайпе на тачпаде.
+ */
+/**
+ * Минимальный |delta.x| для горизонтального скролла — отсекает абсолютный
+ * шум тачпада (значения ≤ 0.05 практически не несут намерения).
+ */
+private const val SCROLL_H_DEAD_ZONE = 0.05f
+
+/**
+ * Коэффициент сглаживания EMA для оценки доминирующей оси скролла.
+ * Меньше → более инерционная оценка; больше → быстрее реагирует на смену оси.
+ */
+private const val SCROLL_EMA_ALPHA = 0.3f
+
+/**
+ * Горизонталь подавляется, если EMA(|dy|) > EMA(|dx|) × этот коэффициент.
+ * JBR разделяет вертикальные и горизонтальные события: во время
+ * горизонтального свайпа вертикальные события не приходят → EMA вертикали
+ * затухает, горизонталь разблокируется уже через 1–2 тика.
+ */
+private const val SCROLL_H_SUPPRESS_RATIO = 2.0f
+
+/**
  * Дебаунс между остановкой пользователя и запуском high-res рендера.
  * Должен быть БОЛЬШЕ типичного интервала между wheel-тиками при
  * медленном зуме (~200–250 мс), иначе render запускается между тиками
@@ -166,7 +192,17 @@ actual fun PdfPagesViewer(
     // Skiko intercepts NSView.magnifyWithEvent: natively and never forwards it
     // to Compose's PointerInputScope, so we bypass Skiko entirely with an
     // NSEvent local monitor — same technique as the tablet pressure bridge.
-    DisposableEffect(state, pendingZoom) {
+    //
+    // The callback MUST be held in `remember`, not a local variable — JNA
+    // callbacks are GC'd if no strong Java reference exists, causing the native
+    // monitor to fire into a dangling pointer and silently do nothing.
+    val gestureCallback = remember(pendingZoom, lastCursorRef) {
+        MacosGestureBridge.OnMagnify { magnification, x, y ->
+            val factor = 1f + magnification
+            if (factor > 0f) pendingZoom.accumulate(factor, lastCursorRef.get())
+        }
+    }
+    DisposableEffect(gestureCallback) {
         if (!Platform.isMac()) return@DisposableEffect onDispose {}
         // Mirror addComposeResourcesToJnaPath() from CocoaTabletInputController:
         // in dev (:run) compose.application.resources.dir may be absent, but
@@ -183,19 +219,8 @@ actual fun PdfPagesViewer(
         }
         val bridge = runCatching {
             Native.load("notepen_gesture", MacosGestureBridge::class.java)
-        }.onFailure { println("[GestureBridge] load FAILED: ${it.message}") }
-            .getOrNull()
-        if (bridge == null) {
-            println("[GestureBridge] bridge is null, pinch zoom disabled")
-            return@DisposableEffect onDispose {}
-        }
-        println("[GestureBridge] loaded OK, installing NSEvent monitor")
-        val callbackRef = MacosGestureBridge.OnMagnify { magnification, x, y ->
-            println("[GestureBridge] magnify=$magnification x=$x y=$y")
-            val factor = 1f + magnification
-            if (factor > 0f) pendingZoom.accumulate(factor, lastCursorRef.get())
-        }
-        bridge.notepen_gesture_start(callbackRef)
+        }.getOrNull() ?: return@DisposableEffect onDispose {}
+        bridge.notepen_gesture_start(gestureCallback)
         onDispose { bridge.notepen_gesture_stop() }
     }
 
@@ -410,8 +435,10 @@ actual fun PdfPagesViewer(
         val vAdapter = remember(state) { PanScrollbarAdapter(state, horizontal = false) }
         val showH by remember {
             derivedStateOf {
-                (state.layout.contentRightPx - state.layout.contentLeftPx) * state.zoom >
-                    state.viewportSize.width
+                // Show horizontal scrollbar only when the PDF column itself overflows the
+                // viewport, matching the panBy restriction. Drawing-area extents (PageExtent)
+                // widen contentW but should not trigger a scrollbar when the page fits.
+                state.layout.basePageWidthPx * state.zoom > state.viewportSize.width
             }
         }
         val showV by remember {
@@ -473,6 +500,10 @@ private fun Modifier.pdfDesktopPointerInput(
         var middleDragOrigin: Offset? = null
         var primaryDragOrigin: Offset? = null
         var zoomBurstFocus: Offset? = null
+        // EMA of recent |dx| and |dy| across scroll events; used to detect the
+        // dominant scroll axis and suppress the minor axis (see SCROLL_H_SUPPRESS_RATIO).
+        var hScrollEma = 0f
+        var vScrollEma = 0f
         while (true) {
             val event = awaitPointerEvent(PointerEventPass.Initial)
             val change = event.changes.firstOrNull()
@@ -555,23 +586,31 @@ private fun Modifier.pdfDesktopPointerInput(
                         }
                         shift -> {
                             state.commitPinchGesture()
-                            // On macOS, horizontal trackpad swipe arrives as delta.x with
-                            // shift=true; Shift+mouse-wheel uses delta.y. Handle both.
-                            state.panBy(
-                                Offset(
-                                    -delta.x * WHEEL_SCROLL_PX_PER_TICK,
-                                    -delta.y * WHEEL_SCROLL_PX_PER_TICK,
-                                ),
-                            )
+                            // On macOS with JBR, trackpad horizontal swipe arrives as
+                            // shift=true + delta.x, dy=0 (synthetic shift — not a keyboard key).
+                            // Update EMA for both axes (dy=0 here → vScrollEma decays).
+                            // Suppress horizontal if vertical EMA dominates.
+                            hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
+                            vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
+                            val pageColumnFits =
+                                state.layout.basePageWidthPx * state.zoom <= state.viewportSize.width
+                            val suppressH = pageColumnFits ||
+                                vScrollEma > hScrollEma * SCROLL_H_SUPPRESS_RATIO
+                            val absDx = kotlin.math.abs(delta.x)
+                            val hPx = if (suppressH || absDx < SCROLL_H_DEAD_ZONE) 0f
+                            else -delta.x * WHEEL_SCROLL_PX_PER_TICK
+                            state.panBy(Offset(hPx, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
                         }
                         else -> {
                             state.commitPinchGesture()
-                            state.panBy(
-                                Offset(
-                                    -delta.x * WHEEL_SCROLL_PX_PER_TICK,
-                                    -delta.y * WHEEL_SCROLL_PX_PER_TICK,
-                                ),
-                            )
+                            // dx=0 here in JBR vertical events → hScrollEma decays.
+                            vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
+                            hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
+                            state.panBy(Offset(0f, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
                         }
                     }
                     change.consume()
