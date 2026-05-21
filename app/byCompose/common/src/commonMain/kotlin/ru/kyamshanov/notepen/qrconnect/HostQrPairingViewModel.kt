@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.qrconnect
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +27,10 @@ class HostQrPairingViewModel(
     private val _state = MutableStateFlow<HostQrPairingCoordinator.State?>(null)
     val state: StateFlow<HostQrPairingCoordinator.State?> = _state.asStateFlow()
 
+    // Notifies the coordinator that a pending approval was resolved by the user
+    // (reject) so it can dismiss the dialog — reject leaves no other signal.
+    private val approvalResolutions = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
     private var runJob: Job? = null
 
     /** Starts the server and begins emitting [state] updates. No-op if already running. */
@@ -37,6 +42,7 @@ class HostQrPairingViewModel(
                 peerServer = peerServer,
                 encoder = qrEncoder,
                 hostDeviceName = hostDeviceName,
+                approvalResolutions = approvalResolutions,
             )
             coordinator.run().collect { s -> _state.value = s }
         }
@@ -63,7 +69,11 @@ class HostQrPairingViewModel(
 
     /** Rejects the pending peer with the given id; no-op if none. */
     fun reject(peerId: String) {
-        scope.launch { peerServer.reject(peerId) }
+        scope.launch {
+            peerServer.reject(peerId)
+            // Dismiss the approval dialog — reject produces no connectedPeers signal.
+            approvalResolutions.emit(peerId)
+        }
     }
 
     /** Disconnects one connected peer; the server keeps running for the others. */
