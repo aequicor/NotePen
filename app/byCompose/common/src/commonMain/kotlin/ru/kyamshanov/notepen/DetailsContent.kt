@@ -65,6 +65,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
@@ -234,6 +235,15 @@ fun DetailsContent(
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
     val pdfExporter = remember { createPdfExporter() }
+
+    // Global tool presets, persisted across documents.
+    val toolPresetsRepository = remember { createToolPresetsRepository() }
+    var toolPresets by remember { mutableStateOf(StoredToolPresets()) }
+    LaunchedEffect(Unit) { toolPresets = toolPresetsRepository.load() }
+    val onToolPresetsChange: (StoredToolPresets) -> Unit = { updated ->
+        toolPresets = updated
+        coroutineScope.launch { toolPresetsRepository.save(updated) }
+    }
 
     var landscapeToolbarWidthDp by remember { mutableStateOf(FLOATING_TOOLBAR_WIDTH) }
     var landscapePageCounterHeightDp by remember { mutableStateOf(TAB_BAR_HEIGHT) }
@@ -468,6 +478,8 @@ fun DetailsContent(
                     },
                     eraserSettings = eraserSettings,
                     onEraserSettingsChange = { eraserSettings = it },
+                    toolPresets = toolPresets,
+                    onToolPresetsChange = onToolPresetsChange,
                     hasAnnotations = hasAnnotations,
                     isExporting = isExporting,
                     onExport = { controls?.export?.invoke() },
@@ -537,6 +549,8 @@ fun DetailsContent(
                     },
                     eraserSettings = eraserSettings,
                     onEraserSettingsChange = { eraserSettings = it },
+                    toolPresets = toolPresets,
+                    onToolPresetsChange = onToolPresetsChange,
                     hasAnnotations = hasAnnotations,
                     isExporting = isExporting,
                     onExport = { controls?.export?.invoke() },

@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -55,6 +56,7 @@ import kotlin.math.roundToInt
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /**
@@ -228,6 +230,8 @@ fun LandscapeToolRail(
     onMarkerSettingsChange: (MarkerSettings) -> Unit,
     eraserSettings: EraserSettings,
     onEraserSettingsChange: (EraserSettings) -> Unit,
+    toolPresets: StoredToolPresets,
+    onToolPresetsChange: (StoredToolPresets) -> Unit,
     hasAnnotations: Boolean,
     isExporting: Boolean,
     onExport: () -> Unit,
@@ -346,6 +350,24 @@ fun LandscapeToolRail(
                             onMagnifierToggle = onMagnifierToggle,
                             onOpenShortcutsSettings = onOpenShortcutsSettings,
                             modifier = Modifier.padding(ISLAND_PADDING),
+                        )
+                    }
+                }
+            }
+            if (toolActive) {
+                GlassSurface {
+                    Box(Modifier.padding(ISLAND_PADDING)) {
+                        ToolPresetsZone(
+                            toolMode = toolMode,
+                            penSettings = penSettings,
+                            onPenSettingsChange = onPenSettingsChange,
+                            markerSettings = markerSettings,
+                            onMarkerSettingsChange = onMarkerSettingsChange,
+                            eraserSettings = eraserSettings,
+                            onEraserSettingsChange = onEraserSettingsChange,
+                            presets = toolPresets,
+                            onPresetsChange = onToolPresetsChange,
+                            orientation = RailOrientation.VERTICAL,
                         )
                     }
                 }

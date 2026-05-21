@@ -94,6 +94,16 @@ private const val SCROLL_EMA_ALPHA = 0.3f
 private const val SCROLL_H_SUPPRESS_RATIO = 2.0f
 
 /**
+ * Если ширина страничной колонки помещается во вьюпорт, горизонтальный
+ * тачпад-скролл подавляется — страница уже видна целиком. НО: если
+ * пользователь смести документ мышью (drag-to-pan), [pan.x] уходит от
+ * центрального положения; тогда скролл разрешается, чтобы вернуть
+ * документ в центр. Этот порог — допустимое отклонение от центра в пикселях,
+ * при котором скролл ещё считается «центрированным» и остаётся заблокированным.
+ */
+private const val SCROLL_H_CENTER_TOLERANCE_PX = 2f
+
+/**
  * Дебаунс между остановкой пользователя и запуском high-res рендера.
  * Должен быть БОЛЬШЕ типичного интервала между wheel-тиками при
  * медленном зуме (~200–250 мс), иначе render запускается между тиками
@@ -435,10 +445,17 @@ actual fun PdfPagesViewer(
         val vAdapter = remember(state) { PanScrollbarAdapter(state, horizontal = false) }
         val showH by remember {
             derivedStateOf {
-                // Show horizontal scrollbar only when the PDF column itself overflows the
-                // viewport, matching the panBy restriction. Drawing-area extents (PageExtent)
-                // widen contentW but should not trigger a scrollbar when the page fits.
-                state.layout.basePageWidthPx * state.zoom > state.viewportSize.width
+                // Show horizontal scrollbar when the page column overflows the viewport OR
+                // when the document has been dragged off its natural centred position (so the
+                // user can drag the scrollbar to re-centre it).
+                val pageColumnW = state.layout.basePageWidthPx * state.zoom
+                val viewportW = state.viewportSize.width
+                if (pageColumnW > viewportW) {
+                    true
+                } else {
+                    val centredPanX = (viewportW - pageColumnW) / 2f
+                    kotlin.math.abs(state.pan.x - centredPanX) > SCROLL_H_CENTER_TOLERANCE_PX
+                }
             }
         }
         val showV by remember {
@@ -594,9 +611,16 @@ private fun Modifier.pdfDesktopPointerInput(
                                 kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
                             vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
                                 kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
-                            val pageColumnFits =
-                                state.layout.basePageWidthPx * state.zoom <= state.viewportSize.width
-                            val suppressH = pageColumnFits ||
+                            val pageColumnW = state.layout.basePageWidthPx * state.zoom
+                            val pageColumnFits = pageColumnW <= state.viewportSize.width
+                            // Suppress H-scroll when page fits AND pan.x is near its natural
+                            // centred position. If the user drag-panned the document off-centre
+                            // we allow trackpad scroll to bring it back.
+                            val suppressDueToFit = pageColumnFits && run {
+                                val centredPanX = (state.viewportSize.width - pageColumnW) / 2f
+                                kotlin.math.abs(state.pan.x - centredPanX) <= SCROLL_H_CENTER_TOLERANCE_PX
+                            }
+                            val suppressH = suppressDueToFit ||
                                 vScrollEma > hScrollEma * SCROLL_H_SUPPRESS_RATIO
                             val absDx = kotlin.math.abs(delta.x)
                             val hPx = if (suppressH || absDx < SCROLL_H_DEAD_ZONE) 0f

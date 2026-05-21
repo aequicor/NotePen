@@ -171,7 +171,11 @@ class TabSession internal constructor(
         // Remove from the source panel WITHOUT touching the registry — the tab's
         // state must survive the move.
         val afterRemoval = layout.withPanelTabs(fromPanelId) { it.closeTab(tabId) } ?: return
-        layout = afterRemoval.addPanel(template, Panel(id = nextPanelId(), tabs = OpenDocuments.of(tab)))
+        // Keep focus on the source panel — the user is reorganising tabs, not switching
+        // their working context to the newly-created panel.
+        layout = afterRemoval
+            .addPanel(template, Panel(id = nextPanelId(), tabs = OpenDocuments.of(tab)))
+            .focusPanel(fromPanelId)
     }
 
     /** Updates divider [index] to [value] (clamped). See [WorkspaceLayout.setRatio]. */
