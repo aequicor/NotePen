@@ -64,6 +64,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
+import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
@@ -472,25 +474,41 @@ private fun MagnifierContent(
 
             // Хвост live-штриха: запечённые сегменты уже в `liveBmp`, рисуем
             // только последние [MAGNIFIER_LIVE_TIP_SEGMENTS] (или весь штрих,
-            // если он короче порога).
+            // если он короче порога). Маркер не поддерживает посегментный
+            // рендер (chisel-ribbon заливается одним path'ом с multiply-блендом,
+            // частичный диапазон дал бы рваную ленту), поэтому для него
+            // инкрементальный bake пропущен (см. `rememberMagnifierLiveLayer`)
+            // и здесь рисуется весь штрих целиком каждый кадр.
             if (pdfDrawingState.isDrawing.value && pdfDrawingState.livePoints.size > 1) {
-                val totalSegments = pdfDrawingState.livePoints.size - 1
-                val tipFrom = activeLayer?.bakedSegments?.coerceAtMost(totalSegments) ?: 0
                 withTransform({
                     clipRect(left = 0f, top = segTop, right = panelW, bottom = segBottom)
                     translate(left = -target.left * virtW, top = segTop - target.top * virtH)
                 }) {
-                    drawLiveStroke(
-                        points = pdfDrawingState.livePoints,
-                        colorArgb = pdfDrawingState.liveColorArgb.value,
-                        normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                        pdfWidth = virtW,
-                        pdfHeight = virtH,
-                        extent = noExtent,
-                        scratch = livePath,
-                        fromSegmentIndex = tipFrom,
-                        toSegmentIndexExclusive = totalSegments,
-                    )
+                    if (pdfDrawingState.liveToolKind.value == ToolKind.MARKER) {
+                        drawMarkerStroke(
+                            points = pdfDrawingState.livePoints,
+                            colorArgb = pdfDrawingState.liveColorArgb.value,
+                            normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
+                            pdfWidth = virtW,
+                            pdfHeight = virtH,
+                            extent = noExtent,
+                            scratch = livePath,
+                        )
+                    } else {
+                        val totalSegments = pdfDrawingState.livePoints.size - 1
+                        val tipFrom = activeLayer?.bakedSegments?.coerceAtMost(totalSegments) ?: 0
+                        drawLiveStroke(
+                            points = pdfDrawingState.livePoints,
+                            colorArgb = pdfDrawingState.liveColorArgb.value,
+                            normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
+                            pdfWidth = virtW,
+                            pdfHeight = virtH,
+                            extent = noExtent,
+                            scratch = livePath,
+                            fromSegmentIndex = tipFrom,
+                            toSegmentIndexExclusive = totalSegments,
+                        )
+                    }
                 }
             }
         }
@@ -775,6 +793,12 @@ private fun rememberMagnifierLiveLayer(
         holder.targetH = th
         holder.bakedSegments = 0
     }
+
+    // Маркер заливается одним path'ом с multiply-блендом и не поддерживает
+    // частичный диапазон сегментов — инкрементальный bake для него пропускаем
+    // (штрих рисуется целиком каждый кадр в Canvas-tail). `bakedSegments`
+    // остаётся 0, так что tail рисует весь штрих, а битмап — пустой.
+    if (pdfDrawingState.liveToolKind.value == ToolKind.MARKER) return holder
 
     val totalSegments = size - 1
     val targetBakeEnd = (totalSegments - MAGNIFIER_LIVE_TIP_SEGMENTS).coerceAtLeast(0)
