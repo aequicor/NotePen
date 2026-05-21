@@ -227,6 +227,7 @@ fun App(
                                 manualViewModel = manualConnectViewModel,
                                 peerClient = peerClient,
                                 onClose = { showSyncPanel = false },
+                                onConnected = { showSyncPanel = false },
                             )
                         }
                     }
