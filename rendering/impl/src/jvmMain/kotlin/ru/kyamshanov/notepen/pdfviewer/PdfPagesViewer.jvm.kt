@@ -500,16 +500,14 @@ private fun Modifier.pdfDesktopPointerInput(
                         }
                         shift -> {
                             state.commitPinchGesture()
-                            state.panBy(Offset(delta.y * WHEEL_SCROLL_PX_PER_TICK, 0f))
+                            state.panBy(Offset(-delta.y * WHEEL_SCROLL_PX_PER_TICK, 0f))
                         }
                         else -> {
                             state.commitPinchGesture()
-                            // delta.x/y from Skiko on macOS match natural-scroll direction:
-                            // positive = content should move in positive direction.
                             state.panBy(
                                 Offset(
-                                    delta.x * WHEEL_SCROLL_PX_PER_TICK,
-                                    delta.y * WHEEL_SCROLL_PX_PER_TICK,
+                                    -delta.x * WHEEL_SCROLL_PX_PER_TICK,
+                                    -delta.y * WHEEL_SCROLL_PX_PER_TICK,
                                 ),
                             )
                         }
