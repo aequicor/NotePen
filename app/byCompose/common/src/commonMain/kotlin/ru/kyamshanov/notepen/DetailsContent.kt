@@ -1599,40 +1599,31 @@ fun DetailsContent(
                     .windowInsetsPadding(WindowInsets.systemBars)
                     .padding(start = 16.dp + sidebarOffset, top = 16.dp, end = 16.dp, bottom = 16.dp),
             ) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    PdfFloatingToolbar(
-                        toolMode = toolMode,
-                        onToolModeChange = { toolMode = it },
-                        hasAnnotations = hasAnnotations,
-                        isExporting = isExporting,
-                        showThumbnails = showThumbnails,
-                        onToggleThumbnails = { showThumbnails = !showThumbnails },
-                        showPencilModeButton = SupportsPencilMode,
-                        pencilModeEnabled = pencilModeEnabled,
-                        onPencilModeChange = onPencilModeChangeCallback,
-                        magnifierEnabled = magnifierState.enabled,
-                        onMagnifierToggle = onMagnifierToggle,
-                        onOpenShortcutsSettings = { showShortcutsDialog = true },
-                        onExport = onExportCallback,
-                        scale = currentScalePercent,
-                        onZoomIn = onZoomInCallback,
-                        onZoomOut = onZoomOutCallback,
-                        modifier = Modifier.onSizeChanged {
-                            landscapeToolbarWidthDp = with(density) { it.width.toDp() }
-                        },
-                    )
-                    Spacer(Modifier.width(12.dp))
-                    ToolSettingsFloatingPanel(
-                        toolMode = toolMode,
-                        penSettings = penSettings,
-                        onPenSettingsChange = { penSettings = it },
-                        markerSettings = markerSettings,
-                        onMarkerSettingsChange = { markerSettings = it },
-                        eraserSettings = eraserSettings,
-                        onEraserSettingsChange = { eraserSettings = it },
-                        vertical = true,
-                    )
-                }
+                LandscapeToolRail(
+                    toolMode = toolMode,
+                    onToolModeChange = { toolMode = it },
+                    penSettings = penSettings,
+                    onPenSettingsChange = { penSettings = it },
+                    markerSettings = markerSettings,
+                    onMarkerSettingsChange = { markerSettings = it },
+                    eraserSettings = eraserSettings,
+                    onEraserSettingsChange = { eraserSettings = it },
+                    hasAnnotations = hasAnnotations,
+                    isExporting = isExporting,
+                    onExport = onExportCallback,
+                    scale = currentScalePercent,
+                    onZoomIn = onZoomInCallback,
+                    onZoomOut = onZoomOutCallback,
+                    showThumbnails = showThumbnails,
+                    onToggleThumbnails = { showThumbnails = !showThumbnails },
+                    showPencilModeButton = SupportsPencilMode,
+                    pencilModeEnabled = pencilModeEnabled,
+                    onPencilModeChange = onPencilModeChangeCallback,
+                    magnifierEnabled = magnifierState.enabled,
+                    onMagnifierToggle = onMagnifierToggle,
+                    onOpenShortcutsSettings = { showShortcutsDialog = true },
+                    onRailWidthChanged = { landscapeToolbarWidthDp = it },
+                )
             }
 
             // Landscape: page indicator airbar + optional offline banner, stacked vertically.
@@ -1693,6 +1684,12 @@ fun DetailsContent(
                     totalPages = pages.size,
                     toolMode = toolMode,
                     onToolModeChange = { toolMode = it },
+                    penSettings = penSettings,
+                    onPenSettingsChange = { penSettings = it },
+                    markerSettings = markerSettings,
+                    onMarkerSettingsChange = { markerSettings = it },
+                    eraserSettings = eraserSettings,
+                    onEraserSettingsChange = { eraserSettings = it },
                     hasAnnotations = hasAnnotations,
                     isExporting = isExporting,
                     onExport = onExportCallback,
@@ -1706,6 +1703,7 @@ fun DetailsContent(
                     onPencilModeChange = onPencilModeChangeCallback,
                     magnifierEnabled = magnifierState.enabled,
                     onMagnifierToggle = onMagnifierToggle,
+                    onOpenShortcutsSettings = { showShortcutsDialog = true },
                     onBack = {
                         // В портрете back-кнопка сначала закрывает раскрытый
                         // сайдбар миниатюр (он занимает всю высоту слева),
@@ -1714,25 +1712,6 @@ fun DetailsContent(
                         else onBackWithSave()
                     },
                 )
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    contentAlignment = Alignment.TopCenter,
-                ) {
-                    ToolSettingsFloatingPanel(
-                        toolMode = toolMode,
-                        penSettings = penSettings,
-                        onPenSettingsChange = { penSettings = it },
-                        markerSettings = markerSettings,
-                        onMarkerSettingsChange = { markerSettings = it },
-                        eraserSettings = eraserSettings,
-                        onEraserSettingsChange = { eraserSettings = it },
-                        vertical = false,
-                        atTop = true,
-                        applyInsets = false,
-                    )
-                }
                 if (showOfflineBanner) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
