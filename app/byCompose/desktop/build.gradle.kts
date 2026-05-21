@@ -62,6 +62,7 @@ compose.desktop {
                 "java.base",
                 "java.desktop",
                 "java.logging",
+                "java.sql",
                 "jdk.crypto.ec"
             )
             targetFormats(
@@ -70,15 +71,29 @@ compose.desktop {
                 TargetFormat.Deb,
                 TargetFormat.Exe
             )
-            packageName = "ru.kyamshanov.notepen"
+            packageName = "NotePen"
             packageVersion = "1.0.0"
-            description = "notepen"
+            description = "NotePen"
             copyright = "© 2025 KYamshanov. All rights reserved."
             vendor = "KYamshanov"
 
             windows {
                 menu = true
                 iconFile.set(project.file("icons/app_icon.ico"))
+            }
+            macOS {
+                bundleID = "ru.kyamshanov.notepen"
+                iconFile.set(project.file("icons/app_icon.icns"))
+                infoPlist {
+                    extraKeysRawXml = """
+                        <key>NSLocalNetworkUsageDescription</key>
+                        <string>NotePen uses the local network to sync notes with your other devices.</string>
+                        <key>NSBonjourServices</key>
+                        <array>
+                            <string>_notepen._tcp</string>
+                        </array>
+                    """.trimIndent()
+                }
             }
             appResourcesRootDir.set(project.layout.projectDirectory.dir("assets"))
             jvmArgs += "-splash:app/resources/splash_logo.png"

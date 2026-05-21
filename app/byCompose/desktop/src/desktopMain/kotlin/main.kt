@@ -85,8 +85,11 @@ import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
+import java.awt.Taskbar
+import java.io.ByteArrayInputStream
 import java.net.InetAddress
 import java.util.UUID
+import javax.imageio.ImageIO
 
 /** См. [WindowsPenFix] — задержка перед повторным проходом по дереву окон Skiko. */
 private const val SKIA_HWND_SETTLE_DELAY_MS: Long = 500L
@@ -278,6 +281,10 @@ fun main() {
             val msg = peerMessage.message
             if (msg is NetworkMessage.StrokeDeltaMessage) {
                 syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
+                // Накапливаем штрих в headless-проекции сразу, не дожидаясь
+                // первого SaveRequest — иначе правки, сделанные на планшете до
+                // запроса сохранения, не попадут в сохранённый на хосте файл.
+                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta)
             }
         }
     }
@@ -286,6 +293,7 @@ fun main() {
             val msg = hostMessage.message
             if (msg is NetworkMessage.StrokeDeltaMessage) {
                 syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
+                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta)
             }
         }
     }
@@ -386,6 +394,19 @@ fun main() {
                 }
             }
             val composeWindow: ComposeWindow = window
+
+            // macOS doesn't derive the Dock icon from the Compose window icon;
+            // it must be set explicitly via the AWT Taskbar API at runtime.
+            // Use the padded variant so the Dock icon matches the macOS icon grid
+            // (rounded square at ~82% with transparent margins) and isn't oversized.
+            if (Platform.isMac() && Taskbar.isTaskbarSupported()) {
+                LaunchedEffect(Unit) {
+                    runCatching {
+                        val bytes = Res.readBytes("files/app_icon_dock.png")
+                        Taskbar.getTaskbar().iconImage = ImageIO.read(ByteArrayInputStream(bytes))
+                    }
+                }
+            }
 
             // Attach the platform-specific tablet input after the window peer
             // exists. `window.isDisplayable` is guaranteed by the time the
