@@ -34,10 +34,15 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
@@ -125,6 +130,48 @@ private const val INK_CACHE_DIM_BUCKET_PX = 256
  */
 private const val LOW_LATENCY_OVERLAY_MAX_DIM_PX = 2400
 
+/**
+ * Растеризованный кэш завершённых штрихов вместе с количеством штрихов
+ * ([strokeCount]), вошедших в него. Счётчик нужен, чтобы понять, какие штрихи
+ * ещё не попали в кэш (хвост `currentPaths`), и дорисовать их поверх, пока идёт
+ * асинхронный rebuild — иначе только что завершённый штрих «пропадал» на время
+ * растеризации (см. anti-flicker в [DrawablePdfPage]).
+ */
+private data class CachedInk(val strokeCount: Int, val bitmap: ImageBitmap)
+
+/**
+ * Растеризует все [paths] в off-screen [ImageBitmap] размера [bw]×[bh].
+ * Чистая функция без захвата composable-состояния — безопасно вызывать вне
+ * main-потока. Битмап покрывает PDF + extent-поля; PDF-пиксель = `bw/ext.width`,
+ * штрихи нормализованы в PDF-page координатах (см. `drawStrokeWithPressure`).
+ */
+private fun buildCompletedInk(
+    bw: Int,
+    bh: Int,
+    paths: List<DrawingPath>,
+    ext: PageExtent,
+    density: Density,
+    layoutDirection: LayoutDirection,
+): ImageBitmap {
+    val pdfBw = bw.toFloat() / ext.width
+    val pdfBh = bh.toFloat() / ext.height
+    val bmp = ImageBitmap(bw, bh)
+    val gCanvas = GraphicsCanvas(bmp)
+    val scope = CanvasDrawScope()
+    val scratch = Path()
+    scope.draw(
+        density = density,
+        layoutDirection = layoutDirection,
+        canvas = gCanvas,
+        size = Size(bw.toFloat(), bh.toFloat()),
+    ) {
+        paths.forEach { path ->
+            drawStrokeWithPressure(path, pdfBw, pdfBh, ext, scratch)
+        }
+    }
+    return bmp
+}
+
 @Composable
 fun DrawablePdfPage(
     bitmap: ImageBitmap,
@@ -173,6 +220,12 @@ fun DrawablePdfPage(
      * без рекомпозиции и без визуального скачка.
      */
     isZooming: () -> Boolean = { false },
+    /**
+     * Диспетчер для растеризации кэша завершённых штрихов вне main-потока.
+     * CPU-bound работа → [Dispatchers.Default] (в commonMain нет `IO`).
+     * Инъекция оставлена для тестов; вызывающим менять не нужно.
+     */
+    rasterDispatcher: CoroutineDispatcher = Dispatchers.Default,
     modifier: Modifier = Modifier,
 ) {
     val canvasSize = remember { mutableStateOf(IntSize.Zero) }
@@ -252,34 +305,30 @@ fun DrawablePdfPage(
     // for varying-pressure strokes this is hundreds of `drawPath` calls per
     // frame per stroke on screen, which dominates the input-to-pixel latency
     // budget once the page has any ink on it.
-    val completedLayer: ImageBitmap? = remember(
-        inkCacheDim,
-        pdfDrawingState.historyVersion.value,
-    ) {
+    //
+    // Растеризация вынесена с main-потока ([rasterDispatcher]): на странице с
+    // сотнями штрихов синхронный rebuild при коммите зума (смена бакета
+    // [inkCacheDim]) занимал сотни мс и ронял кадры. Пока строится новый
+    // битмап, на экране остаётся прежний (GPU-масштабируется тем же
+    // graphicsLayer'ом) — без пустого кадра. Счётчик [CachedInk.strokeCount]
+    // позволяет дорисовать ещё не вошедшие в кэш штрихи, пока он не догнал
+    // (см. anti-flicker ниже).
+    val completedInk = remember { mutableStateOf<CachedInk?>(null) }
+    LaunchedEffect(inkCacheDim, pdfDrawingState.historyVersion.value) {
         val bw = inkCacheDim.width
         val bh = inkCacheDim.height
-        if (bw <= 0 || bh <= 0 || pdfDrawingState.currentPaths.isEmpty()) return@remember null
-        val ext = pdfDrawingState.extent.value
-        // Кэш-битмап имеет размеры слота (т.е. покрывает PDF + extent-поля).
-        // PDF-пиксель внутри битмапа = bw / extent.width, штрихи нормализованы
-        // в PDF-page координатах — см. KDoc у `drawStrokeWithPressure`.
-        val pdfBw = bw.toFloat() / ext.width
-        val pdfBh = bh.toFloat() / ext.height
-        val bmp = ImageBitmap(bw, bh)
-        val gCanvas = GraphicsCanvas(bmp)
-        val scope = CanvasDrawScope()
-        val scratch = Path()
-        scope.draw(
-            density = density,
-            layoutDirection = layoutDirection,
-            canvas = gCanvas,
-            size = Size(bw.toFloat(), bh.toFloat()),
-        ) {
-            pdfDrawingState.currentPaths.forEach { path ->
-                drawStrokeWithPressure(path, pdfBw, pdfBh, ext, scratch)
-            }
+        if (bw <= 0 || bh <= 0 || pdfDrawingState.currentPaths.isEmpty()) {
+            completedInk.value = null
+            return@LaunchedEffect
         }
-        bmp
+        // Снимок состояния делаем на composition-потоке — нельзя итерировать
+        // SnapshotStateList из фонового диспетчера (конкурентная мутация вводом).
+        val paths = pdfDrawingState.currentPaths.toList()
+        val ext = pdfDrawingState.extent.value
+        val bmp = withContext(rasterDispatcher) {
+            buildCompletedInk(bw, bh, paths, ext, density, layoutDirection)
+        }
+        completedInk.value = CachedInk(paths.size, bmp)
     }
 
     // Ввод рисования поднят на уровень PdfPagesViewer'а (см.
@@ -337,11 +386,12 @@ fun DrawablePdfPage(
             // how much ink is on the page. Cache may be rasterised at a lower
             // resolution than the canvas (see INK_CACHE_MAX_DIMENSION_PX), so
             // stretch via dstSize.
-            completedLayer?.let { cache ->
+            val cached = completedInk.value
+            cached?.let { c ->
                 drawImage(
-                    image = cache,
+                    image = c.bitmap,
                     srcOffset = IntOffset.Zero,
-                    srcSize = IntSize(cache.width, cache.height),
+                    srcSize = IntSize(c.bitmap.width, c.bitmap.height),
                     dstOffset = IntOffset.Zero,
                     dstSize = IntSize(size.width.toInt(), size.height.toInt()),
                 )
@@ -361,6 +411,23 @@ fun DrawablePdfPage(
             val ext = pdfDrawingState.extent.value
             val pdfW = if (ext.width > 0f) size.width / ext.width else size.width
             val pdfH = if (ext.height > 0f) size.height / ext.height else size.height
+
+            // Anti-flicker: асинхронный кэш мог ещё не вобрать недавно
+            // завершённые штрихи (на тяжёлой странице rebuild идёт >50 мс —
+            // дольше hand-off'а low-latency overlay; быстрые штрихи подряд тоже
+            // обгоняют ребилд). Дорисуем хвост `currentPaths`, ещё не вошедший в
+            // кэш (`strokeCount`), поверх битмапа — дёшево (обычно 1 штрих) и
+            // закрывает «пропадание» штриха, пока он растеризуется под масштаб.
+            // Не делаем во время активного рисования — его показывает live-ветка
+            // / overlay.
+            val cachedCount = cached?.strokeCount ?: 0
+            val paths = pdfDrawingState.currentPaths
+            if (!pdfDrawingState.isDrawing.value && paths.size > cachedCount) {
+                for (i in cachedCount until paths.size) {
+                    drawStrokeWithPressure(paths[i], pdfW, pdfH, ext, livePath)
+                }
+            }
+
             if (!lowLatencyOverlayActive &&
                 pdfDrawingState.isDrawing.value &&
                 pdfDrawingState.livePoints.size > 1

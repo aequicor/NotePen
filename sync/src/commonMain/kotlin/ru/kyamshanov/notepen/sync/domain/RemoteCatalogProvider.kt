@@ -2,6 +2,8 @@ package ru.kyamshanov.notepen.sync.domain
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,6 +19,9 @@ import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 private val logger = KotlinLogging.logger {}
+
+/** Окно коалесинга всплеска сигналов «каталог изменился» перед рассылкой пирам. */
+private const val CATALOG_BROADCAST_DEBOUNCE_MS = 500L
 
 /**
  * Host-side service that builds the [RemoteCatalog] from local repositories
@@ -108,7 +113,11 @@ class RemoteCatalogProvider(
             "broadcastChanges: at least one of server/client must be provided"
         }
         scope.launch {
-            notifier.changes.collect {
+            // Коалесинг: серии мутаций (миграция истории на старте, частые
+            // автосейвы) порождали десятки RemoteCatalogChanged подряд, и каждый
+            // пир переспрашивал каталог. debounce схлопывает всплеск в один сигнал.
+            @OptIn(FlowPreview::class)
+            notifier.changes.debounce(CATALOG_BROADCAST_DEBOUNCE_MS).collect {
                 logger.info { "Local catalog changed — broadcasting RemoteCatalogChanged" }
                 if (server != null) {
                     runCatching { server.broadcast(NetworkMessage.RemoteCatalogChanged) }

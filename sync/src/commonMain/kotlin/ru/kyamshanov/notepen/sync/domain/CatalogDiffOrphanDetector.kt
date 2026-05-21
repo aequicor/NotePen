@@ -42,7 +42,16 @@ class CatalogDiffOrphanDetector(
             ) { snapshot, counts -> snapshot to counts }
                 .collect { (snapshot, counts) ->
                     if (counts.isEmpty() || snapshot.isEmpty()) return@collect
-                    val presentIds = snapshot.values
+                    // Судим только по НЕпустым каталогам. Пир, который сам является
+                    // чистым клиентом (мы для него host), отдаёт каталог с 0 recents —
+                    // это не доказательство, что документ «осиротел». Иначе host
+                    // помечал бы СВОИ же открытые документы OrphanedOnHost, видя
+                    // пустой каталог планшета (двунаправленный обмен каталогами).
+                    val judgingCatalogs = snapshot.values.filter {
+                        it.recent.isNotEmpty() || it.folders.isNotEmpty()
+                    }
+                    if (judgingCatalogs.isEmpty()) return@collect
+                    val presentIds = judgingCatalogs
                         .flatMap { catalog -> catalog.recent.map { it.documentId } }
                         .toHashSet()
                     for (documentId in counts.keys) {

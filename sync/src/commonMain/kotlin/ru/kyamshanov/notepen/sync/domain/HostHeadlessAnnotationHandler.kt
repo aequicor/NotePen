@@ -3,7 +3,6 @@ package ru.kyamshanov.notepen.sync.domain
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 
@@ -21,7 +20,6 @@ class HostHeadlessAnnotationHandler(
     private val server: PeerServer,
     private val provider: RemoteCatalogProvider,
     private val projection: HostAnnotationProjection,
-    private val repository: AnnotationRepository,
 ) {
 
     /** Starts the request loop; runs until [scope] is cancelled. */
@@ -67,39 +65,18 @@ class HostHeadlessAnnotationHandler(
             return
         }
         projection.follow(documentId, scope)
-        val state = projection.stateOf(documentId)
-        if (state == null) {
-            server.send(
-                peerId,
-                NetworkMessage.SaveResult(
-                    requestId = req.requestId,
-                    success = false,
-                    errorMessage = "No state available",
-                    documentId = documentId,
-                ),
-            )
-            return
-        }
-        val result = repository.save(
-            pdfPath = hostUri,
-            annotations = state.pages,
-            scale = state.scale,
-            pen = state.pen,
-            marker = state.marker,
-            eraser = state.eraser,
-            currentPage = state.currentPage,
-            currentPageOffset = state.currentPageOffset,
-            pageExtents = state.pageExtents,
-        )
-        logger.info {
-            "Headless save id=${req.requestId} doc=$documentId success=${result.isSuccess}"
-        }
+        // Коалесинг: вместо синхронной перезаписи всего файла на каждый
+        // SaveRequest планируем debounce-сброс проекции на диск. Проекция —
+        // источник истины (диск + правки пира), поэтому отдельный save здесь
+        // лишний и при активном рисовании молотил диск десятки раз подряд.
+        projection.requestFlush(documentId, scope)
+        logger.info { "Headless save id=${req.requestId} doc=$documentId accepted (flush scheduled)" }
         server.send(
             peerId,
             NetworkMessage.SaveResult(
                 requestId = req.requestId,
-                success = result.isSuccess,
-                errorMessage = result.exceptionOrNull()?.message,
+                success = true,
+                errorMessage = null,
                 documentId = documentId,
             ),
         )

@@ -219,7 +219,6 @@ fun main() {
         server = peerServer,
         provider = remoteCatalogProvider,
         projection = hostAnnotationProjection,
-        repository = hostAnnotationRepository,
     ).start(scope = appScope)
 
     // Tablet role (desktop may also act as one): cache the most recent
@@ -284,7 +283,7 @@ fun main() {
                 // Накапливаем штрих в headless-проекции сразу, не дожидаясь
                 // первого SaveRequest — иначе правки, сделанные на планшете до
                 // запроса сохранения, не попадут в сохранённый на хосте файл.
-                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta)
+                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta, appScope)
             }
         }
     }
@@ -293,7 +292,7 @@ fun main() {
             val msg = hostMessage.message
             if (msg is NetworkMessage.StrokeDeltaMessage) {
                 syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
-                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta)
+                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta, appScope)
             }
         }
     }
@@ -462,6 +461,13 @@ fun main() {
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
+                    // При открытии документа на ПК подмешиваем самое свежее
+                    // состояние из headless-проекции (in-memory), а не только
+                    // диск — так заметка, только что сделанная на планшете, видна
+                    // сразу, без гонки с дисковым flush'ем.
+                    hostAnnotationSnapshotFor = { docId ->
+                        hostAnnotationProjection.snapshotDtos(docId).orEmpty()
+                    },
                 )
             }
         }

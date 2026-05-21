@@ -1,5 +1,8 @@
 package ru.kyamshanov.notepen
 
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationBundle
@@ -112,6 +115,9 @@ private fun PageExtent.toDto() = PageExtentDto(left, top, right, bottom)
  */
 class AnnotationRepositoryJvmAndroid(
     private val storeFileFor: (pdfPath: String) -> File = { File("$it.notepen.json") },
+    // Дисковый IO должен идти не на main/AWT-потоке: запись JSON с сотнями штрихов
+    // блокировала UI и давала лаг рисования (перо «замирает» и скачком дорисовывает).
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AnnotationRepository {
 
     private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
@@ -127,54 +133,59 @@ class AnnotationRepositoryJvmAndroid(
         currentPageOffset: Int,
         favoritePageIndices: Set<Int>,
         pageExtents: Map<Int, PageExtent>,
-    ): Result<Unit> = try {
-        val dto = AnnotationDataDto(
-            pages = annotations.mapKeys { it.key.toString() }
-                .mapValues { (_, paths) -> paths.map { it.toDto() } },
-            scale = scale,
-            pen = pen.toDto(),
-            marker = marker.toDto(),
-            eraser = eraser.toDto(),
-            currentPage = currentPage,
-            currentPageOffset = currentPageOffset,
-            favoritePageIndices = favoritePageIndices.toList(),
-            pageExtents = pageExtents
-                .filterValues { it != PageExtent.Pdf }
-                .mapKeys { it.key.toString() }
-                .mapValues { (_, e) -> e.toDto() },
-        )
-        val file = storeFileFor(pdfPath)
-        file.parentFile?.mkdirs()
-        file.writeText(json.encodeToString(AnnotationDataDto.serializer(), dto))
-        Result.success(Unit)
-    } catch (e: IOException) {
-        Result.failure(e)
+    ): Result<Unit> = withContext(ioDispatcher) {
+        try {
+            val dto = AnnotationDataDto(
+                pages = annotations.mapKeys { it.key.toString() }
+                    .mapValues { (_, paths) -> paths.map { it.toDto() } },
+                scale = scale,
+                pen = pen.toDto(),
+                marker = marker.toDto(),
+                eraser = eraser.toDto(),
+                currentPage = currentPage,
+                currentPageOffset = currentPageOffset,
+                favoritePageIndices = favoritePageIndices.toList(),
+                pageExtents = pageExtents
+                    .filterValues { it != PageExtent.Pdf }
+                    .mapKeys { it.key.toString() }
+                    .mapValues { (_, e) -> e.toDto() },
+            )
+            val file = storeFileFor(pdfPath)
+            file.parentFile?.mkdirs()
+            file.writeText(json.encodeToString(AnnotationDataDto.serializer(), dto))
+            Result.success(Unit)
+        } catch (e: IOException) {
+            Result.failure(e)
+        }
     }
 
-    override suspend fun load(pdfPath: String): Result<AnnotationBundle> {
-        return try {
+    override suspend fun load(pdfPath: String): Result<AnnotationBundle> = withContext(ioDispatcher) {
+        try {
             val file = storeFileFor(pdfPath)
-            if (!file.exists()) return Result.success(AnnotationBundle())
-            val dto = json.decodeFromString(AnnotationDataDto.serializer(), file.readText())
-            val pages = dto.pages.mapKeys {
-                it.key.toIntOrNull() ?: return Result.success(AnnotationBundle())
-            }.mapValues { (_, paths) -> paths.map { it.toDomain() } }
-            val extents = dto.pageExtents.mapNotNull { (k, v) ->
-                k.toIntOrNull()?.let { it to v.toDomain() }
-            }.toMap()
-            Result.success(
-                AnnotationBundle(
-                    pages = pages,
-                    scale = dto.scale,
-                    pen = dto.pen?.toDomain() ?: PenSettings(),
-                    marker = dto.marker?.toDomain() ?: MarkerSettings(),
-                    eraser = dto.eraser?.toDomain() ?: EraserSettings(),
-                    currentPage = dto.currentPage,
-                    currentPageOffset = dto.currentPageOffset,
-                    favoritePageIndices = dto.favoritePageIndices.toSet(),
-                    pageExtents = extents,
-                ),
-            )
+            if (!file.exists()) {
+                Result.success(AnnotationBundle())
+            } else {
+                val dto = json.decodeFromString(AnnotationDataDto.serializer(), file.readText())
+                val pages = dto.pages.mapNotNull { (k, paths) ->
+                    k.toIntOrNull()?.let { it to paths.map { p -> p.toDomain() } }
+                }.toMap()
+                val extents = dto.pageExtents.mapNotNull { (k, v) ->
+                    k.toIntOrNull()?.let { it to v.toDomain() }
+                }.toMap()
+                Result.success(
+                    AnnotationBundle(
+                        pages = pages,
+                        scale = dto.scale,
+                        pen = dto.pen?.toDomain() ?: PenSettings(),
+                        marker = dto.marker?.toDomain() ?: MarkerSettings(),
+                        eraser = dto.eraser?.toDomain() ?: EraserSettings(),
+                        currentPage = dto.currentPage,
+                        currentPageOffset = dto.currentPageOffset,
+                        favoritePageIndices = dto.favoritePageIndices.toSet(),
+                        pageExtents = extents,
+                    ),
+                )
+            }
         } catch (e: Exception) {
             Result.failure(e)
         }
