@@ -7,6 +7,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.drawing.api.EraseGesture
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
@@ -254,6 +255,8 @@ class MultiPageDrawingController(
         onGestureStart(pageIndex, state.currentPaths.toList())
         state.strokeColorArgb.value = settingsColorArgb
         state.strokeWidth.value = settingsStrokeWidth
+        state.strokeToolKind.value =
+            if (gestureTool == ToolMode.MARKER) ToolKind.MARKER else ToolKind.PEN
         state.startDrawing(
             x = nx,
             y = ny,

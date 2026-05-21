@@ -44,4 +44,5 @@ include(":rendering:api")
 include(":rendering:impl")
 include(":drawing:api")
 include(":drawing:impl")
+include(":tools:marker")
 

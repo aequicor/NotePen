@@ -26,6 +26,7 @@ kotlin {
             implementation(projects.rendering.api)
             implementation(projects.drawing.api)
             implementation(projects.drawing.impl)
+            implementation(projects.tools.marker)
             implementation(projects.shared)
 
             implementation(compose.runtime)

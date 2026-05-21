@@ -50,6 +50,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
+import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
 import ru.kyamshanov.notepen.drawing.api.EraserPosition
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
@@ -179,7 +181,7 @@ private fun buildCompletedInk(
         size = Size(bw.toFloat(), bh.toFloat()),
     ) {
         paths.forEach { path ->
-            drawStrokeWithPressure(path, pdfBw, pdfBh, ext, scratch)
+            drawCompletedStroke(path, pdfBw, pdfBh, ext, scratch)
         }
     }
     return bmp
@@ -443,7 +445,7 @@ fun DrawablePdfPage(
                 // лишь последние штрихи, чтобы только что написанное не «пропадало».
                 val tailStart = maxOf(cachedCount, paths.size - MAX_UNCACHED_TAIL_STROKES)
                 for (i in tailStart until paths.size) {
-                    drawStrokeWithPressure(paths[i], pdfW, pdfH, ext, livePath)
+                    drawCompletedStroke(paths[i], pdfW, pdfH, ext, livePath)
                 }
             }
 
@@ -451,15 +453,27 @@ fun DrawablePdfPage(
                 pdfDrawingState.isDrawing.value &&
                 pdfDrawingState.livePoints.size > 1
             ) {
-                drawLiveStroke(
-                    points = pdfDrawingState.livePoints,
-                    colorArgb = pdfDrawingState.liveColorArgb.value,
-                    normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                    pdfWidth = pdfW,
-                    pdfHeight = pdfH,
-                    extent = ext,
-                    scratch = livePath,
-                )
+                if (pdfDrawingState.liveToolKind.value == ToolKind.MARKER) {
+                    drawMarkerStroke(
+                        points = pdfDrawingState.livePoints,
+                        colorArgb = pdfDrawingState.liveColorArgb.value,
+                        normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
+                        pdfWidth = pdfW,
+                        pdfHeight = pdfH,
+                        extent = ext,
+                        scratch = livePath,
+                    )
+                } else {
+                    drawLiveStroke(
+                        points = pdfDrawingState.livePoints,
+                        colorArgb = pdfDrawingState.liveColorArgb.value,
+                        normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
+                        pdfWidth = pdfW,
+                        pdfHeight = pdfH,
+                        extent = ext,
+                        scratch = livePath,
+                    )
+                }
             }
 
             // Индикатор зоны ластика (AC-12). Позиция курсора эрейзера
@@ -753,6 +767,33 @@ fun DrawScope.drawLiveStroke(
  *
  * Segments are joined with [StrokeCap.Round] so the width steps are invisible.
  */
+/**
+ * Renders a completed [stroke] with the renderer matching its [DrawingPath.toolType]:
+ * the marker's chisel-nib ribbon (multiply blend) or the pen's pressure-modulated
+ * round-nib path. Used by both the off-screen cache bake and the uncached tail.
+ */
+fun DrawScope.drawCompletedStroke(
+    stroke: DrawingPath,
+    pdfWidth: Float,
+    pdfHeight: Float,
+    extent: PageExtent,
+    scratch: Path,
+) {
+    if (stroke.toolType == ToolKind.MARKER) {
+        drawMarkerStroke(
+            points = stroke.points,
+            colorArgb = stroke.colorArgb,
+            normalizedStrokeWidth = stroke.strokeWidth,
+            pdfWidth = pdfWidth,
+            pdfHeight = pdfHeight,
+            extent = extent,
+            scratch = scratch,
+        )
+    } else {
+        drawStrokeWithPressure(stroke, pdfWidth, pdfHeight, extent, scratch)
+    }
+}
+
 fun DrawScope.drawStrokeWithPressure(
     stroke: DrawingPath,
     pdfWidth: Float,
