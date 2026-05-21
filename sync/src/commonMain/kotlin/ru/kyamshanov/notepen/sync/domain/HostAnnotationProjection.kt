@@ -2,6 +2,8 @@ package ru.kyamshanov.notepen.sync.domain
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -26,9 +28,19 @@ data class DocumentAnnotationState(
     val currentPage: Int,
     val currentPageOffset: Int,
     val pageExtents: Map<Int, PageExtent> = emptyMap(),
+    val favoritePageIndices: Set<Int> = emptySet(),
 )
 
 private val logger = KotlinLogging.logger {}
+
+/**
+ * Debounce before flushing peer-originated edits to the host's on-disk file.
+ * Маленькое значение: пользователь может переключиться на ПК и открыть документ
+ * уже через секунду после рисования на планшете — диск должен быть свежим к
+ * этому моменту, иначе ПК прочитает старую версию (без только что сделанной
+ * заметки). Коалесинг сохраняется (повторные дельты перезапускают таймер).
+ */
+private const val FLUSH_DEBOUNCE_MS = 300L
 
 /**
  * Host-side projection that mirrors every `documentId`'s stroke state in RAM,
@@ -60,6 +72,8 @@ class HostAnnotationProjection(
     private val mutex = Mutex()
     private val states = mutableMapOf<String, MutableDocumentState>()
     private val followedEngines = mutableSetOf<String>()
+    // Per-document debounce job for autonomous disk flush of peer-originated edits.
+    private val flushJobs = mutableMapOf<String, Job>()
 
     /**
      * Returns the current accumulated state for [documentId], lazily loading
@@ -101,10 +115,54 @@ class HostAnnotationProjection(
      * сообщение из `incomingMessages`).
      *
      * No-op, если документа нет в опубликованном каталоге (чужой/неизвестный id).
+     *
+     * После применения планирует debounce-сброс на диск ([scope]), чтобы
+     * правки с планшета попадали в файл хоста и были видны при следующем
+     * открытии на ПК — даже если планшет не пришлёт явный `SaveRequest`.
      */
-    suspend fun ingestPeerDelta(documentId: String, delta: StrokeDelta) {
+    suspend fun ingestPeerDelta(documentId: String, delta: StrokeDelta, scope: CoroutineScope) {
         ensureLoaded(documentId) ?: return
         apply(documentId, delta)
+        scheduleFlush(documentId, scope)
+    }
+
+    /**
+     * Гарантирует, что накопленное состояние [documentId] будет сброшено на диск
+     * (debounce-коалесинг). Используется headless-обработчиком вместо прямой
+     * записи на каждый `SaveRequest` — иначе при активном рисовании хост
+     * перезаписывал весь файл десятки раз подряд. No-op для документа вне каталога.
+     */
+    suspend fun requestFlush(documentId: String, scope: CoroutineScope) {
+        ensureLoaded(documentId) ?: return
+        scheduleFlush(documentId, scope)
+    }
+
+    private suspend fun scheduleFlush(documentId: String, scope: CoroutineScope) {
+        mutex.withLock {
+            flushJobs[documentId]?.cancel()
+            flushJobs[documentId] = scope.launch {
+                delay(FLUSH_DEBOUNCE_MS)
+                flushToDisk(documentId)
+            }
+        }
+    }
+
+    private suspend fun flushToDisk(documentId: String) {
+        val hostUri = provider.resolveUri(documentId) ?: return
+        val state = stateOf(documentId) ?: return
+        val result = repository.save(
+            pdfPath = hostUri,
+            annotations = state.pages,
+            scale = state.scale,
+            pen = state.pen,
+            marker = state.marker,
+            eraser = state.eraser,
+            currentPage = state.currentPage,
+            currentPageOffset = state.currentPageOffset,
+            favoritePageIndices = state.favoritePageIndices,
+            pageExtents = state.pageExtents,
+        )
+        logger.info { "Projection autosave to disk: doc=$documentId success=${result.isSuccess}" }
     }
 
     private suspend fun ensureLoaded(documentId: String): Unit? {
@@ -125,6 +183,7 @@ class HostAnnotationProjection(
                 state.eraser = bundle.eraser
                 state.currentPage = bundle.currentPage
                 state.currentPageOffset = bundle.currentPageOffset
+                state.favoritePageIndices = bundle.favoritePageIndices
                 bundle.pages.forEach { (page, paths) ->
                     state.pages.getOrPut(page) { mutableListOf() }.addAll(paths)
                 }
@@ -204,6 +263,7 @@ class HostAnnotationProjection(
         var eraser: EraserSettings = EraserSettings()
         var currentPage: Int = 0
         var currentPageOffset: Int = 0
+        var favoritePageIndices: Set<Int> = emptySet()
     }
 
     private fun MutableDocumentState.toImmutable() = DocumentAnnotationState(
@@ -215,5 +275,6 @@ class HostAnnotationProjection(
         currentPage = currentPage,
         currentPageOffset = currentPageOffset,
         pageExtents = pageExtents.toMap(),
+        favoritePageIndices = favoritePageIndices,
     )
 }

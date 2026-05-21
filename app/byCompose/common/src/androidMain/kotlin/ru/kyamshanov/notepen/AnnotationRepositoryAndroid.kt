@@ -11,10 +11,12 @@ import java.security.MessageDigest
  * is private either way, which is the expected behaviour on Android.
  */
 actual fun createAnnotationRepository(): AnnotationRepository =
-    AnnotationRepositoryJvmAndroid { pdfPath ->
-        val dir = File(AppContextHolder.context.filesDir, "annotations").apply { mkdirs() }
-        File(dir, "${pdfPath.sha256Hex()}.json")
-    }
+    AnnotationRepositoryJvmAndroid(
+        storeFileFor = { pdfPath ->
+            val dir = File(AppContextHolder.context.filesDir, "annotations").apply { mkdirs() }
+            File(dir, "${pdfPath.sha256Hex()}.json")
+        },
+    )
 
 private fun String.sha256Hex(): String =
     MessageDigest.getInstance("SHA-256")

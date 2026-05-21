@@ -703,7 +703,24 @@ fun DetailsContent(
         // returns to the tab keep the user's in-memory edits.
         if (pdfState.annotationsLoaded) return@LaunchedEffect
         pdfState.annotationsLoaded = true
+        // Host-side «виртуальный файл»: проекция (in-memory) — источник истины
+        // по штрихам (= диск + правки пира). Если она доступна и не пуста, ПК
+        // открывает документ через неё, минуя дисковую копию — иначе только что
+        // сделанная на планшете заметка терялась бы из-за гонки с дисковым
+        // flush'ем. Диск при этом всё равно даёт настройки/страницу/избранное.
+        val projectionStrokes = hostAnnotationSnapshotFor?.let { provider ->
+            runCatching { provider(documentId) }.getOrElse { e ->
+                logger.warn { "Host projection read failed for doc=$documentId: ${e::class.simpleName}" }
+                emptyList()
+            }
+        }.orEmpty()
+
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
+            logger.info {
+                "[load-diag] loaded annotations path=$filePath disk-strokes=" +
+                    "${bundle.pages.values.sumOf { it.size }} projection-strokes=${projectionStrokes.size} " +
+                    "pages=${bundle.pages.size}"
+            }
             // applyInitialState откладывает scroll/zoom до момента, когда
             // viewport измерится и страницы загрузятся — работает одинаково
             // на обеих платформах, без отдельной Android-ветки с
@@ -719,10 +736,15 @@ fun DetailsContent(
             penSettings = bundle.pen.sanitizedForCurrentScheme()
             markerSettings = bundle.marker.sanitizedForCurrentScheme()
             eraserSettings = bundle.eraser
-            bundle.pages.forEach { (pageIndex, paths) ->
-                val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
-                state.currentPaths.addAll(paths)
-                state.markHistoryChanged()
+            // Штрихи берём с диска ТОЛЬКО если проекция ничего не дала (обычный
+            // не-host сценарий). Иначе их добавит блок ниже из проекции — без
+            // дублей (диск не хранит strokeId, поэтому смешивать нельзя).
+            if (projectionStrokes.isEmpty()) {
+                bundle.pages.forEach { (pageIndex, paths) ->
+                    val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
+                    state.currentPaths.addAll(paths)
+                    state.markHistoryChanged()
+                }
             }
             bundle.pageExtents.forEach { (pageIndex, ext) ->
                 val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
@@ -731,26 +753,18 @@ fun DetailsContent(
             favoritePageIndices.clear()
             favoritePageIndices.addAll(bundle.favoritePageIndices)
         }
-        // Host-side: подмешиваем штрихи, накопленные проекцией из дельт пира,
-        // пока документ не был открыт локально. Делается после загрузки с диска,
-        // дедуп по strokeId — дисковые штрихи уже в currentPaths, поэтому
-        // фактически добавятся только правки, пришедшие от пира.
-        hostAnnotationSnapshotFor?.let { provider ->
-            val remoteStrokes = runCatching { provider(documentId) }.getOrElse { e ->
-                logger.warn { "Host projection seed failed for doc=$documentId: ${e::class.simpleName}" }
-                emptyList()
-            }
-            if (remoteStrokes.isNotEmpty()) {
-                logger.info { "Seeding ${remoteStrokes.size} projection stroke(s) for doc=$documentId" }
-                remoteStrokes.forEach { added ->
-                    val state = drawingStates.getOrPut(added.pageIndex) { PdfDrawingState() }
-                    added.pageExtent?.let { extDto ->
-                        state.setExtent(state.extent.value.union(extDto.toDomain()))
-                    }
-                    if (state.currentPaths.none { it.strokeId == added.strokeId }) {
-                        state.currentPaths.add(added.path.toDomain())
-                        state.markHistoryChanged()
-                    }
+        // Проекция авторитетна по штрихам — заполняем из неё (включает и дисковые,
+        // и пришедшие от пира). Дедуп по strokeId на случай повторного прохода.
+        if (projectionStrokes.isNotEmpty()) {
+            logger.info { "Seeding ${projectionStrokes.size} projection stroke(s) for doc=$documentId" }
+            projectionStrokes.forEach { added ->
+                val state = drawingStates.getOrPut(added.pageIndex) { PdfDrawingState() }
+                added.pageExtent?.let { extDto ->
+                    state.setExtent(state.extent.value.union(extDto.toDomain()))
+                }
+                if (state.currentPaths.none { it.strokeId == added.strokeId }) {
+                    state.currentPaths.add(added.path.toDomain())
+                    state.markHistoryChanged()
                 }
             }
         }
@@ -791,31 +805,6 @@ fun DetailsContent(
         }
     }
 
-    // Debounced auto-save of the active tab: ~2s after the user stops drawing /
-    // erasing / toggling favourites, the current state is silently written to
-    // disk. Drawing can only happen in the active tab, so saving just it covers
-    // every edit. Keyed on [pdfState] so switching tabs restarts the collector.
-    LaunchedEffect(pdfState) {
-        snapshotFlow {
-            var acc = 0
-            for ((_, s) in pdfState.drawingStates) {
-                acc += s.historyVersion.value
-            }
-            // Include tool settings so a thickness/color/eraser change is
-            // persisted by the debounce even when the user doesn't draw — the
-            // historyVersion alone wouldn't bump for a settings-only edit.
-            acc + pdfState.favoritePageIndices.size +
-                penSettings.hashCode() + markerSettings.hashCode() + eraserSettings.hashCode()
-        }
-            // First emission is the value already on disk (just loaded) — and
-            // the load itself bumps historyVersion. Dropping it avoids writing
-            // back what we just read.
-            .drop(1)
-            .distinctUntilChanged()
-            .debounce(AUTOSAVE_DEBOUNCE)
-            .collect { saveTab(pdfState) }
-    }
-
     // Если этот девайс подключён клиентом к чужому host-у — попросить host
     // сохранить документ у себя. На host-инстансе (PC) peerClient тоже не null,
     // но ни к кому не подключён: тогда remote-сохранение не требуется (локальная
@@ -842,6 +831,41 @@ fun DetailsContent(
             }
             logger.info { "[save-diag tablet] SaveRequest id=$requestId reply=$reply" }
         }
+    }
+
+    // Debounced auto-save of the active tab: ~2s after the user stops drawing /
+    // erasing / toggling favourites, the current state is silently written to
+    // disk. Drawing can only happen in the active tab, so saving just it covers
+    // every edit. Keyed on [pdfState] so switching tabs restarts the collector.
+    LaunchedEffect(pdfState) {
+        snapshotFlow {
+            var acc = 0
+            for ((_, s) in pdfState.drawingStates) {
+                acc += s.historyVersion.value
+            }
+            // Include tool settings so a thickness/color/eraser change is
+            // persisted by the debounce even when the user doesn't draw — the
+            // historyVersion alone wouldn't bump for a settings-only edit.
+            acc + pdfState.favoritePageIndices.size +
+                penSettings.hashCode() + markerSettings.hashCode() + eraserSettings.hashCode()
+        }
+            // First emission is the value already on disk (just loaded) — and
+            // the load itself bumps historyVersion. Dropping it avoids writing
+            // back what we just read.
+            .drop(1)
+            .distinctUntilChanged()
+            .debounce(AUTOSAVE_DEBOUNCE)
+            .collect {
+                saveTab(pdfState)
+                // Если документ открыт с удалённого host-а — попросить его
+                // тоже сохранить у себя, чтобы правки с планшета попадали в
+                // файл на ПК без явного выхода из редактора. Не блокируем
+                // сборщик ожиданием ответа. Только для remote-документов —
+                // иначе host отвечал бы DocumentNotFound на каждый автосейв.
+                if (isRemoteOpenedDoc) {
+                    coroutineScope.launch { requestRemoteSaveIfConnected() }
+                }
+            }
     }
 
     val onBackWithSave: () -> Unit = {
