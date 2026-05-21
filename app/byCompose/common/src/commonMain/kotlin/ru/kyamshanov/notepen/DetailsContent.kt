@@ -2,6 +2,10 @@ package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -35,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -56,13 +61,18 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.layout.offset
+import kotlin.math.roundToInt
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
@@ -81,6 +91,7 @@ import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tabs.DocumentId
 import ru.kyamshanov.notepen.tabs.LayoutTemplate
+import ru.kyamshanov.notepen.tabs.WorkspaceLayout
 import ru.kyamshanov.notepen.tabs.PdfDocumentState
 import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
 import ru.kyamshanov.notepen.tabs.GridContainer
@@ -95,6 +106,7 @@ internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 
 private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
+private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
 
 /**
  * Editor screen: a unified toolbar plus a grid of 1–[ru.kyamshanov.notepen.tabs.MAX_PANELS]
@@ -506,10 +518,23 @@ fun DetailsContent(
                 )
             }
 
+            // ---- Page-indicator airbar: slides to the centre of the focused panel ----
+            val airbarCenterFraction by animateFloatAsState(
+                targetValue = focusedPanelCenterXFraction(layout),
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioNoBouncy,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+                label = "airbarCenter",
+            )
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
+                    .graphicsLayer {
+                        translationX =
+                            (airbarCenterFraction - 0.5f) * windowSizeInPx.width.toFloat()
+                    }
                     .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(top = 8.dp),
             ) {
@@ -525,6 +550,59 @@ fun DetailsContent(
                         modifier = Modifier.onSizeChanged {
                             landscapePageCounterHeightDp = with(density) { it.height.toDp() }
                         },
+                    )
+                }
+            }
+
+            // ---- Thumbnail sidebar overlay: above the toolbar rail ----
+            // Rendered here (after LandscapeToolRail) so it draws on top of the toolbar.
+            val focusedState = tabSession.focusedActiveState
+            val focusedStartFraction = focusedPanelStartXFraction(layout)
+            if (focusedState != null) {
+                val drawingStates = focusedState.drawingStates
+                val annotatedPageIndices by remember(drawingStates) {
+                    derivedStateOf {
+                        drawingStates.entries
+                            .filter { it.value.currentPaths.isNotEmpty() }
+                            .map { it.key }
+                            .toSet()
+                    }
+                }
+                val pagePaths: (Int) -> List<DrawingPath> = remember(drawingStates) {
+                    { idx -> drawingStates[idx]?.currentPaths ?: emptyList() }
+                }
+                AnimatedVisibility(
+                    visible = showThumbnails && focusedState.pages.isNotEmpty(),
+                    enter = slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                        fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+                    exit = slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                        fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .offset {
+                            IntOffset(
+                                x = (focusedStartFraction * windowSizeInPx.width.toFloat())
+                                    .roundToInt(),
+                                y = 0,
+                            )
+                        },
+                ) {
+                    PageThumbnailsSidebar(
+                        pages = focusedState.pages,
+                        pdfDocument = focusedState.pdfDocument,
+                        renderer = renderer,
+                        currentPage = focusedState.pdfViewerState.firstVisiblePageIndex,
+                        onPageClick = { pageIndex ->
+                            focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
+                        },
+                        annotatedPageIndices = annotatedPageIndices,
+                        favoritePageIndices = focusedState.favoritePageIndices.toSet(),
+                        onToggleFavorite = { pageIndex ->
+                            if (!focusedState.favoritePageIndices.remove(pageIndex)) {
+                                focusedState.favoritePageIndices.add(pageIndex)
+                            }
+                        },
+                        pagePaths = pagePaths,
                     )
                 }
             }
@@ -629,5 +707,48 @@ fun DetailsContent(
                 onDismiss = { pendingPanelMove = null },
             )
         }
+    }
+}
+
+/**
+ * Returns the left-edge position of the focused panel as a fraction of screen width [0..1].
+ * Used to offset the thumbnail sidebar overlay so it aligns with the panel's left edge.
+ */
+private fun focusedPanelStartXFraction(layout: WorkspaceLayout): Float {
+    val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
+    val r = layout.ratios
+    return when (layout.template) {
+        LayoutTemplate.FULL -> 0f
+        LayoutTemplate.COLUMNS_2 -> if (idx == 0) 0f else r[0]
+        LayoutTemplate.COLUMNS_3 -> when (idx) {
+            0 -> 0f
+            1 -> r[0]
+            else -> r[1]
+        }
+        LayoutTemplate.LEFT_PLUS_STACK -> if (idx == 0) 0f else r[0]
+        LayoutTemplate.GRID_2X2 -> if (idx == 0 || idx == 2) 0f else r[0]
+    }
+}
+
+/**
+ * Returns the horizontal centre of the focused panel as a fraction of screen width [0..1].
+ * Used to smoothly slide the [PageIndicatorAirbar] over the active panel.
+ */
+private fun focusedPanelCenterXFraction(layout: WorkspaceLayout): Float {
+    val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
+    val r = layout.ratios
+    return when (layout.template) {
+        LayoutTemplate.FULL -> 0.5f
+        LayoutTemplate.COLUMNS_2 ->
+            if (idx == 0) r[0] / 2f else r[0] + (1f - r[0]) / 2f
+        LayoutTemplate.COLUMNS_3 -> when (idx) {
+            0 -> r[0] / 2f
+            1 -> r[0] + (r[1] - r[0]) / 2f
+            else -> r[1] + (1f - r[1]) / 2f
+        }
+        LayoutTemplate.LEFT_PLUS_STACK ->
+            if (idx == 0) r[0] / 2f else r[0] + (1f - r[0]) / 2f
+        LayoutTemplate.GRID_2X2 ->
+            if (idx == 0 || idx == 2) r[0] / 2f else r[0] + (1f - r[0]) / 2f
     }
 }

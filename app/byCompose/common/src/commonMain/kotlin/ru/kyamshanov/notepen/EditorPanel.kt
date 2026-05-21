@@ -902,31 +902,6 @@ fun EditorPanel(
                 }
             }
 
-            AnimatedVisibility(
-                visible = showThumbnails && pages.isNotEmpty(),
-                enter = slideInHorizontally(animationSpec = tween(PANEL_SIDEBAR_ANIM_MS)) { -it } +
-                    fadeIn(animationSpec = tween(PANEL_SIDEBAR_ANIM_MS)),
-                exit = slideOutHorizontally(animationSpec = tween(PANEL_SIDEBAR_ANIM_MS)) { -it } +
-                    fadeOut(animationSpec = tween(PANEL_SIDEBAR_ANIM_MS)),
-                modifier = Modifier.align(Alignment.CenterStart),
-            ) {
-                PageThumbnailsSidebar(
-                    pages = pages,
-                    pdfDocument = pdfDocument,
-                    renderer = renderer,
-                    currentPage = firstVisiblePage,
-                    onPageClick = { pageIndex -> pdfViewerState.scrollToPage(pageIndex, 0) },
-                    annotatedPageIndices = annotatedPageIndices,
-                    favoritePageIndices = favoritePageIndices.toSet(),
-                    onToggleFavorite = { pageIndex ->
-                        if (!favoritePageIndices.remove(pageIndex)) favoritePageIndices.add(pageIndex)
-                    },
-                    pagePaths = remember(drawingStates) {
-                        { pageIndex -> drawingStates[pageIndex]?.currentPaths ?: emptyList() }
-                    },
-                )
-            }
-
             if (showOfflineBanner) {
                 Surface(
                     color = MaterialTheme.colorScheme.errorContainer,

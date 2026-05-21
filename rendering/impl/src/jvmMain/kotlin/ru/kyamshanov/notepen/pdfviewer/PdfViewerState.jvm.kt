@@ -168,7 +168,10 @@ actual class PdfViewerState internal constructor(
             zoomTarget = targetZoom,
         )
         zoom = newZoom
-        pan = newPan
+        // Если после зума страница помещается во вьюпорт — центрируем её
+        // (zoom-out до размера меньше окна → страница встаёт по центру). По
+        // переполняющим осям — обычный edge-clamp.
+        pan = centeredAndClamped(newPan)
     }
 
     actual fun zoomBy(factor: Float, focus: Offset) {
@@ -226,7 +229,12 @@ actual class PdfViewerState internal constructor(
         val newZoom = (zoom * s).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
         val newPan = Offset(x = pan.x * s + t.x, y = pan.y * s + t.y)
         zoom = newZoom
-        pan = newPan
+        // Если после пинча страница умещается по ширине во вьюпорт — центрируем
+        // её (zoom-out до размера меньше окна встаёт по центру). Пока ширина
+        // переполняет, pan НЕ трогаем: edge-clamp в этой точке дал бы видимый
+        // «прыжок» к краю при off-center пинч-зуме (см. KDoc выше).
+        val contentW = (layout.contentRightPx - layout.contentLeftPx) * newZoom
+        pan = if (contentW <= viewportSize.width) centeredAndClamped(newPan) else newPan
         gestureScale = 1f
         gestureTranslation = Offset.Zero
     }
@@ -298,6 +306,18 @@ actual class PdfViewerState internal constructor(
         zoom = zoom,
         viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
     )
+
+    /**
+     * Центрирует [p] по тем осям, на которых контент помещается во вьюпорт
+     * (через [PdfViewerMath.centeringClamp]), затем кламп'ит к границам. Нужно
+     * для зума: когда после уменьшения масштаба страница стала меньше окна, она
+     * автоматически встаёт по центру; по переполняющим осям — обычный edge-clamp.
+     */
+    private fun centeredAndClamped(p: Offset): Offset {
+        val vp = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat())
+        val centered = PdfViewerMath.centeringClamp(p, layout, zoom, vp)
+        return PdfViewerMath.clampPan(centered, layout, zoom, vp)
+    }
 
     companion object {
 
