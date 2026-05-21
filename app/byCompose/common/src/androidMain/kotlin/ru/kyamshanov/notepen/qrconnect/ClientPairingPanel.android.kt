@@ -125,6 +125,10 @@ actual fun CameraScanSlot(
         )
 
         var previewView by remember { mutableStateOf<PreviewView?>(null) }
+        // Held so the "rescan" action on a failed attempt can re-arm the same
+        // scanner without leaving the screen (viewModel.start cancels the old
+        // cycle and resets state to Scanning).
+        var scanner by remember { mutableStateOf<MlKitQrScanner?>(null) }
 
         Box(
             modifier = Modifier
@@ -142,7 +146,16 @@ actual fun CameraScanSlot(
                 is ClientQrPairingCoordinator.State.Connecting -> CircularProgressIndicator()
                 is ClientQrPairingCoordinator.State.Connected -> Text("Подключено", color = Color.White)
                 is ClientQrPairingCoordinator.State.Failed ->
-                    Text(text = "Ошибка: ${s.error.message}", color = Color.White, textAlign = TextAlign.Center)
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(16.dp),
+                    ) {
+                        Text(text = "Ошибка: ${s.error.message}", color = Color.White, textAlign = TextAlign.Center)
+                        scanner?.let { sc ->
+                            Button(onClick = { viewModel.start(sc) }) { Text("Сканировать снова") }
+                        }
+                    }
             }
         }
 
@@ -151,12 +164,13 @@ actual fun CameraScanSlot(
             val lifecycleOwner: LifecycleOwner? = remember(pv) { pv.findViewTreeLifecycleOwner() }
             if (lifecycleOwner != null) {
                 DisposableEffect(pv, lifecycleOwner) {
-                    val scanner = MlKitQrScanner(
+                    val sc = MlKitQrScanner(
                         context = context,
                         lifecycleOwner = lifecycleOwner,
                         previewView = pv,
                     )
-                    val job = viewModel.start(scanner)
+                    scanner = sc
+                    val job = viewModel.start(sc)
                     onDispose { job.cancel() }
                 }
             }

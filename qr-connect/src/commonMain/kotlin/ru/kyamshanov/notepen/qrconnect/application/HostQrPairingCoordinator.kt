@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.qrconnect.domain.QrConnectError
@@ -38,6 +39,14 @@ class HostQrPairingCoordinator(
     private val encoder: QrEncoder,
     private val hostDeviceName: String,
     private val qrSize: Int = DEFAULT_QR_SIZE,
+    /**
+     * Emits the id of a peer whose pending approval the user has resolved
+     * (e.g. pressed "reject"). Clears the pending-approval dialog: reject leaves
+     * no other observable signal (the peer never enters [PeerServer.connectedPeers]),
+     * so without this the dialog would stick. A subsequent connection attempt
+     * re-emits [PeerServer.pendingApprovals] and re-shows the prompt.
+     */
+    private val approvalResolutions: Flow<String> = emptyFlow(),
 ) {
 
     /** UI-facing state machine for the QR pairing flow. */
@@ -106,6 +115,12 @@ class HostQrPairingCoordinator(
                 if (cur != null && connected.any { it.id == cur.id }) {
                     pending.value = null
                 }
+            }
+        }
+        // Clear pending when the user resolves it (reject) — see [approvalResolutions].
+        launch {
+            approvalResolutions.collect { resolvedId ->
+                if (pending.value?.id == resolvedId) pending.value = null
             }
         }
         // Watch lifecycle for terminal Stopped (Idle = server hasn't started yet

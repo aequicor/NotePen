@@ -131,6 +131,13 @@ class MainActivity : ComponentActivity() {
             install(WebSockets) {
                 contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
             }
+            // Bound only the TCP connect/handshake (NOT the long-lived WS session):
+            // when the host is gone, a reconnect attempt must fail fast so the
+            // reconnect deadline is honoured and the sync indicator clears instead
+            // of staying "reconnecting" (yellow) indefinitely on a hung connect.
+            install(io.ktor.client.plugins.HttpTimeout) {
+                connectTimeoutMillis = 4_000L
+            }
         }
         val syncClient = KtorSyncClient(httpClient)
         // Persistent offline buffer (SQLDelight-backed) — survives process death

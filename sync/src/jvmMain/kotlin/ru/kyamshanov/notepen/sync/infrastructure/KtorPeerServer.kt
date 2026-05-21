@@ -78,6 +78,11 @@ class KtorPeerServer(
     private val approvalDeferreds = mutableMapOf<String, CompletableDeferred<Boolean>>()
     private val pendingPeers = mutableMapOf<String, DeviceInfo>()
 
+    // Peer ids approved once in this server cycle. A reconnect from such a peer
+    // is auto-accepted (no second approval prompt), so the client's silent
+    // reconnect loop can re-pair without user interaction. Cleared on teardown.
+    private val approvedPeerIds = mutableSetOf<String>()
+
     private var engine: EmbeddedServer<*, *>? = null
     private val serverScope = CoroutineScope(ioDispatcher + Job())
 
@@ -151,30 +156,47 @@ class KtorPeerServer(
             return
         }
         val peer = first.device
-        // Refuse duplicate connections from the same device id — the existing
-        // session is authoritative; the second attempt is likely a stale retry.
+        // Reconnect handling: a new connection from a device id that already has
+        // a (possibly stale, half-open) session REPLACES the old one rather than
+        // being rejected — otherwise the client's silent reconnect was refused
+        // with "already connected" until the dead TCP timed out. A peer approved
+        // earlier this cycle is auto-accepted (no second prompt), so reconnects
+        // are seamless.
+        val replaced: DefaultWebSocketServerSession?
+        val autoApprove: Boolean
         sessionMutex.withLock {
-            if (sessions.containsKey(peer.id) || pendingPeers.containsKey(peer.id)) {
-                session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("already connected"))
+            // A first-time approval is mid-decision — don't disrupt it; the legit
+            // client will retry and succeed once the user approves.
+            if (pendingPeers.containsKey(peer.id)) {
+                session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("approval in progress"))
                 session.close()
                 return
             }
-            pendingPeers[peer.id] = peer
+            replaced = sessions.remove(peer.id)
+            autoApprove = peer.id in approvedPeerIds
+            if (!autoApprove) pendingPeers[peer.id] = peer
         }
+        // Evict the old session outside the lock (close can block on a half-open
+        // socket). Plain graceful close — no `Disconnect` message, the old client
+        // must not tear down its own document state on a mere replacement.
+        replaced?.let { old -> runCatching { old.close(CloseReason(CloseReason.Codes.NORMAL, "replaced")) } }
 
-        val approvalDeferred = CompletableDeferred<Boolean>()
-        sessionMutex.withLock { approvalDeferreds[peer.id] = approvalDeferred }
-        _pendingApprovals.emit(peer)
+        if (!autoApprove) {
+            val approvalDeferred = CompletableDeferred<Boolean>()
+            sessionMutex.withLock { approvalDeferreds[peer.id] = approvalDeferred }
+            _pendingApprovals.emit(peer)
 
-        val approved = approvalDeferred.await()
-        sessionMutex.withLock {
-            approvalDeferreds.remove(peer.id)
-            pendingPeers.remove(peer.id)
-        }
-        if (!approved) {
-            runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.Disconnect) }
-            session.close(CloseReason(CloseReason.Codes.NORMAL, "rejected by user"))
-            return
+            val approved = approvalDeferred.await()
+            sessionMutex.withLock {
+                approvalDeferreds.remove(peer.id)
+                pendingPeers.remove(peer.id)
+                if (approved) approvedPeerIds.add(peer.id)
+            }
+            if (!approved) {
+                runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.Disconnect) }
+                session.close(CloseReason(CloseReason.Codes.NORMAL, "rejected by user"))
+                return
+            }
         }
 
         session.sendSerialized<NetworkMessage>(NetworkMessage.PairAccepted(selfInfo))
@@ -194,9 +216,14 @@ class KtorPeerServer(
         } catch (e: Exception) {
             logger.warn { "Session for ${peer.name} ended: ${e.message}" }
         } finally {
+            // Identity guard: only tear down the maps if THIS session is still the
+            // registered one. A reconnect may have already replaced us — without
+            // this check the old session's teardown would wipe the new entry.
             sessionMutex.withLock {
-                sessions.remove(peer.id)
-                peerInfoById.remove(peer.id)
+                if (sessions[peer.id] === session) {
+                    sessions.remove(peer.id)
+                    peerInfoById.remove(peer.id)
+                }
             }
             publishConnectedPeers()
         }
@@ -254,6 +281,7 @@ class KtorPeerServer(
         sessionMutex.withLock {
             sessions.clear()
             peerInfoById.clear()
+            approvedPeerIds.clear()
         }
         publishConnectedPeers()
     }

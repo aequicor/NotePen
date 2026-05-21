@@ -133,6 +133,12 @@ fun main() {
         install(WebSockets) {
             contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
         }
+        // Bound only the TCP connect/handshake (NOT the long-lived WS session) so
+        // a reconnect to a vanished host fails fast and the reconnect deadline is
+        // honoured instead of hanging in "reconnecting".
+        install(io.ktor.client.plugins.HttpTimeout) {
+            connectTimeoutMillis = 4_000L
+        }
     }
     val syncClient = KtorSyncClient(httpClient)
 
