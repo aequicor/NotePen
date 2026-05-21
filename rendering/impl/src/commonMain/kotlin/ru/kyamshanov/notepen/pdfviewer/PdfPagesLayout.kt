@@ -144,7 +144,7 @@ object PdfViewerMath {
      * На осях, где контент помещается в экран, буфер не применяется — страница
      * остаётся в пределах вьюпорта.
      */
-    private const val OVERSCROLL_PAGE_FRACTION = 0.5f
+    private const val OVERSCROLL_PAGE_FRACTION = 0.25f
 
     /**
      * Потолок размера слота страницы в пикселях для layout-фазы. Compose
