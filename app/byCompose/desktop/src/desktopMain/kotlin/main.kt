@@ -50,6 +50,7 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesk
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
+import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
@@ -311,7 +312,7 @@ fun main() {
             DefaultRootComponent(
                 componentContext = DefaultComponentContext(lifecycle = lifecycle),
                 historyRepository = historyRepo,
-                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog ->
+                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder ->
                     MainScreenComponent(
                         componentContext = componentContext,
                         historyRepository = historyRepo,
@@ -322,8 +323,9 @@ fun main() {
                         thumbnailRepository = thumbnailRepo,
                         thumbnailGenerator = thumbnailGenerator,
                         onOpenEditor = onOpenEditor,
-                        onOpenFilePicker = { FilePicker().pickPdfFile() },
+                        onOpenFilePicker = { FilePicker().pickDocument() },
                         onOpenPeerCatalog = onOpenPeerCatalog,
+                        onOpenFolder = onOpenFolder,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIds,
                     )
@@ -339,6 +341,22 @@ fun main() {
                         receivedPdfDir = receivedDir,
                         onBack = onBack,
                         onOpenEditor = onOpenEditor,
+                    )
+                },
+                folderComponentFactory = { ctx, folderId, folderName, onBack, onOpenEditor, onOpenFolder ->
+                    FolderContentsComponentImpl(
+                        componentContext = ctx,
+                        folderId = folderId,
+                        folderName = folderName,
+                        historyRepository = historyRepo,
+                        folderRepository = folderRepo,
+                        addToHistory = AddToHistoryUseCase(historyRepo),
+                        thumbnailRepository = thumbnailRepo,
+                        thumbnailGenerator = thumbnailGenerator,
+                        onBack = onBack,
+                        onOpenFilePicker = { FilePicker().pickDocument() },
+                        onOpenEditor = onOpenEditor,
+                        onOpenFolder = onOpenFolder,
                     )
                 },
             )

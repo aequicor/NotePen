@@ -6,9 +6,12 @@ package ru.kyamshanov.notepen.mainscreen.domain.model
  * @property id Уникальный идентификатор папки (UUID v4).
  * @property name Отображаемое имя папки. Максимум 255 символов, не пустое.
  * @property createdAt Момент создания папки (epochMillis).
+ * @property parentId Идентификатор родительской папки или `null` для папки верхнего уровня.
+ *           Поддерживает вложенность папок произвольной глубины.
  */
 data class Folder(
     val id: String,
     val name: String,
     val createdAt: Long,
+    val parentId: String? = null,
 )

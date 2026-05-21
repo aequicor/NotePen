@@ -29,6 +29,7 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import io.github.oshai.kotlinlogging.KotlinLogging
+import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.model.FolderUiModel
 
 private val logger = KotlinLogging.logger {}
@@ -57,7 +58,9 @@ internal fun shouldAcceptDragEvent(mimeTypes: Set<String>): Boolean =
  * @param model UI-модель папки.
  * @param onClick Обработчик нажатия на карточку.
  * @param onDelete Обработчик нажатия кнопки меню (удаление).
- * @param onDropFile Обратный вызов при сбрасывании файла; принимает URI файла.
+ * @param onDropFile Обратный вызов при сбрасывании внутреннего файла; принимает URI файла.
+ * @param onDropExternalFiles Обратный вызов при сбрасывании внешних файлов из ОС
+ *        (Finder/проводник); принимает список путей.
  * @param modifier Модификатор компонента.
  */
 @Composable
@@ -66,13 +69,24 @@ fun FolderCard(
     onClick: () -> Unit,
     onDelete: () -> Unit,
     onDropFile: (fileUri: String) -> Unit = {},
+    onDropExternalFiles: (fileUris: List<String>) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var isHovered by remember { mutableStateOf(false) }
 
-    val dropTarget = remember(onDropFile) {
+    val dropTarget = remember(onDropFile, onDropExternalFiles) {
         object : DragAndDropTarget {
             override fun onDrop(event: DragAndDropEvent): Boolean {
+                if (event.isExternalFileDrop()) {
+                    val uris = extractExternalFileUris(event)
+                    return if (uris.isNotEmpty()) {
+                        onDropExternalFiles(uris)
+                        true
+                    } else {
+                        logger.warn { "FolderCard.onDrop: external drop carried no supported files" }
+                        false
+                    }
+                }
                 val uri = extractFileUri(event)
                 return if (uri != null) {
                     onDropFile(uri)
@@ -100,11 +114,17 @@ fun FolderCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .dragAndDropTarget(
-                shouldStartDragAndDrop = { event ->
-                    shouldAcceptDragEvent(event.dragEventMimeTypes())
+            .then(
+                if (isDragAndDropSupported) {
+                    Modifier.dragAndDropTarget(
+                        shouldStartDragAndDrop = { event ->
+                            shouldAcceptDragEvent(event.dragEventMimeTypes()) || event.isExternalFileDrop()
+                        },
+                        target = dropTarget,
+                    )
+                } else {
+                    Modifier
                 },
-                target = dropTarget,
             ),
         onClick = onClick,
     ) {

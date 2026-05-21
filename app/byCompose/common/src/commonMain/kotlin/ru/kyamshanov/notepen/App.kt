@@ -43,6 +43,7 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
+import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
@@ -96,6 +97,8 @@ fun App(
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     /** Реестр `localPath → documentId` для remote-кешированных PDF. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /** Host-side провайдер накопленных проекцией штрихов; см. [RootContent]. */
+    hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     var showSyncPanel by remember { mutableStateOf(false) }
@@ -117,6 +120,7 @@ fun App(
                     receivedPdfDir = receivedPdfDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
+                    hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                     modifier = Modifier.fillMaxSize(),
                 )
 

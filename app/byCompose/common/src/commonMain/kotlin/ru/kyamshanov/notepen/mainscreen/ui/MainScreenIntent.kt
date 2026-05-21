@@ -140,6 +140,25 @@ sealed class MainScreenIntent {
      */
     data class DropOnFolder(val folderId: String) : MainScreenIntent()
 
+    /**
+     * Внешний(ие) файл(ы) из ОС (Finder/проводник) брошены на библиотеку (главный экран) —
+     * открыть первый в редакторе, остальные добавить в недавние.
+     *
+     * @property uris Канонические пути брошенных файлов.
+     */
+    data class ExternalFilesDroppedOnLibrary(val uris: List<String>) : MainScreenIntent()
+
+    /**
+     * Внешний(ие) файл(ы) из ОС (Finder/проводник) брошены на карточку папки — добавить в папку.
+     *
+     * @property folderId UUID папки, на которую были брошены файлы.
+     * @property uris Канонические пути брошенных файлов.
+     */
+    data class ExternalFilesDroppedOnFolder(
+        val folderId: String,
+        val uris: List<String>,
+    ) : MainScreenIntent()
+
     /** UI подтвердил обработку события успеха — сбросить [ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent]. */
     object OnSuccessEventHandled : MainScreenIntent()
 
@@ -150,4 +169,12 @@ sealed class MainScreenIntent {
      * @property displayName Имя пира для заголовка sub-экрана.
      */
     data class OpenPeer(val peerId: String, val displayName: String) : MainScreenIntent()
+
+    /**
+     * Пользователь тапнул по карточке папки — открыть sub-экран содержимого.
+     *
+     * @property folderId UUID папки.
+     * @property folderName Имя папки для заголовка sub-экрана.
+     */
+    data class OpenFolder(val folderId: String, val folderName: String) : MainScreenIntent()
 }

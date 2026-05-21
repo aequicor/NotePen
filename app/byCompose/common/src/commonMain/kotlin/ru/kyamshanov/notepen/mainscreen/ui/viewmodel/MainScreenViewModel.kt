@@ -33,6 +33,7 @@ import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenFileResult
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
+import ru.kyamshanov.notepen.resolveDocumentDisplayName
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.model.CreateFolderDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.DeleteFolderDialogState
@@ -125,6 +126,14 @@ class MainScreenViewModel(
     /** Защита от двойного нажатия (CC-7). */
     private var isNavigating = false
 
+    /**
+     * Защита от двойного нажатия «Создать папку»: каждый интент исполняется
+     * в отдельной корутине, поэтому два быстрых тапа по кнопке подтверждения
+     * порождали два вызова [FolderRepository.create] с разными UUID — папка
+     * дублировалась (в т.ч. в каталоге, отдаваемом пиру).
+     */
+    private var isCreatingFolder = false
+
     /** Семафор, ограничивающий параллельную генерацию миниатюр (CC-13). */
     private val thumbnailSemaphore = Semaphore(4)
 
@@ -159,9 +168,13 @@ class MainScreenViewModel(
             is MainScreenIntent.DragStarted -> handleDragStarted(intent)
             is MainScreenIntent.DragCancelled -> handleDragCancelled()
             is MainScreenIntent.DropOnFolder -> handleDropOnFolder(intent)
+            is MainScreenIntent.ExternalFilesDroppedOnLibrary -> handleExternalDropOnLibrary(intent.uris)
+            is MainScreenIntent.ExternalFilesDroppedOnFolder ->
+                handleExternalDropOnFolder(intent.folderId, intent.uris)
             is MainScreenIntent.OnSuccessEventHandled ->
                 _state.update { it.copy(successEvent = null) }
             is MainScreenIntent.OpenPeer -> openPeer(intent.peerId, intent.displayName)
+            is MainScreenIntent.OpenFolder -> openFolder(intent.folderId, intent.folderName)
         }
     }
 
@@ -170,6 +183,14 @@ class MainScreenViewModel(
         isNavigating = true
         _state.update {
             it.copy(navigationTarget = NavigationTarget.PeerCatalog(peerId, displayName))
+        }
+    }
+
+    private fun openFolder(folderId: String, folderName: String) {
+        if (isNavigating) return
+        isNavigating = true
+        _state.update {
+            it.copy(navigationTarget = NavigationTarget.Folder(folderId, folderName))
         }
     }
 
@@ -198,11 +219,71 @@ class MainScreenViewModel(
         addFileToFolder(intent.folderId, currentDrag.fileUri, folderName)
     }
 
+    /**
+     * Внешний drop на главный экран: открыть первый файл в редакторе, остальные — в недавние.
+     */
+    private suspend fun handleExternalDropOnLibrary(uris: List<String>) {
+        if (_state.value.isLoading) return
+        val sanitized = uris.filter { it.isNotBlank() }
+        val firstUri = sanitized.firstOrNull() ?: return
+        sanitized.forEach { addExternalFileToHistory(it) }
+        _state.update { it.copy(navigationTarget = NavigationTarget.Editor(firstUri, 0)) }
+    }
+
+    /**
+     * Внешний drop на карточку папки: добавить каждый файл в историю, затем в папку.
+     */
+    private suspend fun handleExternalDropOnFolder(folderId: String, uris: List<String>) {
+        if (_state.value.isLoading) return
+        val sanitized = uris.filter { it.isNotBlank() }
+        if (sanitized.isEmpty()) return
+        val folderName = _state.value.folders.firstOrNull { it.id == folderId }?.name
+        sanitized.forEach { uri ->
+            addExternalFileToHistory(uri)
+            addFileToFolder(folderId, uri, folderName)
+        }
+    }
+
+    /**
+     * Добавляет внешний файл в историю (повторяет success-обработку из [handleFilePickerResult]
+     * без навигации). Размер неизвестен (`null`), имя выводится из пути.
+     */
+    private suspend fun addExternalFileToHistory(uri: String) {
+        val displayName = resolveDocumentDisplayName(uri) ?: uri.substringAfterLast('/').ifBlank { uri }
+        val result = addToHistory.execute(
+            uri = uri,
+            displayName = displayName,
+            fileSize = null,
+            openedAt = nowMillis(),
+            lastPageIndex = 0,
+        )
+        result.fold(
+            onSuccess = { addResult ->
+                when (addResult) {
+                    is AddHistoryResult.Added -> {
+                        _state.update { s ->
+                            s.copy(recentFiles = listOf(addResult.record.toUiModel()) + s.recentFiles)
+                        }
+                        launchThumbnailGeneration(listOf(addResult.record))
+                    }
+                    // Moved: запись уже в недавних; SAF не возникает на desktop.
+                    is AddHistoryResult.Moved -> Unit
+                    is AddHistoryResult.SafFuzzyMatchDetected -> Unit
+                }
+            },
+            onFailure = {
+                _state.update { it.copy(errorEvent = ErrorEvent.HistoryFlushFailed) }
+            },
+        )
+    }
+
     private suspend fun loadInitialData() {
         _state.update { it.copy(isLoading = true) }
         try {
             val files = withTimeout(5_000) { historyRepository.getAll() }
-            val folders = folderRepository.getAll()
+            // Главный экран показывает только папки верхнего уровня; вложенные
+            // открываются на sub-экране содержимого родителя.
+            val folders = folderRepository.getAll().filter { it.parentId == null }
             _state.update {
                 it.copy(
                     recentFiles = files.map { f -> f.toUiModel() },
@@ -255,7 +336,7 @@ class MainScreenViewModel(
                             updateThumbnail(file.id, ThumbnailState.Ready(data))
                         },
                         onFailure = { cause ->
-                            logger.warn { "Thumbnail generation failed for ${file.id}: ${cause::class.simpleName}: ${cause.message}" }
+                            logger.warn(cause) { "Thumbnail generation failed for ${file.id}" }
                             updateThumbnail(file.id, ThumbnailState.Error)
                         },
                     )
@@ -460,6 +541,8 @@ class MainScreenViewModel(
     }
 
     private suspend fun createFolder(name: String) {
+        if (isCreatingFolder) return
+        isCreatingFolder = true
         _state.update { it.copy(createFolderDialog = null) }
         try {
             val folder = folderRepository.create(name)
@@ -475,6 +558,8 @@ class MainScreenViewModel(
             _state.update { it.copy(errorEvent = ErrorEvent.FolderNameCharsInvalid) }
         } catch (_: Exception) {
             _state.update { it.copy(errorEvent = ErrorEvent.FolderOperationFailed) }
+        } finally {
+            isCreatingFolder = false
         }
     }
 

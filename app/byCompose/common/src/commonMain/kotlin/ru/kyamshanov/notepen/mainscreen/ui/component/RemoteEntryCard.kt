@@ -89,10 +89,11 @@ fun RemoteEntryCard(
 @Composable
 fun RemoteFolderCard(
     model: RemoteFolderUiModel,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),

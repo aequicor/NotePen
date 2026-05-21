@@ -12,6 +12,7 @@ import com.arkivanov.decompose.value.MutableValue
 import com.arkivanov.decompose.value.Value
 import kotlinx.serialization.Serializable
 import ru.kyamshanov.notepen.RootComponent.Child.DetailsChild
+import ru.kyamshanov.notepen.RootComponent.Child.FolderContentsChild
 import ru.kyamshanov.notepen.RootComponent.Child.MainChild
 import ru.kyamshanov.notepen.RootComponent.Child.PeerCatalogChild
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
@@ -36,6 +37,7 @@ class DefaultRootComponent(
         componentContext: ComponentContext,
         onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
         onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
+        onOpenFolder: (folderId: String, folderName: String) -> Unit,
     ) -> MainComponent,
     private val peerCatalogComponentFactory: (
         componentContext: ComponentContext,
@@ -44,6 +46,14 @@ class DefaultRootComponent(
         onBack: () -> Unit,
         onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
     ) -> PeerCatalogComponent,
+    private val folderComponentFactory: (
+        componentContext: ComponentContext,
+        folderId: String,
+        folderName: String,
+        onBack: () -> Unit,
+        onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
+        onOpenFolder: (folderId: String, folderName: String) -> Unit,
+    ) -> FolderComponent,
 ) : RootComponent, ComponentContext by componentContext {
 
     private val navigation = StackNavigation<Config>()
@@ -66,6 +76,8 @@ class DefaultRootComponent(
             when (val config = item.configuration) {
                 is Config.Library -> config.instanceId
                 is Config.Details -> config.instanceId
+                is Config.PeerCatalog -> config.instanceId
+                is Config.FolderContents -> config.instanceId
                 else -> -1L
             }
         } + 1L
@@ -85,6 +97,7 @@ class DefaultRootComponent(
         is Config.Library -> MainChild(libraryComponent(ctx))
         is Config.Details -> DetailsChild(detailsComponent(ctx, config))
         is Config.PeerCatalog -> PeerCatalogChild(peerCatalogComponent(ctx, config))
+        is Config.FolderContents -> FolderContentsChild(folderContentsComponent(ctx, config))
     }
 
     @OptIn(DelicateDecomposeApi::class)
@@ -92,7 +105,8 @@ class DefaultRootComponent(
         mainComponentFactory(
             ctx,
             { uri, lastPageIndex -> navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId())) },
-            { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName)) },
+            { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
+            { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
         )
 
     /**
@@ -106,7 +120,8 @@ class DefaultRootComponent(
                 pendingTabUri.value = uri
                 navigation.pop()
             },
-            { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName)) },
+            { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
+            { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
         )
 
     @OptIn(DelicateDecomposeApi::class)
@@ -131,6 +146,17 @@ class DefaultRootComponent(
         ) { uri, lastPageIndex ->
             navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId()))
         }
+
+    @OptIn(DelicateDecomposeApi::class)
+    private fun folderContentsComponent(ctx: ComponentContext, config: Config.FolderContents): FolderComponent =
+        folderComponentFactory(
+            ctx,
+            config.folderId,
+            config.folderName,
+            navigation::pop,
+            { uri, lastPageIndex -> navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId())) },
+            { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
+        )
 
     override fun onBackClicked(toIndex: Int) {
         navigation.popTo(index = toIndex)
@@ -162,6 +188,17 @@ class DefaultRootComponent(
         ) : Config
 
         @Serializable
-        data class PeerCatalog(val peerId: String, val displayName: String) : Config
+        data class PeerCatalog(
+            val peerId: String,
+            val displayName: String,
+            val instanceId: Long = 0L,
+        ) : Config
+
+        @Serializable
+        data class FolderContents(
+            val folderId: String,
+            val folderName: String,
+            val instanceId: Long = 0L,
+        ) : Config
     }
 }

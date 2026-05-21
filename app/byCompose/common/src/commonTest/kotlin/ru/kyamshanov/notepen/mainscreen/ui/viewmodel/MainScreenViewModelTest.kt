@@ -1016,6 +1016,57 @@ class MainScreenViewModelTest {
 
         assertNull(viewModel.state.value.successEvent, "successEvent must be null after OnSuccessEventHandled")
     }
+
+    // External DnD: dropping files from the OS onto the library opens the first and
+    // adds the rest to recent files.
+    @Test
+    fun externalFilesDroppedOnLibrary_opensFirstAndAddsRestToRecents() {
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.ExternalFilesDroppedOnLibrary(
+                uris = listOf("/home/user/first.pdf", "/home/user/second.pdf"),
+            ),
+        )
+
+        val state = viewModel.state.value
+        val nav = state.navigationTarget
+        assertIs<NavigationTarget.Editor>(nav, "library drop must open the first file in the editor")
+        assertEquals("/home/user/first.pdf", nav.uri, "editor must open the first dropped file")
+
+        val recentUris = state.recentFiles.map { it.uri }
+        assertTrue(recentUris.contains("/home/user/first.pdf"), "first file must be in recents")
+        assertTrue(recentUris.contains("/home/user/second.pdf"), "second file must be added to recents")
+    }
+
+    // External DnD: dropping a file onto a folder card adds it to history and to the folder.
+    @Test
+    fun externalFilesDroppedOnFolder_addsFileToHistoryAndFolder() {
+        val folder = Folder(id = "folder-ext", name = "ВнешняяПапка", createdAt = 0L)
+        fakeFolderRepo.folders.add(folder)
+        viewModel.onIntent(MainScreenIntent.ScreenVisible)
+
+        viewModel.onIntent(
+            MainScreenIntent.ExternalFilesDroppedOnFolder(
+                folderId = "folder-ext",
+                uris = listOf("/home/user/dropped.pdf"),
+            ),
+        )
+
+        val state = viewModel.state.value
+        assertTrue(
+            fakeHistoryRepo.files.any { it.uri == "/home/user/dropped.pdf" },
+            "external file must be added to history before being added to the folder",
+        )
+        assertTrue(
+            fakeFolderRepo.addFileCalls.any { it == ("folder-ext" to "/home/user/dropped.pdf") },
+            "addFile must be called with the folder id and dropped file uri",
+        )
+        assertIs<SuccessEvent.FileAddedToFolder>(
+            state.successEvent,
+            "successful external drop on a folder must produce FileAddedToFolder",
+        )
+    }
 }
 
 // --- Controllable FileAvailabilityChecker ---
@@ -1061,15 +1112,19 @@ private class FakeFolderRepository : FolderRepository {
     val folders: MutableList<Folder> = mutableListOf()
     /** Per-folder file lists returned by [getFilesInFolder]. Defaults to empty if key is absent. */
     val filesInFolder: MutableMap<String, List<String>> = mutableMapOf()
+    /** Records every (folderId, uri) passed to [addFile]. */
+    val addFileCalls: MutableList<Pair<String, String>> = mutableListOf()
 
-    override suspend fun create(name: String): Folder {
+    override suspend fun create(name: String, parentId: String?): Folder {
         val ex = createThrows
         if (ex != null) throw ex
-        return Folder(id = "folder-${name.hashCode()}", name = name, createdAt = 0L).also { folders.add(it) }
+        return Folder(id = "folder-${name.hashCode()}", name = name, createdAt = 0L, parentId = parentId)
+            .also { folders.add(it) }
     }
 
     override suspend fun delete(id: String) { folders.removeAll { it.id == id } }
     override suspend fun addFile(folderId: String, uri: String) {
+        addFileCalls.add(folderId to uri)
         val ex = addFileThrows
         if (ex != null) throw ex
     }

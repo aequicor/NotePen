@@ -23,5 +23,6 @@ interface RootComponent {
         class MainChild(val component: MainComponent) : Child()
         class DetailsChild(val component: DetailsComponent) : Child()
         class PeerCatalogChild(val component: PeerCatalogComponent) : Child()
+        class FolderContentsChild(val component: FolderComponent) : Child()
     }
 }

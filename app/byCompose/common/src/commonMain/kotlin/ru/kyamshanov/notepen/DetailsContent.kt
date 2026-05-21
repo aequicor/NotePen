@@ -211,6 +211,17 @@ fun DetailsContent(
      * заново из локального пути — это давало бы другой hash и ломало синк).
      */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /**
+     * Host-side источник уже накопленных штрихов для `documentId`. На хосте (ПК)
+     * штрихи, нарисованные пиром (планшетом), копятся в
+     * [ru.kyamshanov.notepen.sync.domain.HostAnnotationProjection] ещё до того,
+     * как документ открыли локально. Локальное открытие читает аннотации только
+     * с диска, а собственный snapshot-запрос через [peerClient] на хосте уходит
+     * в никуда (хост ни к кому не подключён как клиент), поэтому без этого
+     * провайдера правки пира были бы не видны. На планшете null — там начальный
+     * набор тянется [NetworkMessage.AnnotationSnapshotRequest]'ом к хосту.
+     */
+    hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier,
 ) {
     val localWindowInfo = LocalWindowInfo.current
@@ -719,6 +730,29 @@ fun DetailsContent(
             }
             favoritePageIndices.clear()
             favoritePageIndices.addAll(bundle.favoritePageIndices)
+        }
+        // Host-side: подмешиваем штрихи, накопленные проекцией из дельт пира,
+        // пока документ не был открыт локально. Делается после загрузки с диска,
+        // дедуп по strokeId — дисковые штрихи уже в currentPaths, поэтому
+        // фактически добавятся только правки, пришедшие от пира.
+        hostAnnotationSnapshotFor?.let { provider ->
+            val remoteStrokes = runCatching { provider(documentId) }.getOrElse { e ->
+                logger.warn { "Host projection seed failed for doc=$documentId: ${e::class.simpleName}" }
+                emptyList()
+            }
+            if (remoteStrokes.isNotEmpty()) {
+                logger.info { "Seeding ${remoteStrokes.size} projection stroke(s) for doc=$documentId" }
+                remoteStrokes.forEach { added ->
+                    val state = drawingStates.getOrPut(added.pageIndex) { PdfDrawingState() }
+                    added.pageExtent?.let { extDto ->
+                        state.setExtent(state.extent.value.union(extDto.toDomain()))
+                    }
+                    if (state.currentPaths.none { it.strokeId == added.strokeId }) {
+                        state.currentPaths.add(added.path.toDomain())
+                        state.markHistoryChanged()
+                    }
+                }
+            }
         }
     }
 

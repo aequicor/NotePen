@@ -47,12 +47,15 @@ data class RemoteEntry(
  * @property folderId Stable folder id (UUID v4) — opaque to the tablet.
  * @property name Display name.
  * @property createdAt Epoch millis of folder creation on the host.
+ * @property parentFolderId id родительской папки или `null` для папки верхнего уровня.
+ *           Бэк-совместимость: старый хост без поля → все папки на верхнем уровне.
  */
 @Serializable
 data class RemoteFolder(
     val folderId: String,
     val name: String,
     val createdAt: Long,
+    val parentFolderId: String? = null,
 )
 
 /**

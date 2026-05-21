@@ -15,8 +15,8 @@ class NotifyingFolderRepository(
     private val notifier: CatalogChangeNotifier,
 ) : FolderRepository {
 
-    override suspend fun create(name: String): Folder =
-        delegate.create(name).also { notifier.notifyChanged() }
+    override suspend fun create(name: String, parentId: String?): Folder =
+        delegate.create(name, parentId).also { notifier.notifyChanged() }
 
     override suspend fun delete(id: String) {
         delegate.delete(id)

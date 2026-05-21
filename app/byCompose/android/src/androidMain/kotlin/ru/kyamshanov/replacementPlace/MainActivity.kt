@@ -33,10 +33,17 @@ import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FileAvailabilityCheckerAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FileHistoryRepositoryAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryAndroid
+import ru.kyamshanov.notepen.mainscreen.infrastructure.AndroidThumbnailGenerator
+import ru.kyamshanov.notepen.mainscreen.infrastructure.ImageThumbnailGeneratorAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorAndroid
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroid
+import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
+import ru.kyamshanov.notepen.pdf.infrastructure.AndroidDocumentLoader
+import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImageDocumentLoader
+import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImagePageRenderer
+import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPageRenderer
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
@@ -81,8 +88,15 @@ class MainActivity : ComponentActivity() {
         }
         filePicker.init(filePickerLauncher)
 
-        val pdfDocumentLoader = AndroidPdfDocumentLoader(context, Dispatchers.IO)
-        val pdfPageRenderer = AndroidPdfPageRenderer(Dispatchers.IO)
+        val pdfDocumentLoader = AndroidDocumentLoader(
+            context = context,
+            pdfLoader = AndroidPdfDocumentLoader(context, Dispatchers.IO),
+            imageLoader = AndroidImageDocumentLoader(context, Dispatchers.IO),
+        )
+        val pdfPageRenderer = AndroidPageRenderer(
+            pdfRenderer = AndroidPdfPageRenderer(Dispatchers.IO),
+            imageRenderer = AndroidImagePageRenderer(Dispatchers.IO),
+        )
         val catalogChangeNotifier = InMemoryCatalogChangeNotifier()
         val historyRepo = NotifyingFileHistoryRepository(
             delegate = FileHistoryRepositoryAndroid(context),
@@ -94,11 +108,18 @@ class MainActivity : ComponentActivity() {
         )
         val availabilityChecker = FileAvailabilityCheckerAndroid(context)
         val thumbnailRepo = ThumbnailRepositoryAndroid(context)
-        val thumbnailGenerator = PdfThumbnailGeneratorAndroid(context)
+        val thumbnailGenerator = AndroidThumbnailGenerator(
+            context = context,
+            pdfGenerator = PdfThumbnailGeneratorAndroid(context),
+            imageGenerator = ImageThumbnailGeneratorAndroid(context),
+        )
 
         val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-        val selfId = UUID.randomUUID().toString()
+        val prefs = context.getSharedPreferences("notepen", android.content.Context.MODE_PRIVATE)
+        val selfId: String = prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also { newId ->
+            prefs.edit().putString("device_id", newId).apply()
+        }
         val selfInfo = DeviceInfo(
             id = selfId,
             name = android.os.Build.MODEL ?: "NotePen Tablet",
@@ -219,7 +240,7 @@ class MainActivity : ComponentActivity() {
         val root = DefaultRootComponent(
             componentContext = defaultComponentContext(),
             historyRepository = historyRepo,
-            mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog ->
+            mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder ->
                 MainScreenComponent(
                     componentContext = componentContext,
                     historyRepository = historyRepo,
@@ -230,8 +251,9 @@ class MainActivity : ComponentActivity() {
                     thumbnailRepository = thumbnailRepo,
                     thumbnailGenerator = thumbnailGenerator,
                     onOpenEditor = onOpenEditor,
-                    onOpenFilePicker = { filePicker.pickPdfFile() },
+                    onOpenFilePicker = { filePicker.pickDocument() },
                     onOpenPeerCatalog = onOpenPeerCatalog,
+                    onOpenFolder = onOpenFolder,
                     remoteCatalogsFlow = remoteCatalogCache.catalogs,
                     onlinePeerIdsFlow = onlinePeerIds,
                 )
@@ -247,6 +269,22 @@ class MainActivity : ComponentActivity() {
                     receivedPdfDir = receivedDir,
                     onBack = onBack,
                     onOpenEditor = onOpenEditor,
+                )
+            },
+            folderComponentFactory = { ctx, folderId, folderName, onBack, onOpenEditor, onOpenFolder ->
+                FolderContentsComponentImpl(
+                    componentContext = ctx,
+                    folderId = folderId,
+                    folderName = folderName,
+                    historyRepository = historyRepo,
+                    folderRepository = folderRepo,
+                    addToHistory = AddToHistoryUseCase(historyRepo),
+                    thumbnailRepository = thumbnailRepo,
+                    thumbnailGenerator = thumbnailGenerator,
+                    onBack = onBack,
+                    onOpenFilePicker = { filePicker.pickDocument() },
+                    onOpenEditor = onOpenEditor,
+                    onOpenFolder = onOpenFolder,
                 )
             },
         )

@@ -36,6 +36,38 @@ class FolderRepositoryDesktopTest {
         tmpDir.deleteRecursively()
     }
 
+    @Test
+    fun create_withParent_persistsParentId() = runTest {
+        val parent = repo.create("Parent")
+        val child = repo.create("Child", parentId = parent.id)
+
+        assertEquals(parent.id, child.parentId, "child must carry the parent's id")
+        val reloaded = repo.getAll().first { it.id == child.id }
+        assertEquals(parent.id, reloaded.parentId, "parentId must survive a reload")
+    }
+
+    @Test
+    fun create_withUnknownParent_throwsFolderNotFoundException() = runTest {
+        assertFailsWith<FolderNotFoundException> {
+            repo.create("Orphan", parentId = "does-not-exist")
+        }
+    }
+
+    @Test
+    fun delete_cascadesNestedSubfoldersAndTheirLinks() = runTest {
+        val root = repo.create("Root")
+        val mid = repo.create("Mid", parentId = root.id)
+        val leaf = repo.create("Leaf", parentId = mid.id)
+        repo.addFile(leaf.id, "file:///docs/in-leaf.pdf")
+        val sibling = repo.create("Sibling")
+
+        repo.delete(root.id)
+
+        val remaining = repo.getAll().map { it.id }
+        assertEquals(listOf(sibling.id), remaining, "only the unrelated sibling must remain")
+        assertFailsWith<FolderNotFoundException> { repo.getFilesInFolder(leaf.id) }
+    }
+
     // TC-14 / drag-drop: addFile → success → getFilesInFolder contains URI (AC-2, AC-10)
     @Test
     fun addFile_success_fileAppearsInGetFilesInFolder() = runTest {

@@ -63,7 +63,7 @@ class NavigationWiringTest {
 
     private val fakeFolder = object : FolderRepository {
         override suspend fun getAll() = emptyList<Folder>()
-        override suspend fun create(name: String): Folder = throw UnsupportedOperationException()
+        override suspend fun create(name: String, parentId: String?): Folder = throw UnsupportedOperationException()
         override suspend fun delete(id: String) {}
         override suspend fun rename(id: String, newName: String) {}
         override suspend fun addFile(folderId: String, uri: String) {}

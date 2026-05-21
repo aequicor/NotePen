@@ -64,15 +64,17 @@ class FolderRepositoryAndroid(
         tmp.renameTo(linksFile)
     }
 
-    override suspend fun create(name: String): Folder = withContext(Dispatchers.IO) {
+    override suspend fun create(name: String, parentId: String?): Folder = withContext(Dispatchers.IO) {
         mutex.withLock {
             validateName(name)
             val folders = readFolders()
             if (folders.size >= 100) throw FolderLimitExceededException()
+            if (parentId != null && folders.none { it.id == parentId }) throw FolderNotFoundException(parentId)
             val folder = Folder(
                 id = generateUuid(),
                 name = name.trim(),
                 createdAt = System.currentTimeMillis(),
+                parentId = parentId,
             )
             writeFolders(folders + folder)
             folder
@@ -81,8 +83,10 @@ class FolderRepositoryAndroid(
 
     override suspend fun delete(id: String) = withContext(Dispatchers.IO) {
         mutex.withLock {
-            writeFolders(readFolders().filter { it.id != id })
-            writeLinks(readLinks().filter { it.folderId != id })
+            val folders = readFolders()
+            val toRemove = descendantsOf(id, folders) + id
+            writeFolders(folders.filter { it.id !in toRemove })
+            writeLinks(readLinks().filter { it.folderId !in toRemove })
         }
     }
 
@@ -124,6 +128,21 @@ class FolderRepositoryAndroid(
     override suspend fun getFilesInFolder(folderId: String): List<String> = withContext(Dispatchers.IO) {
         if (readFolders().none { it.id == folderId }) throw FolderNotFoundException(folderId)
         readLinks().filter { it.folderId == folderId }.map { it.fileUri }
+    }
+
+    /** Все папки-потомки [rootId] на любую глубину (без самого [rootId]). */
+    private fun descendantsOf(rootId: String, folders: List<Folder>): Set<String> {
+        val byParent = folders.groupBy { it.parentId }
+        val result = mutableSetOf<String>()
+        val queue = ArrayDeque<String>()
+        queue.add(rootId)
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            byParent[current]?.forEach { child ->
+                if (result.add(child.id)) queue.add(child.id)
+            }
+        }
+        return result
     }
 
     private fun validateName(name: String) {

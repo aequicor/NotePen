@@ -10,6 +10,8 @@ import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.arkivanov.decompose.extensions.compose.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
 import kotlinx.coroutines.flow.Flow
+import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContent
+import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogContent
@@ -18,6 +20,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
@@ -42,6 +45,8 @@ fun RootContent(
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     /** Forwarded to [DetailsContent] for remote-cached documentId lookup. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /** Forwarded to [DetailsContent] to seed host-side projection strokes on local open. */
+    hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier,
 ) {
     val childStack by component.stack.subscribeAsState()
@@ -83,6 +88,10 @@ fun RootContent(
                             mainScreenComponent.onOpenPeerCatalog(target.peerId, target.displayName)
                             mainScreenComponent.viewModel.onNavigationHandled()
                         }
+                        is NavigationTarget.Folder -> {
+                            mainScreenComponent.onOpenFolder(target.folderId, target.folderName)
+                            mainScreenComponent.viewModel.onNavigationHandled()
+                        }
                         null -> {}
                     }
                 }
@@ -109,12 +118,18 @@ fun RootContent(
                 receivedPdfDir = receivedPdfDir,
                 openDocumentRegistry = openDocumentRegistry,
                 localDocumentIdRegistry = localDocumentIdRegistry,
+                hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                 modifier = modifier,
             )
             is RootComponent.Child.PeerCatalogChild -> {
                 val impl = child.component as? PeerCatalogComponentImpl
                     ?: error("PeerCatalogChild.component must be PeerCatalogComponentImpl — check DefaultRootComponent factory")
                 PeerCatalogContent(component = impl, modifier = modifier)
+            }
+            is RootComponent.Child.FolderContentsChild -> {
+                val impl = child.component as? FolderContentsComponentImpl
+                    ?: error("FolderContentsChild.component must be FolderContentsComponentImpl — check DefaultRootComponent factory")
+                FolderContent(component = impl, modifier = modifier)
             }
         }
     }

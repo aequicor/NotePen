@@ -40,22 +40,26 @@ class FolderRepositoryDesktop(
     private val lockFile get() = java.io.File(dataDir, "folders.lock")
     private val inProcessMutex = Mutex()
 
-    override suspend fun create(name: String): Folder = withLockedIO {
+    override suspend fun create(name: String, parentId: String?): Folder = withLockedIO {
         validateName(name)
         val folders = readFolders()
         if (folders.size >= 100) throw FolderLimitExceededException()
+        if (parentId != null && folders.none { it.id == parentId }) throw FolderNotFoundException(parentId)
         val folder = Folder(
             id = generateUuid(),
             name = name.trim(),
             createdAt = System.currentTimeMillis(),
+            parentId = parentId,
         )
         writeFolders(folders + folder)
         folder
     }
 
     override suspend fun delete(id: String): Unit = withLockedIO {
-        writeFolders(readFolders().filter { it.id != id })
-        writeLinks(readLinks().filter { it.folderId != id })
+        val folders = readFolders()
+        val toRemove = descendantsOf(id, folders) + id
+        writeFolders(folders.filter { it.id !in toRemove })
+        writeLinks(readLinks().filter { it.folderId !in toRemove })
     }
 
     override suspend fun addFile(folderId: String, uri: String): Unit = withLockedIO {
@@ -138,6 +142,21 @@ class FolderRepositoryDesktop(
         val tmp = java.io.File(dataDir, "folder_links.tmp.json")
         tmp.writeText(json.encodeToString(links.map { FolderFileLinkDto.fromDomain(it) }))
         java.nio.file.Files.move(tmp.toPath(), linksFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+    }
+
+    /** Все папки-потомки [rootId] на любую глубину (без самого [rootId]). */
+    private fun descendantsOf(rootId: String, folders: List<Folder>): Set<String> {
+        val byParent = folders.groupBy { it.parentId }
+        val result = mutableSetOf<String>()
+        val queue = ArrayDeque<String>()
+        queue.add(rootId)
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            byParent[current]?.forEach { child ->
+                if (result.add(child.id)) queue.add(child.id)
+            }
+        }
+        return result
     }
 
     private fun validateName(name: String) {
