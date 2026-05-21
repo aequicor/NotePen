@@ -268,6 +268,9 @@ class KtorPeerServer(
         sessionMutex.withLock {
             sessions.remove(peerId)
             peerInfoById.remove(peerId)
+            // Deliberate host-side disconnect revokes the auto-approve grant: a
+            // later fresh connection from this device must prompt again.
+            approvedPeerIds.remove(peerId)
         }
         publishConnectedPeers()
     }

@@ -203,6 +203,11 @@ private class HostSession(
                 if (firstAttempt) {
                     when (outcome) {
                         is SessionOutcome.Paired -> firstPairingResult.complete(Result.success(outcome.peer))
+                        // Paired then immediately closed by the host — still a
+                        // successful first pair for the caller; termination is
+                        // handled by the RemoteClosed check below.
+                        SessionOutcome.RemoteClosed ->
+                            firstPairingResult.complete(Result.success(peer ?: server))
                         is SessionOutcome.PairingFailed -> {
                             firstPairingResult.complete(Result.failure(IllegalStateException(outcome.reason)))
                             return@launch
@@ -215,6 +220,13 @@ private class HostSession(
                 }
                 firstAttempt = false
                 if (!scope.isActive) return@launch
+                // Host-initiated disconnect is terminal — do not reconnect, else
+                // the PC could never drop the link (it would auto-rejoin).
+                if (outcome is SessionOutcome.RemoteClosed) {
+                    onStateChange(server.id, PairingState.LostConnection)
+                    onTerminated(server.id)
+                    return@launch
+                }
                 // Try to reconnect within deadline
                 val reconnected = attemptReconnect()
                 if (!reconnected) {
@@ -281,7 +293,11 @@ private class HostSession(
                     val hostPeer = peer ?: server
                     while (true) {
                         val msg = receiveDeserialized<NetworkMessage>()
-                        if (msg is NetworkMessage.Disconnect) break
+                        if (msg is NetworkMessage.Disconnect) {
+                            // Host deliberately closed us — terminal, do not reconnect.
+                            outcome = SessionOutcome.RemoteClosed
+                            break
+                        }
                         incomingFlow.emit(HostMessage(hostPeer, msg))
                     }
                 } finally {
@@ -308,9 +324,11 @@ private class HostSession(
                 server.id,
                 PairingState.Reconnecting(secondsRemaining = ((remainingMs + 999) / 1000).toInt()),
             )
-            val pingOk = runCatching { runSession(firstAttempt = false) }
-                .getOrNull() is SessionOutcome.Paired
-            if (pingOk) return true
+            val result = runCatching { runSession(firstAttempt = false) }.getOrNull()
+            // Reconnected, then the host deliberately closed us — terminal: stop
+            // retrying so the host can drop the link for good.
+            if (result is SessionOutcome.RemoteClosed) return false
+            if (result is SessionOutcome.Paired) return true
             delay(RECONNECT_RETRY_INTERVAL_MS)
         }
         return false
@@ -319,6 +337,14 @@ private class HostSession(
 
 private sealed class SessionOutcome {
     data class Paired(val peer: DeviceInfo) : SessionOutcome()
+
+    /**
+     * The host sent an explicit [NetworkMessage.Disconnect] (user pressed
+     * "disconnect" on the PC, or the server stopped). This is TERMINAL — the
+     * client must NOT silently reconnect, otherwise the connection cannot be
+     * torn down from the host (it would auto-reconnect immediately).
+     */
+    data object RemoteClosed : SessionOutcome()
     data class PairingFailed(val reason: String) : SessionOutcome()
     data object Disconnected : SessionOutcome()
 }
