@@ -11,6 +11,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
+import ru.kyamshanov.notepen.annotation.domain.StrokeSimplifier
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.shape.ShapeRecognizer
 import ru.kyamshanov.notepen.annotation.domain.shape.ShapeResampler
@@ -140,8 +141,11 @@ public class PdfDrawingState {
     /** Завершить штрих и коммитить в [currentPaths]. Возвращает коммитнутый путь или `null`. */
     public fun finishDrawing(): DrawingPath? {
         val completed = if (isDrawing.value && livePoints.size > 1) {
+            val raw = livePoints.toList()
+            // Распознанные фигуры (gestureSnapped) уже минимальны — не прореживаем.
+            val points = if (gestureSnapped) raw else StrokeSimplifier.simplify(raw)
             val path = DrawingPath(
-                points = livePoints.toList(),
+                points = points,
                 colorArgb = liveColorArgb.value,
                 strokeWidth = liveStrokeWidth.value,
             )

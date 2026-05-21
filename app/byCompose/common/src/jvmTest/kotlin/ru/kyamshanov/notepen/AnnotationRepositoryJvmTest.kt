@@ -242,6 +242,36 @@ class AnnotationRepositoryJvmTest {
         assertEquals(120, bundle.scale)
     }
 
+    @Test
+    fun loadViewState_afterSave_returnsScalePageOffset() = runBlocking {
+        val dir = createTempDirectory("notepen_view_rt")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        repo.save(pdfPath, emptyMap(), scale = 175, currentPage = 4, currentPageOffset = 320)
+
+        val view = repo.loadViewState(pdfPath).getOrThrow()
+
+        assertEquals(175, view?.scale)
+        assertEquals(4, view?.currentPage)
+        assertEquals(320, view?.currentPageOffset)
+    }
+
+    @Test
+    fun loadViewState_noFile_returnsNull() = runBlocking {
+        val dir = createTempDirectory("notepen_view_empty")
+        val result = repo.loadViewState(dir.resolve("missing.pdf").toString())
+        assertTrue(result.isSuccess)
+        assertEquals(null, result.getOrNull())
+    }
+
+    @Test
+    fun save_writesSeparateViewSidecar() = runBlocking {
+        val dir = createTempDirectory("notepen_view_file")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        repo.save(pdfPath, emptyMap(), scale = 110, currentPage = 2)
+
+        assertTrue(java.io.File("$pdfPath.notepen.json.view").exists(), "view sidecar must be created")
+    }
+
     // TC-19 surrogate: JSON produced by save/load round-trip is valid (same schema across platforms)
     @Test
     fun jsonShape_isCompatibleAcrossPlatforms() = runBlocking {

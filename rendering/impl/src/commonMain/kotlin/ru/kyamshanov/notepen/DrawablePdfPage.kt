@@ -113,6 +113,20 @@ private const val INK_CACHE_MAX_DIMENSION_PX = 3072
 private const val INK_CACHE_DIM_BUCKET_PX = 256
 
 /**
+ * Максимум ещё-не-кэшированных штрихов, дорисовываемых на main-потоке поверх
+ * битмапа каждый кадр (anti-flicker хвост).
+ *
+ * Хвост рассчитан на «текущее слово» — несколько штрихов с последней паузы. Но
+ * при ХОЛОДНОМ кэше (первый рендер страницы) `cachedCount = 0`, и без лимита
+ * fallback перерисовывал ВСЕ штрихи страницы каждый кадр на main-потоке, пока
+ * фоновый [buildCompletedInk] не догонит — отсюда долгий лаг при открытии
+ * исписанной страницы. Ограничиваем хвост последними N штрихами: основную массу
+ * показывает одноразовый фоновый билд (через ~сотню мс), а per-frame стоимость
+ * остаётся ограниченной.
+ */
+private const val MAX_UNCACHED_TAIL_STROKES = 48
+
+/**
  * Hard ceiling on either dimension of the page Box at which the Android
  * low-latency `SurfaceView` overlay is allowed to mount. Above this, the
  * `CanvasFrontBufferedRenderer` would allocate a HardwareBuffer the full
@@ -426,7 +440,12 @@ fun DrawablePdfPage(
             val cachedCount = cached?.strokeCount ?: 0
             val paths = pdfDrawingState.currentPaths
             if (paths.size > cachedCount) {
-                for (i in cachedCount until paths.size) {
+                // Лимитируем хвост: при холодном кэше (cachedCount = 0 на первом
+                // рендере) иначе перерисовывали бы всю страницу каждый кадр на
+                // main-потоке. Основную массу покрывает фоновый билд; здесь —
+                // лишь последние штрихи, чтобы только что написанное не «пропадало».
+                val tailStart = maxOf(cachedCount, paths.size - MAX_UNCACHED_TAIL_STROKES)
+                for (i in tailStart until paths.size) {
                     drawStrokeWithPressure(paths[i], pdfW, pdfH, ext, livePath)
                 }
             }
