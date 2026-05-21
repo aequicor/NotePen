@@ -1,7 +1,6 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -24,7 +23,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
@@ -32,18 +30,17 @@ import androidx.compose.ui.unit.dp
  * One entry in a [ToolPresetStrip].
  *
  * @property id Stable preset id, echoed back by [ToolPresetStrip] callbacks.
- * @property colorArgb Packed ARGB swatch colour for ink tools; `null` for tools
- *   that have no meaningful colour (e.g. the eraser), which fall back to [icon].
- * @property icon Icon shown when [colorArgb] is `null`.
  * @property deletable Whether the user may delete this preset (built-ins are not).
  * @property selected Whether the preset matches the tool's current settings.
+ * @property preview Renders a thumbnail reflecting the preset's actual tool
+ *   configuration (colour, thickness, eraser shape/size/mode). Drawn centred
+ *   inside the preset chip.
  */
 class ToolPresetItem(
     val id: String,
-    val colorArgb: Long?,
-    val icon: ImageVector?,
     val deletable: Boolean,
     val selected: Boolean,
+    val preview: @Composable () -> Unit,
 )
 
 /**
@@ -110,18 +107,7 @@ private fun PresetItemView(
 
     Box(contentAlignment = Alignment.Center) {
         Box(modifier = itemModifier, contentAlignment = Alignment.Center) {
-            when {
-                item.colorArgb != null -> Box(
-                    Modifier.size(PRESET_ITEM_SIZE).clip(CircleShape)
-                        .background(Color(item.colorArgb.toInt())),
-                )
-                item.icon != null -> Icon(
-                    imageVector = item.icon,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.size(PRESET_ICON_SIZE),
-                )
-            }
+            item.preview()
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             DropdownMenuItem(
