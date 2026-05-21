@@ -18,7 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.BorderColor
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gesture
@@ -76,7 +76,7 @@ internal fun ToolSelector(
             onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN)) },
         )
         ToolToggleButton(
-            icon = Icons.Default.Brush,
+            icon = Icons.Default.BorderColor,
             contentDescription = "Маркер",
             selected = toolMode == ToolMode.MARKER,
             onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER)) },

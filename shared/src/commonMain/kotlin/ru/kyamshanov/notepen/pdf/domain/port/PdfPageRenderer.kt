@@ -28,4 +28,17 @@ interface PdfPageRenderer {
         widthPx: Int,
         heightPx: Int,
     ): PdfPageData
+
+    /**
+     * Возвращает репрезентативную высоту строки текста [document], нормированную
+     * к ширине страницы (доля от ширины — в тех же единицах, что и
+     * `MarkerSettings.strokeWidth` / `DrawingPath.strokeWidth`).
+     *
+     * Используется для подбора стартовой толщины маркера под высоту текста.
+     *
+     * @param document открытый документ, возвращённый [PdfDocumentLoader]
+     * @return доля от ширины страницы, либо `null`, если текстовая геометрия
+     *   недоступна на платформе или в документе нет текста
+     */
+    suspend fun documentTextLineHeight(document: PdfDocument): Float?
 }

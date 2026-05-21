@@ -21,4 +21,6 @@ internal class FakePdfPageRenderer : PdfPageRenderer {
             pixels = IntArray(widthPx * heightPx) { 0xFF_FF_FF_FF.toInt() },
         )
     }
+
+    override suspend fun documentTextLineHeight(document: PdfDocument): Float? = null
 }
