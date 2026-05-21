@@ -94,12 +94,11 @@ private const val SCROLL_EMA_ALPHA = 0.3f
 private const val SCROLL_H_SUPPRESS_RATIO = 2.0f
 
 /**
- * Если ширина страничной колонки помещается во вьюпорт, горизонтальный
- * тачпад-скролл подавляется — страница уже видна целиком. НО: если
- * пользователь смести документ мышью (drag-to-pan), [pan.x] уходит от
- * центрального положения; тогда скролл разрешается, чтобы вернуть
- * документ в центр. Этот порог — допустимое отклонение от центра в пикселях,
- * при котором скролл ещё считается «центрированным» и остаётся заблокированным.
+ * Допустимое отклонение pan.x от центрированного положения (в пикселях),
+ * при котором горизонтальный скроллбар ещё считается ненужным. Если PDF
+ * помещается во вьюпорт и центрирован в пределах этого допуска — скроллбар
+ * не показываем; иначе показываем, чтобы пользователь мог перетаскиванием
+ * вернуть страницу в центр.
  */
 private const val SCROLL_H_CENTER_TOLERANCE_PX = 2f
 
@@ -162,6 +161,76 @@ private class PendingZoom {
 }
 
 /**
+ * Process-wide owner of the macOS trackpad-pinch monitor.
+ *
+ * `notepen_gesture_start` installs a single global `NSEvent` monitor and
+ * replaces any previous one, so per-panel registration would leave only the
+ * last-composed panel receiving pinches. This router installs the monitor once
+ * (ref-counted across all live [PdfPagesViewer]s) and forwards each pinch to the
+ * panel the cursor last hovered, anchored at that panel's local cursor position
+ * — so pinch-zoom acts on the panel under the cursor, not an arbitrary one.
+ *
+ * Threading: [setActive] runs on the Compose main thread (pointer input); the
+ * monitor callback runs on the AppKit main thread. The shared fields are
+ * [java.util.concurrent.atomic.AtomicReference]s; the callback is held strongly
+ * so JNA never GCs it into a dangling native pointer.
+ */
+private object MacosPinchGestureRouter {
+    private val target = java.util.concurrent.atomic.AtomicReference<PendingZoom?>(null)
+    private val focus = java.util.concurrent.atomic.AtomicReference(Offset.Zero)
+    private var refCount = 0
+    private var bridge: MacosGestureBridge? = null
+
+    private val callback = MacosGestureBridge.OnMagnify { magnification, _, _ ->
+        val factor = 1f + magnification
+        val pending = target.get()
+        if (factor > 0f && pending != null) pending.accumulate(factor, focus.get())
+    }
+
+    @Synchronized
+    fun acquire() {
+        if (!Platform.isMac()) return
+        if (refCount == 0) {
+            // Mirror addComposeResourcesToJnaPath() from CocoaTabletInputController:
+            // in dev (:run) compose.application.resources.dir may be absent, but
+            // build.gradle.kts already adds -Djna.library.path=assets/, so this
+            // is belt-and-suspenders for packaged distributions.
+            System.getProperty("compose.application.resources.dir")?.let { dir ->
+                val cur = System.getProperty("jna.library.path").orEmpty()
+                if (dir !in cur.split(java.io.File.pathSeparator)) {
+                    System.setProperty(
+                        "jna.library.path",
+                        if (cur.isEmpty()) dir else "$dir${java.io.File.pathSeparator}$cur",
+                    )
+                }
+            }
+            bridge = runCatching {
+                Native.load("notepen_gesture", MacosGestureBridge::class.java)
+            }.getOrNull()
+            bridge?.notepen_gesture_start(callback)
+        }
+        refCount++
+    }
+
+    @Synchronized
+    fun release() {
+        if (!Platform.isMac() || refCount == 0) return
+        refCount--
+        if (refCount == 0) {
+            bridge?.notepen_gesture_stop()
+            bridge = null
+            target.set(null)
+        }
+    }
+
+    /** Route subsequent pinch events to [pendingZoom], anchored at panel-local [cursor]. */
+    fun setActive(pendingZoom: PendingZoom, cursor: Offset) {
+        target.set(pendingZoom)
+        focus.set(cursor)
+    }
+}
+
+/**
  * Desktop-реализация [PdfPagesViewer].
  *
  * - **Cursor-anchored zoom** через Ctrl+wheel — пиксель под курсором
@@ -193,9 +262,6 @@ actual fun PdfPagesViewer(
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
     val density = LocalDensity.current
     val pendingZoom = remember { PendingZoom() }
-    // Shared cursor position: updated by pointer-input on Compose thread,
-    // read by macOS gesture callback on AppKit thread → AtomicReference.
-    val lastCursorRef = remember { java.util.concurrent.atomic.AtomicReference(Offset.Zero) }
     val renderDispatcher = Dispatchers.Default
 
     // macOS trackpad pinch: NSEventMaskMagnify via libnotepen_gesture.dylib.
@@ -203,35 +269,13 @@ actual fun PdfPagesViewer(
     // to Compose's PointerInputScope, so we bypass Skiko entirely with an
     // NSEvent local monitor — same technique as the tablet pressure bridge.
     //
-    // The callback MUST be held in `remember`, not a local variable — JNA
-    // callbacks are GC'd if no strong Java reference exists, causing the native
-    // monitor to fire into a dangling pointer and silently do nothing.
-    val gestureCallback = remember(pendingZoom, lastCursorRef) {
-        MacosGestureBridge.OnMagnify { magnification, x, y ->
-            val factor = 1f + magnification
-            if (factor > 0f) pendingZoom.accumulate(factor, lastCursorRef.get())
-        }
-    }
-    DisposableEffect(gestureCallback) {
-        if (!Platform.isMac()) return@DisposableEffect onDispose {}
-        // Mirror addComposeResourcesToJnaPath() from CocoaTabletInputController:
-        // in dev (:run) compose.application.resources.dir may be absent, but
-        // build.gradle.kts already adds -Djna.library.path=assets/, so this
-        // is belt-and-suspenders for packaged distributions.
-        System.getProperty("compose.application.resources.dir")?.let { dir ->
-            val cur = System.getProperty("jna.library.path").orEmpty()
-            if (dir !in cur.split(java.io.File.pathSeparator)) {
-                System.setProperty(
-                    "jna.library.path",
-                    if (cur.isEmpty()) dir else "$dir${java.io.File.pathSeparator}$cur",
-                )
-            }
-        }
-        val bridge = runCatching {
-            Native.load("notepen_gesture", MacosGestureBridge::class.java)
-        }.getOrNull() ?: return@DisposableEffect onDispose {}
-        bridge.notepen_gesture_start(gestureCallback)
-        onDispose { bridge.notepen_gesture_stop() }
+    // The native monitor is a process-wide singleton (`notepen_gesture_start`
+    // replaces any previous monitor), so each panel can't own its own. Instead
+    // a shared router holds one monitor and forwards pinch events to whichever
+    // panel the cursor last hovered — see [MacosPinchGestureRouter].
+    DisposableEffect(Unit) {
+        MacosPinchGestureRouter.acquire()
+        onDispose { MacosPinchGestureRouter.release() }
     }
 
     LaunchedEffect(pages) {
@@ -357,7 +401,7 @@ actual fun PdfPagesViewer(
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
-                .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled, lastCursorRef)
+                .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
                 .then(gestureModifier),
         ) {
         SubcomposeLayout(
@@ -510,7 +554,6 @@ private fun Modifier.pdfDesktopPointerInput(
     state: PdfViewerState,
     pendingZoom: PendingZoom,
     primaryDragPanEnabled: () -> Boolean,
-    lastCursorRef: java.util.concurrent.atomic.AtomicReference<Offset>,
 ): Modifier = this.pointerInput(state) {
     awaitPointerEventScope {
         var lastCursor = Offset.Zero
@@ -533,7 +576,9 @@ private fun Modifier.pdfDesktopPointerInput(
                             zoomBurstFocus = null
                         }
                         lastCursor = newPos
-                        lastCursorRef.set(newPos)
+                        // The cursor is hovering this panel → route trackpad
+                        // pinch here, anchored at the panel-local position.
+                        MacosPinchGestureRouter.setActive(pendingZoom, newPos)
                     }
                     val middleOrigin = middleDragOrigin
                     if (middleOrigin != null && event.buttons.isTertiaryPressed && change != null) {
@@ -611,16 +656,13 @@ private fun Modifier.pdfDesktopPointerInput(
                                 kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
                             vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
                                 kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
-                            val pageColumnW = state.layout.basePageWidthPx * state.zoom
-                            val pageColumnFits = pageColumnW <= state.viewportSize.width
-                            // Suppress H-scroll when page fits AND pan.x is near its natural
-                            // centred position. If the user drag-panned the document off-centre
-                            // we allow trackpad scroll to bring it back.
-                            val suppressDueToFit = pageColumnFits && run {
-                                val centredPanX = (state.viewportSize.width - pageColumnW) / 2f
-                                kotlin.math.abs(state.pan.x - centredPanX) <= SCROLL_H_CENTER_TOLERANCE_PX
-                            }
-                            val suppressH = suppressDueToFit ||
+                            // When the page fits the viewport width it is auto-centred on
+                            // zoom; trackpad H-scroll is disabled in that mode (the page can
+                            // still be dragged horizontally with the mouse). Otherwise suppress
+                            // only incidental H-drift while the dominant axis is vertical.
+                            val pageColumnFits =
+                                state.layout.basePageWidthPx * state.zoom <= state.viewportSize.width
+                            val suppressH = pageColumnFits ||
                                 vScrollEma > hScrollEma * SCROLL_H_SUPPRESS_RATIO
                             val absDx = kotlin.math.abs(delta.x)
                             val hPx = if (suppressH || absDx < SCROLL_H_DEAD_ZONE) 0f

@@ -137,6 +137,16 @@ object PdfViewerMath {
     const val MAX_ZOOM: Float = 8.0f
 
     /**
+     * Дополнительный «оверскролл»-буфер для горизонтального панорамирования,
+     * когда контент шире вьюпорта: разрешает увести pan.x на эту долю ширины
+     * PDF-колонки за строгую границу контента. Растёт с зумом, давая запас
+     * хода на больших масштабах, чтобы удобно дотянуться до полей страницы.
+     * На осях, где контент помещается в экран, буфер не применяется — страница
+     * остаётся в пределах вьюпорта.
+     */
+    private const val OVERSCROLL_PAGE_FRACTION = 0.5f
+
+    /**
      * Потолок размера слота страницы в пикселях для layout-фазы. Compose
      * `Constraints` не может упаковать сторону >~32767 при второй большой
      * стороне, поэтому страница НИКОГДА не раскладывается крупнее этого
@@ -317,11 +327,16 @@ object PdfViewerMath {
 
     /**
      * Edge-clamp [pan] для интерактивного панорамирования
-     * ([PdfViewerState.panBy]): держит документ хотя бы частично в
-     * вьюпорте, когда он больше вьюпорта по оси. Если контент целиком
-     * меньше вьюпорта, [pan] по этой оси НЕ трогаем — иначе любой scroll
-     * (даже только вертикальный) затирает горизонтальное смещение,
-     * выставленное cursor-anchored zoom'ом не по центру.
+     * ([PdfViewerState.panBy]).
+     *
+     * По каждой оси:
+     * - Контент **помещается** во вьюпорт: pan ограничен так, чтобы контент
+     *   целиком оставался в экране — его можно свободно сдвигать в пределах
+     *   пустого поля (drag-to-pan / скролл), но не вытолкнуть за край.
+     * - Контент **переполняет** вьюпорт: краевой clamp с дополнительным
+     *   оверскролл-буфером по горизонтали ([OVERSCROLL_PAGE_FRACTION] от
+     *   ширины PDF-колонки), чтобы на больших зумах был запас хода к полям.
+     *   По вертикали буфер не добавляется — прокрутка ведётся по страницам.
      *
      * Учитывает [PdfPagesLayout.contentLeftPx] / [PdfPagesLayout.contentRightPx]
      * — границы слотов с учётом [PageExtent], не только PDF-колонки.
@@ -334,23 +349,42 @@ object PdfViewerMath {
     ): Offset {
         val contentW = (layout.contentRightPx - layout.contentLeftPx) * zoom
         val contentH = (layout.contentBottomPx - layout.contentTopPx) * zoom
-        val x = if (contentW <= viewportSize.width) {
-            pan.x
-        } else {
-            val minX = viewportSize.width - layout.contentRightPx * zoom
+        val hBuffer = layout.basePageWidthPx * zoom * OVERSCROLL_PAGE_FRACTION
+        val x = clampAxis(
+            value = pan.x,
+            edgeA = viewportSize.width - layout.contentRightPx * zoom,
             // `0f - x` вместо `-x`, чтобы для contentLeftPx == 0 получить +0f,
             // а не -0f (различимы Float.equals и ассертами в тестах).
-            val maxX = 0f - layout.contentLeftPx * zoom
-            pan.x.coerceIn(minX, maxX)
-        }
-        val y = if (contentH <= viewportSize.height) {
-            pan.y
-        } else {
-            val minY = viewportSize.height - layout.contentBottomPx * zoom
-            val maxY = 0f - layout.contentTopPx * zoom
-            pan.y.coerceIn(minY, maxY)
-        }
+            edgeB = 0f - layout.contentLeftPx * zoom,
+            overflow = contentW > viewportSize.width,
+            buffer = hBuffer,
+        )
+        val y = clampAxis(
+            value = pan.y,
+            edgeA = viewportSize.height - layout.contentBottomPx * zoom,
+            edgeB = 0f - layout.contentTopPx * zoom,
+            overflow = contentH > viewportSize.height,
+            buffer = 0f,
+        )
         return Offset(x, y)
+    }
+
+    /**
+     * Кламп одной оси [pan]. [edgeA] / [edgeB] — два положения pan, при которых
+     * соответствующие края контента совпадают с краями вьюпорта (порядок не
+     * важен). При `overflow == false` контент держится целиком в экране; при
+     * `overflow == true` — краевой clamp с оверскролл-[buffer].
+     */
+    private fun clampAxis(
+        value: Float,
+        edgeA: Float,
+        edgeB: Float,
+        overflow: Boolean,
+        buffer: Float,
+    ): Float {
+        val lo = minOf(edgeA, edgeB)
+        val hi = maxOf(edgeA, edgeB)
+        return if (overflow) value.coerceIn(lo - buffer, hi + buffer) else value.coerceIn(lo, hi)
     }
 
     /**

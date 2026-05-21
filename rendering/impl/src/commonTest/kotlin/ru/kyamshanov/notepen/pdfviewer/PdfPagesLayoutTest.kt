@@ -102,11 +102,10 @@ class PdfPagesLayoutTest {
     }
 
     @Test
-    fun `clampPan leaves pan untouched on axis where content fits`() {
+    fun `clampPan keeps a fitting page within screen bounds`() {
         val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 100f)
-        // Контент 100×100 в 400×400 — обе оси помещаются, pan не трогаем
-        // (иначе scroll будет затирать пользовательское горизонтальное
-        // смещение от cursor-anchored zoom не по центру).
+        // Контент 100×100 в 400×400 — обе оси помещаются. pan в пределах
+        // [0, 300] по обеим осям, значит (40, 70) полностью внутри → не трогаем.
         val clamped = PdfViewerMath.clampPan(
             pan = Offset(40f, 70f),
             layout = layout,
@@ -118,19 +117,64 @@ class PdfPagesLayoutTest {
     }
 
     @Test
-    fun `clampPan keeps tall content scrollable within bounds and leaves X free`() {
+    fun `clampPan pulls a fitting page back inside the viewport`() {
+        val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 100f)
+        // Контент 100×100 в 400×400 → pan.x ∈ [0, 300]. 999 → 300 (страница
+        // прижата к правому краю, но целиком в экране). -50 по Y → 0.
+        val clamped = PdfViewerMath.clampPan(
+            pan = Offset(999f, -50f),
+            layout = layout,
+            zoom = 1f,
+            viewportSize = FloatSize(400f, 400f),
+        )
+        assertEquals(300f, clamped.x)
+        assertEquals(0f, clamped.y)
+    }
+
+    @Test
+    fun `clampPan clips pan Y on overflow without vertical buffer`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f) // total 300
+        // Контент 100×300 при viewport 400×200 — X помещается → pan.x ∈ [0, 300],
+        // 40 не трогаем; Y overflow → клампим в [200-300, 0] = [-100, 0] (без
+        // вертикального буфера), 999 → 0.
         val clamped = PdfViewerMath.clampPan(
             pan = Offset(40f, 999f),
             layout = layout,
             zoom = 1f,
             viewportSize = FloatSize(400f, 200f),
         )
-        // Контент 100×300 при viewport 400×200 — X помещается (pan.x не
-        // трогаем, остаётся 40), Y overflow → клампим в [200-300, 0] = [-100, 0],
-        // 999 → 0.
         assertEquals(40f, clamped.x)
         assertEquals(0f, clamped.y)
+    }
+
+    @Test
+    fun `clampPan grants horizontal overscroll buffer when content overflows width`() {
+        val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 200f) // 200×200
+        // Viewport 100×400: X overflow → края [100-200, 0] = [-100, 0];
+        // буфер = 200 * 0.5 = 100 → допустимо [-200, 100]. Y помещается → [0, 200].
+        val viewportSize = FloatSize(100f, 400f)
+        val maxed = PdfViewerMath.clampPan(
+            pan = Offset(999f, 0f),
+            layout = layout,
+            zoom = 1f,
+            viewportSize = viewportSize,
+        )
+        assertEquals(100f, maxed.x) // hi + buffer
+        assertEquals(0f, maxed.y)
+        val minned = PdfViewerMath.clampPan(
+            pan = Offset(-999f, 0f),
+            layout = layout,
+            zoom = 1f,
+            viewportSize = viewportSize,
+        )
+        assertEquals(-200f, minned.x) // lo - buffer
+        val within = PdfViewerMath.clampPan(
+            pan = Offset(-50f, 0f),
+            layout = layout,
+            zoom = 1f,
+            viewportSize = viewportSize,
+        )
+        assertEquals(-50f, within.x) // already inside the buffered range
     }
 
     @Test
