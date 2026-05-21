@@ -15,12 +15,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size as CanvasSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Category
-import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.material.icons.filled.Opacity
 import androidx.compose.material.icons.filled.Palette
@@ -62,6 +62,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.applySize
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.isBuiltinPresetId
 import ru.kyamshanov.notepen.annotation.domain.model.sliderPositionToStrokeWidth
+import ru.kyamshanov.notepen.annotation.domain.model.strokeWidthToSliderPosition
 import ru.kyamshanov.notepen.mainscreen.domain.model.generateUuid
 import ru.kyamshanov.notepen.tools.marker.markerSlots
 
@@ -346,10 +347,9 @@ internal fun ToolPresetsZone(
                 items = all.map {
                     ToolPresetItem(
                         id = it.id,
-                        colorArgb = it.settings.colorArgb,
-                        icon = null,
                         deletable = !isBuiltinPresetId(it.id),
                         selected = it.settings == penSettings,
+                        preview = { PenPresetPreview(it.settings) },
                     )
                 },
                 addIcon = Icons.Default.Add,
@@ -365,10 +365,9 @@ internal fun ToolPresetsZone(
                 items = all.map {
                     ToolPresetItem(
                         id = it.id,
-                        colorArgb = it.settings.colorArgb,
-                        icon = null,
                         deletable = !isBuiltinPresetId(it.id),
                         selected = it.settings == markerSettings,
+                        preview = { MarkerPresetPreview(it.settings) },
                     )
                 },
                 addIcon = Icons.Default.Add,
@@ -386,10 +385,9 @@ internal fun ToolPresetsZone(
                 items = all.map {
                     ToolPresetItem(
                         id = it.id,
-                        colorArgb = null,
-                        icon = Icons.Default.CleaningServices,
                         deletable = !isBuiltinPresetId(it.id),
                         selected = it.settings == eraserSettings,
+                        preview = { EraserPresetPreview(it.settings) },
                     )
                 },
                 addIcon = Icons.Default.Add,
@@ -403,6 +401,52 @@ internal fun ToolPresetsZone(
         }
         ToolMode.NONE -> Unit
     }
+}
+
+/** Maps a slider position `[0..1]` to a preview diameter in [PREVIEW_MIN]..[PREVIEW_MAX]. */
+private fun previewSize(position: Float): Dp =
+    PREVIEW_MIN + (PREVIEW_MAX - PREVIEW_MIN) * position.coerceIn(0f, 1f)
+
+/** Pen preview: a colour dot whose diameter encodes the stroke width. */
+@Composable
+private fun PenPresetPreview(settings: PenSettings) {
+    val pos = strokeWidthToSliderPosition(
+        settings.strokeWidth,
+        PenSettings.MIN_STROKE_WIDTH,
+        PenSettings.MAX_STROKE_WIDTH,
+    )
+    Box(
+        Modifier.size(previewSize(pos)).clip(CircleShape)
+            .background(Color(settings.colorArgb.toInt())),
+    )
+}
+
+/** Marker preview: a translucent capsule whose thickness encodes the stroke width. */
+@Composable
+private fun MarkerPresetPreview(settings: MarkerSettings) {
+    val pos = strokeWidthToSliderPosition(
+        settings.strokeWidth,
+        MarkerSettings.MIN_STROKE_WIDTH,
+        MarkerSettings.MAX_STROKE_WIDTH,
+    )
+    Box(
+        Modifier.width(PREVIEW_MAX).height(previewSize(pos)).clip(RoundedCornerShape(percent = 50))
+            .background(Color(settings.colorArgb.toInt())),
+    )
+}
+
+/** Eraser preview: the actual shape, sized by the eraser size; filled for OBJECT mode. */
+@Composable
+private fun EraserPresetPreview(settings: EraserSettings) {
+    val pos = (settings.sizeNormalized - EraserSettings.MIN_SIZE_NORMALIZED) /
+        (EraserSettings.MAX_SIZE_NORMALIZED - EraserSettings.MIN_SIZE_NORMALIZED)
+    val shape = if (settings.shape == EraserShape.CIRCLE) CircleShape else RoundedCornerShape(2.dp)
+    val outline = MaterialTheme.colorScheme.onSecondaryContainer
+    Box(
+        Modifier.size(previewSize(pos)).clip(shape)
+            .background(if (settings.mode == EraserMode.OBJECT) outline.copy(alpha = ERASER_FILL_ALPHA) else Color.Transparent)
+            .border(PRESET_PREVIEW_BORDER, outline, shape),
+    )
 }
 
 /* ---------------- oriented expanded-content widgets ---------------- */
@@ -445,3 +489,7 @@ private val PANEL_EXPANSION_PADDING_V = 8.dp
 private val RAIL_ITEM_GAP = 4.dp
 private val RAIL_ICON_BUTTON_SIZE = 40.dp
 private val CHIP_GAP = 6.dp
+private val PREVIEW_MIN = 8.dp
+private val PREVIEW_MAX = 24.dp
+private val PRESET_PREVIEW_BORDER = 1.5.dp
+private const val ERASER_FILL_ALPHA = 0.3f

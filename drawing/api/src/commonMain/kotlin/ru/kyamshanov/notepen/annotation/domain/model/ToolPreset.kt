@@ -57,35 +57,23 @@ internal const val BUILTIN_PRESET_PREFIX = "builtin:"
  */
 object BuiltinToolPresets {
 
-    /** Default pen presets: common ink colours plus a fine liner and a pencil. */
+    /** Default pen presets (max two): a blue and a red ballpoint. */
     val pen: List<PenPreset> = listOf(
-        PenPreset("${BUILTIN_PRESET_PREFIX}pen:black", PenSettings(colorArgb = 0xFF000000L, strokeWidth = 0.0020f)),
         PenPreset("${BUILTIN_PRESET_PREFIX}pen:blue", PenSettings(colorArgb = 0xFF1E88E5L, strokeWidth = 0.0020f)),
         PenPreset("${BUILTIN_PRESET_PREFIX}pen:red", PenSettings(colorArgb = 0xFFE53935L, strokeWidth = 0.0020f)),
-        PenPreset("${BUILTIN_PRESET_PREFIX}pen:liner", PenSettings(colorArgb = 0xFF000000L, strokeWidth = 0.0012f)),
-        PenPreset(
-            "${BUILTIN_PRESET_PREFIX}pen:pencil",
-            PenSettings(colorArgb = 0xFF616161L, strokeWidth = 0.0016f).applyAlpha(0.7f),
-        ),
     )
 
-    /** Default highlighter presets — translucent so underlying text stays readable. */
+    /** Default highlighter presets (max two) — translucent so text stays readable. */
     val marker: List<MarkerPreset> = listOf(
         MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:yellow", MarkerSettings(colorArgb = 0x80FFEB3BL, strokeWidth = 0.025f)),
         MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:green", MarkerSettings(colorArgb = 0x8076FF03L, strokeWidth = 0.025f)),
-        MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:pink", MarkerSettings(colorArgb = 0x80FF4081L, strokeWidth = 0.025f)),
-        MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:cyan", MarkerSettings(colorArgb = 0x8000BCD4L, strokeWidth = 0.030f)),
     )
 
-    /** Default eraser presets: a small and large point eraser plus a whole-stroke eraser. */
+    /** Default eraser presets (max two): a small point eraser and a whole-stroke eraser. */
     val eraser: List<EraserPreset> = listOf(
         EraserPreset(
             "${BUILTIN_PRESET_PREFIX}eraser:small",
             EraserSettings(shape = EraserShape.CIRCLE, sizeNormalized = 0.02f, mode = EraserMode.POINT),
-        ),
-        EraserPreset(
-            "${BUILTIN_PRESET_PREFIX}eraser:large",
-            EraserSettings(shape = EraserShape.CIRCLE, sizeNormalized = 0.08f, mode = EraserMode.POINT),
         ),
         EraserPreset(
             "${BUILTIN_PRESET_PREFIX}eraser:object",
