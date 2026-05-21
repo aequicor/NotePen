@@ -38,6 +38,7 @@ kotlin {
             implementation(projects.shared)
             implementation(projects.drawing.api)
             implementation(projects.drawing.impl)
+            implementation(projects.tools.marker)
             implementation(projects.sync)
             implementation(projects.qrConnect)
             implementation(projects.rendering.api)

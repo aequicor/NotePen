@@ -19,32 +19,26 @@ kotlin {
     }
 
     sourceSets {
-
         commonMain.dependencies {
-            implementation(projects.app.byCompose.theme)
             implementation(projects.drawing.api)
-            //compose
+            implementation(projects.app.byCompose.uikit)
+
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)
+            implementation(compose.materialIconsExtended)
             implementation(compose.ui)
-            implementation(compose.components.resources)
-            implementation(compose.components.uiToolingPreview)
-        }
 
-        androidMain.dependencies {
-            implementation(compose.preview)
-            implementation(libs.androidx.activity.compose)
+            implementation(libs.kotlinx.coroutines.core)
         }
-
-        jvmMain.dependencies {
-            implementation(compose.desktop.currentOs)
+        commonTest.dependencies {
+            implementation(kotlin("test"))
         }
     }
 }
 
 android {
-    namespace = "ru.kyamshanov.notepen"
+    namespace = "ru.kyamshanov.notepen.tools.marker"
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

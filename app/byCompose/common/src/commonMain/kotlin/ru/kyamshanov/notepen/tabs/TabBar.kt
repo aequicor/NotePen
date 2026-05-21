@@ -150,6 +150,7 @@ fun TabBar(
                             showClose = tab.id == openDocs.activeId && tabCount > 1,
                             onSelect = { onSelect(side, tab.id) },
                             onClose = { onClose(side, tab.id) },
+                            onNewTab = { onAddTab(side) },
                             onOpenInNewPanel = onOpenInNewPanel?.let { cb -> { cb(tab.id) } },
                             onClosePanel = onClosePanel,
                             modifier = Modifier.width(tabWidth),
@@ -181,11 +182,13 @@ private fun TabChip(
     showClose: Boolean,
     onSelect: () -> Unit,
     onClose: () -> Unit,
+    onNewTab: () -> Unit,
     onOpenInNewPanel: (() -> Unit)?,
     onClosePanel: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
-    val hasMenu = onOpenInNewPanel != null || onClosePanel != null
+    // "Новая вкладка" is always available, so the context menu always opens.
+    val hasMenu = true
     // Active tab: subtle highlight that lets the outer glass bar show through.
     // Inactive tab: fully transparent — the glass bar background is the visual context.
     val chipBackground: Color = if (isActive) {
@@ -286,6 +289,13 @@ private fun TabChip(
                 onDismissRequest = { menuExpanded = false },
                 offset = with(density) { DpOffset(menuOffset.x.toDp(), menuOffset.y.toDp() - TAB_BAR_HEIGHT) },
             ) {
+                DropdownMenuItem(
+                    text = { Text("Новая вкладка") },
+                    onClick = {
+                        menuExpanded = false
+                        onNewTab()
+                    },
+                )
                 onOpenInNewPanel?.let { open ->
                     DropdownMenuItem(
                         text = { Text("Открыть в новой панели") },

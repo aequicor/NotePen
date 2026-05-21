@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
@@ -42,9 +43,16 @@ public class PdfDrawingState {
     /** ARGB-packed color of the active stroke; kept in sync with pen settings. */
     public var strokeColorArgb: MutableState<Long> = mutableLongStateOf(DrawingPath.BLACK_ARGB)
 
+    /** Tool of the active stroke; written by the input layer before [startDrawing]. */
+    public var strokeToolKind: MutableState<ToolKind> = mutableStateOf(ToolKind.PEN)
+
     /** Color of the currently-live stroke. Snapshotted at [startDrawing]. */
     public val liveColorArgb: MutableState<Long> =
         mutableStateOf(DrawingPath.BLACK_ARGB)
+
+    /** Tool of the currently-live stroke. Snapshotted at [startDrawing]. */
+    public val liveToolKind: MutableState<ToolKind> =
+        mutableStateOf(ToolKind.PEN)
 
     /** Normalised stroke width of the currently-live stroke. Snapshotted at [startDrawing]. */
     public val liveStrokeWidth: MutableState<Float> =
@@ -103,6 +111,7 @@ public class PdfDrawingState {
         isDrawing.value = true
         gestureSnapped = false
         liveColorArgb.value = strokeColorArgb.value
+        liveToolKind.value = strokeToolKind.value
         liveStrokeWidth.value = normalizedStrokeWidth
         livePoints.clear()
         livePoints.add(DrawingPoint(x, y, isNewPath = true, pressure = pressure, tilt = tilt))
@@ -148,6 +157,7 @@ public class PdfDrawingState {
                 points = points,
                 colorArgb = liveColorArgb.value,
                 strokeWidth = liveStrokeWidth.value,
+                toolType = liveToolKind.value,
             )
             currentPaths.add(path)
             markHistoryChanged()

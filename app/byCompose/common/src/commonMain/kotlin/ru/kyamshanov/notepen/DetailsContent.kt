@@ -55,6 +55,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -89,6 +90,9 @@ import ru.kyamshanov.notepen.tabs.rememberTabSession
 private val logger = KotlinLogging.logger {}
 
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
+
+private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
+private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
 
 /**
  * Editor screen: a unified toolbar plus a grid of 1–[ru.kyamshanov.notepen.tabs.MAX_PANELS]
@@ -446,8 +450,14 @@ fun DetailsContent(
                     isExporting = isExporting,
                     onExport = { controls?.export?.invoke() },
                     scale = scale,
-                    onZoomIn = { controls?.zoomIn?.invoke() },
-                    onZoomOut = { controls?.zoomOut?.invoke() },
+                    onZoomIn = {
+                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@LandscapeToolRail
+                        vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                    },
+                    onZoomOut = {
+                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@LandscapeToolRail
+                        vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                    },
                     showThumbnails = showThumbnails,
                     onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
                     showPencilModeButton = SupportsPencilMode,
@@ -504,8 +514,14 @@ fun DetailsContent(
                     isExporting = isExporting,
                     onExport = { controls?.export?.invoke() },
                     scale = scale,
-                    onZoomIn = { controls?.zoomIn?.invoke() },
-                    onZoomOut = { controls?.zoomOut?.invoke() },
+                    onZoomIn = {
+                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@PortraitTopBar
+                        vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                    },
+                    onZoomOut = {
+                        val vs = tabSession.focusedActiveState?.pdfViewerState ?: return@PortraitTopBar
+                        vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                    },
                     showThumbnails = showThumbnails,
                     onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
                     showPencilModeButton = SupportsPencilMode,
