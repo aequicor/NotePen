@@ -52,6 +52,10 @@ import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
+import ru.kyamshanov.notepen.pdf.infrastructure.JvmDocumentLoader
+import ru.kyamshanov.notepen.pdf.infrastructure.JvmImageDocumentLoader
+import ru.kyamshanov.notepen.pdf.infrastructure.JvmImagePageRenderer
+import ru.kyamshanov.notepen.pdf.infrastructure.JvmPageRenderer
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
@@ -123,8 +127,14 @@ fun main() {
     val selfName = runCatching { InetAddress.getLocalHost().hostName }.getOrDefault("NotePen Desktop")
     val selfInfo = DeviceInfo(id = selfId, name = selfName, host = "", port = 0)
 
-    val pdfDocumentLoader = JvmPdfDocumentLoader(Dispatchers.IO)
-    val pdfPageRenderer = JvmPdfPageRenderer(Dispatchers.IO)
+    val pdfDocumentLoader = JvmDocumentLoader(
+        pdfLoader = JvmPdfDocumentLoader(Dispatchers.IO),
+        imageLoader = JvmImageDocumentLoader(Dispatchers.IO),
+    )
+    val pdfPageRenderer = JvmPageRenderer(
+        pdfRenderer = JvmPdfPageRenderer(Dispatchers.IO),
+        imageRenderer = JvmImagePageRenderer(Dispatchers.IO),
+    )
 
     val catalogChangeNotifier = InMemoryCatalogChangeNotifier()
     val historyRepo = NotifyingFileHistoryRepository(

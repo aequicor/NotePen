@@ -12,22 +12,38 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 
-/** Width / height of a draggable divider between panels. */
-private val DIVIDER_THICKNESS = 6.dp
+/** Pointer hit area along the cross axis of a draggable divider. */
+internal val DIVIDER_HIT = 16.dp
+
+/** Visible hair-line drawn down the middle of a divider. */
+private val DIVIDER_LINE = 1.dp
+
+/** Short axis of the grab handle pill. */
+private val HANDLE_THICKNESS = 4.dp
+
+/** Long axis of the grab handle pill. */
+private val HANDLE_LENGTH = 36.dp
 
 /** Border width drawn around the focused panel. */
 private val FOCUS_BORDER = 2.dp
@@ -56,6 +72,7 @@ fun GridContainer(
         when (layout.template) {
             LayoutTemplate.FULL -> Cell(layout, layout.panels[0], onFocusPanel, content, Modifier.fillMaxSize())
             LayoutTemplate.COLUMNS_2 -> Columns(layout, onSetRatio, onFocusPanel, content)
+            LayoutTemplate.ROWS_2 -> Rows(layout, onSetRatio, onFocusPanel, content)
             LayoutTemplate.COLUMNS_3 -> Columns(layout, onSetRatio, onFocusPanel, content)
             LayoutTemplate.LEFT_PLUS_STACK -> LeftPlusStack(layout, onSetRatio, onFocusPanel, content)
             LayoutTemplate.GRID_2X2 -> GridTwoByTwo(layout, onSetRatio, onFocusPanel, content)
@@ -84,6 +101,23 @@ private fun Columns(
                 VerticalDivider { dx -> onSetRatio(index, ratioAt(layout, index) + delta(dx, widthPx)) }
             }
         }
+    }
+}
+
+/** Two rows stacked top-to-bottom, sharing all width. */
+@Composable
+private fun Rows(
+    layout: WorkspaceLayout,
+    onSetRatio: (Int, Float) -> Unit,
+    onFocusPanel: (PanelId) -> Unit,
+    content: @Composable (Panel) -> Unit,
+) {
+    var heightPx by remember { mutableStateOf(0f) }
+    Column(Modifier.fillMaxSize().onSizeChanged { heightPx = it.height.toFloat() }) {
+        val top = layout.ratios[0]
+        Cell(layout, layout.panels[0], onFocusPanel, content, Modifier.fillMaxWidth().weight(top))
+        HorizontalDivider { dy -> onSetRatio(0, layout.ratios[0] + delta(dy, heightPx)) }
+        Cell(layout, layout.panels[1], onFocusPanel, content, Modifier.fillMaxWidth().weight(1f - top))
     }
 }
 
@@ -188,32 +222,55 @@ private fun Modifier.focusOnPress(onFocus: () -> Unit): Modifier = pointerInput(
 
 @Composable
 private fun RowScope.VerticalDivider(onDrag: (Float) -> Unit) {
+    // pointerInput is keyed on Unit, so the gesture closure is captured once;
+    // route through rememberUpdatedState so it always calls the latest onDrag
+    // (which closes over the current ratios) instead of the stale first one.
+    val currentOnDrag by rememberUpdatedState(onDrag)
     Box(
         Modifier
             .fillMaxHeight()
-            .width(DIVIDER_THICKNESS)
-            .background(MaterialTheme.colorScheme.outlineVariant)
+            .width(DIVIDER_HIT)
+            .pointerHoverIcon(PointerIcon.Hand)
             .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
-                    onDrag(dragAmount.x)
+                    currentOnDrag(dragAmount.x)
                 }
             },
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.fillMaxHeight().width(DIVIDER_LINE).background(MaterialTheme.colorScheme.outlineVariant))
+        Box(
+            Modifier
+                .size(width = HANDLE_THICKNESS, height = HANDLE_LENGTH)
+                .clip(RoundedCornerShape(HANDLE_THICKNESS / 2))
+                .background(MaterialTheme.colorScheme.outline),
+        )
+    }
 }
 
 @Composable
 private fun ColumnScope.HorizontalDivider(onDrag: (Float) -> Unit) {
+    val currentOnDrag by rememberUpdatedState(onDrag)
     Box(
         Modifier
             .fillMaxWidth()
-            .height(DIVIDER_THICKNESS)
-            .background(MaterialTheme.colorScheme.outlineVariant)
+            .height(DIVIDER_HIT)
+            .pointerHoverIcon(PointerIcon.Hand)
             .pointerInput(Unit) {
                 detectDragGestures { change, dragAmount ->
                     change.consume()
-                    onDrag(dragAmount.y)
+                    currentOnDrag(dragAmount.y)
                 }
             },
-    )
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(Modifier.fillMaxWidth().height(DIVIDER_LINE).background(MaterialTheme.colorScheme.outlineVariant))
+        Box(
+            Modifier
+                .size(width = HANDLE_LENGTH, height = HANDLE_THICKNESS)
+                .clip(RoundedCornerShape(HANDLE_THICKNESS / 2))
+                .background(MaterialTheme.colorScheme.outline),
+        )
+    }
 }

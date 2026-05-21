@@ -25,6 +25,7 @@ data class Panel(
  *
  * Slot order matches [WorkspaceLayout.panels] order:
  * - [COLUMNS_2]: left, right.
+ * - [ROWS_2]: top, bottom.
  * - [COLUMNS_3]: left, middle, right.
  * - [LEFT_PLUS_STACK]: large left, right-top, right-bottom.
  * - [GRID_2X2]: top-left, top-right, bottom-left, bottom-right.
@@ -33,8 +34,11 @@ enum class LayoutTemplate(val capacity: Int) {
     /** One panel filling the whole workspace. */
     FULL(1),
 
-    /** Two equal columns (1×2). */
+    /** Two equal columns side by side (1×2). */
     COLUMNS_2(2),
+
+    /** Two equal rows stacked vertically (2×1). */
+    ROWS_2(2),
 
     /** Three columns (1×3). */
     COLUMNS_3(3),
@@ -57,6 +61,7 @@ enum class LayoutTemplate(val capacity: Int) {
  * ### [ratios] semantics (per [template], each clamped to [MIN_RATIO]..[MAX_RATIO])
  * - [LayoutTemplate.FULL]: empty.
  * - [LayoutTemplate.COLUMNS_2]: `[leftWidth]`.
+ * - [LayoutTemplate.ROWS_2]: `[topHeight]`.
  * - [LayoutTemplate.COLUMNS_3]: `[divider1, divider2]` — cumulative positions
  *   of the two vertical dividers (`0 < divider1 < divider2 < 1`); column
  *   widths are `divider1`, `divider2 - divider1`, `1 - divider2`.
@@ -180,6 +185,7 @@ data class WorkspaceLayout(
         fun defaultRatios(template: LayoutTemplate): List<Float> = when (template) {
             LayoutTemplate.FULL -> emptyList()
             LayoutTemplate.COLUMNS_2 -> listOf(0.5f)
+            LayoutTemplate.ROWS_2 -> listOf(0.5f)
             LayoutTemplate.COLUMNS_3 -> listOf(1f / 3f, 2f / 3f)
             LayoutTemplate.LEFT_PLUS_STACK -> listOf(0.5f, 0.5f)
             LayoutTemplate.GRID_2X2 -> listOf(0.5f, 0.5f)
