@@ -175,4 +175,42 @@ class PdfPagesLayoutTest {
         // byWidth = 3, byHeight = 4 → min = 3.
         assertEquals(3f, z)
     }
+
+    @Test
+    fun `layoutZoomCap caps so largest slot dim stays within MAX_LAYOUT_DIM_PX`() {
+        // Базовая ширина 5000, страница квадратная → большая сторона слота 5000.
+        // cap = 16000 / 5000 = 3.2 (ниже MAX_ZOOM=8).
+        val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 5000f)
+        val cap = PdfViewerMath.layoutZoomCap(layout)
+        assertTrue(abs(cap - (PdfViewerMath.MAX_LAYOUT_DIM_PX / 5000f)) < 1e-3f)
+        // На cap большая сторона ровно = предел.
+        assertTrue(layout.pageWidthsPx[0] * cap <= PdfViewerMath.MAX_LAYOUT_DIM_PX + 1f)
+    }
+
+    @Test
+    fun `layoutZoomCap never exceeds MAX_ZOOM for small pages`() {
+        val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 500f)
+        // 16000 / 500 = 32 → клампится к MAX_ZOOM.
+        assertEquals(PdfViewerMath.MAX_ZOOM, PdfViewerMath.layoutZoomCap(layout))
+    }
+
+    @Test
+    fun `residualScale is identity below cap and splits above`() {
+        val cap = 4f
+        // Ниже cap — растеризуем на полном зуме, residual == 1.
+        assertEquals(2f, PdfViewerMath.layoutZoom(2f, cap))
+        assertEquals(1f, PdfViewerMath.residualScale(2f, cap))
+        // Выше cap — layoutZoom фиксируется на cap, остаток уходит в residual.
+        assertEquals(cap, PdfViewerMath.layoutZoom(8f, cap))
+        assertTrue(abs(PdfViewerMath.residualScale(8f, cap) - 2f) < 1e-4f)
+    }
+
+    @Test
+    fun `layoutZoom times residualScale reconstructs visual zoom`() {
+        val cap = 4f
+        for (zoom in listOf(0.5f, 1f, 3.9f, 4f, 6f, 8f)) {
+            val visual = PdfViewerMath.layoutZoom(zoom, cap) * PdfViewerMath.residualScale(zoom, cap)
+            assertTrue(abs(visual - zoom) < 1e-4f, "zoom=$zoom reconstructed=$visual")
+        }
+    }
 }

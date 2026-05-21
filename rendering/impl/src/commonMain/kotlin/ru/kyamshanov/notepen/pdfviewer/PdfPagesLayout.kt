@@ -137,6 +137,45 @@ object PdfViewerMath {
     const val MAX_ZOOM: Float = 8.0f
 
     /**
+     * Потолок размера слота страницы в пикселях для layout-фазы. Compose
+     * `Constraints` не может упаковать сторону >~32767 при второй большой
+     * стороне, поэтому страница НИКОГДА не раскладывается крупнее этого
+     * предела: визуальный зум сверх него добавляется GPU-трансформой
+     * (`residualScale`), а не размером layout'а. 16000 — с запасом ниже лимита.
+     */
+    const val MAX_LAYOUT_DIM_PX: Float = 16_000f
+
+    /**
+     * Максимальный визуальный зум, который ещё можно «впечь» в размер layout'а
+     * для [layout], не превысив [MAX_LAYOUT_DIM_PX] по большей стороне любого
+     * слота. Адаптивно к размеру страниц: для крупных страниц cap ниже.
+     * Возвращает значение в [[1f], [MAX_ZOOM]].
+     */
+    fun layoutZoomCap(layout: PdfPagesLayout): Float {
+        var maxDim = layout.basePageWidthPx
+        val n = layout.pageWidthsPx.size
+        for (i in 0 until n) {
+            val w = layout.pageWidthsPx[i]
+            val h = layout.pdfHeightsPx[i] * layout.pageExtents[i].height
+            if (w > maxDim) maxDim = w
+            if (h > maxDim) maxDim = h
+        }
+        return if (maxDim <= 0f) MAX_ZOOM else (MAX_LAYOUT_DIM_PX / maxDim).coerceIn(1f, MAX_ZOOM)
+    }
+
+    /** Зум, применяемый к размеру/растеризации (capped). */
+    fun layoutZoom(zoom: Float, cap: Float): Float = zoom.coerceAtMost(cap)
+
+    /**
+     * Остаточный множитель зума сверх [layoutZoom], применяемый GPU-трансформой.
+     * `1f`, пока `zoom <= cap`; иначе `zoom / cap`.
+     */
+    fun residualScale(zoom: Float, cap: Float): Float {
+        val lz = layoutZoom(zoom, cap)
+        return if (lz <= 0f) 1f else zoom / lz
+    }
+
+    /**
      * Cursor-anchored zoom. Возвращает новый `(pan, zoom)` такой, что
      * пиксель документа под [focus] остаётся под [focus] после смены
      * масштаба с [zoomOld] на `zoomNew`. [zoomNew] клампится в

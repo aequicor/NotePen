@@ -124,7 +124,9 @@ actual fun PdfPagesViewer(
             VisibleSnapshot(
                 first = (range.first - BUFFER_PAGES).coerceAtLeast(0),
                 last = (range.last + BUFFER_PAGES).coerceAtMost(state.pages.lastIndex),
-                scalePercent = state.scalePercent,
+                // Растеризуем PDF до layoutCap; зум сверх него — GPU-апскейл,
+                // поэтому коммит зума за cap не должен запускать ре-рендер.
+                scalePercent = state.renderScalePercent,
                 basePageWidthPx = state.basePageWidthPx,
                 viewportSize = state.viewportSize,
             )
@@ -211,7 +213,10 @@ actual fun PdfPagesViewer(
                 // в graphicsLayer-блоке — он переоценивается на DRAW-pass'е,
                 // без рекомпозиции / ремежа SubcomposeLayout'а.
                 .graphicsLayer {
-                    val s = state.gestureScale
+                    // residualScale — зум сверх layoutCap, который НЕ запечён в
+                    // размер layout'а (страница разложена в layoutZoom-пиксели),
+                    // поэтому домножаем его сюда. Ниже cap residualScale == 1f.
+                    val s = state.gestureScale * state.residualScale
                     scaleX = s
                     scaleY = s
                     transformOrigin = TransformOrigin(0f, 0f)
@@ -244,18 +249,24 @@ actual fun PdfPagesViewer(
                 val placeable: androidx.compose.ui.layout.Placeable,
             )
             val items = mutableListOf<Item>()
+            // Размер/растеризацию ведём в layoutZoom (≤ cap), визуальный зум
+            // сверх cap добавляет graphicsLayer через residualScale. Размещение
+            // считаем в полном zoom и пред-делим на residualScale, т.к. layer
+            // домножит координаты обратно. Ниже cap residualScale == 1f.
+            val lz = state.layoutZoom
+            val rs = state.residualScale
             for (i in first..last) {
                 val ext = layout.pageExtents[i]
                 val pdfH = layout.pdfHeightsPx[i]
-                val w = (layout.pageWidthsPx[i] * zoom).roundToInt().coerceAtLeast(1)
-                val h = (pdfH * ext.height * zoom).roundToInt().coerceAtLeast(1)
+                val w = (layout.pageWidthsPx[i] * lz).roundToInt().coerceAtLeast(1)
+                val h = (pdfH * ext.height * lz).roundToInt().coerceAtLeast(1)
                 val visualWidthDp = with(density) { w.toDp() }
                 val visualHeightDp = with(density) { h.toDp() }
                 val pdfWidthDp = with(density) {
-                    (layout.basePageWidthPx * zoom).roundToInt().coerceAtLeast(1).toDp()
+                    (layout.basePageWidthPx * lz).roundToInt().coerceAtLeast(1).toDp()
                 }
                 val pdfHeightDp = with(density) {
-                    (pdfH * zoom).roundToInt().coerceAtLeast(1).toDp()
+                    (pdfH * lz).roundToInt().coerceAtLeast(1).toDp()
                 }
                 val pagePlaceables = subcompose(i) {
                     val cached = cache.entries[i]?.bitmap
@@ -274,8 +285,8 @@ actual fun PdfPagesViewer(
                 // слот всего лишь выходит наружу по extent. Соседние страницы
                 // не двигаются, PDF под пером тоже не смещается при росте
                 // extent.
-                val slotX = (pan.x + ext.left * layout.basePageWidthPx * zoom).roundToInt()
-                val slotY = (pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom).roundToInt()
+                val slotX = ((pan.x + ext.left * layout.basePageWidthPx * zoom) / rs).roundToInt()
+                val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
                 pagePlaceables.forEach { items.add(Item(slotX, slotY, it)) }
             }
             layout(constraints.maxWidth, constraints.maxHeight) {

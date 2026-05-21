@@ -137,6 +137,25 @@ actual class PdfViewerState internal constructor(
     actual val scalePercent: Int by derivedStateOf { (zoom * 100f).roundToInt() }
 
     /**
+     * Потолок зума, который «впекается» в размер layout'а (адаптивно к размеру
+     * страницы). Зум сверх него идёт через GPU-трансформу — см. [residualScale].
+     */
+    val layoutCap: Float by derivedStateOf { PdfViewerMath.layoutZoomCap(layout) }
+
+    /** Зум для размера/растеризации страницы (≤ [layoutCap]). */
+    val layoutZoom: Float get() = PdfViewerMath.layoutZoom(zoom, layoutCap)
+
+    /** Остаточный зум сверх [layoutZoom], применяемый через `graphicsLayer`. */
+    val residualScale: Float get() = PdfViewerMath.residualScale(zoom, layoutCap)
+
+    /**
+     * scalePercent, ограниченный [layoutCap]: целевое разрешение растеризации
+     * PDF-битмапа не должно расти выше cap (выше — GPU-апскейл), иначе коммит
+     * зума за cap триггерил бы бесполезный ре-рендер.
+     */
+    val renderScalePercent: Int by derivedStateOf { (layoutZoom * 100f).roundToInt() }
+
+    /**
      * Cursor-anchored zoom: переводит масштаб в [targetZoom], сохраняя
      * точку под [focus] (centroid пинча) на месте.
      */
