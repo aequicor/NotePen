@@ -54,6 +54,12 @@ bin/
 .planning/MORNING_REPORT.md
 /local.properties
 /java_pid34416.hprof
+
+# Signing keys — НИКОГДА не коммитить (ключи подписи релизов)
+*.jks
+*.keystore
+*.p12
+*.pfx
 /.claude/settings.local.json
 .aikit/bin/
 /.claude/worktrees/
