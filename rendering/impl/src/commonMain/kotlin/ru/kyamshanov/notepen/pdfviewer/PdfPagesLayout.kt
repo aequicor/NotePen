@@ -334,9 +334,9 @@ object PdfViewerMath {
      *   целиком оставался в экране — его можно свободно сдвигать в пределах
      *   пустого поля (drag-to-pan / скролл), но не вытолкнуть за край.
      * - Контент **переполняет** вьюпорт: краевой clamp с дополнительным
-     *   оверскролл-буфером по горизонтали ([OVERSCROLL_PAGE_FRACTION] от
-     *   ширины PDF-колонки), чтобы на больших зумах был запас хода к полям.
-     *   По вертикали буфер не добавляется — прокрутка ведётся по страницам.
+     *   оверскролл-буфером ([OVERSCROLL_PAGE_FRACTION] от ширины PDF-колонки)
+     *   по обеим осям — чтобы drag/wheel overscroll мог немного вытянуть
+     *   документ за край до срабатывания пружины возврата.
      *
      * Учитывает [PdfPagesLayout.contentLeftPx] / [PdfPagesLayout.contentRightPx]
      * — границы слотов с учётом [PageExtent], не только PDF-колонки.
@@ -364,7 +364,7 @@ object PdfViewerMath {
             edgeA = viewportSize.height - layout.contentBottomPx * zoom,
             edgeB = 0f - layout.contentTopPx * zoom,
             overflow = contentH > viewportSize.height,
-            buffer = 0f,
+            buffer = hBuffer,
         )
         return Offset(x, y)
     }

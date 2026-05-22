@@ -16,6 +16,7 @@ kotlin-logging = "7.0.13"
 slf4j = "2.0.17"
 apache-pdfbox = "3.0.5"
 jna = "5.14.0"
+jbr-api = "1.9.0"
 androidx-graphics-core = "1.0.3"
 androidx-core-splashscreen = "1.0.1"
 sqldelight = "2.0.2"
@@ -53,6 +54,7 @@ ktor-client-websockets = { module = "io.ktor:ktor-client-websockets", version.re
 jmdns = { module = "org.jmdns:jmdns", version.ref = "jmdns" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
 jna-platform = { module = "net.java.dev.jna:jna-platform", version.ref = "jna" }
+jbr-api = { module = "org.jetbrains.runtime:jbr-api", version.ref = "jbr-api" }
 androidx-graphics-core = { module = "androidx.graphics:graphics-core", version.ref = "androidx-graphics-core" }
 androidx-core-splashscreen = { module = "androidx.core:core-splashscreen", version.ref = "androidx-core-splashscreen" }
 sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sqldelight" }

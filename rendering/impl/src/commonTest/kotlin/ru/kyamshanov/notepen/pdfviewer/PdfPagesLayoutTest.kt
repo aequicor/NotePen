@@ -132,11 +132,11 @@ class PdfPagesLayoutTest {
     }
 
     @Test
-    fun `clampPan clips pan Y on overflow without vertical buffer`() {
+    fun `clampPan grants vertical overscroll buffer when content overflows height`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f) // total 300
         // Контент 100×300 при viewport 400×200 — X помещается → pan.x ∈ [0, 300],
-        // 40 не трогаем; Y overflow → клампим в [200-300, 0] = [-100, 0] (без
-        // вертикального буфера), 999 → 0.
+        // 40 не трогаем; Y overflow → края [-100, 0]; буфер = 100*0.25 = 25 →
+        // диапазон [-125, 25], 999 → 25.
         val clamped = PdfViewerMath.clampPan(
             pan = Offset(40f, 999f),
             layout = layout,
@@ -144,7 +144,7 @@ class PdfPagesLayoutTest {
             viewportSize = FloatSize(400f, 200f),
         )
         assertEquals(40f, clamped.x)
-        assertEquals(0f, clamped.y)
+        assertEquals(25f, clamped.y)
     }
 
     @Test

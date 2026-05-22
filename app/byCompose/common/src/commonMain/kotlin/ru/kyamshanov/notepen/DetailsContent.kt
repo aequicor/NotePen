@@ -13,6 +13,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
@@ -62,6 +63,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -69,13 +71,17 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
 import kotlin.math.roundToInt
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
@@ -111,6 +117,15 @@ internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
 private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
+
+/** Tool state snapshot saved per panel when it loses focus. */
+private data class PanelToolSnapshot(
+    val toolMode: ToolMode,
+    val penSettings: PenSettings,
+    val markerSettings: MarkerSettings,
+    val eraserSettings: EraserSettings,
+    val markerWidthPinned: Boolean,
+)
 
 /**
  * Editor screen: a unified toolbar plus a grid of 1–[ru.kyamshanov.notepen.tabs.MAX_PANELS]
@@ -197,6 +212,32 @@ fun DetailsContent(
     var pencilModeEnabled by remember { mutableStateOf(false) }
     var pencilModeManuallyTouched by remember { mutableStateOf(false) }
 
+    // Per-panel tool state: save on lose-focus, restore on gain-focus.
+    val panelToolStates = remember { mutableStateMapOf<PanelId, PanelToolSnapshot>() }
+    LaunchedEffect(tabSession) {
+        var previousPanelId = tabSession.layout.focusedPanelId
+        snapshotFlow { tabSession.layout.focusedPanelId }
+            .distinctUntilChanged()
+            .drop(1)
+            .collect { newPanelId ->
+                panelToolStates[previousPanelId] = PanelToolSnapshot(
+                    toolMode = toolMode,
+                    penSettings = penSettings,
+                    markerSettings = markerSettings,
+                    eraserSettings = eraserSettings,
+                    markerWidthPinned = markerWidthPinned,
+                )
+                previousPanelId = newPanelId
+                panelToolStates[newPanelId]?.let { snapshot ->
+                    toolMode = snapshot.toolMode
+                    penSettings = snapshot.penSettings
+                    markerSettings = snapshot.markerSettings
+                    eraserSettings = snapshot.eraserSettings
+                    markerWidthPinned = snapshot.markerWidthPinned
+                }
+            }
+    }
+
     // Derive the marker's default thickness from the focused document's text
     // line height (where the PDF engine exposes it). Skipped once the width is
     // pinned by a manual change or a restored saved value.
@@ -250,6 +291,44 @@ fun DetailsContent(
     val onToolPresetsChange: (StoredToolPresets) -> Unit = { updated ->
         toolPresets = updated
         coroutineScope.launch { toolPresetsRepository.save(updated) }
+    }
+
+    // Last preset explicitly selected per tool within this document session.
+    // Null means "not yet chosen" — the first activation falls back to the first builtin.
+    var lastPenPresetId by remember { mutableStateOf<String?>(null) }
+    var lastMarkerPresetId by remember { mutableStateOf<String?>(null) }
+    var lastEraserPresetId by remember { mutableStateOf<String?>(null) }
+
+    val onPresetApplied: (String) -> Unit = { id ->
+        when (toolMode) {
+            ToolMode.PEN -> lastPenPresetId = id
+            ToolMode.MARKER -> lastMarkerPresetId = id
+            ToolMode.ERASER -> lastEraserPresetId = id
+            ToolMode.NONE -> Unit
+        }
+    }
+
+    // When a tool becomes active, restore the last chosen preset for it (or the first
+    // builtin preset if none has been chosen yet in this session).
+    LaunchedEffect(toolMode) {
+        when (toolMode) {
+            ToolMode.PEN -> {
+                val all = BuiltinToolPresets.pen + toolPresets.pen
+                val preset = lastPenPresetId?.let { id -> all.firstOrNull { it.id == id } } ?: all.firstOrNull()
+                preset?.let { penSettings = it.settings }
+            }
+            ToolMode.MARKER -> {
+                val all = BuiltinToolPresets.marker + toolPresets.marker
+                val preset = lastMarkerPresetId?.let { id -> all.firstOrNull { it.id == id } } ?: all.firstOrNull()
+                preset?.let { markerSettings = it.settings }
+            }
+            ToolMode.ERASER -> {
+                val all = BuiltinToolPresets.eraser + toolPresets.eraser
+                val preset = lastEraserPresetId?.let { id -> all.firstOrNull { it.id == id } } ?: all.firstOrNull()
+                preset?.let { eraserSettings = it.settings }
+            }
+            ToolMode.NONE -> Unit
+        }
     }
 
     var landscapeToolbarWidthDp by remember { mutableStateOf(FLOATING_TOOLBAR_WIDTH) }
@@ -425,6 +504,13 @@ fun DetailsContent(
                         // A restored width is the user's own choice — don't override it.
                         markerWidthPinned = true
                         eraserSettings = eraser
+                        panelToolStates[panel.id] = PanelToolSnapshot(
+                            toolMode = toolMode,
+                            penSettings = pen,
+                            markerSettings = marker,
+                            eraserSettings = eraser,
+                            markerWidthPinned = true,
+                        )
                     },
                     onAddTab = { onAddTabToPanel(panel.id) },
                     onAllTabsClosed = onBackWithSave,
@@ -489,7 +575,13 @@ fun DetailsContent(
                     shape = CircleShape,
                     modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp),
                 ) {
-                    IconButton(onClick = onBackOrCloseThumbnails) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape)
+                            .clickable(onClick = onBackOrCloseThumbnails),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = BACK_CONTENT_DESCRIPTION,
@@ -523,6 +615,7 @@ fun DetailsContent(
                     onEraserSettingsChange = { eraserSettings = it },
                     toolPresets = toolPresets,
                     onToolPresetsChange = onToolPresetsChange,
+                    onPresetApplied = onPresetApplied,
                     hasAnnotations = hasAnnotations,
                     isExporting = isExporting,
                     onExport = { controls?.export?.invoke() },
@@ -628,8 +721,11 @@ fun DetailsContent(
                         .align(Alignment.TopStart)
                         .offset {
                             IntOffset(
-                                x = (focusedStartFraction * windowSizeInPx.width.toFloat())
-                                    .roundToInt(),
+                                x = focusedPanelStartXPx(
+                                    layout,
+                                    windowSizeInPx.width.toFloat(),
+                                    dividerPx,
+                                ).roundToInt(),
                                 y = focusedTopPx.roundToInt(),
                             )
                         }
@@ -677,6 +773,7 @@ fun DetailsContent(
                     onEraserSettingsChange = { eraserSettings = it },
                     toolPresets = toolPresets,
                     onToolPresetsChange = onToolPresetsChange,
+                    onPresetApplied = onPresetApplied,
                     hasAnnotations = hasAnnotations,
                     isExporting = isExporting,
                     onExport = { controls?.export?.invoke() },
@@ -825,6 +922,30 @@ private fun focusedPanelStartYPx(layout: WorkspaceLayout, gridHeightPx: Float, d
         LayoutTemplate.ROWS_2 -> if (idx == 0) 0f else belowDivider(r[0])
         LayoutTemplate.LEFT_PLUS_STACK -> if (idx == 2) belowDivider(r[1]) else 0f
         LayoutTemplate.GRID_2X2 -> if (idx >= 2) belowDivider(r[1]) else 0f
+    }
+}
+
+/**
+ * Returns the left-edge pixel position of the focused panel inside the window,
+ * accounting for the fixed [dividerPx] consumed by each vertical divider between
+ * columns. Used to position the thumbnail sidebar so it starts exactly at the
+ * panel's content edge rather than inside a divider's hit zone.
+ */
+private fun focusedPanelStartXPx(layout: WorkspaceLayout, windowWidthPx: Float, dividerPx: Float): Float {
+    val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
+    val r = layout.ratios
+    val split1 = windowWidthPx - dividerPx
+    val split2 = windowWidthPx - 2 * dividerPx
+    return when (layout.template) {
+        LayoutTemplate.FULL, LayoutTemplate.ROWS_2 -> 0f
+        LayoutTemplate.COLUMNS_2 -> if (idx == 0) 0f else split1 * r[0] + dividerPx
+        LayoutTemplate.COLUMNS_3 -> when (idx) {
+            0 -> 0f
+            1 -> split2 * r[0] + dividerPx
+            else -> split2 * r[1] + 2 * dividerPx
+        }
+        LayoutTemplate.LEFT_PLUS_STACK -> if (idx == 0) 0f else split1 * r[0] + dividerPx
+        LayoutTemplate.GRID_2X2 -> if (idx == 0 || idx == 2) 0f else split1 * r[0] + dividerPx
     }
 }
 

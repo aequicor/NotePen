@@ -1,8 +1,16 @@
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.awt.ComposeWindow
+import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.setupJbrTitleBar
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
+import ru.kyamshanov.notepen.titlebar.TitleBarInteraction
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
@@ -96,7 +104,47 @@ import kotlin.system.exitProcess
 /** См. [WindowsPenFix] — задержка перед повторным проходом по дереву окон Skiko. */
 private const val SKIA_HWND_SETTLE_DELAY_MS: Long = 500L
 
-fun main() {
+/**
+ * Маршрутизация запросов «открыть PDF через NotePen» от ОС в навигацию приложения.
+ *
+ * Путь к файлу может прийти раньше, чем создан [RootComponent] (особенно на macOS,
+ * где Apple Event "odoc" доставляется AWT почти сразу при старте). Поэтому до
+ * установки приёмника пути буферизуются, а после — открываются сразу.
+ */
+private object OpenFileRouter {
+    private val lock = Any()
+    private val pending = mutableListOf<String>()
+    private var sink: ((String) -> Unit)? = null
+
+    /** Открыть путь, либо отложить до появления приёмника. Потокобезопасно (AWT EDT / main). */
+    fun submit(path: String) {
+        if (path.isBlank()) return
+        val target: ((String) -> Unit)?
+        synchronized(lock) {
+            target = sink
+            if (target == null) pending += path
+        }
+        target?.invoke(path)
+    }
+
+    /** Зарегистрировать приёмник и слить накопленные пути в порядке поступления. */
+    fun connect(newSink: (String) -> Unit) {
+        val drained: List<String>
+        synchronized(lock) {
+            sink = newSink
+            drained = pending.toList()
+            pending.clear()
+        }
+        drained.forEach(newSink)
+    }
+}
+
+fun main(args: Array<String>) {
+    // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
+    // (macOS использует Apple Event "odoc", регистрируем OpenFileHandler ниже.)
+    args.firstOrNull { it.endsWith(".pdf", ignoreCase = true) }
+        ?.let { OpenFileRouter.submit(java.io.File(it).absolutePath) }
+
     // On Windows, AWT DropTarget registration (via dragAndDropTarget) conflicts with
     // Skia's DirectX/ANGLE swap chain and breaks ImageBitmap rendering.
     // Switching to OpenGL avoids the conflict while keeping hardware acceleration.
@@ -110,6 +158,7 @@ fun main() {
     // The system property is read by the macOS AWT port when it first touches NSApplication
     // and stays in effect for the whole process lifetime, including during shutdown.
     if (Platform.isMac()) {
+        System.setProperty("apple.awt.application.name", "NotePen")
         runCatching {
             val resourcePath = "composeResources/notepen.app.bycompose.desktop.generated.resources/files/app_icon_dock.png"
             Thread.currentThread().contextClassLoader
@@ -117,6 +166,20 @@ fun main() {
                 ?.takeIf { it.protocol == "file" }
                 ?.let { java.io.File(it.toURI()).absolutePath }
                 ?.let { System.setProperty("apple.awt.application.icon", it) }
+        }
+
+        // macOS доставляет открываемый файл не через argv, а Apple Event "odoc",
+        // который AWT превращает в OpenFileHandler. Регистрируем до создания окна,
+        // иначе событие, пришедшее при холодном старте, потеряется.
+        runCatching {
+            if (java.awt.Desktop.isDesktopSupported()) {
+                val desktop = java.awt.Desktop.getDesktop()
+                if (desktop.isSupported(java.awt.Desktop.Action.APP_OPEN_FILE)) {
+                    desktop.setOpenFileHandler { event ->
+                        event.files.forEach { OpenFileRouter.submit(it.absolutePath) }
+                    }
+                }
+            }
         }
     }
 
@@ -398,6 +461,10 @@ fun main() {
             )
         }
 
+    // Корень готов: открываем отложенные PDF (запуск «открыть с помощью») и все
+    // последующие запросы ОС. openDetailsExternally мутирует навигацию — только на UI-потоке.
+    OpenFileRouter.connect { path -> runOnUiThread { root.openDetailsExternally(path) } }
+
     application {
         val windowState = rememberWindowState(
             placement = WindowPlacement.Maximized,
@@ -425,6 +492,16 @@ fun main() {
                 }
             }
             val composeWindow: ComposeWindow = window
+
+            var titleBarInteraction by remember { mutableStateOf<TitleBarInteraction?>(null) }
+            var titleBarStartInset by remember { mutableStateOf(0.dp) }
+
+            LaunchedEffect(composeWindow) {
+                setupJbrTitleBar(composeWindow)?.let { (interaction, inset) ->
+                    titleBarInteraction = interaction
+                    titleBarStartInset = inset
+                }
+            }
 
             // Attach the platform-specific tablet input after the window peer
             // exists. `window.isDisplayable` is guaranteed by the time the
@@ -463,7 +540,11 @@ fun main() {
                 }
             }
 
-            CompositionLocalProvider(LocalTabletInputController provides tabletController) {
+            CompositionLocalProvider(
+                LocalTitleBarInteraction provides titleBarInteraction,
+                LocalTitleBarStartInset provides titleBarStartInset,
+                LocalTabletInputController provides tabletController,
+            ) {
                 App(
                     rootComponent = root,
                     pdfDocumentLoader = pdfDocumentLoader,

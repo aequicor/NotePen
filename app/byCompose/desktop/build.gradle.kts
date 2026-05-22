@@ -78,6 +78,17 @@ compose.desktop {
             copyright = "© 2025 KYamshanov. All rights reserved."
             vendor = "KYamshanov"
 
+            // Регистрирует NotePen как обработчик .pdf, чтобы его можно было
+            // выбрать приложением по умолчанию и открывать PDF «через него».
+            // macOS: пишется в CFBundleDocumentTypes (Info.plist); путь к файлу
+            // приходит как Apple Event "odoc" → java.awt.Desktop OpenFileHandler.
+            // Windows: jpackage прокидывает путь как аргумент main().
+            fileAssociation(
+                mimeType = "application/pdf",
+                extension = "pdf",
+                description = "PDF Document",
+            )
+
             windows {
                 menu = true
                 iconFile.set(project.file("icons/app_icon.ico"))

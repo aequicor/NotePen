@@ -819,7 +819,11 @@ fun EditorPanel(
                     .fillMaxSize()
                     .stylusEventSink(tabletController)
                     .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
-                primaryDragPanEnabled = { toolModeProvider.value == ToolMode.NONE },
+                primaryDragPanEnabled = {
+                    toolModeProvider.value == ToolMode.NONE &&
+                        !quickLoupeArmed.value &&
+                        !openTriggerProvider.value
+                },
                 gestureModifier = Modifier.pdfMultiPageDrawingInput(
                     key = drawingController,
                     tablet = tabletController,
