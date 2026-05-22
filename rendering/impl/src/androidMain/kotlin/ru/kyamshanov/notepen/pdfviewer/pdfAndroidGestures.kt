@@ -12,6 +12,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.input.pointer.util.addPointerInputChange
 import kotlin.math.sqrt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -168,7 +169,12 @@ internal fun Modifier.pdfSingleFingerPanInput(
             val canPan = panEnabled()
             val mode = state.scrollMode
             val tracker = VelocityTracker()
-            tracker.addPosition(down.uptimeMillis, down.position)
+            // addPointerInputChange (не addPosition) дренит change.historical —
+            // суб-кадровые сэмплы, которые Android батчит между кадрами. Без них
+            // velocity на отрыве занижается, и инерционный fling гаснет заметно
+            // раньше нативного скролла (системный VelocityTracker.addMovement
+            // тоже учитывает все исторические сэмплы MotionEvent).
+            tracker.addPointerInputChange(down)
             val pointerId = down.id
             var panning = false
             var movedBeyondSlop = false
@@ -178,6 +184,10 @@ internal fun Modifier.pdfSingleFingerPanInput(
                 if (event.changes.count { it.pressed } >= 2) return@awaitEachGesture
                 val change = event.changes.firstOrNull { it.id == pointerId } ?: break
                 lastChange = change
+                // Каждый сэмпл трекаемого пальца (включая historical и финальный
+                // UP) — в трекер, ДО любых ранних выходов, иначе теряется хвост
+                // скорости перед отрывом и fling недолетает.
+                tracker.addPointerInputChange(change)
                 if (!change.pressed) break
                 if (change.isConsumed) return@awaitEachGesture
                 if (!panning) {
@@ -186,7 +196,6 @@ internal fun Modifier.pdfSingleFingerPanInput(
                     // покадровая дельта < slop) не стартует вовсе — это и есть
                     // "мёртвая зона" мелкого скролла.
                     if ((change.position - down.position).getDistance() < slop) {
-                        tracker.addPosition(change.uptimeMillis, change.position)
                         continue
                     }
                     movedBeyondSlop = true
@@ -199,7 +208,6 @@ internal fun Modifier.pdfSingleFingerPanInput(
                 val delta = change.positionChange().maskByScrollMode(mode)
                 if (delta != Offset.Zero) {
                     state.panBy(delta)
-                    tracker.addPosition(change.uptimeMillis, change.position)
                     change.consume()
                 }
             }
