@@ -1,12 +1,22 @@
 package ru.kyamshanov.notepen.pdfviewer
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.splineBasedDecay
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import kotlin.math.sqrt
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 
 /**
  * Pointer-input Android-вьювера: два-пальцевый pinch с anchor в centroid.
@@ -87,6 +97,141 @@ internal fun Modifier.pdfAndroidPointerInput(state: PdfViewerState): Modifier =
                     else -> {
                         prevCentroid = null
                         prevSpan = 0f
+                    }
+                }
+            }
+        }
+    }
+
+/** Держит текущую fling-корутину, чтобы новое касание могло её отменить. */
+internal class PdfFlingJobHolder {
+    var job: Job? = null
+}
+
+/** Обнуляет запрещённые текущим [ScrollMode] оси одно-пальцевого скролла. */
+private fun Offset.maskByScrollMode(mode: ScrollMode): Offset = when (mode) {
+    ScrollMode.BOTH -> this
+    ScrollMode.VERTICAL -> Offset(0f, y)
+    ScrollMode.NONE -> Offset.Zero
+}
+
+/**
+ * Одно-пальцевый pan по ОБЕИМ осям (диагональ) + инерционный fling.
+ *
+ * Заменяет пару ортогональных `Modifier.scrollable`, каждый из которых
+ * лочился на свою ось по pointer-slop и не давал двигать страницу по
+ * диагонали. Здесь дельта пальца [PointerInputChange.positionChange]
+ * применяется к обеим осям сразу через [PdfViewerState.panBy].
+ *
+ * Обработчик на [PointerEventPass.Main] и стоит ПЕРЕД `gestureModifier` в
+ * цепочке (тот — inner, обрабатывает Main-pass раньше). Поэтому рисование /
+ * лупа / магнифайер, если они «забрали» жест ([PointerInputChange.isConsumed]),
+ * имеют приоритет — pan отступает. [panEnabled] дополнительно гейтит pan,
+ * повторяя desktop-семантику: двигаем только когда нет активного инструмента
+ * и лупы.
+ *
+ * Два пальца → отдаём жест pinch-обработчику [pdfAndroidPointerInput].
+ *
+ * Двойной тап (касание без смещения за slop, второе в пределах
+ * double-tap-таймаута) вписывает страницу по ширине свободной области и
+ * центрирует её под пальцем ([PdfViewerState.fitToWidthInArea]). Детекция
+ * встроена в этот же обработчик и НЕ потребляет down — отдельный
+ * `detectTapGestures` потреблял бы первое касание, и pan начинал бы работать
+ * лишь со второго нажатия.
+ */
+@OptIn(ExperimentalComposeUiApi::class)
+internal fun Modifier.pdfSingleFingerPanInput(
+    state: PdfViewerState,
+    panEnabled: () -> Boolean,
+    flingScope: CoroutineScope,
+    flingHolder: PdfFlingJobHolder,
+): Modifier =
+    this.pointerInput(state) {
+        // Нативная для Android физика fling'а (как у системного скролла);
+        // PointerInputScope — это Density, поэтому передаём его сюда.
+        val decaySpec = splineBasedDecay<Float>(this)
+        val slop = viewConfiguration.touchSlop
+        val doubleTapTimeoutMs = viewConfiguration.doubleTapTimeoutMillis
+        // Сохраняются между жестами в пределах этого pointerInput-блока.
+        var lastTapUptime = 0L
+        var lastTapPos = Offset.Zero
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
+            // Новое касание гасит текущий fling.
+            flingHolder.job?.cancel()
+            if (down.isConsumed || !panEnabled()) return@awaitEachGesture
+            val mode = state.scrollMode
+            val tracker = VelocityTracker()
+            tracker.addPosition(down.uptimeMillis, down.position)
+            val pointerId = down.id
+            var panning = false
+            var movedBeyondSlop = false
+            var lastChange = down
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Main)
+                if (event.changes.count { it.pressed } >= 2) return@awaitEachGesture
+                val change = event.changes.firstOrNull { it.id == pointerId } ?: break
+                lastChange = change
+                if (!change.pressed) break
+                if (change.isConsumed) return@awaitEachGesture
+                if (!panning) {
+                    // Слоп меряется по суммарному смещению от точки касания,
+                    // а не по дельте кадра: иначе медленный drag (где каждая
+                    // покадровая дельта < slop) не стартует вовсе — это и есть
+                    // "мёртвая зона" мелкого скролла.
+                    if ((change.position - down.position).getDistance() < slop) {
+                        tracker.addPosition(change.uptimeMillis, change.position)
+                        continue
+                    }
+                    movedBeyondSlop = true
+                    // Скролл выключен — drag не панорамирует (зум и перемещение
+                    // щипком остаются), но движение всё равно дисквалифицирует тап.
+                    if (mode == ScrollMode.NONE) continue
+                    panning = true
+                }
+                val delta = change.positionChange().maskByScrollMode(mode)
+                if (delta != Offset.Zero) {
+                    state.panBy(delta)
+                    tracker.addPosition(change.uptimeMillis, change.position)
+                    change.consume()
+                }
+            }
+            // Касание без смещения — кандидат на (двойной) тап.
+            if (!movedBeyondSlop) {
+                val now = lastChange.uptimeMillis
+                val pos = lastChange.position
+                val isDoubleTap = now - lastTapUptime <= doubleTapTimeoutMs &&
+                    (pos - lastTapPos).getDistance() <= slop * 2f
+                if (isDoubleTap) {
+                    state.fitToWidthInArea(pos)
+                    lastTapUptime = 0L
+                } else {
+                    lastTapUptime = now
+                    lastTapPos = pos
+                }
+                return@awaitEachGesture
+            }
+            if (!panning) return@awaitEachGesture
+            val velocity = tracker.calculateVelocity()
+            val horizontalFling = mode == ScrollMode.BOTH
+            flingHolder.job = flingScope.launch {
+                coroutineScope {
+                    if (horizontalFling) launch {
+                        var last = 0f
+                        Animatable(0f).animateDecay(velocity.x, decaySpec) {
+                            val d = value - last
+                            last = value
+                            // На краю листа panBy — no-op; decay быстро затухает.
+                            state.panBy(Offset(d, 0f))
+                        }
+                    }
+                    launch {
+                        var last = 0f
+                        Animatable(0f).animateDecay(velocity.y, decaySpec) {
+                            val d = value - last
+                            last = value
+                            state.panBy(Offset(0f, d))
+                        }
                     }
                 }
             }

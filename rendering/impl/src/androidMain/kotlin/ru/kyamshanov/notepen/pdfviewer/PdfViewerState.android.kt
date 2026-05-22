@@ -58,6 +58,11 @@ actual class PdfViewerState internal constructor(
      */
     actual var pageExtentProvider: (Int) -> PageExtent by mutableStateOf({ PageExtent.Pdf })
 
+    actual var scrollMode: ScrollMode by mutableStateOf(ScrollMode.BOTH)
+
+    actual var fitWidthInsetStartPx: Float by mutableFloatStateOf(0f)
+    actual var fitWidthInsetEndPx: Float by mutableFloatStateOf(0f)
+
     /**
      * Transient множитель для активного pinch'а: применяется к содержимому
      * `SubcomposeLayout` через `Modifier.graphicsLayer` без пересчёта layout'а
@@ -96,29 +101,46 @@ actual class PdfViewerState internal constructor(
     private var hasInitialCentered: Boolean = false
 
     internal fun applyPendingInitialScrollIfNeeded() {
+        if (viewportSize.width <= 0 || pages.isEmpty()) return
         pendingInitialScalePercent?.let { sc ->
-            if (viewportSize.width > 0) {
-                setScalePercent(sc)
-                pendingInitialScalePercent = null
-            }
+            setScalePercent(sc)
+            pendingInitialScalePercent = null
         }
-        if (!hasInitialCentered && viewportSize.width > 0 && pages.isNotEmpty()) {
-            val pageW = (layout.basePageWidthPx * zoom).roundToInt()
-            val centerX = (viewportSize.width - pageW) / 2
-            pan = Offset(centerX.toFloat(), 0f)
+        val page = pendingInitialPage
+        if (page != null) {
+            applyInitialPosition(page, pendingInitialOffset)
+            pendingInitialPage = null
+            pendingInitialOffset = 0
+            hasInitialCentered = true
+            return
+        }
+        if (!hasInitialCentered) {
+            applyInitialPosition(pageIndex = 0, offsetPx = 0)
             hasInitialCentered = true
         }
-        val page = pendingInitialPage ?: return
-        if (viewportSize.width <= 0 || pages.isEmpty()) return
-        scrollToPage(page.coerceIn(0, pages.lastIndex), pendingInitialOffset)
-        pendingInitialPage = null
-        pendingInitialOffset = 0
+    }
+
+    /**
+     * Авторитетная установка стартовой позиции. Открытие на первой странице с
+     * нулевым оффсетом центрирует документ по обеим осям (по Y — только если он
+     * помещается во вьюпорт, см. [centeredAndClamped]); открытие на конкретной
+     * странице/оффсете скроллит к ней. Через эту точку проходят и
+     * [applyPendingInitialScrollIfNeeded], и [applyInitialState], чтобы
+     * восстановление состояния не затирало центрирование top-align'ом.
+     */
+    private fun applyInitialPosition(pageIndex: Int, offsetPx: Int) {
+        if (pageIndex <= 0 && offsetPx <= 0) {
+            pan = centeredAndClamped(Offset.Zero)
+        } else {
+            scrollToPage(pageIndex.coerceIn(0, pages.lastIndex), offsetPx)
+        }
     }
 
     actual fun applyInitialState(scalePercent: Int, pageIndex: Int, pageOffsetPx: Int) {
         if (viewportSize.width > 0 && pages.isNotEmpty()) {
             setScalePercent(scalePercent)
-            scrollToPage(pageIndex, pageOffsetPx)
+            applyInitialPosition(pageIndex, pageOffsetPx)
+            hasInitialCentered = true
         } else {
             pendingInitialScalePercent = scalePercent
             pendingInitialPage = pageIndex
@@ -265,11 +287,46 @@ actual class PdfViewerState internal constructor(
         pan = clamped(newPan)
     }
 
+    /**
+     * Вписывает страницу по ширине в свободную область вьюпорта (за вычетом
+     * [fitWidthInsetStartPx] / [fitWidthInsetEndPx], занятых тулрейлом/меню) и
+     * перемещает центр страницы под точку [focus] (палец). Позиция кламп'ится.
+     * Вызывается по двойному тапу.
+     */
+    actual fun fitToWidthInArea(focus: Offset) {
+        if (viewportSize.width <= 0 || pages.isEmpty()) return
+        val base = layout.basePageWidthPx
+        if (base <= 0f) return
+        val available = (viewportSize.width - fitWidthInsetStartPx - fitWidthInsetEndPx)
+            .coerceAtLeast(1f)
+        val newZoom = (available / base).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        val (docCenterX, docCenterY) = pageCenterUnderFocus(focus, base)
+        zoom = newZoom
+        pan = clamped(Offset(focus.x - docCenterX * newZoom, focus.y - docCenterY * newZoom))
+    }
+
+    /** Document-space центр страницы, на которую указывает [focus] при текущем зуме. */
+    private fun pageCenterUnderFocus(focus: Offset, base: Float): Pair<Float, Float> {
+        val docYFocus = if (zoom > 0f) (focus.y - pan.y) / zoom else 0f
+        val tops = layout.pageTopsPx
+        var pageIndex = 0
+        for (i in tops.indices) {
+            if (tops[i] <= docYFocus) pageIndex = i else break
+        }
+        val pdfH = layout.pdfHeightsPx.getOrElse(pageIndex) { base }
+        val pageTop = tops.getOrElse(pageIndex) { 0f }
+        return (base / 2f) to (pageTop + pdfH / 2f)
+    }
+
     private fun clamped(p: Offset): Offset = PdfViewerMath.clampPan(
         pan = p,
         layout = layout,
         zoom = zoom,
         viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
+        // Touch: оверскролл-буфер — половина экрана по каждой оси, чтобы
+        // страницу можно было увести к центру вьюпорта для рисования у краёв.
+        horizontalBuffer = viewportSize.width / 2f,
+        verticalBuffer = viewportSize.height / 2f,
     )
 
     /**

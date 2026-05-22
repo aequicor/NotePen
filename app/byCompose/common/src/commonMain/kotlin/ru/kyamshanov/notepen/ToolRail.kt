@@ -20,16 +20,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BorderColor
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -48,6 +52,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -105,6 +110,12 @@ internal fun ToolSelector(
 /**
  * System (non-drawing) controls: pencil mode, magnifier, page thumbnails,
  * shortcut settings, PDF export and zoom. Laid out along [orientation].
+ *
+ * In [RailOrientation.HORIZONTAL] (portrait phone top bar) horizontal space is
+ * tight, so only the magnifier and zoom controls stay inline; the rarely-used
+ * actions (pencil mode, thumbnails, shortcuts, export) collapse into a `⋮`
+ * overflow [DropdownMenu]. In [RailOrientation.VERTICAL] (landscape rail)
+ * everything stays expanded — vertical space is not constrained.
  */
 @Composable
 internal fun SystemControls(
@@ -125,7 +136,7 @@ internal fun SystemControls(
     onOpenShortcutsSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val buttons: @Composable () -> Unit = {
+    val pencilModeButton: @Composable () -> Unit = {
         if (showPencilModeButton) {
             ToolToggleButton(
                 icon = Icons.Default.Gesture,
@@ -134,18 +145,16 @@ internal fun SystemControls(
                 onClick = { onPencilModeChange(!pencilModeEnabled) },
             )
         }
-        ToolToggleButton(
-            icon = Icons.Default.Search,
-            contentDescription = "Лупа для письма",
-            selected = magnifierEnabled,
-            onClick = onMagnifierToggle,
-        )
+    }
+    val thumbnailsButton: @Composable () -> Unit = {
         ToolToggleButton(
             icon = Icons.Default.GridView,
             contentDescription = "Миниатюры страниц",
             selected = showThumbnails,
             onClick = onToggleThumbnails,
         )
+    }
+    val shortcutsButton: @Composable () -> Unit = {
         IconButton(onClick = onOpenShortcutsSettings) {
             Icon(
                 imageVector = Icons.Default.Settings,
@@ -153,6 +162,8 @@ internal fun SystemControls(
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+    val exportButton: @Composable () -> Unit = {
         IconButton(
             onClick = onExport,
             enabled = hasAnnotations && !isExporting,
@@ -175,6 +186,16 @@ internal fun SystemControls(
                 )
             }
         }
+    }
+    val magnifierButton: @Composable () -> Unit = {
+        ToolToggleButton(
+            icon = Icons.Default.Search,
+            contentDescription = "Лупа для письма",
+            selected = magnifierEnabled,
+            onClick = onMagnifierToggle,
+        )
+    }
+    val zoomControls: @Composable () -> Unit = {
         IconButton(onClick = onZoomIn, enabled = scale < MAX_SCALE) {
             Icon(
                 imageVector = Icons.Default.ZoomIn,
@@ -186,6 +207,10 @@ internal fun SystemControls(
             text = "$scale%",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            // Фиксированная ширина под максимум "800%": иначе смена зума меняет
+            // ширину метки и расталкивает соседние элементы меню.
+            modifier = Modifier.width(SCALE_LABEL_WIDTH),
         )
         IconButton(onClick = onZoomOut, enabled = scale > MIN_SCALE) {
             Icon(
@@ -199,11 +224,118 @@ internal fun SystemControls(
         RailOrientation.VERTICAL -> Column(
             modifier = modifier,
             horizontalAlignment = Alignment.CenterHorizontally,
-        ) { buttons() }
+        ) {
+            pencilModeButton()
+            magnifierButton()
+            thumbnailsButton()
+            shortcutsButton()
+            exportButton()
+            zoomControls()
+        }
         RailOrientation.HORIZONTAL -> Row(
             modifier = modifier,
             verticalAlignment = Alignment.CenterVertically,
-        ) { buttons() }
+        ) {
+            // Кнопки/метка зума в портретном баре опущены: масштаб задаётся
+            // пинчем, а место экономится под видимое ⋮-меню.
+            magnifierButton()
+            SystemControlsOverflow(
+                showPencilModeButton = showPencilModeButton,
+                pencilModeEnabled = pencilModeEnabled,
+                onPencilModeChange = onPencilModeChange,
+                showThumbnails = showThumbnails,
+                onToggleThumbnails = onToggleThumbnails,
+                onOpenShortcutsSettings = onOpenShortcutsSettings,
+                hasAnnotations = hasAnnotations,
+                isExporting = isExporting,
+                onExport = onExport,
+            )
+        }
+    }
+}
+
+/**
+ * `⋮` overflow menu collapsing the rarely-used [SystemControls] actions so the
+ * portrait top bar fits a phone's width.
+ */
+@Composable
+private fun SystemControlsOverflow(
+    showPencilModeButton: Boolean,
+    pencilModeEnabled: Boolean,
+    onPencilModeChange: (Boolean) -> Unit,
+    showThumbnails: Boolean,
+    onToggleThumbnails: () -> Unit,
+    onOpenShortcutsSettings: () -> Unit,
+    hasAnnotations: Boolean,
+    isExporting: Boolean,
+    onExport: () -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Ещё",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (showPencilModeButton) {
+                DropdownMenuItem(
+                    text = { Text("Режим стилуса") },
+                    leadingIcon = { Icon(Icons.Default.Gesture, contentDescription = null) },
+                    trailingIcon = if (pencilModeEnabled) {
+                        { Icon(Icons.Default.Check, contentDescription = null) }
+                    } else {
+                        null
+                    },
+                    onClick = {
+                        onPencilModeChange(!pencilModeEnabled)
+                        expanded = false
+                    },
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("Миниатюры страниц") },
+                leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null) },
+                trailingIcon = if (showThumbnails) {
+                    { Icon(Icons.Default.Check, contentDescription = null) }
+                } else {
+                    null
+                },
+                onClick = {
+                    onToggleThumbnails()
+                    expanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Шорткаты") },
+                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                onClick = {
+                    onOpenShortcutsSettings()
+                    expanded = false
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Экспортировать в PDF") },
+                enabled = hasAnnotations && !isExporting,
+                leadingIcon = {
+                    if (isExporting) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(EXPORT_PROGRESS_SIZE),
+                            strokeWidth = EXPORT_PROGRESS_STROKE,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    } else {
+                        Icon(Icons.Default.PictureAsPdf, contentDescription = null)
+                    }
+                },
+                onClick = {
+                    onExport()
+                    expanded = false
+                },
+            )
+        }
     }
 }
 
@@ -412,6 +544,7 @@ fun LandscapeToolRail(
 /** Open/close duration of the budding panel; the slot-switch delay matches it. */
 private const val PANEL_ANIM_MS = 180
 
+private val SCALE_LABEL_WIDTH = 40.dp
 private val ISLAND_GAP = 8.dp
 private val ISLAND_PADDING = 4.dp
 private val EXPORT_PROGRESS_SIZE = 24.dp

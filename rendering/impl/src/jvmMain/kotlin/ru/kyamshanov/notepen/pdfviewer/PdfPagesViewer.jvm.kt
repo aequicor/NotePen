@@ -713,7 +713,15 @@ private fun Modifier.pdfDesktopPointerInput(
                     }
                 }
                 PointerEventType.Press -> {
-                    if (event.buttons.isTertiaryPressed && change != null) {
+                    val dblClick = (event.awtEventOrNull as? java.awt.event.MouseEvent)?.clickCount == 2
+                    if (dblClick && event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
+                        change != null
+                    ) {
+                        // Двойной клик вписывает страницу по ширине свободной области
+                        // и перемещает центр страницы под курсор.
+                        state.fitToWidthInArea(change.position)
+                        change.consume()
+                    } else if (event.buttons.isTertiaryPressed && change != null) {
                         state.commitPinchGesture()
                         state.beginPanGesture()
                         middleDragOrigin = change.position
@@ -782,9 +790,14 @@ private fun Modifier.pdfDesktopPointerInput(
                             val suppressH = pageColumnFits ||
                                 vScrollEma > hScrollEma * SCROLL_H_SUPPRESS_RATIO
                             val absDx = kotlin.math.abs(delta.x)
-                            val hPx = if (suppressH || absDx < SCROLL_H_DEAD_ZONE) 0f
-                            else -delta.x * WHEEL_SCROLL_PX_PER_TICK
-                            state.wheelScrollBy(Offset(hPx, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
+                            // Горизонтальный скролл только в режиме BOTH; вертикаль
+                            // подавляется лишь в NONE (см. [PdfViewerState.scrollMode]).
+                            val hPx = if (suppressH || absDx < SCROLL_H_DEAD_ZONE ||
+                                state.scrollMode != ScrollMode.BOTH
+                            ) 0f else -delta.x * WHEEL_SCROLL_PX_PER_TICK
+                            val vPx = if (state.scrollMode == ScrollMode.NONE) 0f
+                            else -delta.y * WHEEL_SCROLL_PX_PER_TICK
+                            state.wheelScrollBy(Offset(hPx, vPx))
                         }
                         else -> {
                             state.commitPinchGesture()
@@ -793,7 +806,9 @@ private fun Modifier.pdfDesktopPointerInput(
                                 kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
                             hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
                                 kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
-                            state.wheelScrollBy(Offset(0f, -delta.y * WHEEL_SCROLL_PX_PER_TICK))
+                            val vPx = if (state.scrollMode == ScrollMode.NONE) 0f
+                            else -delta.y * WHEEL_SCROLL_PX_PER_TICK
+                            state.wheelScrollBy(Offset(0f, vPx))
                         }
                     }
                     change.consume()

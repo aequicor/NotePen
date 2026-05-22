@@ -31,7 +31,11 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.OpenWith
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.ZoomIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -88,6 +92,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.pdfviewer.ScrollMode
 import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
 import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
@@ -408,6 +413,21 @@ fun DetailsContent(
     // bar) keeps the airbar / sidebar vertical placement exact across platforms.
     var gridHeightPx by remember { mutableStateOf(0f) }
 
+    // Horizontal area occupied by the floating tool rail at the screen's left in
+    // landscape (single-panel FULL layout). Double-tap fit-to-width subtracts it
+    // so the page lands beside the rail/menu, not under it. The portrait top bar
+    // spans the full width and steals no horizontal room, so the inset is 0 there.
+    val fitWidthStartInset = if (isLandscape && layout.template == LayoutTemplate.FULL) {
+        val sidebar = if (showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true) {
+            SIDEBAR_WIDTH
+        } else {
+            0.dp
+        }
+        sidebar + landscapeToolbarWidthDp + 32.dp
+    } else {
+        0.dp
+    }
+
     Box(
         modifier
             .fillMaxSize()
@@ -534,6 +554,7 @@ fun DetailsContent(
                         null
                     },
                     onControlsChanged = { c -> if (panel.id == layout.focusedPanelId) focusedControls = c },
+                    fitWidthStartInset = fitWidthStartInset,
                 )
             }
         }
@@ -596,10 +617,19 @@ fun DetailsContent(
                 enter = slideInHorizontally { -it } + fadeIn(),
                 exit = slideOutHorizontally { -it } + fadeOut(),
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
+                    // Якорим рейл ПОД кнопкой назад (TopStart + резерв сверху на
+                    // её высоту), а не центрируем по вертикали: на телефоне в
+                    // ландшафте высоты мало, и центрированный рейл наезжал на
+                    // back-кнопку вверху. Так перекрытие исключено детерминированно.
+                    .align(Alignment.TopStart)
                     .offset(x = railShift)
                     .windowInsetsPadding(WindowInsets.systemBars)
-                    .padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 16.dp),
+                    .padding(
+                        start = 16.dp,
+                        top = 8.dp + landscapePageCounterHeightDp + 16.dp,
+                        end = 16.dp,
+                        bottom = 16.dp,
+                    ),
             ) {
                 LandscapeToolRail(
                     toolMode = toolMode,
@@ -802,26 +832,59 @@ fun DetailsContent(
         }
         }
 
-        if (SupportsQuickLoupe) {
-            val armed = controls?.quickLoupeArmed == true
+        // Floating airbar (bottom-right): quick loupe (touch only) with the
+        // scroll-mode toggle stacked beneath it. When the quick loupe is absent
+        // (desktop) the scroll-mode toggle alone stays visible.
+        val showScrollModeButton = controls != null
+        if (SupportsQuickLoupe || showScrollModeButton) {
             GlassSurface(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(bottom = 88.dp, end = 16.dp),
-                shape = CircleShape,
-                tint = if (armed) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+                shape = if (SupportsQuickLoupe && showScrollModeButton) {
+                    RoundedCornerShape(28.dp)
+                } else {
+                    CircleShape
+                },
             ) {
-                IconButton(onClick = { controls?.toggleQuickLoupe?.invoke() }) {
-                    Icon(
-                        imageVector = Icons.Default.ZoomIn,
-                        contentDescription = "Быстрая лупа: выделить область",
-                        tint = if (armed) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                    )
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (SupportsQuickLoupe) {
+                        val armed = controls?.quickLoupeArmed == true
+                        IconButton(onClick = { controls?.toggleQuickLoupe?.invoke() }) {
+                            Icon(
+                                imageVector = Icons.Default.ZoomIn,
+                                contentDescription = "Быстрая лупа: выделить область",
+                                tint = if (armed) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        }
+                    }
+                    if (showScrollModeButton) {
+                        val mode = controls?.scrollMode ?: ScrollMode.BOTH
+                        IconButton(onClick = { controls?.cycleScrollMode?.invoke() }) {
+                            Icon(
+                                imageVector = when (mode) {
+                                    ScrollMode.BOTH -> Icons.Default.OpenWith
+                                    ScrollMode.VERTICAL -> Icons.Default.SwapVert
+                                    ScrollMode.NONE -> Icons.Default.Block
+                                },
+                                contentDescription = when (mode) {
+                                    ScrollMode.BOTH -> "Скролл: по обеим осям"
+                                    ScrollMode.VERTICAL -> "Скролл: только по вертикали"
+                                    ScrollMode.NONE -> "Скролл выключен"
+                                },
+                                tint = if (mode == ScrollMode.BOTH) {
+                                    MaterialTheme.colorScheme.onSurface
+                                } else {
+                                    MaterialTheme.colorScheme.primary
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }

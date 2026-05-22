@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -104,20 +105,8 @@ actual fun PdfPagesViewer(
         state.applyPendingInitialScrollIfNeeded()
     }
 
-    val scrollableState = remember(state) {
-        // Возвращаем фактически потреблённую дельту: PdfViewerMath.clampPan
-        // не даст сдвинуть документ за край, и fling сам остановится у
-        // границы вместо проскальзывания. Непотреблённый остаток уходит в
-        // [overscrollEffect] → растяжение/отскок как в LazyColumn.
-        ScrollableState { delta ->
-            val before = state.pan.y
-            state.panBy(Offset(0f, delta))
-            state.pan.y - before
-        }
-    }
-    // Платформенный overscroll (stretch + bounce) для вертикального скролла —
-    // тот же эффект, что у LazyColumn. На API < 12 деградирует до glow.
-    val overscrollEffect = rememberOverscrollEffect()
+    val flingScope = rememberCoroutineScope()
+    val flingHolder = remember(state) { PdfFlingJobHolder() }
 
     LaunchedEffect(pdfDocument, state, renderer) {
         val doc = pdfDocument ?: return@LaunchedEffect
@@ -195,27 +184,23 @@ actual fun PdfPagesViewer(
                 }
             }
             .clipToBounds()
-            // Pinch — Initial pass, перехват до scrollable; жесты <2 пальцев
-            // проходят дальше.
+            // Pinch — Initial pass, перехват до pan-обработчика; жесты <2
+            // пальцев проходят дальше.
             .pdfAndroidPointerInput(state)
-            // Vertical scroll + native fling для одно-пальцевого drag'a.
-            // delta от scrollable положительна при drag вниз (+Y);
-            // panBy добавляет её к pan.y — контент следует за пальцем.
-            .scrollable(
-                state = scrollableState,
-                orientation = Orientation.Vertical,
-                flingBehavior = ScrollableDefaults.flingBehavior(),
-                reverseDirection = false,
-                overscrollEffect = overscrollEffect,
+            // Одно-пальцевый pan по обеим осям (диагональ) + инерционный fling.
+            // Стоит ПЕРЕД gestureModifier: рисование/лупа (inner) обрабатывают
+            // Main-pass раньше и, если потребили жест, pan отступает.
+            .pdfSingleFingerPanInput(
+                state = state,
+                panEnabled = primaryDragPanEnabled,
+                flingScope = flingScope,
+                flingHolder = flingHolder,
             )
-            // Рисует растяжение/отскок от непотреблённой scrollable дельты.
-            .overscroll(overscrollEffect)
-            // gestureModifier должен быть ПОСЛЕ scrollable: в Main-pass
+            // gestureModifier должен быть ПОСЛЕ pan-обработчика: в Main-pass
             // события идут inner→outer, т.е. этот modifier обрабатывает
-            // события раньше scrollable. Если gesture-handler потребил
-            // событие (consume), scrollable видит isConsumed=true и
-            // awaitPointerSlopOrCancellation возвращает null — скролл
-            // не запускается параллельно с рисованием / выделением лупой.
+            // события раньше pan'а. Если gesture-handler потребил событие
+            // (consume), pan видит isConsumed=true и отступает — pan не
+            // запускается параллельно с рисованием / выделением лупой.
             .then(gestureModifier),
     ) {
         SubcomposeLayout(

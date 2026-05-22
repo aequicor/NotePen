@@ -78,6 +78,7 @@ import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
+import ru.kyamshanov.notepen.pdfviewer.ScrollMode
 import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.PenPointerEventType
@@ -118,6 +119,7 @@ class PanelControls(
     val magnifierEnabled: Boolean,
     val showThumbnails: Boolean,
     val quickLoupeArmed: Boolean,
+    val scrollMode: ScrollMode,
     val zoomIn: () -> Unit,
     val zoomOut: () -> Unit,
     val toggleMagnifier: () -> Unit,
@@ -125,6 +127,7 @@ class PanelControls(
     val toggleThumbnails: () -> Unit,
     val navigateToPage: (Int) -> Unit,
     val toggleQuickLoupe: () -> Unit,
+    val cycleScrollMode: () -> Unit,
 )
 
 /**
@@ -174,6 +177,7 @@ fun EditorPanel(
     onOpenPanelPicker: ((DocumentId) -> Unit)?,
     onClosePanel: (() -> Unit)?,
     onControlsChanged: (PanelControls?) -> Unit,
+    fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val openDocs = panel.tabs
@@ -217,6 +221,10 @@ fun EditorPanel(
         pdfViewerState.pageExtentProvider = { pageIndex ->
             drawingStates[pageIndex]?.extent?.value ?: PageExtent.Pdf
         }
+    }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    SideEffect {
+        pdfViewerState.fitWidthInsetStartPx = with(density) { fitWidthStartInset.toPx() }
     }
     val firstVisiblePage by remember(pdfState) { derivedStateOf { pdfViewerState.firstVisiblePageIndex } }
     val currentScalePercent by remember(pdfState) { derivedStateOf { pdfViewerState.scalePercent } }
@@ -777,6 +785,13 @@ fun EditorPanel(
             quickLoupeArmed.value = !quickLoupeArmed.value
         }
     }
+    val onCycleScrollMode: () -> Unit = {
+        pdfViewerState.scrollMode = when (pdfViewerState.scrollMode) {
+            ScrollMode.BOTH -> ScrollMode.VERTICAL
+            ScrollMode.VERTICAL -> ScrollMode.NONE
+            ScrollMode.NONE -> ScrollMode.BOTH
+        }
+    }
 
     if (isFocused) {
         // Read showThumbnails here in the composition (not only inside SideEffect)
@@ -784,6 +799,9 @@ fun EditorPanel(
         // not register a recomposition dependency, so without this read toggling
         // thumbnails would never re-run the effect nor republish PanelControls.
         val thumbnailsVisible = showThumbnails
+        // Read scrollMode in composition (not only inside SideEffect) so the
+        // composition subscribes to it — toggling it republishes PanelControls.
+        val currentScrollMode = pdfViewerState.scrollMode
         SideEffect {
             onControlsChanged(
                 PanelControls(
@@ -795,6 +813,7 @@ fun EditorPanel(
                     magnifierEnabled = magnifierState.enabled,
                     showThumbnails = thumbnailsVisible,
                     quickLoupeArmed = quickLoupeArmed.value,
+                    scrollMode = currentScrollMode,
                     zoomIn = onZoomIn,
                     zoomOut = onZoomOut,
                     toggleMagnifier = onMagnifierToggle,
@@ -802,6 +821,7 @@ fun EditorPanel(
                     toggleThumbnails = { showThumbnails = !showThumbnails },
                     navigateToPage = { pdfViewerState.scrollToPage(it, 0) },
                     toggleQuickLoupe = onToggleQuickLoupe,
+                    cycleScrollMode = onCycleScrollMode,
                 ),
             )
         }

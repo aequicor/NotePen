@@ -34,6 +34,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +50,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.union
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
@@ -131,7 +133,8 @@ fun MainContent(
         topBar = {
             TopAppBar(
                 title = { Text("NotePen") },
-                windowInsets = WindowInsets(left = titleBarStartInset),
+                windowInsets = WindowInsets(left = titleBarStartInset)
+                    .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
                     if (onBack != null) {
                         IconButton(onClick = onBack) {

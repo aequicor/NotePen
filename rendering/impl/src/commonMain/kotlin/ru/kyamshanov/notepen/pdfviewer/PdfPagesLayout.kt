@@ -340,16 +340,22 @@ object PdfViewerMath {
      *
      * Учитывает [PdfPagesLayout.contentLeftPx] / [PdfPagesLayout.contentRightPx]
      * — границы слотов с учётом [PageExtent], не только PDF-колонки.
+     *
+     * [horizontalBuffer] / [verticalBuffer] — размер оверскролл-буфера по
+     * соответствующей оси (px). По умолчанию — доля ширины PDF-колонки
+     * ([OVERSCROLL_PAGE_FRACTION]); вызывающий может задать иной (например,
+     * половину вьюпорта на touch-платформе).
      */
     fun clampPan(
         pan: Offset,
         layout: PdfPagesLayout,
         zoom: Float,
         viewportSize: FloatSize,
+        horizontalBuffer: Float = layout.basePageWidthPx * zoom * OVERSCROLL_PAGE_FRACTION,
+        verticalBuffer: Float = layout.basePageWidthPx * zoom * OVERSCROLL_PAGE_FRACTION,
     ): Offset {
         val contentW = (layout.contentRightPx - layout.contentLeftPx) * zoom
         val contentH = (layout.contentBottomPx - layout.contentTopPx) * zoom
-        val hBuffer = layout.basePageWidthPx * zoom * OVERSCROLL_PAGE_FRACTION
         val x = clampAxis(
             value = pan.x,
             edgeA = viewportSize.width - layout.contentRightPx * zoom,
@@ -357,14 +363,14 @@ object PdfViewerMath {
             // а не -0f (различимы Float.equals и ассертами в тестах).
             edgeB = 0f - layout.contentLeftPx * zoom,
             overflow = contentW > viewportSize.width,
-            buffer = hBuffer,
+            buffer = horizontalBuffer,
         )
         val y = clampAxis(
             value = pan.y,
             edgeA = viewportSize.height - layout.contentBottomPx * zoom,
             edgeB = 0f - layout.contentTopPx * zoom,
             overflow = contentH > viewportSize.height,
-            buffer = hBuffer,
+            buffer = verticalBuffer,
         )
         return Offset(x, y)
     }
