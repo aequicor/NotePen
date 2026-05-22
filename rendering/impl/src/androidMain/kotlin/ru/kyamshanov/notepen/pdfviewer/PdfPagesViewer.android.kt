@@ -27,8 +27,8 @@ import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.sample
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -36,7 +36,17 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 
-private const val RENDER_DEBOUNCE_MS = 150L
+/**
+ * Период сэмплинга рендер-триггера. Раньше тут был `debounce`, но он ждёт
+ * «тишины»: при непрерывном скролле видимый диапазон меняется каждый кадр,
+ * дебаунс постоянно сбрасывается, и страницы НЕ перерисовываются до полной
+ * остановки — входящие страницы видны мыльными (растянутый битмап меньшего
+ * масштаба) или пустыми. `sample` отдаёт последнее значение раз в период даже
+ * при непрерывном потоке → новые страницы растеризуются прямо во время
+ * скролла, не дожидаясь остановки. Рендер идёт на [renderDispatcher] (вне
+ * main-потока), поэтому на плавность самого скролла не влияет.
+ */
+private const val RENDER_SAMPLE_MS = 100L
 private const val MAX_CACHE_ENTRIES = 6
 
 /**
@@ -71,10 +81,11 @@ private const val STALE_SCALE_RATIO_THRESHOLD = 2f
  *   через [Modifier.scrollable] с дефолтным [ScrollableDefaults.flingBehavior].
  * - **Виртуализация** через [SubcomposeLayout] + [BUFFER_PAGES] буферных
  *   страниц сверху/снизу.
- * - **Адаптивный рендер** — после commit'а pinch'а snapshotFlow видит
- *   новый `zoom`, через [RENDER_DEBOUNCE_MS] перерисовывает битмапы на
- *   новом масштабе через общий [PdfBitmapCache]; до прихода нового
- *   битмапа `Image` растягивает предыдущий.
+ * - **Адаптивный рендер** — snapshotFlow следит за видимым диапазоном и
+ *   масштабом и раз в [RENDER_SAMPLE_MS] (sample, не debounce — чтобы
+ *   рендерить и во время непрерывного скролла, а не только после остановки)
+ *   перерисовывает битмапы на текущем масштабе через общий [PdfBitmapCache];
+ *   до прихода нового битмапа `Image` растягивает предыдущий.
  *
  * Pinch перехватывается на [androidx.compose.ui.input.pointer.PointerEventPass.Initial],
  * чтобы выиграть у scrollable и вложенного stylus-handler'а
@@ -128,7 +139,7 @@ actual fun PdfPagesViewer(
             )
         }
             .distinctUntilChanged()
-            .debounce(RENDER_DEBOUNCE_MS)
+            .sample(RENDER_SAMPLE_MS)
             .collectLatest { snap ->
                 if (snap.viewportSize.width <= 0 || snap.first < 0 || snap.last < snap.first) {
                     return@collectLatest
