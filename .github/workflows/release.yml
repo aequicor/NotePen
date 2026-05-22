@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Decode keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+
+      - name: Build release APK
+        run: ./gradlew :app:byCompose:android:assembleRelease
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/keystore.jks
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: app/byCompose/android/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS DMG
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Extract version from tag
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build macOS DMG
+        run: ./gradlew :app:byCompose:desktop:packageReleaseDmg -Papp.version=${{ env.APP_VERSION }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: app/byCompose/desktop/build/compose/binaries/main-release/dmg/*.dmg
+          if-no-files-found: error
+
+  build-windows:
+    name: Build Windows MSI
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Extract version from tag
+        shell: bash
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build Windows MSI
+        run: ./gradlew :app:byCompose:desktop:packageReleaseMsi -Papp.version=${{ env.APP_VERSION }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi
+          path: app/byCompose/desktop/build/compose/binaries/main-release/msi/*.msi
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-android, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: |
+            artifacts/android-apk/*.apk
+            artifacts/macos-dmg/*.dmg
+            artifacts/windows-msi/*.msi

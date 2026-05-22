@@ -30,6 +30,7 @@ kotlin {
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.jna)
             implementation(libs.jna.platform)
+            compileOnly(libs.jbr.api)
             implementation(libs.kotlinx.coroutines.swing)
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.cio)
@@ -72,7 +73,7 @@ compose.desktop {
                 TargetFormat.Exe
             )
             packageName = "NotePen"
-            packageVersion = "1.0.0"
+            packageVersion = providers.gradleProperty("app.version").getOrElse("1.0.0")
             description = "NotePen"
             copyright = "© 2025 KYamshanov. All rights reserved."
             vendor = "KYamshanov"
