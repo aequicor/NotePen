@@ -5,7 +5,22 @@
 
 -keep class kotlinx.coroutines.swing.*
 -keep class com.arkivanov.decompose.**
+# Стандартное правило для enum: без него ProGuard ломает values()/valueOf и
+# $VALUES, из-за чего EnumMap(enumClass) падает с NPE "keyUniverse is null"
+# (краш в com.jetbrains.* / JBR API при старте — setupJbrTitleBar).
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+# JBR API (com.jetbrains.*) связывается с реализацией в рантайме рефлексивно.
+-keep class com.jetbrains.** { *; }
+-dontwarn com.jetbrains.**
 -keep class io.ktor.** { *; }
+# JDBC-драйвер sqlite регистрируется рефлексивно через META-INF/services
+# (JdbcSqliteDriver → DriverManager). Статических ссылок нет, поэтому без keep
+# ProGuard вырезает org.sqlite.* целиком и release падает при открытии sync-БД
+# в main() (createSyncDatabaseJvm).
+-keep class org.sqlite.** { *; }
 -keep class ru.kyamshanov.notepen.sync.domain.model.** { *; }
 -keep class ru.kyamshanov.notepen.annotation.domain.model.** { *; }
 -keepclassmembers class ru.kyamshanov.notepen.** {
