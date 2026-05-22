@@ -48,6 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.foundation.layout.WindowInsets
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
@@ -124,10 +126,12 @@ fun MainContent(
         onIntent(MainScreenIntent.OnSuccessEventHandled)
     }
 
+    val titleBarStartInset = LocalTitleBarStartInset.current
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("NotePen") },
+                windowInsets = WindowInsets(left = titleBarStartInset),
                 navigationIcon = {
                     if (onBack != null) {
                         IconButton(onClick = onBack) {

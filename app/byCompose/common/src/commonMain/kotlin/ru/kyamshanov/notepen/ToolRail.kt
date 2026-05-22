@@ -232,6 +232,7 @@ fun LandscapeToolRail(
     onEraserSettingsChange: (EraserSettings) -> Unit,
     toolPresets: StoredToolPresets,
     onToolPresetsChange: (StoredToolPresets) -> Unit,
+    onPresetApplied: ((id: String) -> Unit)? = null,
     hasAnnotations: Boolean,
     isExporting: Boolean,
     onExport: () -> Unit,
@@ -368,6 +369,7 @@ fun LandscapeToolRail(
                             presets = toolPresets,
                             onPresetsChange = onToolPresetsChange,
                             orientation = RailOrientation.VERTICAL,
+                            onPresetApplied = onPresetApplied,
                         )
                     }
                 }

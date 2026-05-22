@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -104,8 +105,13 @@ private const val SCROLL_H_SUPPRESS_RATIO = 2.0f
  */
 private const val OVERSCROLL_GLOW_REF_PX = 90f
 
-/** Максимальная непрозрачность краевого свечения. */
-private const val OVERSCROLL_GLOW_MAX_ALPHA = 0.28f
+/**
+ * Максимальная непрозрачность краевого свечения. Ниже, чем у прежней чёрной тени
+ * (0.28): свечение теперь тонируется насыщенным `colorScheme.primary` (M3
+ * edge-effect), и при той же alpha цветной градиент читается заметно сильнее
+ * нейтрально-чёрного — 0.18 даёт тот же «вес», но мягче и в стиле приложения.
+ */
+private const val OVERSCROLL_GLOW_MAX_ALPHA = 0.18f
 
 /** Глубина свечения от кромки внутрь — доля меньшей стороны вьюпорта. */
 private const val OVERSCROLL_GLOW_DEPTH_FRACTION = 0.12f
@@ -280,6 +286,9 @@ actual fun PdfPagesViewer(
     val density = LocalDensity.current
     val pendingZoom = remember { PendingZoom() }
     val renderDispatcher = Dispatchers.Default
+    // M3 edge-effect: тонируем краевую overscroll-тень цветом схемы — в стиле
+    // приложения, адаптивно к светлой/тёмной теме.
+    val overscrollColor = MaterialTheme.colorScheme.primary
 
     // macOS trackpad pinch: NSEventMaskMagnify via libnotepen_gesture.dylib.
     // Skiko intercepts NSView.magnifyWithEvent: natively and never forwards it
@@ -328,8 +337,9 @@ actual fun PdfPagesViewer(
                 state.commitPinchGesture()
                 hasPendingCommit = false
             }
-            // Затухание краевого overscroll-свечения (self-gated).
-            state.relaxOverscroll(dt)
+            // Свёртка накопленного за кадр wheel-overscroll + пружинное затухание.
+            // Раз в кадр — чтобы поток wheel-событий не дёргал overscroll.
+            state.stepOverscroll(dt)
         }
     }
 
@@ -427,7 +437,7 @@ actual fun PdfPagesViewer(
             modifier = Modifier
                 .fillMaxSize()
                 .clipToBounds()
-                .overscrollGlow { state.overscrollOffset }
+                .overscrollGlow(overscrollColor) { state.overscrollOffset }
                 .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
                 .then(gestureModifier),
         ) {
@@ -579,12 +589,17 @@ private data class ImmutablePdfPageScope(
  * как `{ toolMode == ToolMode.NONE }`.
  */
 /**
- * Рисует краевую overscroll-тень (RecyclerView-style) поверх контента по текущему
- * [glow] (= `PdfViewerState.overscrollOffset`): затемнённый градиент у прижатой
+ * Рисует краевую overscroll-тень поверх контента по текущему [glow]
+ * (= `PdfViewerState.overscrollOffset`): тонированный [color] градиент у прижатой
  * кромки, гаснущий внутрь. Дополняет визуальный сдвиг контента — вместе дают
  * ощущение «дальше некуда» + пружину.
+ *
+ * [color] передаётся из темы (`MaterialTheme.colorScheme.primary`), поэтому
+ * свечение в стиле приложения и автоматически адаптируется к светлой/тёмной теме
+ * (M3 edge-effect). Альфа берётся из самого цвета не полностью — насыщенность
+ * управляется [OVERSCROLL_GLOW_MAX_ALPHA].
  */
-private fun Modifier.overscrollGlow(glow: () -> Offset): Modifier = this.drawWithContent {
+private fun Modifier.overscrollGlow(color: Color, glow: () -> Offset): Modifier = this.drawWithContent {
     drawContent()
     val g = glow()
     if (g == Offset.Zero) return@drawWithContent
@@ -592,12 +607,15 @@ private fun Modifier.overscrollGlow(glow: () -> Offset): Modifier = this.drawWit
     val h = size.height
     val depth = minOf(w, h) * OVERSCROLL_GLOW_DEPTH_FRACTION
     if (depth <= 0f) return@drawWithContent
-    fun alpha(px: Float): Float =
-        (kotlin.math.abs(px) / OVERSCROLL_GLOW_REF_PX).coerceIn(0f, 1f) * OVERSCROLL_GLOW_MAX_ALPHA
+    fun edge(px: Float): Color =
+        color.copy(
+            alpha = (kotlin.math.abs(px) / OVERSCROLL_GLOW_REF_PX).coerceIn(0f, 1f) *
+                OVERSCROLL_GLOW_MAX_ALPHA,
+        )
     if (g.y > 0f) {
         drawRect(
             brush = Brush.verticalGradient(
-                0f to Color.Black.copy(alpha = alpha(g.y)),
+                0f to edge(g.y),
                 1f to Color.Transparent,
                 startY = 0f,
                 endY = depth,
@@ -609,7 +627,7 @@ private fun Modifier.overscrollGlow(glow: () -> Offset): Modifier = this.drawWit
         drawRect(
             brush = Brush.verticalGradient(
                 0f to Color.Transparent,
-                1f to Color.Black.copy(alpha = alpha(g.y)),
+                1f to edge(g.y),
                 startY = h - depth,
                 endY = h,
             ),
@@ -620,7 +638,7 @@ private fun Modifier.overscrollGlow(glow: () -> Offset): Modifier = this.drawWit
     if (g.x > 0f) {
         drawRect(
             brush = Brush.horizontalGradient(
-                0f to Color.Black.copy(alpha = alpha(g.x)),
+                0f to edge(g.x),
                 1f to Color.Transparent,
                 startX = 0f,
                 endX = depth,
@@ -632,7 +650,7 @@ private fun Modifier.overscrollGlow(glow: () -> Offset): Modifier = this.drawWit
         drawRect(
             brush = Brush.horizontalGradient(
                 0f to Color.Transparent,
-                1f to Color.Black.copy(alpha = alpha(g.x)),
+                1f to edge(g.x),
                 startX = w - depth,
                 endX = w,
             ),

@@ -1,5 +1,13 @@
 package ru.kyamshanov.notepen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
@@ -16,10 +24,15 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,13 +74,66 @@ public fun ToolPresetStrip(
     onDelete: (String) -> Unit,
     orientation: RailOrientation,
 ) {
+    // Eagerly initialised from the first items so the first frame shows content without animation.
+    val latestItems = remember { mutableStateMapOf<String, ToolPresetItem>().also { m -> items.forEach { m[it.id] = it } } }
+    val orderedIds = remember { mutableStateListOf<String>().also { l -> items.forEach { l.add(it.id) } } }
+    val visibilityStates = remember {
+        mutableStateMapOf<String, MutableTransitionState<Boolean>>().also { m ->
+            items.forEach { m[it.id] = MutableTransitionState(true) }
+        }
+    }
+
+    LaunchedEffect(items) {
+        val inputIds = items.map { it.id }.toSet()
+        for (item in items) {
+            latestItems[item.id] = item
+            val existing = visibilityStates[item.id]
+            when {
+                existing == null -> {
+                    val ts = MutableTransitionState(false)
+                    ts.targetState = true
+                    visibilityStates[item.id] = ts
+                    orderedIds.add(item.id)
+                }
+                // Item was mid-removal but came back — reverse the animation.
+                !existing.targetState -> existing.targetState = true
+            }
+        }
+        for (id in orderedIds.toList()) {
+            if (id !in inputIds) visibilityStates[id]?.targetState = false
+        }
+    }
+
+    // Remove items whose exit animation has fully completed.
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            orderedIds.filter { id -> visibilityStates[id]?.let { it.isIdle && !it.currentState } == true }
+        }.collect { finished ->
+            finished.forEach { id ->
+                orderedIds.remove(id)
+                visibilityStates.remove(id)
+                latestItems.remove(id)
+            }
+        }
+    }
+
     val content: @Composable () -> Unit = {
-        items.forEach { item ->
-            PresetItemView(
-                item = item,
-                onApply = { onApply(item.id) },
-                onDelete = { onDelete(item.id) },
-            )
+        for (id in orderedIds) {
+            val item = latestItems[id] ?: continue
+            val visState = visibilityStates[id] ?: continue
+            key(id) {
+                AnimatedVisibility(
+                    visibleState = visState,
+                    enter = scaleIn(initialScale = 0.5f) + fadeIn(),
+                    exit = scaleOut(targetScale = 0.5f) + fadeOut(),
+                ) {
+                    PresetItemView(
+                        item = item,
+                        onApply = { onApply(id) },
+                        onDelete = { onDelete(id) },
+                    )
+                }
+            }
         }
         AddPresetButton(icon = addIcon, onClick = onAdd)
     }
@@ -91,9 +157,14 @@ private fun PresetItemView(
     onDelete: () -> Unit,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val borderColor = if (item.selected) MaterialTheme.colorScheme.primary
-    else MaterialTheme.colorScheme.outlineVariant
-    val borderWidth = if (item.selected) PRESET_BORDER_SELECTED_W else PRESET_BORDER_DEFAULT_W
+    val borderColor by animateColorAsState(
+        targetValue = if (item.selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
+        label = "presetBorderColor",
+    )
+    val borderWidth by animateDpAsState(
+        targetValue = if (item.selected) PRESET_BORDER_SELECTED_W else PRESET_BORDER_DEFAULT_W,
+        label = "presetBorderWidth",
+    )
 
     val openMenu = { if (item.deletable) menuOpen = true }
     var itemModifier = Modifier

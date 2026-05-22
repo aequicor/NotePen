@@ -12,7 +12,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
 import kotlin.math.abs
-import kotlin.math.exp
 import kotlin.math.roundToInt
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
@@ -25,15 +24,33 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 private const val OVERSCROLL_MAX_OFFSET_PX = 90f
 
 /**
- * Постоянная времени пружинного возврата overscroll-смещения к нулю (мс): за
- * ~TAU смещение спадает до ~37%. Во время инерции колеса у края держится
- * равновесие ∝ скорости и само сходит к нулю, когда инерция гаснет. Меньше →
- * резче возврат; больше → мягче.
+ * Жёсткость пружины overscroll (ω₀² = stiffness, ω₀ ≈ 10 рад/с).
+ * При критическом демпфировании [OVERSCROLL_SPRING_DAMPING] = 2·ω₀ = 20
+ * время оседания ≈ 4/ω₀ ≈ 0.4с — быстрый возврат без перелёта, как в Safari.
  */
-private const val OVERSCROLL_SPRING_TAU_MS = 130f
+private const val OVERSCROLL_SPRING_STIFFNESS = 100f
+
+/**
+ * Демпфирование пружины (2·ζ·ω₀, ζ = 1.0 → критически демпфированная).
+ * Нет осцилляций — пружина возвращается к нулю за один проход.
+ */
+private const val OVERSCROLL_SPRING_DAMPING = 20f
+
+/**
+ * Коэффициент преобразования «непогашенного» scroll-delta (px) в скорость пружины
+ * (px/с). Каждый scroll-тик у края даёт импульс скорости, а не скачок позиции:
+ * скорость интегрируется плавно между кадрами → нет saw-tooth при нестабильном
+ * потоке событий (главный источник дёргания). Значение подобрано так, чтобы при
+ * среднем wheel-скролле (delta.y ≈ 1, WHEEL_SCROLL_PX = 60) равновесное смещение
+ * было ≈ 40–60 px.
+ */
+private const val OVERSCROLL_IMPULSE_GAIN = 5f
 
 /** Порог (px), ниже которого overscroll-смещение считается нулевым. */
-private const val OVERSCROLL_EPS_PX = 0.3f
+private const val OVERSCROLL_EPS_PX = 0.5f
+
+/** Порог скорости (px/с), ниже которого пружина считается остановившейся. */
+private const val OVERSCROLL_VEL_EPS = 5f
 
 /**
  * Desktop-реализация [PdfViewerState]: один `zoom: Float`, [pan] —
@@ -286,24 +303,44 @@ actual class PdfViewerState internal constructor(
     // ===== Overscroll =====
     // [pan] всегда жёстко кламплен; «перелёт» за край показывается отдельным
     // визуальным смещением контента [overscrollOffset] (GPU-трансляция во
-    // вьювере), которое пружинит к нулю в [relaxOverscroll]. Тем же вектором
+    // вьювере), которое пружинит к нулю в [stepOverscroll]. Тем же вектором
     // рисуется краевая тень. И колесо, и drag дают пружину + тень, не двигая
     // саму позицию скролла — поэтому на обычном скролле нет тряски, а
     // центрирование/кламп не ломаются.
 
     /**
-     * Визуальное overscroll-смещение контента (viewport-px). Знак = направление
-     * «перелёта»: `x > 0` тянет вправо (упор в левый край), `y > 0` — вниз
-     * (упор в верх) и т.д. Применяется вьювером как GPU-трансляция и как тень.
+     * Видимое overscroll-смещение контента (viewport-px). Пружина действует
+     * напрямую на это значение — визуальное затухание строго экспоненциально
+     * (не зависит от промежуточного raw-накопителя). Знак = направление «перелёта»:
+     * `x > 0` тянет вправо (упор в левый край), `y > 0` — вниз (упор в верх).
+     * Применяется вьювером как GPU-трансляция и рисуется краевой тенью.
      */
     var overscrollOffset: Offset by mutableStateOf(Offset.Zero)
         private set
 
-    /** Палец активного drag «держит» смещение: пока true, [relaxOverscroll] не затухает. */
+    /** Палец активного drag «держит» смещение пока движется. */
     private var overscrollHeld = false
 
-    /** «Сырое» абсолютное положение пальца во время drag (для расчёта перелёта). */
+    /** Абсолютное положение «сырого» пальца во время drag для расчёта перелёта. */
     private var dragRawPan = Offset.Zero
+
+    /**
+     * Накопитель «непогашенного» у края вклада колеса за текущий кадр. Колесо/
+     * тачпад могут слать > 100 событий/сек — больше, чем кадров. [wheelScrollBy]
+     * лишь копит сюда, а интеграция в [overscrollOffset] идёт ровно раз в кадр в
+     * [stepOverscroll]: иначе число add'ов на кадр плавает с частотой событий →
+     * межкадровая пульсация overscroll = подёргивание.
+     * Тот же thread (Compose main) пишет и читает — синхронизация не нужна.
+     */
+    private var pendingWheelOverscroll = Offset.Zero
+
+    /**
+     * Скорость пружины overscroll (px/с) по каждой оси. Wheel-события конвертируются
+     * в импульс скорости (а не скачок позиции) → скорость сглаживает движение между
+     * кадрами независимо от нестабильности потока событий.
+     */
+    private var springVelX = 0f
+    private var springVelY = 0f
 
     /** Начало drag-to-pan: фиксирует сырое положение пальца и режим удержания. */
     fun beginPanGesture() {
@@ -312,9 +349,11 @@ actual class PdfViewerState internal constructor(
     }
 
     /**
-     * Drag-сдвиг: [pan] жёстко кламплен, а «перелёт» пальца за окно clamp'а уходит
-     * в демпфированное [overscrollOffset] — контент тянется за пальцем, как в
-     * `LazyColumn`. На отпускании вызови [endPanGesture] (пружинный возврат).
+     * Drag-сдвиг: [pan] жёстко кламплен, а «перелёт» пальца за окно clamp'а
+     * демпфируется [softDampOverscroll] и пишется в [overscrollOffset] — контент
+     * тянется за пальцем с резиновым сопротивлением (чем дальше, тем меньше
+     * прирост). На отпускании вызови [endPanGesture] — пружина стартует
+     * мгновенно от текущего [overscrollOffset].
      */
     fun panGestureBy(delta: Offset) {
         dragRawPan = Offset(
@@ -332,16 +371,22 @@ actual class PdfViewerState internal constructor(
         )
     }
 
-    /** Конец drag: снимает удержание — [overscrollOffset] пружинит к нулю в [relaxOverscroll]. */
+    /**
+     * Конец drag: снимает удержание. Пружина стартует от текущего [overscrollOffset]
+     * с нулевой начальной скоростью — критически демпфированная система вернётся
+     * к нулю за ~0.4 с без перелёта.
+     */
     fun endPanGesture() {
         overscrollHeld = false
+        springVelX = 0f
+        springVelY = 0f
     }
 
     /**
-     * Скролл колесом/трекпадом: [pan] жёстко кламплен, «непогашенная» у края
-     * дельта демпфированно копится в [overscrollOffset] (резина у края), а
-     * [relaxOverscroll] непрерывно возвращает его к нулю — равновесие во время
-     * инерции ∝ скорости, без debounce и без сдвига позиции скролла.
+     * Скролл колесом/трекпадом: [pan] жёстко кламплен сразу (скролл отзывчив),
+     * «непогашенный» у края остаток копится в [pendingWheelOverscroll].
+     * Интеграцию в [overscrollOffset] и пружинный возврат делает [stepOverscroll]
+     * один раз за кадр.
      */
     fun wheelScrollBy(delta: Offset) {
         overscrollHeld = false
@@ -354,42 +399,61 @@ actual class PdfViewerState internal constructor(
         val unX = if (delta.x == 0f) 0f else candidate.x - c.x
         val unY = if (delta.y == 0f) 0f else candidate.y - c.y
         if (unX != 0f || unY != 0f) {
-            overscrollOffset = Offset(
-                x = addWheelOverscroll(overscrollOffset.x, unX),
-                y = addWheelOverscroll(overscrollOffset.y, unY),
-            )
+            pendingWheelOverscroll += Offset(unX, unY)
         }
     }
 
     /**
-     * Per-frame пружинный возврат [overscrollOffset] к нулю (экспоненциально по
-     * [dtMillis] с постоянной [OVERSCROLL_SPRING_TAU_MS]). No-op, пока палец
-     * держит drag ([overscrollHeld]) или смещения нет. Вызывать каждый кадр.
+     * Per-frame шаг overscroll — velocity-based spring, как в Safari.
+     *
+     * Wheel-события конвертируются в **импульс скорости** (не скачок позиции):
+     * `vel += pending * gain * IMPULSE_GAIN`. Скорость интегрируется плавно →
+     * никакого saw-tooth от нестабильного потока событий.
+     *
+     * Пружина (критически демпфированная, ω₀ ≈ 10 рад/с) тянет позицию к 0:
+     * `accel = -stiffness * pos - damping * vel`. Время оседания ≈ 0.4 с.
+     *
+     * При macOS-momentum пружина и импульсы приходят к естественному равновесию
+     * ∝ скорости scroll'а; по мере затухания импульсы уменьшаются → пружина
+     * плавно возвращает к нулю — без таймеров и mode-switching.
+     *
+     * Вызывать каждый кадр.
      */
-    fun relaxOverscroll(dtMillis: Long) {
+    fun stepOverscroll(dtMillis: Long) {
+        val dtSec = dtMillis / 1000f
+        val pending = pendingWheelOverscroll
+        if (pending != Offset.Zero) {
+            val gainX = (1f - abs(overscrollOffset.x) / OVERSCROLL_MAX_OFFSET_PX).coerceIn(0f, 1f)
+            val gainY = (1f - abs(overscrollOffset.y) / OVERSCROLL_MAX_OFFSET_PX).coerceIn(0f, 1f)
+            springVelX += pending.x * gainX * OVERSCROLL_IMPULSE_GAIN
+            springVelY += pending.y * gainY * OVERSCROLL_IMPULSE_GAIN
+            pendingWheelOverscroll = Offset.Zero
+        }
         if (overscrollHeld) return
-        val o = overscrollOffset
-        if (o == Offset.Zero) return
-        val factor = exp(-dtMillis.toFloat() / OVERSCROLL_SPRING_TAU_MS)
-        val nx = o.x * factor
-        val ny = o.y * factor
-        overscrollOffset = Offset(
-            x = if (abs(nx) < OVERSCROLL_EPS_PX) 0f else nx,
-            y = if (abs(ny) < OVERSCROLL_EPS_PX) 0f else ny,
-        )
+        val posX = overscrollOffset.x
+        val posY = overscrollOffset.y
+        if (posX == 0f && posY == 0f && springVelX == 0f && springVelY == 0f) return
+        // Spring force: F = -k*x - c*v
+        springVelX += (-OVERSCROLL_SPRING_STIFFNESS * posX - OVERSCROLL_SPRING_DAMPING * springVelX) * dtSec
+        springVelY += (-OVERSCROLL_SPRING_STIFFNESS * posY - OVERSCROLL_SPRING_DAMPING * springVelY) * dtSec
+        var newX = posX + springVelX * dtSec
+        var newY = posY + springVelY * dtSec
+        // Hard clamp: spring не может вытолкнуть дальше максимума
+        if (newX > OVERSCROLL_MAX_OFFSET_PX) { newX = OVERSCROLL_MAX_OFFSET_PX; springVelX = 0f }
+        else if (newX < -OVERSCROLL_MAX_OFFSET_PX) { newX = -OVERSCROLL_MAX_OFFSET_PX; springVelX = 0f }
+        if (newY > OVERSCROLL_MAX_OFFSET_PX) { newY = OVERSCROLL_MAX_OFFSET_PX; springVelY = 0f }
+        else if (newY < -OVERSCROLL_MAX_OFFSET_PX) { newY = -OVERSCROLL_MAX_OFFSET_PX; springVelY = 0f }
+        // Settle: snap to zero when both position and velocity are negligible
+        if (abs(newX) < OVERSCROLL_EPS_PX && abs(springVelX) < OVERSCROLL_VEL_EPS) { newX = 0f; springVelX = 0f }
+        if (abs(newY) < OVERSCROLL_EPS_PX && abs(springVelY) < OVERSCROLL_VEL_EPS) { newY = 0f; springVelY = 0f }
+        overscrollOffset = Offset(newX, newY)
     }
 
-    /** Перелёт пальца [v] (px) → ограниченное смещение: 0 → 0, ±∞ → ±[OVERSCROLL_MAX_OFFSET_PX]. */
+    /** Перелёт пальца [v] (px) → демпфированное смещение: 0 → 0, ±∞ → ±[OVERSCROLL_MAX_OFFSET_PX]. */
     private fun softDampOverscroll(v: Float): Float {
         val m = OVERSCROLL_MAX_OFFSET_PX
         val damped = m * (1f - 1f / (abs(v) / m + 1f))
         return if (v < 0f) -damped else damped
-    }
-
-    /** Прибавляет к смещению вклад [delta] с резиновым ослаблением у предела [OVERSCROLL_MAX_OFFSET_PX]. */
-    private fun addWheelOverscroll(cur: Float, delta: Float): Float {
-        val gain = (1f - abs(cur) / OVERSCROLL_MAX_OFFSET_PX).coerceIn(0f, 1f)
-        return (cur + delta * gain).coerceIn(-OVERSCROLL_MAX_OFFSET_PX, OVERSCROLL_MAX_OFFSET_PX)
     }
 
     actual fun scrollToPage(pageIndex: Int, offsetPx: Int) {

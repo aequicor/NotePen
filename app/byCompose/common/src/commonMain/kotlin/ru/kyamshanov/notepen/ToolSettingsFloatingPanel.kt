@@ -339,6 +339,7 @@ internal fun ToolPresetsZone(
     presets: StoredToolPresets,
     onPresetsChange: (StoredToolPresets) -> Unit,
     orientation: RailOrientation,
+    onPresetApplied: ((id: String) -> Unit)? = null,
 ) {
     when (toolMode) {
         ToolMode.PEN -> {
@@ -353,7 +354,12 @@ internal fun ToolPresetsZone(
                     )
                 },
                 addIcon = Icons.Default.Add,
-                onApply = { id -> all.firstOrNull { it.id == id }?.let { onPenSettingsChange(it.settings) } },
+                onApply = { id ->
+                    all.firstOrNull { it.id == id }?.let {
+                        onPenSettingsChange(it.settings)
+                        onPresetApplied?.invoke(id)
+                    }
+                },
                 onAdd = { onPresetsChange(presets.copy(pen = presets.pen + PenPreset(generateUuid(), penSettings))) },
                 onDelete = { id -> onPresetsChange(presets.copy(pen = presets.pen.filterNot { it.id == id })) },
                 orientation = orientation,
@@ -371,7 +377,12 @@ internal fun ToolPresetsZone(
                     )
                 },
                 addIcon = Icons.Default.Add,
-                onApply = { id -> all.firstOrNull { it.id == id }?.let { onMarkerSettingsChange(it.settings) } },
+                onApply = { id ->
+                    all.firstOrNull { it.id == id }?.let {
+                        onMarkerSettingsChange(it.settings)
+                        onPresetApplied?.invoke(id)
+                    }
+                },
                 onAdd = {
                     onPresetsChange(presets.copy(marker = presets.marker + MarkerPreset(generateUuid(), markerSettings)))
                 },
@@ -391,7 +402,12 @@ internal fun ToolPresetsZone(
                     )
                 },
                 addIcon = Icons.Default.Add,
-                onApply = { id -> all.firstOrNull { it.id == id }?.let { onEraserSettingsChange(it.settings) } },
+                onApply = { id ->
+                    all.firstOrNull { it.id == id }?.let {
+                        onEraserSettingsChange(it.settings)
+                        onPresetApplied?.invoke(id)
+                    }
+                },
                 onAdd = {
                     onPresetsChange(presets.copy(eraser = presets.eraser + EraserPreset(generateUuid(), eraserSettings)))
                 },

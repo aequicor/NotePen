@@ -49,6 +49,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /** Vertical extent of a [TabBar] — exposed so callers can offset the content below it. */
@@ -94,15 +96,16 @@ fun TabBar(
     onClosePanel: (() -> Unit)?,
     modifier: Modifier = Modifier,
 ) {
+    val titleBarInteraction = LocalTitleBarInteraction.current
+    val startInset = LocalTitleBarStartInset.current
+    val barModifier = modifier.fillMaxWidth().height(TAB_BAR_HEIGHT)
     GlassSurface(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(TAB_BAR_HEIGHT),
+        modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
         shape = RectangleShape,
         tint = MaterialTheme.colorScheme.surfaceContainerLow,
         fillAlpha = 0.35f,
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = startInset)) {
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
@@ -158,11 +161,10 @@ fun TabBar(
                     }
                 }
             }
+            val addBtnModifier = Modifier.size(TAB_BAR_HEIGHT).padding(2.dp)
             IconButton(
                 onClick = { onAddTab(side) },
-                modifier = Modifier
-                    .size(TAB_BAR_HEIGHT)
-                    .padding(2.dp),
+                modifier = titleBarInteraction?.interactive(addBtnModifier) ?: addBtnModifier,
             ) {
                 Icon(
                     imageVector = Icons.Default.Add,
@@ -207,10 +209,10 @@ private fun TabChip(
     // on desktop).
     var menuOffset by remember { mutableStateOf(Offset.Zero) }
     val density = LocalDensity.current
+    val titleBarInteraction = LocalTitleBarInteraction.current
+    val chipBaseModifier = modifier.height(TAB_BAR_HEIGHT).background(color = chipBackground, shape = TAB_SHAPE)
     Box(
-        modifier = modifier
-            .height(TAB_BAR_HEIGHT)
-            .background(color = chipBackground, shape = TAB_SHAPE)
+        modifier = (titleBarInteraction?.interactive(chipBaseModifier) ?: chipBaseModifier)
             .pointerInput(Unit) {
                 // Non-consuming press tracker (initial pass) so long-press can
                 // open the menu where the finger went down.

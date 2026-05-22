@@ -86,6 +86,7 @@ fun PortraitTopBar(
     onEraserSettingsChange: (EraserSettings) -> Unit,
     toolPresets: StoredToolPresets,
     onToolPresetsChange: (StoredToolPresets) -> Unit,
+    onPresetApplied: ((id: String) -> Unit)? = null,
     hasAnnotations: Boolean,
     isExporting: Boolean,
     onExport: () -> Unit,
@@ -214,6 +215,7 @@ fun PortraitTopBar(
                         presets = toolPresets,
                         onPresetsChange = onToolPresetsChange,
                         orientation = RailOrientation.HORIZONTAL,
+                        onPresetApplied = onPresetApplied,
                     )
                 }
             }
