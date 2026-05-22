@@ -206,10 +206,17 @@ compose.desktop {
             // explicitly; in packaged builds CocoaTabletInputController.addComposeResourcesToJnaPath()
             // does the same at runtime.
             "-Djna.library.path=${project.layout.projectDirectory.file("assets").asFile.absolutePath}",
-            // macOS: register the Dock icon at the OS level for the entire process lifetime.
-            // Taskbar.setIconImage() only works while AWT is alive; this flag persists through shutdown.
-            "-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon.icns").asFile.absolutePath}",
         )
+
+        // -Xdock:icon is a macOS-only launcher option; passing it on Windows/Linux
+        // aborts JVM startup ("Unrecognized option"). Gate on the host OS — only a
+        // macOS host has a Dock and packages the .app anyway.
+        // Registers the Dock icon at the OS level for the entire process lifetime;
+        // Taskbar.setIconImage() only works while AWT is alive, this flag persists through shutdown.
+        val hostOs = System.getProperty("os.name").lowercase()
+        if (hostOs.contains("mac") || hostOs.contains("darwin")) {
+            jvmArgs += "-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon.icns").asFile.absolutePath}"
+        }
     }
 }
 
