@@ -70,6 +70,26 @@ jobs:
       - name: Build macOS DMG
         run: ./gradlew :app:byCompose:desktop:packageReleaseDmg -Papp.version=${{ env.APP_VERSION }}
 
+      # Compose/jpackage не задаёт иконку тома DMG (видна в заголовке окна
+      # установщика). Ставим её пост-обработкой: монтируем DMG в r/w-режиме,
+      # кладём .VolumeIcon.icns и выставляем флаг кастомной иконки, затем
+      # пересобираем в сжатый формат. Тот же приём использует create-dmg.
+      - name: Set DMG volume icon
+        run: |
+          set -euo pipefail
+          dmg_dir=app/byCompose/desktop/build/compose/binaries/main-release/dmg
+          dmg=$(find "$dmg_dir" -name '*.dmg' | head -n1)
+          icns=app/byCompose/desktop/icons/app_icon.icns
+          rw=$(mktemp -u).dmg
+          hdiutil convert "$dmg" -format UDRW -o "$rw"
+          mount=$(hdiutil attach "$rw" -nobrowse -noverify -noautoopen | grep -Eo '/Volumes/.*' | head -n1)
+          cp "$icns" "$mount/.VolumeIcon.icns"
+          SetFile -a C "$mount"
+          hdiutil detach "$mount"
+          rm -f "$dmg"
+          hdiutil convert "$rw" -format UDZO -o "$dmg"
+          rm -f "$rw"
+
       - uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
