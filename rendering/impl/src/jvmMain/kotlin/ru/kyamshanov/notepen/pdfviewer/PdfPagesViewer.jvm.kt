@@ -717,9 +717,9 @@ private fun Modifier.pdfDesktopPointerInput(
                     if (dblClick && event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
                         change != null
                     ) {
-                        // Двойной клик вписывает страницу по ширине свободной области
-                        // и перемещает центр страницы под курсор.
-                        state.fitToWidthInArea(change.position)
+                        // Double-tap-to-zoom: переключает fit-width ↔ приближение,
+                        // точка под курсором остаётся на месте.
+                        state.doubleTapZoom(change.position)
                         change.consume()
                     } else if (event.buttons.isTertiaryPressed && change != null) {
                         state.commitPinchGesture()

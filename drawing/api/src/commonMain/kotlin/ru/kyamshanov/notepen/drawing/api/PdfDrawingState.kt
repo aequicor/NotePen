@@ -171,6 +171,18 @@ public class PdfDrawingState {
         return completed
     }
 
+    /**
+     * Отменить текущий штрих, НЕ коммитя его в [currentPaths]. Используется,
+     * когда жест прерван (например, начался pinch-zoom вторым пальцем) — в
+     * отличие от [finishDrawing], незавершённый штрих не должен оставаться на
+     * странице.
+     */
+    public fun discardDrawing() {
+        isDrawing.value = false
+        gestureSnapped = false
+        livePoints.clear()
+    }
+
     /** Очистить все штрихи и сбросить extent. */
     public fun clearDrawing() {
         currentPaths.clear()

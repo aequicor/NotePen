@@ -638,6 +638,11 @@ suspend fun PointerInputScope.detectStylusAwareDrag(
         if (!isDrawingPointer && !captureGesture(down.position)) {
             return@awaitEachGesture
         }
+        // Палец-рисование (а не стилус) прерывается появлением второго пальца:
+        // это pinch-zoom, и штрих не должен ни рисоваться во время жеста, ни
+        // оставаться после него. У стилуса второй контакт — это ладонь, её
+        // игнорируем (палец-палм не должен отменять перо).
+        val fingerGesture = !isDrawingPointer
 
         onDown(
             down.position,
@@ -649,6 +654,9 @@ suspend fun PointerInputScope.detectStylusAwareDrag(
         try {
             while (!ended) {
                 val event = awaitPointerEvent()
+                // Второй палец → pinch-zoom: бросаем штрих (finally → onCancel),
+                // не потребляя событие, чтобы pinch-обработчик его подхватил.
+                if (fingerGesture && event.changes.count { it.pressed } >= 2) break
                 val change = event.changes.firstOrNull { it.id == down.id } ?: continue
                 if (!change.pressed) {
                     onUp()

@@ -137,6 +137,19 @@ object PdfViewerMath {
     const val MAX_ZOOM: Float = 8.0f
 
     /**
+     * Во сколько раз double-tap «приближает» относительно fit-width — целевой
+     * зум для чтения, как в Chrome / Photos / Acrobat (double-tap-to-zoom).
+     */
+    const val DOUBLE_TAP_ZOOM_FACTOR: Float = 2.5f
+
+    /**
+     * Допуск, выше которого текущий зум считается «уже приближённым»: double-tap
+     * в этом состоянии возвращает к fit-width, иначе — приближает. Небольшой
+     * запас над fit-width гасит дрожание float у самого порога.
+     */
+    const val DOUBLE_TAP_FIT_EPSILON: Float = 1.05f
+
+    /**
      * Дополнительный «оверскролл»-буфер для горизонтального панорамирования,
      * когда контент шире вьюпорта: разрешает увести pan.x на эту долю ширины
      * PDF-колонки за строгую границу контента. Растёт с зумом, давая запас
@@ -395,10 +408,14 @@ object PdfViewerMath {
 
     /**
      * Кламп [pan] для зума: ТОЛЬКО центрирование по тем осям, на которых
-     * контент целиком помещается в вьюпорт. Edge-clamp не делаем — он
+     * **PDF-лист** целиком помещается в вьюпорт. Edge-clamp не делаем — он
      * ломает cursor anchoring у границ (точка под курсором сдвигается на
      * шаг clamp'а каждый тик, и при многократном wheel-зуме страница
      * "уплывает").
+     *
+     * Центрируется именно PDF-колонка `[0, basePageWidthPx]` ×
+     * `[0, totalHeightPx]`, а **не** слот с [PageExtent]: иначе штрих/надпись,
+     * вылезшая за лист, утягивала бы сам лист от центра.
      */
     fun centeringClamp(
         pan: Offset,
@@ -406,17 +423,60 @@ object PdfViewerMath {
         zoom: Float,
         viewportSize: FloatSize,
     ): Offset {
-        val contentW = (layout.contentRightPx - layout.contentLeftPx) * zoom
-        val contentH = (layout.contentBottomPx - layout.contentTopPx) * zoom
-        val x = if (contentW <= viewportSize.width) {
-            val midContent = (layout.contentLeftPx + layout.contentRightPx) / 2f * zoom
-            viewportSize.width / 2f - midContent
-        } else pan.x
-        val y = if (contentH <= viewportSize.height) {
-            val midContent = (layout.contentTopPx + layout.contentBottomPx) / 2f * zoom
-            viewportSize.height / 2f - midContent
-        } else pan.y
+        val pdfW = layout.basePageWidthPx * zoom
+        val pdfH = layout.totalHeightPx * zoom
+        val x = if (pdfW <= viewportSize.width) (viewportSize.width - pdfW) / 2f else pan.x
+        val y = if (pdfH <= viewportSize.height) (viewportSize.height - pdfH) / 2f else pan.y
         return Offset(x, y)
+    }
+
+    /**
+     * Целевой зум для double-tap-to-zoom (как в Chrome / Photos / Acrobat).
+     *
+     * [availableWidthPx] — ширина свободной области вьюпорта (за вычетом
+     * тулрейла/меню). Если текущий зум [currentZoom] заметно выше fit-width
+     * (`> fit × `[DOUBLE_TAP_FIT_EPSILON]) — возвращаем fit-width (тап
+     * «отдаляет»), иначе — `fit × `[DOUBLE_TAP_ZOOM_FACTOR] («приближаем» для
+     * чтения). Результат кламп'ится в [[MIN_ZOOM], [MAX_ZOOM]].
+     */
+    fun doubleTapTargetZoom(
+        currentZoom: Float,
+        basePageWidthPx: Float,
+        availableWidthPx: Float,
+    ): Float {
+        if (basePageWidthPx <= 0f) return currentZoom
+        val available = availableWidthPx.coerceAtLeast(1f)
+        val fitZoom = (available / basePageWidthPx).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        return if (currentZoom > fitZoom * DOUBLE_TAP_FIT_EPSILON) {
+            fitZoom
+        } else {
+            (fitZoom * DOUBLE_TAP_ZOOM_FACTOR).coerceIn(MIN_ZOOM, MAX_ZOOM)
+        }
+    }
+
+    /**
+     * Pan для double-tap «по ширине», укладывающий PDF-колонку в **свободную
+     * область** вьюпорта за вычетом плавающих панелей: тулрейла/настроек слева
+     * ([insetStartPx]), счётчика страниц сверху ([insetTopPx]) и панели справа
+     * ([insetEndPx]). PDF-колонка центрируется по горизонтали внутри этой
+     * области, а верх страницы [pageIndex] прижимается к её верхней кромке —
+     * чтобы страница не уходила под рельсу и под счётчик.
+     */
+    fun panForFitWidth(
+        layout: PdfPagesLayout,
+        pageIndex: Int,
+        zoom: Float,
+        viewportWidth: Float,
+        insetStartPx: Float,
+        insetTopPx: Float,
+        insetEndPx: Float,
+    ): Offset {
+        val availableWidth = (viewportWidth - insetStartPx - insetEndPx).coerceAtLeast(1f)
+        val centeringX = insetStartPx + (availableWidth - layout.basePageWidthPx * zoom) / 2f
+        val panY = insetTopPx + if (pageIndex in layout.pageHeightsPx.indices) {
+            -layout.pageTopsPx[pageIndex] * zoom
+        } else 0f
+        return Offset(centeringX, panY)
     }
 
     /** Zoom такой, что страница [pageIndex] занимает всю ширину вьюпорта. */

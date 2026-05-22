@@ -15,10 +15,13 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -27,13 +30,18 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -41,6 +49,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -68,12 +78,14 @@ import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import kotlin.math.roundToInt
@@ -93,10 +105,18 @@ import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdfviewer.ScrollMode
+import ru.kyamshanov.notepen.qrconnect.ClientPairingPanel
+import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostQrPairingPanel
+import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
+import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
 import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.PairingState
+import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
@@ -145,10 +165,12 @@ fun DetailsContent(
     loader: PdfDocumentLoader,
     renderer: PdfPageRenderer,
     syncEngineFor: ((documentId: String) -> SyncEngine)? = null,
-    @Suppress("UNUSED_PARAMETER")
     peerServer: PeerServer? = null,
     peerClient: SyncClient? = null,
     pendingDeltaCounts: kotlinx.coroutines.flow.Flow<Map<String, Int>>? = null,
+    hostQrViewModel: HostQrPairingViewModel? = null,
+    clientScanViewModel: ClientQrScanViewModel? = null,
+    manualConnectViewModel: ManualConnectViewModel? = null,
     receivedPdfDir: String? = null,
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
@@ -428,6 +450,16 @@ fun DetailsContent(
         0.dp
     }
 
+    // Vertical room taken by the page-counter airbar floating at the focused
+    // panel's top-centre in landscape. The airbar sits 8.dp below the viewer's
+    // top edge; double-tap fit-to-width pushes the page below it (plus a 16.dp
+    // gap) so the page top doesn't slide under the counter.
+    val fitWidthTopInset = if (isLandscape && layout.template == LayoutTemplate.FULL) {
+        8.dp + landscapePageCounterHeightDp + 16.dp
+    } else {
+        0.dp
+    }
+
     Box(
         modifier
             .fillMaxSize()
@@ -555,6 +587,7 @@ fun DetailsContent(
                     },
                     onControlsChanged = { c -> if (panel.id == layout.focusedPanelId) focusedControls = c },
                     fitWidthStartInset = fitWidthStartInset,
+                    fitWidthTopInset = fitWidthTopInset,
                 )
             }
         }
@@ -590,6 +623,10 @@ fun DetailsContent(
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .offset(x = railShift)
+                    // Те же инсеты, что и у рельсы ниже — иначе при боковом
+                    // вырезе/системном баре кнопка назад не совпадает с рельсой
+                    // по левому краю.
+                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
                     .padding(start = 16.dp, top = 8.dp),
             ) {
                 GlassSurface(
@@ -617,21 +654,25 @@ fun DetailsContent(
                 enter = slideInHorizontally { -it } + fadeIn(),
                 exit = slideOutHorizontally { -it } + fadeOut(),
                 modifier = Modifier
-                    // Якорим рейл ПОД кнопкой назад (TopStart + резерв сверху на
-                    // её высоту), а не центрируем по вертикали: на телефоне в
-                    // ландшафте высоты мало, и центрированный рейл наезжал на
-                    // back-кнопку вверху. Так перекрытие исключено детерминированно.
+                    // Резервируем сверху высоту back-кнопки (чтобы не перекрыть её),
+                    // а ниже занимаем всю высоту и центрируем рельсу по вертикали —
+                    // на десктопе она оказывается посередине, а не прижата к верху.
                     .align(Alignment.TopStart)
                     .offset(x = railShift)
-                    .windowInsetsPadding(WindowInsets.systemBars)
+                    // systemBars ∪ displayCutout: в ландшафте вырез/«бровь» уходит
+                    // на боковой край, и без cutout вертикальная рельса налезала
+                    // на него слева.
+                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
                     .padding(
                         start = 16.dp,
                         top = 8.dp + landscapePageCounterHeightDp + 16.dp,
                         end = 16.dp,
                         bottom = 16.dp,
-                    ),
+                    )
+                    .fillMaxHeight(),
             ) {
-                LandscapeToolRail(
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
+                    LandscapeToolRail(
                     toolMode = toolMode,
                     onToolModeChange = { toolMode = it },
                     penSettings = penSettings,
@@ -669,7 +710,8 @@ fun DetailsContent(
                     onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
                     onOpenShortcutsSettings = { showShortcutsDialog = true },
                     onRailWidthChanged = { landscapeToolbarWidthDp = it },
-                )
+                    )
+                }
             }
 
             // ---- Page-indicator airbar: slides to the centre of the focused panel ----
@@ -832,23 +874,57 @@ fun DetailsContent(
         }
         }
 
-        // Floating airbar (bottom-right): quick loupe (touch only) with the
-        // scroll-mode toggle stacked beneath it. When the quick loupe is absent
-        // (desktop) the scroll-mode toggle alone stays visible.
+        // Floating airbar (bottom-right): the sync button, quick loupe (touch
+        // only) and the scroll-mode toggle stacked into one glass island. Each
+        // entry renders only when its feature is wired up.
+        val syncPaneEnabled = hostQrViewModel != null || clientScanViewModel != null
+        var showSyncPanel by remember { mutableStateOf(false) }
         val showScrollModeButton = controls != null
-        if (SupportsQuickLoupe || showScrollModeButton) {
+        val airbarButtonCount =
+            (if (syncPaneEnabled) 1 else 0) +
+                (if (SupportsQuickLoupe) 1 else 0) +
+                (if (showScrollModeButton) 1 else 0)
+        if (airbarButtonCount > 0) {
             GlassSurface(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(bottom = 88.dp, end = 16.dp),
-                shape = if (SupportsQuickLoupe && showScrollModeButton) {
+                shape = if (airbarButtonCount > 1) {
                     RoundedCornerShape(28.dp)
                 } else {
                     CircleShape
                 },
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    if (syncPaneEnabled) {
+                        val hostPeers = peerServer
+                            ?.connectedPeers
+                            ?.collectAsState(emptySet())
+                            ?.value
+                            ?: emptySet()
+                        val hostLifecycle = peerServer
+                            ?.lifecycle
+                            ?.collectAsState(ServerLifecycleState.Idle)
+                            ?.value
+                        val clientHosts = peerClient
+                            ?.connectedHosts
+                            ?.collectAsState(emptySet())
+                            ?.value
+                            ?: emptySet()
+                        val clientStates = peerClient
+                            ?.pairingStates
+                            ?.collectAsState(emptyMap())
+                            ?.value
+                            ?: emptyMap()
+                        IconButton(onClick = { showSyncPanel = true }) {
+                            Icon(
+                                imageVector = Icons.Default.Sync,
+                                contentDescription = "Синхронизация",
+                                tint = syncIndicatorTint(hostPeers, hostLifecycle, clientHosts, clientStates),
+                            )
+                        }
+                    }
                     if (SupportsQuickLoupe) {
                         val armed = controls?.quickLoupeArmed == true
                         IconButton(onClick = { controls?.toggleQuickLoupe?.invoke() }) {
@@ -889,6 +965,76 @@ fun DetailsContent(
             }
         }
 
+        if (showSyncPanel && syncPaneEnabled) {
+            Dialog(onDismissRequest = { showSyncPanel = false }) {
+                Surface(
+                    shape = MaterialTheme.shapes.large,
+                    tonalElevation = 6.dp,
+                    modifier = Modifier
+                        .widthIn(min = 320.dp, max = 480.dp)
+                        .heightIn(min = 200.dp, max = 720.dp),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
+                    ) {
+                        if (hostQrViewModel != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "QR-подключение",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(onClick = { showSyncPanel = false }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Закрыть",
+                                    )
+                                }
+                            }
+                            HostQrPairingPanel(
+                                viewModel = hostQrViewModel,
+                                onCloseDialog = { showSyncPanel = false },
+                            )
+                        }
+                        if (clientScanViewModel != null && manualConnectViewModel != null && peerClient != null) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = "Подключение",
+                                    style = MaterialTheme.typography.titleLarge,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                IconButton(onClick = { showSyncPanel = false }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Закрыть",
+                                    )
+                                }
+                            }
+                            ClientPairingPanel(
+                                scanViewModel = clientScanViewModel,
+                                manualViewModel = manualConnectViewModel,
+                                peerClient = peerClient,
+                                onClose = { showSyncPanel = false },
+                                onConnected = { showSyncPanel = false },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         SnackbarHost(
             hostState = snackbarHostState,
             modifier = Modifier
@@ -915,6 +1061,36 @@ fun DetailsContent(
                 onDismiss = { pendingPanelMove = null },
             )
         }
+    }
+}
+
+private val SyncConnectedGreen = Color(0xFF2E7D32)
+private val SyncUnstableYellow = Color(0xFFF9A825)
+
+/**
+ * Tint for the sync button in the quick-actions airbar, signalling connection
+ * status:
+ * - **Green** — host has at least one connected peer, or client is paired.
+ * - **Yellow** — client is [PairingState.Reconnecting]/[PairingState.Error]
+ *   or host lifecycle is [ServerLifecycleState.Error] (and no green).
+ * - **Default** (`onSurface`) — idle / pairing / lost / both null.
+ */
+@Composable
+private fun syncIndicatorTint(
+    hostPeers: Set<DeviceInfo>,
+    hostLifecycle: ServerLifecycleState?,
+    clientHosts: Set<DeviceInfo>,
+    clientStates: Map<String, PairingState>,
+): Color {
+    val anyConnected = hostPeers.isNotEmpty() || clientHosts.isNotEmpty()
+    val hostUnstable = hostLifecycle is ServerLifecycleState.Error
+    val anyClientUnstable = clientStates.values.any {
+        it is PairingState.Reconnecting || it is PairingState.Error
+    }
+    return when {
+        anyConnected -> SyncConnectedGreen
+        hostUnstable || anyClientUnstable -> SyncUnstableYellow
+        else -> MaterialTheme.colorScheme.onSurface
     }
 }
 

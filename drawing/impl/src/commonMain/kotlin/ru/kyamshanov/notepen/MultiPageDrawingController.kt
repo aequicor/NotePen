@@ -315,7 +315,7 @@ class MultiPageDrawingController(
         when (activeMode) {
             Mode.DRAW -> {
                 val pageIndex = activePageIndex
-                drawingStates[pageIndex]?.finishDrawing()
+                drawingStates[pageIndex]?.discardDrawing()
             }
             Mode.ERASE -> activeErase?.cancel().also { activeErase = null }
             Mode.NONE -> Unit

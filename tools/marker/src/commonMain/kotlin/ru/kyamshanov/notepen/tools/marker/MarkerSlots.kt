@@ -2,8 +2,9 @@ package ru.kyamshanov.notepen.tools.marker
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LineWeight
-import androidx.compose.material.icons.filled.Palette
+import androidx.compose.ui.graphics.Color
 import ru.kyamshanov.notepen.ColorPresets
+import ru.kyamshanov.notepen.NotePenIcons
 import ru.kyamshanov.notepen.SlotItem
 import ru.kyamshanov.notepen.StrokeWidthSlider
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
@@ -16,8 +17,9 @@ public fun markerSlots(
     onChange: (MarkerSettings) -> Unit,
 ): List<SlotItem> = listOf(
     SlotItem(
-        icon = Icons.Default.Palette,
+        icon = NotePenIcons.ColorSwatch,
         contentDescription = "Цвет",
+        tint = Color(settings.colorArgb.toInt()),
         content = { orientation ->
             ColorPresets(
                 presets = MarkerSettings.PRESET_COLORS,

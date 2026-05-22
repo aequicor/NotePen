@@ -1,6 +1,5 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -9,8 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
@@ -29,8 +26,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -67,10 +62,10 @@ import ru.kyamshanov.notepen.ui.glass.GlassSurface
 /**
  * Full-width top chrome for portrait mode.
  *
- * A single bar split by a thin divider into two segments:
- *  - left segment — back button, page counter and the [ToolSelector];
- *  - right segment — [SystemControls] when no tool is active, or the active
- *    tool's [ToolSettingsIconStrip] when a tool is selected (full content swap).
+ * A back button and page counter on the left, then a single horizontal
+ * [WheelStrip] holding tool toggles, the active tool's settings slots and
+ * presets, and the system controls (see [unifiedToolWheelEntries]). Entries fade
+ * towards the bar's edges and scroll when they overflow, so a phone needs no `⋮`.
  *
  * Tapping a settings slot opens its slider / color picker in a panel that
  * animates DOWN below the bar.
@@ -165,75 +160,45 @@ fun PortraitTopBar(
                     onNavigateToPage = onNavigateToPage,
                     modifier = Modifier.padding(horizontal = PORTRAIT_BAR_PAGE_PADDING),
                 )
-                // Зона инструментов прижата вправо и горизонтально
-                // скроллится: если ToolSelector + настройки + ⋮-пресеты не
-                // влезают в ширину телефона, их можно проскроллить, ничего
-                // не обрезается и не наезжает на back/счётчик слева.
-                Box(
+                // Инструменты, настройки, пресеты и системные кнопки — в ОДНОМ
+                // горизонтальном колесе (затухание к краям). Так на телефоне всё
+                // помещается без ⋮-меню — лишнее прокручивается.
+                val entries = unifiedToolWheelEntries(
+                    orientation = RailOrientation.HORIZONTAL,
+                    toolMode = toolMode,
+                    onToolModeChange = onToolModeChange,
+                    penSettings = penSettings,
+                    onPenSettingsChange = onPenSettingsChange,
+                    markerSettings = markerSettings,
+                    onMarkerSettingsChange = onMarkerSettingsChange,
+                    eraserSettings = eraserSettings,
+                    onEraserSettingsChange = onEraserSettingsChange,
+                    toolPresets = toolPresets,
+                    onToolPresetsChange = onToolPresetsChange,
+                    onPresetApplied = onPresetApplied,
+                    expandedIndex = expandedIndex,
+                    onSlotToggle = onSlotToggle,
+                    hasAnnotations = hasAnnotations,
+                    isExporting = isExporting,
+                    onExport = onExport,
+                    scale = scale,
+                    onZoomIn = onZoomIn,
+                    onZoomOut = onZoomOut,
+                    showThumbnails = showThumbnails,
+                    onToggleThumbnails = onToggleThumbnails,
+                    showPencilModeButton = showPencilModeButton,
+                    pencilModeEnabled = pencilModeEnabled,
+                    onPencilModeChange = onPencilModeChange,
+                    magnifierEnabled = magnifierEnabled,
+                    onMagnifierToggle = onMagnifierToggle,
+                    onOpenShortcutsSettings = onOpenShortcutsSettings,
+                )
+                WheelStrip(
+                    entries = entries,
+                    orientation = RailOrientation.HORIZONTAL,
                     modifier = Modifier.weight(1f),
-                    contentAlignment = Alignment.CenterEnd,
-                ) {
-                    Row(
-                        modifier = Modifier.horizontalScroll(rememberScrollState()),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        ToolSelector(
-                            toolMode = toolMode,
-                            onToolModeChange = onToolModeChange,
-                            orientation = RailOrientation.HORIZONTAL,
-                        )
-                        VerticalDivider()
-                        AnimatedContent(targetState = toolMode, label = "portrait-segment-b") { mode ->
-                            if (mode != ToolMode.NONE) {
-                                ToolSettingsIconStrip(
-                                    toolMode = mode,
-                                    penSettings = penSettings,
-                                    onPenSettingsChange = onPenSettingsChange,
-                                    markerSettings = markerSettings,
-                                    onMarkerSettingsChange = onMarkerSettingsChange,
-                                    eraserSettings = eraserSettings,
-                                    onEraserSettingsChange = onEraserSettingsChange,
-                                    orientation = RailOrientation.HORIZONTAL,
-                                    expandedIndex = expandedIndex,
-                                    onToggle = onSlotToggle,
-                                )
-                            } else {
-                                SystemControls(
-                                    orientation = RailOrientation.HORIZONTAL,
-                                    hasAnnotations = hasAnnotations,
-                                    isExporting = isExporting,
-                                    onExport = onExport,
-                                    scale = scale,
-                                    onZoomIn = onZoomIn,
-                                    onZoomOut = onZoomOut,
-                                    showThumbnails = showThumbnails,
-                                    onToggleThumbnails = onToggleThumbnails,
-                                    showPencilModeButton = showPencilModeButton,
-                                    pencilModeEnabled = pencilModeEnabled,
-                                    onPencilModeChange = onPencilModeChange,
-                                    magnifierEnabled = magnifierEnabled,
-                                    onMagnifierToggle = onMagnifierToggle,
-                                    onOpenShortcutsSettings = onOpenShortcutsSettings,
-                                )
-                            }
-                        }
-                        if (toolActive) {
-                            VerticalDivider()
-                            ToolPresetsOverflow(
-                                toolMode = toolMode,
-                                penSettings = penSettings,
-                                onPenSettingsChange = onPenSettingsChange,
-                                markerSettings = markerSettings,
-                                onMarkerSettingsChange = onMarkerSettingsChange,
-                                eraserSettings = eraserSettings,
-                                onEraserSettingsChange = onEraserSettingsChange,
-                                presets = toolPresets,
-                                onPresetsChange = onToolPresetsChange,
-                                onPresetApplied = onPresetApplied,
-                            )
-                        }
-                    }
-                }
+                    selectedKey = selectedToolWheelKey(toolMode),
+                )
             }
         }
         AnimatedVisibility(
@@ -265,57 +230,6 @@ fun PortraitTopBar(
                         index = lastExpanded,
                     )
                 }
-            }
-        }
-    }
-}
-
-/**
- * `⋮` button collapsing the active tool's presets into a dropdown so the portrait
- * bar stays compact. The dropdown reuses [ToolPresetsZone] (vertical layout) for
- * full preset management — apply / add / delete — without duplicating logic.
- * Applying a preset closes the menu; add / delete keep it open.
- */
-@Composable
-private fun ToolPresetsOverflow(
-    toolMode: ToolMode,
-    penSettings: PenSettings,
-    onPenSettingsChange: (PenSettings) -> Unit,
-    markerSettings: MarkerSettings,
-    onMarkerSettingsChange: (MarkerSettings) -> Unit,
-    eraserSettings: EraserSettings,
-    onEraserSettingsChange: (EraserSettings) -> Unit,
-    presets: StoredToolPresets,
-    onPresetsChange: (StoredToolPresets) -> Unit,
-    onPresetApplied: ((id: String) -> Unit)?,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "Пресеты",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            Box(Modifier.padding(PORTRAIT_PRESETS_MENU_PADDING)) {
-                ToolPresetsZone(
-                    toolMode = toolMode,
-                    penSettings = penSettings,
-                    onPenSettingsChange = onPenSettingsChange,
-                    markerSettings = markerSettings,
-                    onMarkerSettingsChange = onMarkerSettingsChange,
-                    eraserSettings = eraserSettings,
-                    onEraserSettingsChange = onEraserSettingsChange,
-                    presets = presets,
-                    onPresetsChange = onPresetsChange,
-                    orientation = RailOrientation.VERTICAL,
-                    onPresetApplied = { id ->
-                        expanded = false
-                        onPresetApplied?.invoke(id)
-                    },
-                )
             }
         }
     }
@@ -419,26 +333,9 @@ private fun PortraitPageCounter(
     }
 }
 
-/** Thin vertical line separating the tool selector from the swappable segment. */
-@Composable
-private fun VerticalDivider() {
-    Spacer(
-        Modifier
-            .padding(horizontal = PORTRAIT_DIVIDER_SPACING)
-            .height(PORTRAIT_DIVIDER_HEIGHT)
-            .width(PORTRAIT_DIVIDER_WIDTH)
-            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = PORTRAIT_DIVIDER_ALPHA)),
-    )
-}
-
 /** Open/close duration of the expansion panel; the slot-switch delay matches it. */
 private const val PORTRAIT_PANEL_ANIM_MS = 180
 
 private val PORTRAIT_BAR_PADDING_H = 4.dp
 private val PORTRAIT_BAR_PAGE_PADDING = 8.dp
-private val PORTRAIT_DIVIDER_SPACING = 8.dp
-private val PORTRAIT_DIVIDER_HEIGHT = 24.dp
-private val PORTRAIT_DIVIDER_WIDTH = 1.dp
-private const val PORTRAIT_DIVIDER_ALPHA = 0.5f
 private val PORTRAIT_EXPANSION_TOP_PADDING = 8.dp
-private val PORTRAIT_PRESETS_MENU_PADDING = 8.dp

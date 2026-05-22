@@ -1,20 +1,11 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.DropdownMenu
@@ -24,15 +15,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,118 +26,58 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 /**
- * One entry in a [ToolPresetStrip].
+ * One entry in the presets section of a tool wheel.
  *
- * @property id Stable preset id, echoed back by [ToolPresetStrip] callbacks.
+ * @property id Stable preset id, echoed back by the apply/delete callbacks.
  * @property deletable Whether the user may delete this preset (built-ins are not).
  * @property selected Whether the preset matches the tool's current settings.
  * @property preview Renders a thumbnail reflecting the preset's actual tool
  *   configuration (colour, thickness, eraser shape/size/mode). Drawn centred
  *   inside the preset chip.
  */
-class ToolPresetItem(
-    val id: String,
-    val deletable: Boolean,
-    val selected: Boolean,
-    val preview: @Composable () -> Unit,
+public class ToolPresetItem(
+    public val id: String,
+    public val deletable: Boolean,
+    public val selected: Boolean,
+    public val preview: @Composable () -> Unit,
 )
 
 /**
- * A separate "presets" zone for the active tool: a strip of tappable presets
- * followed by an add button, laid out along [orientation].
+ * Builds the presets section of a tool wheel as a list of [WheelEntry]: one chip
+ * per preset followed by a trailing add button. The chips share the wheel's
+ * single scroll axis with the tool toggles and settings slots.
  *
- * Tapping a preset calls [onApply]. Tapping the trailing add button ([addIcon])
- * calls [onAdd] to capture the current settings. A deletable preset opens a
- * delete menu on long-press (touch) or secondary click (desktop), invoking
- * [onDelete].
+ * Tapping a chip calls [onApply]; tapping the add button calls [onAdd] to capture
+ * the current settings. A deletable chip opens a delete menu on long-press (touch)
+ * or secondary click (desktop), invoking [onDelete].
+ *
+ * The add button is shown only when [showAdd] is true. Callers hide it when the
+ * current settings already match an existing preset, so identical presets can't be
+ * duplicated.
  */
-@Composable
-public fun ToolPresetStrip(
+public fun toolPresetWheelEntries(
     items: List<ToolPresetItem>,
     addIcon: ImageVector,
     onApply: (String) -> Unit,
     onAdd: () -> Unit,
     onDelete: (String) -> Unit,
-    orientation: RailOrientation,
-) {
-    // Eagerly initialised from the first items so the first frame shows content without animation.
-    val latestItems = remember { mutableStateMapOf<String, ToolPresetItem>().also { m -> items.forEach { m[it.id] = it } } }
-    val orderedIds = remember { mutableStateListOf<String>().also { l -> items.forEach { l.add(it.id) } } }
-    val visibilityStates = remember {
-        mutableStateMapOf<String, MutableTransitionState<Boolean>>().also { m ->
-            items.forEach { m[it.id] = MutableTransitionState(true) }
-        }
+    showAdd: Boolean = true,
+): List<WheelEntry> = buildList {
+    items.forEach { item ->
+        add(
+            WheelEntry(item.id, PRESET_ITEM_SIZE) {
+                PresetChip(item = item, onApply = { onApply(item.id) }, onDelete = { onDelete(item.id) })
+            },
+        )
     }
-
-    LaunchedEffect(items) {
-        val inputIds = items.map { it.id }.toSet()
-        for (item in items) {
-            latestItems[item.id] = item
-            val existing = visibilityStates[item.id]
-            when {
-                existing == null -> {
-                    val ts = MutableTransitionState(false)
-                    ts.targetState = true
-                    visibilityStates[item.id] = ts
-                    orderedIds.add(item.id)
-                }
-                // Item was mid-removal but came back — reverse the animation.
-                !existing.targetState -> existing.targetState = true
-            }
-        }
-        for (id in orderedIds.toList()) {
-            if (id !in inputIds) visibilityStates[id]?.targetState = false
-        }
-    }
-
-    // Remove items whose exit animation has fully completed.
-    LaunchedEffect(Unit) {
-        snapshotFlow {
-            orderedIds.filter { id -> visibilityStates[id]?.let { it.isIdle && !it.currentState } == true }
-        }.collect { finished ->
-            finished.forEach { id ->
-                orderedIds.remove(id)
-                visibilityStates.remove(id)
-                latestItems.remove(id)
-            }
-        }
-    }
-
-    val content: @Composable () -> Unit = {
-        for (id in orderedIds) {
-            val item = latestItems[id] ?: continue
-            val visState = visibilityStates[id] ?: continue
-            key(id) {
-                AnimatedVisibility(
-                    visibleState = visState,
-                    enter = scaleIn(initialScale = 0.5f) + fadeIn(),
-                    exit = scaleOut(targetScale = 0.5f) + fadeOut(),
-                ) {
-                    PresetItemView(
-                        item = item,
-                        onApply = { onApply(id) },
-                        onDelete = { onDelete(id) },
-                    )
-                }
-            }
-        }
-        AddPresetButton(icon = addIcon, onClick = onAdd)
-    }
-    when (orientation) {
-        RailOrientation.HORIZONTAL -> Row(
-            horizontalArrangement = Arrangement.spacedBy(PRESET_STRIP_GAP),
-            verticalAlignment = Alignment.CenterVertically,
-        ) { content() }
-        RailOrientation.VERTICAL -> Column(
-            verticalArrangement = Arrangement.spacedBy(PRESET_STRIP_GAP),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) { content() }
+    if (showAdd) {
+        add(WheelEntry(ADD_PRESET_KEY, PRESET_ITEM_SIZE) { AddPresetButton(icon = addIcon, onClick = onAdd) })
     }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun PresetItemView(
+private fun PresetChip(
     item: ToolPresetItem,
     onApply: () -> Unit,
     onDelete: () -> Unit,
@@ -210,7 +136,7 @@ private fun AddPresetButton(icon: ImageVector, onClick: () -> Unit) {
  */
 internal expect fun Modifier.secondaryClickModifier(onSecondaryClick: () -> Unit): Modifier
 
-private val PRESET_STRIP_GAP = 8.dp
+private const val ADD_PRESET_KEY = "__add_preset__"
 private val PRESET_ITEM_SIZE = 28.dp
 private val PRESET_ICON_SIZE = 18.dp
 private val PRESET_BORDER_DEFAULT_W = 1.dp

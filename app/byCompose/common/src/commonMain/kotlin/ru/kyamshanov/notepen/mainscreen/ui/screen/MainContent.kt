@@ -68,6 +68,12 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import androidx.compose.ui.platform.LocalWindowInfo
+import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
+import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
+import ru.kyamshanov.notepen.qrconnect.SyncPairingButton
+import ru.kyamshanov.notepen.sync.domain.port.PeerServer
+import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 private val RECENT_CARD_WIDTH: Dp = 132.dp
@@ -81,6 +87,11 @@ private val RECENT_CARD_WIDTH: Dp = 132.dp
  * @param onBack Возврат к предыдущему документу, когда библиотека открыта поверх
  *        редактора (кнопкой «+»). `null` — когда главный экран является корнем
  *        навигации; в этом случае кнопка «назад» не показывается.
+ * @param hostQrViewModel Вьюмодель хост-панели QR для кнопки синхронизации; `null` — кнопка скрыта.
+ * @param clientScanViewModel Вьюмодель сканирования QR на клиенте для кнопки синхронизации.
+ * @param manualConnectViewModel Вьюмодель ручного подключения для кнопки синхронизации.
+ * @param peerServer Хост-сервер для индикатора статуса синхронизации.
+ * @param peerClient Клиент синхронизации для индикатора статуса и панели подключения.
  * @param modifier Модификатор компонента.
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -89,6 +100,11 @@ fun MainContent(
     state: MainScreenUiState,
     onIntent: (MainScreenIntent) -> Unit,
     onBack: (() -> Unit)? = null,
+    hostQrViewModel: HostQrPairingViewModel? = null,
+    clientScanViewModel: ClientQrScanViewModel? = null,
+    manualConnectViewModel: ManualConnectViewModel? = null,
+    peerServer: PeerServer? = null,
+    peerClient: SyncClient? = null,
     modifier: Modifier = Modifier,
 ) {
     val windowWidth = LocalWindowInfo.current.containerSize.width
@@ -156,6 +172,13 @@ fun MainContent(
                     IconButton(onClick = { onIntent(MainScreenIntent.OpenCreateFolderDialog) }) {
                         Icon(Icons.Default.CreateNewFolder, contentDescription = "Новая папка")
                     }
+                    SyncPairingButton(
+                        hostQrViewModel = hostQrViewModel,
+                        clientScanViewModel = clientScanViewModel,
+                        manualConnectViewModel = manualConnectViewModel,
+                        peerServer = peerServer,
+                        peerClient = peerClient,
+                    )
                 },
             )
         },

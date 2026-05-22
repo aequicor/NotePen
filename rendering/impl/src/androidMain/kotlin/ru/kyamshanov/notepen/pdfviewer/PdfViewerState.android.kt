@@ -61,6 +61,7 @@ actual class PdfViewerState internal constructor(
     actual var scrollMode: ScrollMode by mutableStateOf(ScrollMode.BOTH)
 
     actual var fitWidthInsetStartPx: Float by mutableFloatStateOf(0f)
+    actual var fitWidthInsetTopPx: Float by mutableFloatStateOf(0f)
     actual var fitWidthInsetEndPx: Float by mutableFloatStateOf(0f)
 
     /**
@@ -287,35 +288,40 @@ actual class PdfViewerState internal constructor(
         pan = clamped(newPan)
     }
 
-    /**
-     * Вписывает страницу по ширине в свободную область вьюпорта (за вычетом
-     * [fitWidthInsetStartPx] / [fitWidthInsetEndPx], занятых тулрейлом/меню) и
-     * перемещает центр страницы под точку [focus] (палец). Позиция кламп'ится.
-     * Вызывается по двойному тапу.
-     */
-    actual fun fitToWidthInArea(focus: Offset) {
+    actual fun doubleTapZoom(focus: Offset) {
         if (viewportSize.width <= 0 || pages.isEmpty()) return
         val base = layout.basePageWidthPx
-        if (base <= 0f) return
-        val available = (viewportSize.width - fitWidthInsetStartPx - fitWidthInsetEndPx)
-            .coerceAtLeast(1f)
-        val newZoom = (available / base).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
-        val (docCenterX, docCenterY) = pageCenterUnderFocus(focus, base)
-        zoom = newZoom
-        pan = clamped(Offset(focus.x - docCenterX * newZoom, focus.y - docCenterY * newZoom))
-    }
-
-    /** Document-space центр страницы, на которую указывает [focus] при текущем зуме. */
-    private fun pageCenterUnderFocus(focus: Offset, base: Float): Pair<Float, Float> {
-        val docYFocus = if (zoom > 0f) (focus.y - pan.y) / zoom else 0f
-        val tops = layout.pageTopsPx
-        var pageIndex = 0
-        for (i in tops.indices) {
-            if (tops[i] <= docYFocus) pageIndex = i else break
+        if (base <= 0f || zoom <= 0f) return
+        val availableWidth = viewportSize.width - fitWidthInsetStartPx - fitWidthInsetEndPx
+        val target = PdfViewerMath.doubleTapTargetZoom(
+            currentZoom = zoom,
+            basePageWidthPx = base,
+            availableWidthPx = availableWidth,
+        )
+        val fitZoom = (availableWidth.coerceAtLeast(1f) / base)
+            .coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        if (target <= fitZoom * PdfViewerMath.DOUBLE_TAP_FIT_EPSILON) {
+            // Fit-width (отдаление): укладываем страницу в свободную область —
+            // правее тулрейла и ниже счётчика, а не под ними.
+            zoom = target
+            pan = clamped(
+                PdfViewerMath.panForFitWidth(
+                    layout = layout,
+                    pageIndex = firstVisiblePageIndex,
+                    zoom = target,
+                    viewportWidth = viewportSize.width.toFloat(),
+                    insetStartPx = fitWidthInsetStartPx,
+                    insetTopPx = fitWidthInsetTopPx,
+                    insetEndPx = fitWidthInsetEndPx,
+                ),
+            )
+        } else {
+            // Приближение — cursor-anchored: точка документа под пальцем на месте.
+            val docX = (focus.x - pan.x) / zoom
+            val docY = (focus.y - pan.y) / zoom
+            zoom = target
+            pan = clamped(Offset(focus.x - docX * target, focus.y - docY * target))
         }
-        val pdfH = layout.pdfHeightsPx.getOrElse(pageIndex) { base }
-        val pageTop = tops.getOrElse(pageIndex) { 0f }
-        return (base / 2f) to (pageTop + pdfH / 2f)
     }
 
     private fun clamped(p: Offset): Offset = PdfViewerMath.clampPan(

@@ -22,8 +22,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Category
 import androidx.compose.material.icons.filled.LineWeight
-import androidx.compose.material.icons.filled.Opacity
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PhotoSizeSelectLarge
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -110,8 +108,9 @@ private fun SlotIconButton(
         Icon(
             imageVector = slot.icon,
             contentDescription = slot.contentDescription,
-            tint = if (isExpanded) MaterialTheme.colorScheme.primary
-                   else MaterialTheme.colorScheme.onSecondaryContainer,
+            tint = slot.tint
+                ?: if (isExpanded) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSecondaryContainer,
         )
     }
 }
@@ -133,15 +132,16 @@ private fun slotsFor(
 }
 
 /**
- * Compact strip of slot icon-buttons for the active tool's settings.
+ * Builds the active tool's settings slots as a list of [WheelEntry] — one icon
+ * button per slot. The [expandedIndex] slot is highlighted; tapping a slot calls
+ * [onToggle] with its index. The caller owns the expanded state so the expansion
+ * content can live in a sibling surface (the landscape "budding" side rail, or
+ * the portrait below-bar strip).
  *
- * Icons are laid out along the rail axis ([orientation]); the [expandedIndex]
- * slot is highlighted. Tapping a slot calls [onToggle] with its index — the
- * caller owns the expanded state so the expansion content can live in a sibling
- * surface (the landscape "budding" side rail, or the portrait below-bar strip).
+ * [expandedButtonModifier] is applied only to the currently-expanded slot so the
+ * landscape budding panel can anchor itself to that button's position.
  */
-@Composable
-internal fun ToolSettingsIconStrip(
+internal fun toolSettingsSlotEntries(
     toolMode: ToolMode,
     penSettings: PenSettings,
     onPenSettingsChange: (PenSettings) -> Unit,
@@ -149,20 +149,18 @@ internal fun ToolSettingsIconStrip(
     onMarkerSettingsChange: (MarkerSettings) -> Unit,
     eraserSettings: EraserSettings,
     onEraserSettingsChange: (EraserSettings) -> Unit,
-    orientation: RailOrientation,
     expandedIndex: Int?,
     onToggle: (Int) -> Unit,
-    modifier: Modifier = Modifier,
     expandedButtonModifier: Modifier = Modifier,
-) {
+): List<WheelEntry> {
     val slots = slotsFor(
         toolMode,
         penSettings, onPenSettingsChange,
         markerSettings, onMarkerSettingsChange,
         eraserSettings, onEraserSettingsChange,
     )
-    val buttons: @Composable () -> Unit = {
-        slots.forEachIndexed { i, slot ->
+    return slots.mapIndexed { i, slot ->
+        WheelEntry("slot_$i") {
             SlotIconButton(
                 slot = slot,
                 isExpanded = expandedIndex == i,
@@ -170,18 +168,6 @@ internal fun ToolSettingsIconStrip(
                 modifier = if (expandedIndex == i) expandedButtonModifier else Modifier,
             )
         }
-    }
-    when (orientation) {
-        RailOrientation.VERTICAL -> Column(
-            modifier = modifier,
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(RAIL_ITEM_GAP),
-        ) { buttons() }
-        RailOrientation.HORIZONTAL -> Row(
-            modifier = modifier,
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(RAIL_ITEM_GAP),
-        ) { buttons() }
     }
 }
 
@@ -227,8 +213,9 @@ private fun penSlots(
     onChange: (PenSettings) -> Unit,
 ): List<SlotItem> = listOf(
     SlotItem(
-        icon = Icons.Default.Palette,
+        icon = NotePenIcons.ColorSwatch,
         contentDescription = "Цвет",
+        tint = Color(settings.colorArgb.toInt()),
         content = { orientation ->
             ColorPresets(
                 presets = PenSettings.PRESET_COLORS,
@@ -252,7 +239,7 @@ private fun penSlots(
         },
     ),
     SlotItem(
-        icon = Icons.Default.Opacity,
+        icon = NotePenIcons.Opacity,
         contentDescription = "Прозрачность",
         content = { orientation ->
             OrientedSlider(
@@ -322,13 +309,12 @@ private fun eraserSlots(
 /* ---------------- presets zone ---------------- */
 
 /**
- * Separate "presets" zone for the active tool: built-in + user presets that
- * apply a full settings snapshot on tap, plus an add button. No-op for
- * [ToolMode.NONE]. The caller owns [presets]; changes are reported via
- * [onPresetsChange] for persistence.
+ * Builds the active tool's preset chips (built-in + user) plus a trailing add
+ * button as a list of [WheelEntry]. Empty for [ToolMode.NONE]. Tapping a chip
+ * applies a full settings snapshot; the caller owns [presets] and persists
+ * changes via [onPresetsChange].
  */
-@Composable
-internal fun ToolPresetsZone(
+internal fun toolPresetEntries(
     toolMode: ToolMode,
     penSettings: PenSettings,
     onPenSettingsChange: (PenSettings) -> Unit,
@@ -338,85 +324,82 @@ internal fun ToolPresetsZone(
     onEraserSettingsChange: (EraserSettings) -> Unit,
     presets: StoredToolPresets,
     onPresetsChange: (StoredToolPresets) -> Unit,
-    orientation: RailOrientation,
     onPresetApplied: ((id: String) -> Unit)? = null,
-) {
-    when (toolMode) {
-        ToolMode.PEN -> {
-            val all = BuiltinToolPresets.pen + presets.pen
-            ToolPresetStrip(
-                items = all.map {
-                    ToolPresetItem(
-                        id = it.id,
-                        deletable = !isBuiltinPresetId(it.id),
-                        selected = it.settings == penSettings,
-                        preview = { PenPresetPreview(it.settings) },
-                    )
-                },
-                addIcon = Icons.Default.Add,
-                onApply = { id ->
-                    all.firstOrNull { it.id == id }?.let {
-                        onPenSettingsChange(it.settings)
-                        onPresetApplied?.invoke(id)
-                    }
-                },
-                onAdd = { onPresetsChange(presets.copy(pen = presets.pen + PenPreset(generateUuid(), penSettings))) },
-                onDelete = { id -> onPresetsChange(presets.copy(pen = presets.pen.filterNot { it.id == id })) },
-                orientation = orientation,
-            )
-        }
-        ToolMode.MARKER -> {
-            val all = BuiltinToolPresets.marker + presets.marker
-            ToolPresetStrip(
-                items = all.map {
-                    ToolPresetItem(
-                        id = it.id,
-                        deletable = !isBuiltinPresetId(it.id),
-                        selected = it.settings == markerSettings,
-                        preview = { MarkerPresetPreview(it.settings) },
-                    )
-                },
-                addIcon = Icons.Default.Add,
-                onApply = { id ->
-                    all.firstOrNull { it.id == id }?.let {
-                        onMarkerSettingsChange(it.settings)
-                        onPresetApplied?.invoke(id)
-                    }
-                },
-                onAdd = {
-                    onPresetsChange(presets.copy(marker = presets.marker + MarkerPreset(generateUuid(), markerSettings)))
-                },
-                onDelete = { id -> onPresetsChange(presets.copy(marker = presets.marker.filterNot { it.id == id })) },
-                orientation = orientation,
-            )
-        }
-        ToolMode.ERASER -> {
-            val all = BuiltinToolPresets.eraser + presets.eraser
-            ToolPresetStrip(
-                items = all.map {
-                    ToolPresetItem(
-                        id = it.id,
-                        deletable = !isBuiltinPresetId(it.id),
-                        selected = it.settings == eraserSettings,
-                        preview = { EraserPresetPreview(it.settings) },
-                    )
-                },
-                addIcon = Icons.Default.Add,
-                onApply = { id ->
-                    all.firstOrNull { it.id == id }?.let {
-                        onEraserSettingsChange(it.settings)
-                        onPresetApplied?.invoke(id)
-                    }
-                },
-                onAdd = {
-                    onPresetsChange(presets.copy(eraser = presets.eraser + EraserPreset(generateUuid(), eraserSettings)))
-                },
-                onDelete = { id -> onPresetsChange(presets.copy(eraser = presets.eraser.filterNot { it.id == id })) },
-                orientation = orientation,
-            )
-        }
-        ToolMode.NONE -> Unit
+): List<WheelEntry> = when (toolMode) {
+    ToolMode.PEN -> {
+        val all = BuiltinToolPresets.pen + presets.pen
+        toolPresetWheelEntries(
+            items = all.map {
+                ToolPresetItem(
+                    id = it.id,
+                    deletable = !isBuiltinPresetId(it.id),
+                    selected = it.settings == penSettings,
+                    preview = { PenPresetPreview(it.settings) },
+                )
+            },
+            addIcon = Icons.Default.Add,
+            onApply = { id ->
+                all.firstOrNull { it.id == id }?.let {
+                    onPenSettingsChange(it.settings)
+                    onPresetApplied?.invoke(id)
+                }
+            },
+            onAdd = { onPresetsChange(presets.copy(pen = presets.pen + PenPreset(generateUuid(), penSettings))) },
+            onDelete = { id -> onPresetsChange(presets.copy(pen = presets.pen.filterNot { it.id == id })) },
+            showAdd = all.none { it.settings == penSettings },
+        )
     }
+    ToolMode.MARKER -> {
+        val all = BuiltinToolPresets.marker + presets.marker
+        toolPresetWheelEntries(
+            items = all.map {
+                ToolPresetItem(
+                    id = it.id,
+                    deletable = !isBuiltinPresetId(it.id),
+                    selected = it.settings == markerSettings,
+                    preview = { MarkerPresetPreview(it.settings) },
+                )
+            },
+            addIcon = Icons.Default.Add,
+            onApply = { id ->
+                all.firstOrNull { it.id == id }?.let {
+                    onMarkerSettingsChange(it.settings)
+                    onPresetApplied?.invoke(id)
+                }
+            },
+            onAdd = {
+                onPresetsChange(presets.copy(marker = presets.marker + MarkerPreset(generateUuid(), markerSettings)))
+            },
+            onDelete = { id -> onPresetsChange(presets.copy(marker = presets.marker.filterNot { it.id == id })) },
+            showAdd = all.none { it.settings == markerSettings },
+        )
+    }
+    ToolMode.ERASER -> {
+        val all = BuiltinToolPresets.eraser + presets.eraser
+        toolPresetWheelEntries(
+            items = all.map {
+                ToolPresetItem(
+                    id = it.id,
+                    deletable = !isBuiltinPresetId(it.id),
+                    selected = it.settings == eraserSettings,
+                    preview = { EraserPresetPreview(it.settings) },
+                )
+            },
+            addIcon = Icons.Default.Add,
+            onApply = { id ->
+                all.firstOrNull { it.id == id }?.let {
+                    onEraserSettingsChange(it.settings)
+                    onPresetApplied?.invoke(id)
+                }
+            },
+            onAdd = {
+                onPresetsChange(presets.copy(eraser = presets.eraser + EraserPreset(generateUuid(), eraserSettings)))
+            },
+            onDelete = { id -> onPresetsChange(presets.copy(eraser = presets.eraser.filterNot { it.id == id })) },
+            showAdd = all.none { it.settings == eraserSettings },
+        )
+    }
+    ToolMode.NONE -> emptyList()
 }
 
 /** Maps a slider position `[0..1]` to a preview diameter in [PREVIEW_MIN]..[PREVIEW_MAX]. */
@@ -502,7 +485,6 @@ private fun EraserChip(selected: Boolean, label: String, onClick: () -> Unit) {
 
 private val PANEL_EXPANSION_PADDING_H = 12.dp
 private val PANEL_EXPANSION_PADDING_V = 8.dp
-private val RAIL_ITEM_GAP = 4.dp
 private val RAIL_ICON_BUTTON_SIZE = 40.dp
 private val CHIP_GAP = 6.dp
 private val PREVIEW_MIN = 8.dp

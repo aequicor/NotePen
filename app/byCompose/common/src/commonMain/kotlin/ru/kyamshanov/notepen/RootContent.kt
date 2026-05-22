@@ -19,6 +19,9 @@ import ru.kyamshanov.notepen.mainscreen.ui.screen.MainContent
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
+import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
@@ -39,6 +42,12 @@ fun RootContent(
     peerClient: SyncClient? = null,
     /** Forwarded to [DetailsContent] for the offline-pending banner. */
     pendingDeltaCounts: Flow<Map<String, Int>>? = null,
+    /** Forwarded to [DetailsContent] to drive the host QR pane of the sync dialog. */
+    hostQrViewModel: HostQrPairingViewModel? = null,
+    /** Forwarded to [DetailsContent] to drive the client scan pane of the sync dialog. */
+    clientScanViewModel: ClientQrScanViewModel? = null,
+    /** Forwarded to [DetailsContent] to drive the manual-connect form of the sync dialog. */
+    manualConnectViewModel: ManualConnectViewModel? = null,
     /** Forwarded to [DetailsContent] so it can detect remote-opened PDFs. */
     receivedPdfDir: String? = null,
     /** Forwarded to [DetailsContent] for open/close tracking. */
@@ -104,6 +113,11 @@ fun RootContent(
                     } else {
                         null
                     },
+                    hostQrViewModel = hostQrViewModel,
+                    clientScanViewModel = clientScanViewModel,
+                    manualConnectViewModel = manualConnectViewModel,
+                    peerServer = peerServer,
+                    peerClient = peerClient,
                     modifier = modifier,
                 )
             }
@@ -115,6 +129,9 @@ fun RootContent(
                 peerServer = peerServer,
                 peerClient = peerClient,
                 pendingDeltaCounts = pendingDeltaCounts,
+                hostQrViewModel = hostQrViewModel,
+                clientScanViewModel = clientScanViewModel,
+                manualConnectViewModel = manualConnectViewModel,
                 receivedPdfDir = receivedPdfDir,
                 openDocumentRegistry = openDocumentRegistry,
                 localDocumentIdRegistry = localDocumentIdRegistry,

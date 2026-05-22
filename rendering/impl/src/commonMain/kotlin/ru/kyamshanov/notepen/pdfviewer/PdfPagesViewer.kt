@@ -146,20 +146,25 @@ expect class PdfViewerState {
     var scrollMode: ScrollMode
 
     /**
-     * Горизонтальный inset (px) слева/справа, занятый плавающим тулрейлом или
-     * меню инструментов. Учитывается в [fitToWidthInArea], чтобы страница по
-     * двойному тапу вписывалась в свободную область, а не уходила под панель.
+     * Insets (px) свободной области вьюпорта, занятой плавающими панелями:
+     * тулрейлом/настройками слева ([fitWidthInsetStartPx]), счётчиком страниц
+     * сверху ([fitWidthInsetTopPx]) и панелью справа ([fitWidthInsetEndPx]).
+     * Учитываются в [doubleTapZoom]: страница по двойному тапу вписывается в
+     * свободную область и не уходит под эти панели.
      */
     var fitWidthInsetStartPx: Float
+    var fitWidthInsetTopPx: Float
     var fitWidthInsetEndPx: Float
 
     /**
-     * Вписывает страницу по ширине в область вьюпорта за вычетом
-     * [fitWidthInsetStartPx] / [fitWidthInsetEndPx] и перемещает центр страницы
-     * под точку [focus] (палец/курсор), после чего кламп'ит позицию. Используется
-     * по двойному тапу/клику.
+     * Double-tap-to-zoom, как в Chrome / Photos / Acrobat: переключает зум между
+     * fit-width и «приближенным» уровнем чтения. В режиме fit-width страница
+     * укладывается в свободную область вьюпорта за вычетом
+     * [fitWidthInsetStartPx] / [fitWidthInsetTopPx] / [fitWidthInsetEndPx] —
+     * правее тулрейла и ниже счётчика, а не под ними. При «приближении» точка
+     * документа под [focus] (палец/курсор) остаётся на месте — cursor-anchored.
      */
-    fun fitToWidthInArea(focus: Offset)
+    fun doubleTapZoom(focus: Offset)
 }
 
 /** Создаёт и запоминает [PdfViewerState] с сохранением между рекомпозициями. */

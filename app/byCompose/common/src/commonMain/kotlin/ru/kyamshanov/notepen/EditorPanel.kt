@@ -178,6 +178,7 @@ fun EditorPanel(
     onClosePanel: (() -> Unit)?,
     onControlsChanged: (PanelControls?) -> Unit,
     fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
+    fitWidthTopInset: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
 ) {
     val openDocs = panel.tabs
@@ -225,6 +226,7 @@ fun EditorPanel(
     val density = androidx.compose.ui.platform.LocalDensity.current
     SideEffect {
         pdfViewerState.fitWidthInsetStartPx = with(density) { fitWidthStartInset.toPx() }
+        pdfViewerState.fitWidthInsetTopPx = with(density) { fitWidthTopInset.toPx() }
     }
     val firstVisiblePage by remember(pdfState) { derivedStateOf { pdfViewerState.firstVisiblePageIndex } }
     val currentScalePercent by remember(pdfState) { derivedStateOf { pdfViewerState.scalePercent } }
@@ -840,7 +842,11 @@ fun EditorPanel(
                     .stylusEventSink(tabletController)
                     .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
                 primaryDragPanEnabled = {
-                    toolModeProvider.value == ToolMode.NONE &&
+                    // Палец/указатель свободен для панорамирования, когда он не
+                    // является инструментом рисования: либо инструмент неактивен,
+                    // либо включён режим стилуса (рисует только перо) — как в
+                    // ноут-апах, где палец скроллит, а стилус рисует.
+                    (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
                         !quickLoupeArmed.value &&
                         !openTriggerProvider.value
                 },

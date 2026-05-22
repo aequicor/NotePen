@@ -47,6 +47,11 @@ public class SlotItem(
     public val contentDescription: String,
     /** Renders the expanded content for the requested [RailOrientation]. */
     public val content: @Composable (RailOrientation) -> Unit,
+    /**
+     * Forces the collapsed [icon]'s tint instead of the theme default. Used by the
+     * colour slot to render its glyph in the currently selected colour.
+     */
+    public val tint: Color? = null,
 )
 
 /** Row/column of color-preset dots; [isSelected] marks the active one. */

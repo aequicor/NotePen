@@ -1,6 +1,5 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandHorizontally
@@ -9,31 +8,22 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BorderColor
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CleaningServices
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,61 +55,78 @@ import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /**
- * Tool selection buttons (Pen / Marker / Eraser) laid out along [orientation].
- * Re-tap on the active tool deactivates it — see [nextToolModeOnToggle].
+ * Tool toggles (Pen / Marker / Eraser) as a list of [WheelEntry] for the unified
+ * tool wheel. Re-tapping the active tool deactivates it — see [nextToolModeOnToggle].
  */
-@Composable
-internal fun ToolSelector(
+internal fun toolSelectorEntries(
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
-    orientation: RailOrientation,
-    modifier: Modifier = Modifier,
-) {
-    val buttons: @Composable () -> Unit = {
+): List<WheelEntry> = listOf(
+    WheelEntry(TOOL_PEN_KEY) {
         ToolToggleButton(
-            icon = Icons.Default.Edit,
+            icon = NotePenIcons.Brush,
             contentDescription = "Перо",
             selected = toolMode == ToolMode.PEN,
             onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN)) },
+            showSelectionBackground = false,
         )
+    },
+    WheelEntry(TOOL_MARKER_KEY) {
         ToolToggleButton(
-            icon = Icons.Default.BorderColor,
+            icon = NotePenIcons.Highlighter,
             contentDescription = "Маркер",
             selected = toolMode == ToolMode.MARKER,
             onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER)) },
+            showSelectionBackground = false,
         )
+    },
+    WheelEntry(TOOL_ERASER_KEY) {
         ToolToggleButton(
-            icon = Icons.Default.CleaningServices,
+            icon = NotePenIcons.Eraser,
             contentDescription = "Ластик",
             selected = toolMode == ToolMode.ERASER,
             onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER)) },
+            showSelectionBackground = false,
         )
-    }
-    when (orientation) {
-        RailOrientation.VERTICAL -> Column(
-            modifier = modifier,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) { buttons() }
-        RailOrientation.HORIZONTAL -> Row(
-            modifier = modifier,
-            verticalAlignment = Alignment.CenterVertically,
-        ) { buttons() }
-    }
+    },
+)
+
+/** Wheel-entry key of the currently selected drawing tool, or `null` for [ToolMode.NONE]. */
+internal fun selectedToolWheelKey(toolMode: ToolMode): Any? = when (toolMode) {
+    ToolMode.PEN -> TOOL_PEN_KEY
+    ToolMode.MARKER -> TOOL_MARKER_KEY
+    ToolMode.ERASER -> TOOL_ERASER_KEY
+    ToolMode.NONE -> null
 }
 
+private const val TOOL_PEN_KEY = "tool_pen"
+private const val TOOL_MARKER_KEY = "tool_marker"
+private const val TOOL_ERASER_KEY = "tool_eraser"
+
 /**
- * System (non-drawing) controls: pencil mode, magnifier, page thumbnails,
- * shortcut settings, PDF export and zoom. Laid out along [orientation].
+ * Assembles the unified tool wheel: tool toggles, then (for an active tool) its
+ * settings slots and presets, then the system controls — each group separated by
+ * a thin [RailDivider]. The whole list feeds one [WheelStrip], so the bar needs
+ * no `⋮` overflow.
  *
- * In [RailOrientation.HORIZONTAL] (portrait phone top bar) horizontal space is
- * tight, so only the magnifier and zoom controls stay inline; the rarely-used
- * actions (pencil mode, thumbnails, shortcuts, export) collapse into a `⋮`
- * overflow [DropdownMenu]. In [RailOrientation.VERTICAL] (landscape rail)
- * everything stays expanded — vertical space is not constrained.
+ * [expandedButtonModifier] is forwarded to the currently-expanded settings slot
+ * (used by the landscape budding panel to anchor itself).
  */
-@Composable
-internal fun SystemControls(
+internal fun unifiedToolWheelEntries(
     orientation: RailOrientation,
+    toolMode: ToolMode,
+    onToolModeChange: (ToolMode) -> Unit,
+    penSettings: PenSettings,
+    onPenSettingsChange: (PenSettings) -> Unit,
+    markerSettings: MarkerSettings,
+    onMarkerSettingsChange: (MarkerSettings) -> Unit,
+    eraserSettings: EraserSettings,
+    onEraserSettingsChange: (EraserSettings) -> Unit,
+    toolPresets: StoredToolPresets,
+    onToolPresetsChange: (StoredToolPresets) -> Unit,
+    onPresetApplied: ((id: String) -> Unit)?,
+    expandedIndex: Int?,
+    onSlotToggle: (Int) -> Unit,
     hasAnnotations: Boolean,
     isExporting: Boolean,
     onExport: () -> Unit,
@@ -134,8 +141,110 @@ internal fun SystemControls(
     magnifierEnabled: Boolean,
     onMagnifierToggle: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
+    expandedButtonModifier: Modifier = Modifier,
+): List<WheelEntry> {
+    val settings = toolSettingsSlotEntries(
+        toolMode = toolMode,
+        penSettings = penSettings,
+        onPenSettingsChange = onPenSettingsChange,
+        markerSettings = markerSettings,
+        onMarkerSettingsChange = onMarkerSettingsChange,
+        eraserSettings = eraserSettings,
+        onEraserSettingsChange = onEraserSettingsChange,
+        expandedIndex = expandedIndex,
+        onToggle = onSlotToggle,
+        expandedButtonModifier = expandedButtonModifier,
+    )
+    val presets = toolPresetEntries(
+        toolMode = toolMode,
+        penSettings = penSettings,
+        onPenSettingsChange = onPenSettingsChange,
+        markerSettings = markerSettings,
+        onMarkerSettingsChange = onMarkerSettingsChange,
+        eraserSettings = eraserSettings,
+        onEraserSettingsChange = onEraserSettingsChange,
+        presets = toolPresets,
+        onPresetsChange = onToolPresetsChange,
+        onPresetApplied = onPresetApplied,
+    )
+    val system = systemControlEntries(
+        hasAnnotations = hasAnnotations,
+        isExporting = isExporting,
+        onExport = onExport,
+        scale = scale,
+        onZoomIn = onZoomIn,
+        onZoomOut = onZoomOut,
+        showThumbnails = showThumbnails,
+        onToggleThumbnails = onToggleThumbnails,
+        showPencilModeButton = showPencilModeButton,
+        pencilModeEnabled = pencilModeEnabled,
+        onPencilModeChange = onPencilModeChange,
+        magnifierEnabled = magnifierEnabled,
+        onMagnifierToggle = onMagnifierToggle,
+        onOpenShortcutsSettings = onOpenShortcutsSettings,
+    )
+    return buildList {
+        addAll(toolSelectorEntries(toolMode, onToolModeChange))
+        if (settings.isNotEmpty()) {
+            add(WheelEntry("div_settings", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
+            addAll(settings)
+        }
+        if (presets.isNotEmpty()) {
+            add(WheelEntry("div_presets", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
+            addAll(presets)
+        }
+        // Системные кнопки показываем ТОЛЬКО когда инструмент не выбран: при
+        // активном инструменте их место занимают настройки и пресеты.
+        if (toolMode == ToolMode.NONE && system.isNotEmpty()) {
+            add(WheelEntry("div_system", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
+            addAll(system)
+        }
+    }
+}
+
+/** Thin line separating groups inside the tool wheel, oriented across the strip. */
+@Composable
+internal fun RailDivider(orientation: RailOrientation) {
+    val color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = WHEEL_DIVIDER_ALPHA)
+    when (orientation) {
+        RailOrientation.HORIZONTAL -> Spacer(
+            Modifier
+                .padding(horizontal = WHEEL_DIVIDER_SPACING)
+                .height(WHEEL_DIVIDER_LENGTH)
+                .width(WHEEL_DIVIDER_THICKNESS)
+                .background(color),
+        )
+        RailOrientation.VERTICAL -> Spacer(
+            Modifier
+                .padding(vertical = WHEEL_DIVIDER_SPACING)
+                .width(WHEEL_DIVIDER_LENGTH)
+                .height(WHEEL_DIVIDER_THICKNESS)
+                .background(color),
+        )
+    }
+}
+
+/**
+ * System (non-drawing) controls as wheel entries: pencil mode (optional),
+ * magnifier, page thumbnails, shortcuts, PDF export and a zoom cluster. Appended
+ * to the unified wheel so the phone bar needs no `⋮` overflow menu.
+ */
+internal fun systemControlEntries(
+    hasAnnotations: Boolean,
+    isExporting: Boolean,
+    onExport: () -> Unit,
+    scale: Int,
+    onZoomIn: () -> Unit,
+    onZoomOut: () -> Unit,
+    showThumbnails: Boolean,
+    onToggleThumbnails: () -> Unit,
+    showPencilModeButton: Boolean,
+    pencilModeEnabled: Boolean,
+    onPencilModeChange: (Boolean) -> Unit,
+    magnifierEnabled: Boolean,
+    onMagnifierToggle: () -> Unit,
+    onOpenShortcutsSettings: () -> Unit,
+): List<WheelEntry> {
     val pencilModeButton: @Composable () -> Unit = {
         if (showPencilModeButton) {
             ToolToggleButton(
@@ -155,7 +264,7 @@ internal fun SystemControls(
         )
     }
     val shortcutsButton: @Composable () -> Unit = {
-        IconButton(onClick = onOpenShortcutsSettings) {
+        IconButton(onClick = onOpenShortcutsSettings, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Шорткаты",
@@ -167,6 +276,7 @@ internal fun SystemControls(
         IconButton(
             onClick = onExport,
             enabled = hasAnnotations && !isExporting,
+            modifier = Modifier.size(RAIL_BUTTON_SIZE),
         ) {
             if (isExporting) {
                 CircularProgressIndicator(
@@ -189,30 +299,37 @@ internal fun SystemControls(
     }
     val magnifierButton: @Composable () -> Unit = {
         ToolToggleButton(
-            icon = Icons.Default.Search,
+            icon = NotePenIcons.WritingLoupe,
             contentDescription = "Лупа для письма",
             selected = magnifierEnabled,
             onClick = onMagnifierToggle,
         )
     }
-    val zoomControls: @Composable () -> Unit = {
-        IconButton(onClick = onZoomIn, enabled = scale < MAX_SCALE) {
+    // Зум разбит на ОТДЕЛЬНЫЕ элементы колеса (а не один Row), иначе в
+    // вертикальной рельсе широкий горизонтальный кластер обрезался по ширине
+    // полосы — «−» пропадал, а проценты съезжали.
+    val zoomInButton: @Composable () -> Unit = {
+        IconButton(onClick = onZoomIn, enabled = scale < MAX_SCALE, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
             Icon(
                 imageVector = Icons.Default.ZoomIn,
                 contentDescription = "Увеличить",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+    }
+    val zoomLabel: @Composable () -> Unit = {
         Text(
             text = "$scale%",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
             // Фиксированная ширина под максимум "800%": иначе смена зума меняет
-            // ширину метки и расталкивает соседние элементы меню.
+            // ширину метки и дёргает соседние элементы.
             modifier = Modifier.width(SCALE_LABEL_WIDTH),
         )
-        IconButton(onClick = onZoomOut, enabled = scale > MIN_SCALE) {
+    }
+    val zoomOutButton: @Composable () -> Unit = {
+        IconButton(onClick = onZoomOut, enabled = scale > MIN_SCALE, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
             Icon(
                 imageVector = Icons.Default.ZoomOut,
                 contentDescription = "Уменьшить",
@@ -220,137 +337,30 @@ internal fun SystemControls(
             )
         }
     }
-    when (orientation) {
-        RailOrientation.VERTICAL -> Column(
-            modifier = modifier,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            pencilModeButton()
-            magnifierButton()
-            thumbnailsButton()
-            shortcutsButton()
-            exportButton()
-            zoomControls()
-        }
-        RailOrientation.HORIZONTAL -> Row(
-            modifier = modifier,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // Кнопки/метка зума в портретном баре опущены: масштаб задаётся
-            // пинчем, а место экономится под видимое ⋮-меню.
-            magnifierButton()
-            SystemControlsOverflow(
-                showPencilModeButton = showPencilModeButton,
-                pencilModeEnabled = pencilModeEnabled,
-                onPencilModeChange = onPencilModeChange,
-                showThumbnails = showThumbnails,
-                onToggleThumbnails = onToggleThumbnails,
-                onOpenShortcutsSettings = onOpenShortcutsSettings,
-                hasAnnotations = hasAnnotations,
-                isExporting = isExporting,
-                onExport = onExport,
-            )
-        }
+    return buildList {
+        if (showPencilModeButton) add(WheelEntry("sys_pencil") { pencilModeButton() })
+        add(WheelEntry("sys_magnifier") { magnifierButton() })
+        add(WheelEntry("sys_thumbnails") { thumbnailsButton() })
+        add(WheelEntry("sys_shortcuts") { shortcutsButton() })
+        add(WheelEntry("sys_export") { exportButton() })
+        add(WheelEntry("sys_zoom_in") { zoomInButton() })
+        add(WheelEntry("sys_zoom_label", WHEEL_LABEL_ENTRY_SIZE) { zoomLabel() })
+        add(WheelEntry("sys_zoom_out") { zoomOutButton() })
     }
 }
 
 /**
- * `⋮` overflow menu collapsing the rarely-used [SystemControls] actions so the
- * portrait top bar fits a phone's width.
- */
-@Composable
-private fun SystemControlsOverflow(
-    showPencilModeButton: Boolean,
-    pencilModeEnabled: Boolean,
-    onPencilModeChange: (Boolean) -> Unit,
-    showThumbnails: Boolean,
-    onToggleThumbnails: () -> Unit,
-    onOpenShortcutsSettings: () -> Unit,
-    hasAnnotations: Boolean,
-    isExporting: Boolean,
-    onExport: () -> Unit,
-) {
-    var expanded by remember { mutableStateOf(false) }
-    Box {
-        IconButton(onClick = { expanded = true }) {
-            Icon(
-                imageVector = Icons.Default.MoreVert,
-                contentDescription = "Ещё",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (showPencilModeButton) {
-                DropdownMenuItem(
-                    text = { Text("Режим стилуса") },
-                    leadingIcon = { Icon(Icons.Default.Gesture, contentDescription = null) },
-                    trailingIcon = if (pencilModeEnabled) {
-                        { Icon(Icons.Default.Check, contentDescription = null) }
-                    } else {
-                        null
-                    },
-                    onClick = {
-                        onPencilModeChange(!pencilModeEnabled)
-                        expanded = false
-                    },
-                )
-            }
-            DropdownMenuItem(
-                text = { Text("Миниатюры страниц") },
-                leadingIcon = { Icon(Icons.Default.GridView, contentDescription = null) },
-                trailingIcon = if (showThumbnails) {
-                    { Icon(Icons.Default.Check, contentDescription = null) }
-                } else {
-                    null
-                },
-                onClick = {
-                    onToggleThumbnails()
-                    expanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Шорткаты") },
-                leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                onClick = {
-                    onOpenShortcutsSettings()
-                    expanded = false
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Экспортировать в PDF") },
-                enabled = hasAnnotations && !isExporting,
-                leadingIcon = {
-                    if (isExporting) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(EXPORT_PROGRESS_SIZE),
-                            strokeWidth = EXPORT_PROGRESS_STROKE,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                    } else {
-                        Icon(Icons.Default.PictureAsPdf, contentDescription = null)
-                    }
-                },
-                onClick = {
-                    onExport()
-                    expanded = false
-                },
-            )
-        }
-    }
-}
-
-/**
- * Landscape (vertical) tool rail split into two glass "islands":
- *  - top island — [ToolSelector] (always visible);
- *  - bottom island — [SystemControls] when no tool is active, or the active
- *    tool's [ToolSettingsIconStrip] when a tool is selected (full content swap).
+ * Landscape (vertical) tool rail: one glass island holding a single vertical
+ * [WheelStrip] — tool toggles, the active tool's settings slots and presets, and
+ * the system controls, separated by [RailDivider]s. Entries fade towards the
+ * rail's edges and scroll when they overflow.
  *
  * Tapping a settings slot sprouts a separate vertical "budding" panel to the
- * RIGHT of the bottom island carrying the slider / color picker — the slot
- * icons stay put inside the island.
+ * RIGHT of the rail carrying the slider / color picker — the slot icons stay put
+ * inside the wheel.
  *
- * [onRailWidthChanged] reports the islands' width (excluding the budding panel)
- * so the caller can align the back button to the rail.
+ * [onRailWidthChanged] reports the rail's width (excluding the budding panel) so
+ * the caller can align the back button to the rail.
  */
 @Composable
 fun LandscapeToolRail(
@@ -426,86 +436,56 @@ fun LandscapeToolRail(
         modifier = modifier.onGloballyPositioned { railCoords = it },
         verticalAlignment = Alignment.Bottom,
     ) {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(ISLAND_GAP),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.onSizeChanged {
-                onRailWidthChanged(with(density) { it.width.toDp() })
+        // Инструменты, настройки, пресеты и системные кнопки — в ОДНОМ
+        // вертикальном колесе (затухание к краям). Колесо подгоняется по высоте
+        // под содержимое и прокручивается, если оно не помещается.
+        val entries = unifiedToolWheelEntries(
+            orientation = RailOrientation.VERTICAL,
+            toolMode = toolMode,
+            onToolModeChange = onToolModeChange,
+            penSettings = penSettings,
+            onPenSettingsChange = onPenSettingsChange,
+            markerSettings = markerSettings,
+            onMarkerSettingsChange = onMarkerSettingsChange,
+            eraserSettings = eraserSettings,
+            onEraserSettingsChange = onEraserSettingsChange,
+            toolPresets = toolPresets,
+            onToolPresetsChange = onToolPresetsChange,
+            onPresetApplied = onPresetApplied,
+            expandedIndex = expandedIndex,
+            onSlotToggle = onSlotToggle,
+            hasAnnotations = hasAnnotations,
+            isExporting = isExporting,
+            onExport = onExport,
+            scale = scale,
+            onZoomIn = onZoomIn,
+            onZoomOut = onZoomOut,
+            showThumbnails = showThumbnails,
+            onToggleThumbnails = onToggleThumbnails,
+            showPencilModeButton = showPencilModeButton,
+            pencilModeEnabled = pencilModeEnabled,
+            onPencilModeChange = onPencilModeChange,
+            magnifierEnabled = magnifierEnabled,
+            onMagnifierToggle = onMagnifierToggle,
+            onOpenShortcutsSettings = onOpenShortcutsSettings,
+            expandedButtonModifier = Modifier.onGloballyPositioned { btn ->
+                railCoords?.let { row ->
+                    buttonCenterY = row.localPositionOf(
+                        btn,
+                        Offset(0f, btn.size.height / 2f),
+                    ).y
+                }
             },
+        )
+        GlassSurface(
+            modifier = Modifier.onSizeChanged { onRailWidthChanged(with(density) { it.width.toDp() }) },
         ) {
-            GlassSurface {
-                ToolSelector(
-                    toolMode = toolMode,
-                    onToolModeChange = onToolModeChange,
-                    orientation = RailOrientation.VERTICAL,
-                    modifier = Modifier.padding(ISLAND_PADDING),
-                )
-            }
-            GlassSurface {
-                AnimatedContent(targetState = toolMode, label = "rail-segment-b") { mode ->
-                    if (mode != ToolMode.NONE) {
-                        ToolSettingsIconStrip(
-                            toolMode = mode,
-                            penSettings = penSettings,
-                            onPenSettingsChange = onPenSettingsChange,
-                            markerSettings = markerSettings,
-                            onMarkerSettingsChange = onMarkerSettingsChange,
-                            eraserSettings = eraserSettings,
-                            onEraserSettingsChange = onEraserSettingsChange,
-                            orientation = RailOrientation.VERTICAL,
-                            expandedIndex = expandedIndex,
-                            onToggle = onSlotToggle,
-                            modifier = Modifier.padding(ISLAND_PADDING),
-                            expandedButtonModifier = Modifier.onGloballyPositioned { btn ->
-                                railCoords?.let { row ->
-                                    buttonCenterY = row.localPositionOf(
-                                        btn,
-                                        Offset(0f, btn.size.height / 2f),
-                                    ).y
-                                }
-                            },
-                        )
-                    } else {
-                        SystemControls(
-                            orientation = RailOrientation.VERTICAL,
-                            hasAnnotations = hasAnnotations,
-                            isExporting = isExporting,
-                            onExport = onExport,
-                            scale = scale,
-                            onZoomIn = onZoomIn,
-                            onZoomOut = onZoomOut,
-                            showThumbnails = showThumbnails,
-                            onToggleThumbnails = onToggleThumbnails,
-                            showPencilModeButton = showPencilModeButton,
-                            pencilModeEnabled = pencilModeEnabled,
-                            onPencilModeChange = onPencilModeChange,
-                            magnifierEnabled = magnifierEnabled,
-                            onMagnifierToggle = onMagnifierToggle,
-                            onOpenShortcutsSettings = onOpenShortcutsSettings,
-                            modifier = Modifier.padding(ISLAND_PADDING),
-                        )
-                    }
-                }
-            }
-            if (toolActive) {
-                GlassSurface {
-                    Box(Modifier.padding(ISLAND_PADDING)) {
-                        ToolPresetsZone(
-                            toolMode = toolMode,
-                            penSettings = penSettings,
-                            onPenSettingsChange = onPenSettingsChange,
-                            markerSettings = markerSettings,
-                            onMarkerSettingsChange = onMarkerSettingsChange,
-                            eraserSettings = eraserSettings,
-                            onEraserSettingsChange = onEraserSettingsChange,
-                            presets = toolPresets,
-                            onPresetsChange = onToolPresetsChange,
-                            orientation = RailOrientation.VERTICAL,
-                            onPresetApplied = onPresetApplied,
-                        )
-                    }
-                }
-            }
+            WheelStrip(
+                entries = entries,
+                orientation = RailOrientation.VERTICAL,
+                modifier = Modifier.padding(ISLAND_PADDING),
+                selectedKey = selectedToolWheelKey(toolMode),
+            )
         }
         AnimatedVisibility(
             visible = toolActive && expandedIndex != null,
@@ -543,6 +523,15 @@ fun LandscapeToolRail(
 
 /** Open/close duration of the budding panel; the slot-switch delay matches it. */
 private const val PANEL_ANIM_MS = 180
+
+private val WHEEL_DIVIDER_SPACING = 6.dp
+private val WHEEL_DIVIDER_LENGTH = 28.dp
+private val WHEEL_DIVIDER_THICKNESS = 1.5.dp
+private const val WHEEL_DIVIDER_ALPHA = 0.7f
+
+/** Main-axis size estimates for non-button wheel entries (for tight strip sizing). */
+private val WHEEL_DIVIDER_ENTRY_SIZE = 16.dp
+private val WHEEL_LABEL_ENTRY_SIZE = 24.dp
 
 private val SCALE_LABEL_WIDTH = 40.dp
 private val ISLAND_GAP = 8.dp

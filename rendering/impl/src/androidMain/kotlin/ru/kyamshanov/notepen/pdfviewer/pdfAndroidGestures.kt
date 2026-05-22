@@ -133,8 +133,8 @@ private fun Offset.maskByScrollMode(mode: ScrollMode): Offset = when (mode) {
  * Два пальца → отдаём жест pinch-обработчику [pdfAndroidPointerInput].
  *
  * Двойной тап (касание без смещения за slop, второе в пределах
- * double-tap-таймаута) вписывает страницу по ширине свободной области и
- * центрирует её под пальцем ([PdfViewerState.fitToWidthInArea]). Детекция
+ * double-tap-таймаута) переключает зум fit-width ↔ приближение под пальцем
+ * ([PdfViewerState.doubleTapZoom]). Детекция
  * встроена в этот же обработчик и НЕ потребляет down — отдельный
  * `detectTapGestures` потреблял бы первое касание, и pan начинал бы работать
  * лишь со второго нажатия.
@@ -159,7 +159,13 @@ internal fun Modifier.pdfSingleFingerPanInput(
             val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Main)
             // Новое касание гасит текущий fling.
             flingHolder.job?.cancel()
-            if (down.isConsumed || !panEnabled()) return@awaitEachGesture
+            // Если палец «забран» рисованием/лупой (down.isConsumed), отступаем —
+            // тогда тем же пальцем рисуют, и ни pan, ни double-tap не нужны.
+            // Если же палец свободен (инструмент неактивен ИЛИ включён режим
+            // стилуса — рисует только перо), double-tap-zoom работает даже при
+            // активном инструменте; pan дополнительно гейтится [panEnabled].
+            if (down.isConsumed) return@awaitEachGesture
+            val canPan = panEnabled()
             val mode = state.scrollMode
             val tracker = VelocityTracker()
             tracker.addPosition(down.uptimeMillis, down.position)
@@ -184,9 +190,10 @@ internal fun Modifier.pdfSingleFingerPanInput(
                         continue
                     }
                     movedBeyondSlop = true
-                    // Скролл выключен — drag не панорамирует (зум и перемещение
-                    // щипком остаются), но движение всё равно дисквалифицирует тап.
-                    if (mode == ScrollMode.NONE) continue
+                    // Pan недоступен (активен инструмент) или скролл выключен —
+                    // drag не панорамирует (зум и перемещение щипком остаются), но
+                    // движение всё равно дисквалифицирует тап.
+                    if (!canPan || mode == ScrollMode.NONE) continue
                     panning = true
                 }
                 val delta = change.positionChange().maskByScrollMode(mode)
@@ -203,7 +210,7 @@ internal fun Modifier.pdfSingleFingerPanInput(
                 val isDoubleTap = now - lastTapUptime <= doubleTapTimeoutMs &&
                     (pos - lastTapPos).getDistance() <= slop * 2f
                 if (isDoubleTap) {
-                    state.fitToWidthInArea(pos)
+                    state.doubleTapZoom(pos)
                     lastTapUptime = 0L
                 } else {
                     lastTapUptime = now

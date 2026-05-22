@@ -5,6 +5,7 @@ import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 
 /**
@@ -186,6 +187,60 @@ class PdfPagesLayoutTest {
     }
 
     @Test
+    fun `panForFitWidth places page beside rail and below counter`() {
+        val layout = PdfPagesLayout.build(pages(1f, 1f), basePageWidthPx = 100f) // 100×100 each
+        // Viewport 200 wide, left rail inset 60, top counter inset 50, no right
+        // inset → available width = 140, fit zoom = 1.4. PDF column (100×1.4=140)
+        // exactly fills the free band → centeringX == insetStart == 60.
+        val zoom = 1.4f
+        val pan = PdfViewerMath.panForFitWidth(
+            layout = layout,
+            pageIndex = 1,
+            zoom = zoom,
+            viewportWidth = 200f,
+            insetStartPx = 60f,
+            insetTopPx = 50f,
+            insetEndPx = 0f,
+        )
+        assertEquals(60f, pan.x)
+        // Page 1 top (docTop = 100) lands at the counter inset: 50 - 100*1.4.
+        assertEquals(50f - 100f * zoom, pan.y)
+    }
+
+    @Test
+    fun `doubleTapTargetZoom zooms in from fit-width`() {
+        // base 100, available 200 → fit = 2.0; зум на fit → приближаем ×FACTOR.
+        val target = PdfViewerMath.doubleTapTargetZoom(
+            currentZoom = 2f,
+            basePageWidthPx = 100f,
+            availableWidthPx = 200f,
+        )
+        assertEquals((2f * PdfViewerMath.DOUBLE_TAP_ZOOM_FACTOR), target)
+    }
+
+    @Test
+    fun `doubleTapTargetZoom returns to fit-width when already zoomed in`() {
+        // fit = 2.0, текущий 5.0 (> fit×epsilon) → возвращаем к fit-width.
+        val target = PdfViewerMath.doubleTapTargetZoom(
+            currentZoom = 5f,
+            basePageWidthPx = 100f,
+            availableWidthPx = 200f,
+        )
+        assertEquals(2f, target)
+    }
+
+    @Test
+    fun `doubleTapTargetZoom clamps zoom-in to MAX_ZOOM`() {
+        // fit = 4.0, ×2.5 = 10 → клампится к MAX_ZOOM.
+        val target = PdfViewerMath.doubleTapTargetZoom(
+            currentZoom = 4f,
+            basePageWidthPx = 100f,
+            availableWidthPx = 400f,
+        )
+        assertEquals(PdfViewerMath.MAX_ZOOM, target)
+    }
+
+    @Test
     fun `centeringClamp leaves pan free when content overflows axis`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f) // 100×300
         // Контент 100×300, вьюпорт 50×100 — оба overflow → pan не трогаем.
@@ -210,6 +265,27 @@ class PdfPagesLayoutTest {
         )
         assertEquals(100f, p.x) // (300 - 100) / 2
         assertEquals(-50f, p.y) // не тронули
+    }
+
+    @Test
+    fun `centeringClamp centres PDF sheet, not the extent-expanded slot`() {
+        // Лист 100×100, надпись вылезла далеко вправо/вниз за границы PDF.
+        val extent = PageExtent(left = 0f, top = 0f, right = 3f, bottom = 3f)
+        val layout = PdfPagesLayout.build(
+            pages(1f),
+            basePageWidthPx = 100f,
+            extents = listOf(extent),
+        )
+        // Вьюпорт 300×300: PDF-лист (100×100) помещается по обеим осям,
+        // слот со штрихом (300×300) — нет. Центрируем сам лист.
+        val p = PdfViewerMath.centeringClamp(
+            pan = Offset(999f, 999f),
+            layout = layout,
+            zoom = 1f,
+            viewportSize = FloatSize(300f, 300f),
+        )
+        assertEquals(100f, p.x) // (300 - 100) / 2 — лист по центру
+        assertEquals(100f, p.y) // (300 - 100) / 2
     }
 
     @Test
