@@ -24,21 +24,29 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Extract version from tag
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
       - name: Decode keystore
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
 
       - name: Build release APK
-        run: ./gradlew :app:byCompose:android:assembleRelease
+        run: ./gradlew :app:byCompose:android:assembleRelease -Papp.version=${{ env.APP_VERSION }}
         env:
           ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/keystore.jks
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_STORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
+      - name: Rename APK to NotePen-<version>.apk
+        run: |
+          src=$(find app/byCompose/android/build/outputs/apk/release -name '*.apk' ! -name '*unsigned*' | head -n1)
+          mv "$src" "app/byCompose/android/build/outputs/apk/release/NotePen-${APP_VERSION}.apk"
+
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: app/byCompose/android/build/outputs/apk/release/*.apk
+          path: app/byCompose/android/build/outputs/apk/release/NotePen-*.apk
           if-no-files-found: error
 
   build-macos:
