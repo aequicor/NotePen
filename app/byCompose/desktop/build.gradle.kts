@@ -1,10 +1,93 @@
+import org.gradle.api.artifacts.transform.CacheableTransform
+import org.gradle.api.artifacts.transform.InputArtifact
+import org.gradle.api.artifacts.transform.TransformAction
+import org.gradle.api.artifacts.transform.TransformOutputs
+import org.gradle.api.artifacts.transform.TransformParameters
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
+}
+
+/**
+ * Удаляет из `sqlite-jdbc` нативные библиотеки всех платформ, кроме целевой.
+ *
+ * Jar тянет ~23 натива (Linux/Windows/FreeBSD/Mac × все архитектуры, ~23 МБ),
+ * хотя в дистрибутиве нужна ровно одна либа под текущую ОС/архитектуру.
+ * В CI каждая платформа собирается на своём раннере, поэтому `os.name`/`os.arch`
+ * сборочной машины совпадают с целью. Прочие jar проходят без изменений.
+ */
+@CacheableTransform
+abstract class StripForeignSqliteNatives : TransformAction<TransformParameters.None> {
+    @get:PathSensitive(PathSensitivity.NAME_ONLY)
+    @get:InputArtifact
+    abstract val inputArtifact: Provider<FileSystemLocation>
+
+    override fun transform(outputs: TransformOutputs) {
+        val input = inputArtifact.get().asFile
+        if (!input.name.startsWith("sqlite-jdbc")) {
+            outputs.file(input)
+            return
+        }
+        val keepDir = currentPlatformNativeDir()
+        val output = outputs.file(input.name)
+        ZipFile(input).use { zip ->
+            ZipOutputStream(output.outputStream().buffered()).use { out ->
+                for (entry in zip.entries()) {
+                    val name = entry.name
+                    val foreignNative = name.startsWith(SQLITE_NATIVE_ROOT) && !name.startsWith(keepDir)
+                    if (foreignNative) continue
+                    out.putNextEntry(ZipEntry(name))
+                    if (!entry.isDirectory) zip.getInputStream(entry).use { it.copyTo(out) }
+                    out.closeEntry()
+                }
+            }
+        }
+    }
+
+    private fun currentPlatformNativeDir(): String {
+        val os = System.getProperty("os.name").lowercase()
+        val arch = System.getProperty("os.arch").lowercase()
+        val osDir = when {
+            os.contains("mac") || os.contains("darwin") -> "Mac"
+            os.contains("win") -> "Windows"
+            else -> "Linux"
+        }
+        val archDir = when (arch) {
+            "aarch64", "arm64" -> "aarch64"
+            "amd64", "x86_64", "x64" -> "x86_64"
+            "x86", "i386", "i686" -> "x86"
+            else -> arch
+        }
+        return "$SQLITE_NATIVE_ROOT$osDir/$archDir/"
+    }
+
+    private companion object {
+        const val SQLITE_NATIVE_ROOT = "org/sqlite/native/"
+    }
+}
+
+private val sqliteStripped = Attribute.of("sqlite.natives.stripped", Boolean::class.javaObjectType)
+
+dependencies {
+    attributesSchema { attribute(sqliteStripped) }
+    artifactTypes.getByName("jar") { attributes.attribute(sqliteStripped, false) }
+    registerTransform(StripForeignSqliteNatives::class) {
+        from.attribute(sqliteStripped, false).attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar")
+        to.attribute(sqliteStripped, true).attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar")
+    }
+}
+
+configurations.configureEach {
+    if (name == "desktopRuntimeClasspath") {
+        attributes.attribute(sqliteStripped, true)
+    }
 }
 
 kotlin {
