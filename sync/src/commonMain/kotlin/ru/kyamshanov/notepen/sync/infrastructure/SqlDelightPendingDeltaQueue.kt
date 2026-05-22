@@ -4,6 +4,9 @@ import app.cash.sqldelight.coroutines.asFlow
 import app.cash.sqldelight.coroutines.mapToList
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -23,14 +26,19 @@ import ru.kyamshanov.notepen.sync.domain.port.PendingDeltaQueue
  *
  * Concurrency: SQLDelight queries are blocking; all writes hop to [ioDispatcher].
  * Reads exposed as suspends do the same for symmetry.
+ *
+ * Lazy open: [databaseProvider] is invoked on first query, not at construction.
+ * Opening a SQLite database (native lib extraction + first JDBC connection) can
+ * cost seconds on a cold start; deferring it keeps that work off the caller's
+ * thread (it runs on [ioDispatcher] via the suspend methods and [pendingCounts]).
  */
 class SqlDelightPendingDeltaQueue(
-    database: NotePenSyncDatabase,
+    databaseProvider: () -> NotePenSyncDatabase,
     private val ioDispatcher: CoroutineDispatcher,
     private val clock: () -> Long = { currentTimeMillis() },
 ) : PendingDeltaQueue {
 
-    private val queries = database.pendingDeltaQueries
+    private val queries by lazy { databaseProvider().pendingDeltaQueries }
     private val json = Json { classDiscriminator = "type" }
 
     override suspend fun enqueue(documentId: String, delta: StrokeDelta) {
@@ -61,10 +69,17 @@ class SqlDelightPendingDeltaQueue(
     override suspend fun pendingCount(documentId: String): Int =
         withContext(ioDispatcher) { queries.countByDocument(documentId).executeAsOne().toInt() }
 
+    // flow {} + flowOn defer the first `queries` access (which forces the lazy
+    // DB open) onto [ioDispatcher] at collection time — calling this function
+    // never opens the database on the caller's thread.
     override fun pendingCounts(): Flow<Map<String, Int>> =
-        queries.countsAll().asFlow()
-            .mapToList(ioDispatcher)
-            .map { rows -> rows.associate { it.document_id to it.pendingCount.toInt() } }
+        flow {
+            emitAll(
+                queries.countsAll().asFlow()
+                    .mapToList(ioDispatcher)
+                    .map { rows -> rows.associate { it.document_id to it.pendingCount.toInt() } },
+            )
+        }.flowOn(ioDispatcher)
 }
 
 /** Platform-provided wall clock in epoch millis. */

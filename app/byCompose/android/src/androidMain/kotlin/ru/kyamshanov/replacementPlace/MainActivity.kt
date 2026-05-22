@@ -142,9 +142,8 @@ class MainActivity : ComponentActivity() {
         val syncClient = KtorSyncClient(httpClient)
         // Persistent offline buffer (SQLDelight-backed) — survives process death
         // so edits made offline still replay after the next launch + reconnect.
-        val syncDatabase = createSyncDatabaseAndroid(context = context)
         val pendingDeltaQueue = SqlDelightPendingDeltaQueue(
-            database = syncDatabase,
+            databaseProvider = { createSyncDatabaseAndroid(context = context) },
             ioDispatcher = Dispatchers.IO,
         )
         // One registry per app; each open document is its own SyncEngine.

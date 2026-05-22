@@ -231,9 +231,10 @@ fun main(args: Array<String>) {
     // Persistent offline buffer (SQLDelight-backed) — survives app restarts so
     // edits made offline still replay after a restart + reconnect.
     val syncDatabasePath = System.getProperty("user.home") + "/.notepen/sync.db"
-    val syncDatabase = createSyncDatabaseJvm(syncDatabasePath)
+    // Lazy: opening SQLite (native lib + first connection) costs seconds cold —
+    // defer it off the main thread so it doesn't block the first frame.
     val pendingDeltaQueue = SqlDelightPendingDeltaQueue(
-        database = syncDatabase,
+        databaseProvider = { createSyncDatabaseJvm(syncDatabasePath) },
         ioDispatcher = Dispatchers.IO,
     )
 
