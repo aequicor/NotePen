@@ -67,28 +67,74 @@ jobs:
       - name: Extract version from tag
         run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
 
+      # Desktop-сборка пинит тулчейн на JBR (vendor=JETBRAINS) ради WindowDecorations
+      # API кастомного тайтлбара. foojay не умеет провижинить JetBrains-вендор, а на
+      # раннере его нет — поэтому качаем jbrsdk вручную и регистрируем как toolchain
+      # через org.gradle.java.installations.paths. Нужен именно jbrsdk (не jbr): в нём
+      # есть jpackage/jlink/jmods, которыми Compose собирает дистрибутив.
+      - name: Provision JetBrains Runtime SDK 21 (desktop toolchain)
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            arm64|aarch64) arch=osx-aarch64 ;;
+            x86_64)        arch=osx-x64 ;;
+            *) echo "::error::unexpected macOS arch $(uname -m)"; exit 1 ;;
+          esac
+          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-21.0.11-${arch}-b1163.116.tar.gz"
+          echo "Downloading $url"
+          curl -fSL --retry 3 "$url" -o "$RUNNER_TEMP/jbrsdk.tar.gz"
+          mkdir -p "$RUNNER_TEMP/jbrsdk"
+          tar -xzf "$RUNNER_TEMP/jbrsdk.tar.gz" -C "$RUNNER_TEMP/jbrsdk" --strip-components=1
+          home=$(dirname "$(dirname "$(find "$RUNNER_TEMP/jbrsdk" -type f -path '*/bin/jpackage' | head -n1)")")
+          test -x "$home/bin/javac"
+          printf '\norg.gradle.java.installations.paths=%s\n' "$home" >> gradle.properties
+          echo "JBR toolchain home: $home"
+          "$home/bin/java" -version
+
       - name: Build macOS DMG
         run: ./gradlew :app:byCompose:desktop:packageReleaseDmg -Papp.version=${{ env.APP_VERSION }}
 
       # Compose/jpackage не задаёт иконку тома DMG (видна в заголовке окна
-      # установщика). Ставим её пост-обработкой: монтируем DMG в r/w-режиме,
-      # кладём .VolumeIcon.icns и выставляем флаг кастомной иконки, затем
-      # пересобираем в сжатый формат. Тот же приём использует create-dmg.
+      # установщика). Ставим её пост-обработкой: монтируем DMG в r/w, кладём
+      # .VolumeIcon.icns, выставляем флаг кастомной иконки, пересобираем в сжатый
+      # UDZO. Шаг чисто косметический и НЕ должен ронять релиз: continue-on-error +
+      # оригинальный DMG перезаписывается только при успешной пересборке (иначе
+      # артефакт остаётся валидным, просто без кастомной иконки тома).
       - name: Set DMG volume icon
+        continue-on-error: true
         run: |
-          set -euo pipefail
+          set -uo pipefail
           dmg_dir=app/byCompose/desktop/build/compose/binaries/main-release/dmg
           dmg=$(find "$dmg_dir" -name '*.dmg' | head -n1)
           icns=app/byCompose/desktop/icons/app_icon.icns
-          rw=$(mktemp -u).dmg
-          hdiutil convert "$dmg" -format UDRW -o "$rw"
-          mount=$(hdiutil attach "$rw" -nobrowse -noverify -noautoopen | grep -Eo '/Volumes/.*' | head -n1)
-          cp "$icns" "$mount/.VolumeIcon.icns"
-          SetFile -a C "$mount"
-          hdiutil detach "$mount"
-          rm -f "$dmg"
-          hdiutil convert "$rw" -format UDZO -o "$dmg"
-          rm -f "$rw"
+          if [ -z "$dmg" ] || [ ! -f "$icns" ]; then
+            echo "::warning::DMG or icns missing; keeping build output as-is"; exit 0
+          fi
+          rw="$RUNNER_TEMP/notepen-rw.dmg"
+          out="$RUNNER_TEMP/notepen-out.dmg"
+          rm -f "$rw" "$out"
+          if ! hdiutil convert "$dmg" -format UDRW -o "$rw"; then
+            echo "::warning::convert to UDRW failed; keeping original DMG"; exit 0
+          fi
+          mount=$(hdiutil attach "$rw" -nobrowse -noverify -noautoopen | grep -Eo '/Volumes/[^[:cntrl:]]+' | head -n1)
+          if [ -z "$mount" ] || [ ! -d "$mount" ]; then
+            echo "::warning::could not mount r/w DMG; keeping original DMG"; rm -f "$rw"; exit 0
+          fi
+          cp "$icns" "$mount/.VolumeIcon.icns" || echo "::warning::copy volume icon failed"
+          if command -v SetFile >/dev/null 2>&1; then
+            SetFile -a C "$mount" || echo "::warning::SetFile failed"
+          else
+            echo "::warning::SetFile unavailable; custom-icon flag not set"
+          fi
+          sync; sleep 2
+          hdiutil detach "$mount" >/dev/null 2>&1 || { sleep 3; hdiutil detach -force "$mount" >/dev/null 2>&1 || true; }
+          if hdiutil convert "$rw" -format UDZO -o "$out"; then
+            mv -f "$out" "$dmg"
+            echo "Applied custom volume icon to $dmg"
+          else
+            echo "::warning::recompress failed; keeping original DMG"
+          fi
+          rm -f "$rw" "$out"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -114,6 +160,25 @@ jobs:
       - name: Extract version from tag
         shell: bash
         run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # См. комментарий в job build-macos: тот же jbrsdk-тулчейн нужен и здесь,
+      # иначе резолв vendor=JETBRAINS упадёт (на раннере только Temurin).
+      - name: Provision JetBrains Runtime SDK 21 (desktop toolchain)
+        shell: bash
+        run: |
+          set -euo pipefail
+          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-21.0.11-windows-x64-b1163.116.tar.gz"
+          echo "Downloading $url"
+          curl -fSL --retry 3 "$url" -o jbrsdk.tar.gz
+          mkdir -p .jbrsdk
+          tar -xzf jbrsdk.tar.gz -C .jbrsdk --strip-components=1
+          javabin=$(find .jbrsdk -type f -name jpackage.exe | head -n1)
+          home_dir=$(cd "$(dirname "$(dirname "$javabin")")" && pwd)
+          test -f "$home_dir/bin/javac.exe"
+          home=$(cygpath -m "$home_dir")
+          printf '\norg.gradle.java.installations.paths=%s\n' "$home" >> gradle.properties
+          echo "JBR toolchain home: $home"
+          "$home_dir/bin/java.exe" -version
 
       - name: Build Windows MSI
         shell: bash
