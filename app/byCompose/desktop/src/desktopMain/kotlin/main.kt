@@ -8,6 +8,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.setupJbrTitleBar
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 import ru.kyamshanov.notepen.titlebar.TitleBarInteraction
@@ -496,11 +497,13 @@ fun main(args: Array<String>) {
 
             var titleBarInteraction by remember { mutableStateOf<TitleBarInteraction?>(null) }
             var titleBarStartInset by remember { mutableStateOf(0.dp) }
+            var titleBarEndInset by remember { mutableStateOf(0.dp) }
 
             LaunchedEffect(composeWindow) {
-                setupJbrTitleBar(composeWindow)?.let { (interaction, inset) ->
-                    titleBarInteraction = interaction
-                    titleBarStartInset = inset
+                setupJbrTitleBar(composeWindow)?.let { setup ->
+                    titleBarInteraction = setup.interaction
+                    titleBarStartInset = setup.startInset
+                    titleBarEndInset = setup.endInset
                 }
             }
 
@@ -544,6 +547,7 @@ fun main(args: Array<String>) {
             CompositionLocalProvider(
                 LocalTitleBarInteraction provides titleBarInteraction,
                 LocalTitleBarStartInset provides titleBarStartInset,
+                LocalTitleBarEndInset provides titleBarEndInset,
                 LocalTabletInputController provides tabletController,
             ) {
                 App(

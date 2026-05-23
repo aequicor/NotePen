@@ -8,8 +8,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -34,6 +36,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -58,6 +61,9 @@ import ru.kyamshanov.notepen.mainscreen.ui.dialog.CreateFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.DeleteFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
 import ru.kyamshanov.notepen.resolveDocumentDisplayName
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,20 +90,36 @@ fun FolderContent(
         )
     }
 
+    val titleBarInteraction = LocalTitleBarInteraction.current
+    val titleBarStartInset = LocalTitleBarStartInset.current
+    val titleBarEndInset = LocalTitleBarEndInset.current
     Scaffold(
         topBar = {
+            val barModifier = Modifier.fillMaxWidth()
             TopAppBar(
+                modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
                 title = { Text(state.folderName) },
+                windowInsets = WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
+                    .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
-                    IconButton(onClick = component.onBack) {
+                    IconButton(
+                        onClick = component.onBack,
+                        modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { component.viewModel.requestAddExisting() }) {
+                    IconButton(
+                        onClick = { component.viewModel.requestAddExisting() },
+                        modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                    ) {
                         Icon(Icons.Filled.LibraryAdd, contentDescription = "Добавить из недавних")
                     }
-                    IconButton(onClick = { component.viewModel.openCreateFolderDialog() }) {
+                    IconButton(
+                        onClick = { component.viewModel.openCreateFolderDialog() },
+                        modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                    ) {
                         Icon(Icons.Filled.CreateNewFolder, contentDescription = "Создать папку")
                     }
                 },

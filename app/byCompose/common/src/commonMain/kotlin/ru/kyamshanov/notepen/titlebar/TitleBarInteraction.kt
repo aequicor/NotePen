@@ -37,3 +37,10 @@ val LocalTitleBarInteraction = staticCompositionLocalOf<TitleBarInteraction?> { 
  * area (macOS traffic lights). Zero when not applicable.
  */
 val LocalTitleBarStartInset = staticCompositionLocalOf<Dp> { 0.dp }
+
+/**
+ * Right inset in dp reserved for OS window controls that overlay the title-bar
+ * area (Windows caption buttons: minimize / maximize / close). Zero when not
+ * applicable (e.g. macOS, where controls sit on the leading edge).
+ */
+val LocalTitleBarEndInset = staticCompositionLocalOf<Dp> { 0.dp }

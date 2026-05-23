@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.union
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
@@ -144,16 +146,23 @@ fun MainContent(
         onIntent(MainScreenIntent.OnSuccessEventHandled)
     }
 
+    val titleBarInteraction = LocalTitleBarInteraction.current
     val titleBarStartInset = LocalTitleBarStartInset.current
+    val titleBarEndInset = LocalTitleBarEndInset.current
     Scaffold(
         topBar = {
+            val barModifier = Modifier.fillMaxWidth()
             TopAppBar(
+                modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
                 title = { Text("NotePen") },
-                windowInsets = WindowInsets(left = titleBarStartInset)
+                windowInsets = WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
                     .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
                     if (onBack != null) {
-                        IconButton(onClick = onBack) {
+                        IconButton(
+                            onClick = onBack,
+                            modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                        ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "Назад к документу",
@@ -163,13 +172,19 @@ fun MainContent(
                 },
                 actions = {
                     if (isWide) {
-                        TextButton(onClick = { onIntent(MainScreenIntent.OpenFilePicker) }) {
+                        TextButton(
+                            onClick = { onIntent(MainScreenIntent.OpenFilePicker) },
+                            modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                        ) {
                             Icon(Icons.Default.Add, contentDescription = null)
                             Spacer(Modifier.width(4.dp))
                             Text("Открыть")
                         }
                     }
-                    IconButton(onClick = { onIntent(MainScreenIntent.OpenCreateFolderDialog) }) {
+                    IconButton(
+                        onClick = { onIntent(MainScreenIntent.OpenCreateFolderDialog) },
+                        modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                    ) {
                         Icon(Icons.Default.CreateNewFolder, contentDescription = "Новая папка")
                     }
                     SyncPairingButton(

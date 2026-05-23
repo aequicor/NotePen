@@ -12,23 +12,43 @@ import ru.kyamshanov.notepen.titlebar.TitleBarInteraction
 import java.awt.Frame
 
 /**
- * Initialises a JBR [CustomTitleBar] on [window], replacing the OS chrome with
- * the Compose canvas.  The Compose layout fills from (0, 0) — the
- * [ru.kyamshanov.notepen.tabs.TabBar] composables already rendered at the top of
- * each panel occupy the area that was previously the OS title bar.
+ * Result of installing a JBR [CustomTitleBar]: the pointer-input wiring plus the
+ * insets the OS reserves for window controls overlaying the caption area.
  *
- * @return A [TitleBarInteraction] + left-inset pair that the caller must provide
- * via [ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction] and
- * [ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset], or `null` when JBR
+ * @property interaction drag / interactive pointer-input wiring for the title bar.
+ * @property startInset width reserved on the leading edge (macOS traffic lights).
+ * @property endInset width reserved on the trailing edge (Windows caption buttons).
+ */
+internal data class JbrTitleBarSetup(
+    val interaction: TitleBarInteraction,
+    val startInset: Dp,
+    val endInset: Dp,
+)
+
+/**
+ * Initialises a JBR [CustomTitleBar] on [window], replacing the OS chrome with
+ * the Compose canvas.  The Compose layout fills from (0, 0) — the title-bar
+ * composables (the [ru.kyamshanov.notepen.tabs.TabBar] in the editor and the top
+ * app bars on the library screens) occupy the area that was previously the OS
+ * title bar.
+ *
+ * @return A [JbrTitleBarSetup] the caller must provide via
+ * [ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction],
+ * [ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset] and
+ * [ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset], or `null` when JBR
  * decorations are not supported on the current runtime.
  */
-internal fun setupJbrTitleBar(window: Frame): Pair<TitleBarInteraction, Dp>? {
+internal fun setupJbrTitleBar(window: Frame): JbrTitleBarSetup? {
     if (!JBR.isWindowDecorationsSupported()) return null
     val tb = JBR.getWindowDecorations().createCustomTitleBar().apply {
         height = TAB_BAR_HEIGHT.value
     }
     JBR.getWindowDecorations().setCustomTitleBar(window, tb)
-    return JbrTitleBarInteraction(tb) to tb.leftInset.dp
+    return JbrTitleBarSetup(
+        interaction = JbrTitleBarInteraction(tb),
+        startInset = tb.leftInset.dp,
+        endInset = tb.rightInset.dp,
+    )
 }
 
 private class JbrTitleBarInteraction(private val titleBar: CustomTitleBar) : TitleBarInteraction {

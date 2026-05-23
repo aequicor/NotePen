@@ -36,8 +36,15 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.EditorBackHandler
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.union
+import androidx.compose.material3.TopAppBarDefaults
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteEntryCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteFolderCard
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 
@@ -62,10 +69,15 @@ fun PeerCatalogContent(
 
     val windowWidth = LocalWindowInfo.current.containerSize.width
     val isWide = with(LocalDensity.current) { windowWidth.toDp() >= WIDE_SCREEN_THRESHOLD }
+    val titleBarInteraction = LocalTitleBarInteraction.current
+    val titleBarStartInset = LocalTitleBarStartInset.current
+    val titleBarEndInset = LocalTitleBarEndInset.current
 
     Scaffold(
         topBar = {
+            val barModifier = Modifier.fillMaxWidth()
             TopAppBar(
+                modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
                 title = {
                     val suffix = when {
                         state.currentFolderName != null -> " / ${state.currentFolderName}"
@@ -74,9 +86,14 @@ fun PeerCatalogContent(
                     }
                     Text(state.peerName + suffix)
                 },
+                windowInsets = WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
+                    .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
                     // Внутри папки «назад» возвращает в корень каталога, а не выходит с экрана.
-                    IconButton(onClick = { if (!component.viewModel.exitFolder()) component.onBack() }) {
+                    IconButton(
+                        onClick = { if (!component.viewModel.exitFolder()) component.onBack() },
+                        modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                    ) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Назад",

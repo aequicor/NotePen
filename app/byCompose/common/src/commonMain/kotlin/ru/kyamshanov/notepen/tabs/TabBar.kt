@@ -49,6 +49,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
@@ -98,6 +99,7 @@ fun TabBar(
 ) {
     val titleBarInteraction = LocalTitleBarInteraction.current
     val startInset = LocalTitleBarStartInset.current
+    val endInset = LocalTitleBarEndInset.current
     val barModifier = modifier.fillMaxWidth().height(TAB_BAR_HEIGHT)
     GlassSurface(
         modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
@@ -105,7 +107,7 @@ fun TabBar(
         tint = MaterialTheme.colorScheme.surfaceContainerLow,
         fillAlpha = 0.35f,
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(start = startInset)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = startInset, end = endInset)) {
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)

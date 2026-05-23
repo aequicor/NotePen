@@ -31,6 +31,7 @@ import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 
 private val SyncConnectedGreen = Color(0xFF2E7D32)
 private val SyncUnstableYellow = Color(0xFFF9A825)
@@ -66,7 +67,11 @@ fun SyncPairingButton(
     val clientHosts = peerClient?.connectedHosts?.collectAsState(emptySet())?.value ?: emptySet()
     val clientStates = peerClient?.pairingStates?.collectAsState(emptyMap())?.value ?: emptyMap()
 
-    IconButton(onClick = { showSyncPanel = true }) {
+    val titleBarInteraction = LocalTitleBarInteraction.current
+    IconButton(
+        onClick = { showSyncPanel = true },
+        modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+    ) {
         Icon(
             imageVector = Icons.Default.Sync,
             contentDescription = "Синхронизация",
