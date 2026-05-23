@@ -420,6 +420,8 @@ fun DetailsContent(
 
     EditorBackHandler(enabled = true) { onBackWithSave() }
 
+    ImmersiveEditorMode()
+
     val onPencilModeChange: (Boolean) -> Unit = { enabled ->
         pencilModeEnabled = enabled
         pencilModeManuallyTouched = true
