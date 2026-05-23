@@ -203,7 +203,6 @@ actual fun PdfPagesViewer(
             // Main-pass раньше и, если потребили жест, pan отступает.
             .pdfSingleFingerPanInput(
                 state = state,
-                panEnabled = primaryDragPanEnabled,
                 flingScope = flingScope,
                 flingHolder = flingHolder,
             )
