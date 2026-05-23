@@ -176,10 +176,13 @@ compose.desktop {
                 "java.sql",
                 "jdk.crypto.ec"
             )
+            // Windows .exe собирается НЕ через jpackage (TargetFormat.Exe), а из
+            // app-image (createReleaseDistributable) внешним инсталлятором Inno Setup
+            // — см. installer/windows/notepen.iss. Причина: jpackage не умеет
+            // добавить финальный чекбокс «Запустить NotePen» и opt-in галочку ярлыка.
             targetFormats(
                 TargetFormat.Dmg,
-                TargetFormat.Deb,
-                TargetFormat.Exe
+                TargetFormat.Deb
             )
             packageName = "NotePen"
             packageVersion = providers.gradleProperty("app.version").getOrElse("1.0.0")
@@ -199,10 +202,10 @@ compose.desktop {
             )
 
             windows {
-                // --win-per-user-install: ставит в %LOCALAPPDATA% для текущего
-                // пользователя, поэтому инсталлятор не требует прав администратора.
-                perUserInstall = true
-                menu = true
+                // Влияет только на иконку лаунчера NotePen.exe внутри app-image
+                // (createReleaseDistributable). Установку (per-user без админа,
+                // ярлыки, чекбоксы «Запустить»/«Ярлык», ассоциация .pdf) делает
+                // Inno Setup — installer/windows/notepen.iss.
                 iconFile.set(project.file("icons/app_icon.ico"))
             }
             macOS {
