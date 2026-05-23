@@ -4,6 +4,8 @@ import org.gradle.api.artifacts.transform.TransformAction
 import org.gradle.api.artifacts.transform.TransformOutputs
 import org.gradle.api.artifacts.transform.TransformParameters
 import org.gradle.api.artifacts.type.ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.gradle.jvm.toolchain.JvmVendorSpec
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
@@ -93,6 +95,18 @@ configurations.configureEach {
 kotlin {
     jvm("desktop") {
         withJava()
+    }
+
+    // JBR provides the WindowDecorations API used by setupJbrTitleBar (custom title
+    // bar + native Windows snapping). Pinning the desktop toolchain to the JetBrains
+    // vendor makes :run / :runDistributable and the jpackage/jlink bundled runtime use
+    // JBR, so the custom title bar is active in dev and in shipped builds. Resolved from
+    // a locally-installed JBR 21 — foojay cannot auto-provision the JetBrains vendor, so
+    // a machine without one in an auto-detected dir must set
+    // org.gradle.java.installations.paths in its user-level gradle.properties.
+    jvmToolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+        vendor.set(JvmVendorSpec.JETBRAINS)
     }
 
     sourceSets {
