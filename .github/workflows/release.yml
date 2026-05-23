@@ -180,14 +180,14 @@ jobs:
           echo "JBR toolchain home: $home"
           "$home_dir/bin/java.exe" -version
 
-      - name: Build Windows MSI
+      - name: Build Windows EXE
         shell: bash
-        run: ./gradlew :app:byCompose:desktop:packageReleaseMsi -Papp.version=${{ env.APP_VERSION }}
+        run: ./gradlew :app:byCompose:desktop:packageReleaseExe -Papp.version=${{ env.APP_VERSION }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-msi
-          path: app/byCompose/desktop/build/compose/binaries/main-release/msi/*.msi
+          name: windows-exe
+          path: app/byCompose/desktop/build/compose/binaries/main-release/exe/*.exe
           if-no-files-found: error
 
   publish-release:
@@ -209,4 +209,4 @@ jobs:
           files: |
             artifacts/android-apk/*.apk
             artifacts/macos-dmg/*.dmg
-            artifacts/windows-msi/*.msi
+            artifacts/windows-exe/*.exe

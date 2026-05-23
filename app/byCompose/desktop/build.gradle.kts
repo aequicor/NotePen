@@ -154,6 +154,19 @@ compose.desktop {
 
         mainClass = "MainKt"
 
+        // Задачи Compose Desktop run / package* НЕ используют kotlin `jvmToolchain`
+        // (он влияет только на компиляцию). По умолчанию они берут JDK, которым
+        // запущен Gradle (current JVM — обычно Temurin). На не-JBR рантайме
+        // JBR.isWindowDecorationsSupported() == false, поэтому setupJbrTitleBar
+        // возвращает null и кастомный титлбар молча не активируется — и в :run, и
+        // в собранном дистрибутиве (jpackage берёт рантайм из того же javaHome).
+        // Поэтому явно указываем JBR. compilerFor (требует javac) выбирает
+        // полноценный jbrsdk с jpackage/jlink/jmods, а не runtime-only jbr.
+        javaHome = javaToolchains.compilerFor {
+            languageVersion.set(JavaLanguageVersion.of(21))
+            vendor.set(JvmVendorSpec.JETBRAINS)
+        }.map { it.metadata.installationPath.asFile.absolutePath }.get()
+
         nativeDistributions {
             includeAllModules = false
             modules = arrayListOf(
@@ -165,7 +178,6 @@ compose.desktop {
             )
             targetFormats(
                 TargetFormat.Dmg,
-                TargetFormat.Msi,
                 TargetFormat.Deb,
                 TargetFormat.Exe
             )
@@ -187,6 +199,9 @@ compose.desktop {
             )
 
             windows {
+                // --win-per-user-install: ставит в %LOCALAPPDATA% для текущего
+                // пользователя, поэтому инсталлятор не требует прав администратора.
+                perUserInstall = true
                 menu = true
                 iconFile.set(project.file("icons/app_icon.ico"))
             }
