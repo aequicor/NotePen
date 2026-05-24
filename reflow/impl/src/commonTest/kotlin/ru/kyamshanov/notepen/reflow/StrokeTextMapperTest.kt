@@ -96,6 +96,8 @@ class StrokeTextMapperTest {
         val text = when (val block = doc.blocks[anchor.blockIndex]) {
             is ReflowBlock.Paragraph -> block.text
             is ReflowBlock.Heading -> block.text
+            is ReflowBlock.ListItem -> block.text
+            is ReflowBlock.Table -> ""
             is ReflowBlock.Figure -> ""
         }
         return text.substring(anchor.charStart, anchor.charEnd)

@@ -23,6 +23,9 @@ internal fun page(
  * Раскладывает строку в глифы по символам (координаты в пунктах): пробел
  * сдвигает курсор без глифа (создавая межсловный зазор), остальные символы
  * получают прямоугольник шириной [charWidth] и высотой [fontSize].
+ *
+ * [bold]/[monospace] помечают все глифы строки соответствующим начертанием —
+ * чтобы проверять перенос стиля шрифта в провенанс.
  */
 internal fun line(
     text: String,
@@ -30,6 +33,8 @@ internal fun line(
     fontSize: Float = 10f,
     startX: Float = 50f,
     charWidth: Float = 6f,
+    bold: Boolean = false,
+    monospace: Boolean = false,
 ): List<RawGlyph> {
     var x = startX
     val glyphs = mutableListOf<RawGlyph>()
@@ -42,6 +47,8 @@ internal fun line(
             text = ch.toString(),
             rect = ReflowRect(left = x, top = top, right = x + charWidth, bottom = top + fontSize),
             fontSizePt = fontSize,
+            bold = bold,
+            monospace = monospace,
         )
         x += charWidth
     }

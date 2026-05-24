@@ -98,6 +98,7 @@ class AndroidPdfReflowExtractor(
 
     private fun TextPosition.toGlyph(): RawGlyph? {
         val text = unicode?.takeIf { it.isNotEmpty() } ?: return null
+        val fontName = font?.name
         return RawGlyph(
             text = text,
             rect = ReflowRect(
@@ -108,6 +109,8 @@ class AndroidPdfReflowExtractor(
             ),
             fontSizePt = fontSizeInPt,
             spaceWidthPt = widthOfSpace,
+            bold = FontStyles.isBold(fontName),
+            monospace = FontStyles.isMonospace(fontName),
         )
     }
 

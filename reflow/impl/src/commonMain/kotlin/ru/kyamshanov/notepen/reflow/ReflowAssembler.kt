@@ -48,8 +48,23 @@ internal object ReflowAssembler {
     /** Дефисы, снимаемые при переносе слова на конце строки: ASCII, типографский (‐), мягкий. */
     private const val HYPHEN_CHARS = "-‐­"
 
+    /** Знаки препинания, примыкающие к предыдущему слову: перед ними пробел не ставится. */
+    private const val TRAILING_PUNCT = ",.;:!?)]}»…"
+
     private const val HEADING_LEVEL_1_RATIO = 1.8f
     private const val HEADING_LEVEL_2_RATIO = 1.4f
+
+    /** Горизонтальный зазор (доля кегля), начиная с которого это граница колонок таблицы. */
+    private const val COLUMN_GAP_FACTOR = 1.5f
+
+    /** Допуск выравнивания левых краёв ячеек в одну колонку (доля кегля). */
+    private const val COLUMN_ALIGN_FACTOR = 1.0f
+
+    /** Минимум «колоночных» строк (≥2 сегмента), чтобы счесть блок таблицей. */
+    private const val MIN_TABLE_ROWS = 2
+
+    /** Сколько подряд не-колоночных строк (переносы ячеек) допускается между строками таблицы. */
+    private const val MAX_TABLE_GAP_LINES = 2
 
     /**
      * Классифицирует тип содержимого по наличию текстового слоя на страницах.
@@ -75,8 +90,17 @@ internal object ReflowAssembler {
     }
 
     private fun buildPageBlocks(page: RawPage, bodyFont: Float): List<ReflowBlock> {
+        val lines = groupLines(page.glyphs, bodyFont, page)
+        // Таблицы вытаскиваем до сборки абзацев: их строки не должны слипнуться в текст.
+        val tables = detectTableRanges(lines, page.widthPt, bodyFont).mapNotNull { range ->
+            buildTable(lines.subList(range.first, range.last + 1), page.widthPt, bodyFont)?.let { range to it }
+        }
+        val inTable = BooleanArray(lines.size)
+        tables.forEach { (range, _) -> for (index in range) inTable[index] = true }
+
         val items = buildList {
-            groupLines(page.glyphs, bodyFont, page).forEach { add(Item.Text(it)) }
+            tables.forEach { (range, table) -> add(Item.Table(table, lines[range.first].top)) }
+            lines.forEachIndexed { index, line -> if (!inTable[index]) add(Item.Text(line)) }
             page.images
                 .filter {
                     !FigureGeometry.isFullPage(it, page.widthPt, page.heightPt) &&
@@ -90,9 +114,131 @@ internal object ReflowAssembler {
             when (item) {
                 is Item.Text -> builder.addLine(item.line)
                 is Item.Image -> builder.addImage(item.rect)
+                is Item.Table -> builder.addTable(item.table)
             }
         }
         return builder.build()
+    }
+
+    /**
+     * Диапазоны строк, образующих таблицы: подряд идущие «колоночные» строки
+     * (≥2 сегмента, разделённых большими зазорами). Между ними допускаются
+     * переносы ячеек (одиночные сегменты) — до [MAX_TABLE_GAP_LINES] строк.
+     */
+    private fun detectTableRanges(lines: List<Line>, pageWidthPt: Float, fontSize: Float): List<IntRange> {
+        if (lines.size < MIN_TABLE_ROWS || fontSize <= 0f) return emptyList()
+        val columnGapPt = fontSize * COLUMN_GAP_FACTOR
+        val columnar = lines.map { it.toSegments(pageWidthPt, columnGapPt).size >= 2 }
+        val ranges = mutableListOf<IntRange>()
+        var i = 0
+        while (i < lines.size) {
+            if (!columnar[i]) {
+                i++
+                continue
+            }
+            var last = i
+            var columnarCount = 1
+            var j = i + 1
+            while (j < lines.size) {
+                when {
+                    columnar[j] -> {
+                        last = j
+                        columnarCount++
+                        j++
+                    }
+
+                    j - last <= MAX_TABLE_GAP_LINES -> j++ // перенос ячейки между строками таблицы
+                    else -> break
+                }
+            }
+            if (columnarCount >= MIN_TABLE_ROWS) {
+                ranges += i..last
+                i = last + 1
+            } else {
+                i++
+            }
+        }
+        return ranges
+    }
+
+    /**
+     * Собирает [ReflowBlock.Table] из строк таблицы: колонки — по кластерам
+     * левых краёв сегментов, строки — по вертикальным зазорам (как абзацы),
+     * перенос ячейки склеивается в одну ячейку. `null`, если колонок < 2.
+     */
+    private fun buildTable(lines: List<Line>, pageWidthPt: Float, fontSize: Float): ReflowBlock.Table? {
+        if (pageWidthPt <= 0f || fontSize <= 0f) return null
+        val columnGapPt = fontSize * COLUMN_GAP_FACTOR
+        val lineSegments = lines.map { it.toSegments(pageWidthPt, columnGapPt) }
+        val columns = columnCenters(lineSegments.flatten(), fontSize * COLUMN_ALIGN_FACTOR / pageWidthPt)
+        if (columns.size < 2) return null
+        val rows = groupTableRows(lines, lineSegments, fontSize).map { rowSegments ->
+            val cellSegments = List(columns.size) { mutableListOf<Segment>() }
+            rowSegments.forEach { segment -> cellSegments[nearestColumn(segment.leftNorm, columns)].add(segment) }
+            ReflowBlock.TableRow(
+                cells = cellSegments.map { segments ->
+                    val built = buildCell(segments)
+                    ReflowBlock.TableCell(built.text, built.source)
+                },
+            )
+        }
+        return if (rows.size >= MIN_TABLE_ROWS) ReflowBlock.Table(rows) else null
+    }
+
+    /** Левые края колонок: кластеризует левые края сегментов с допуском [tolNorm]. */
+    private fun columnCenters(segments: List<Segment>, tolNorm: Float): List<Float> {
+        val lefts = segments.map { it.leftNorm }.sorted()
+        val centers = mutableListOf<Float>()
+        for (left in lefts) {
+            if (centers.isEmpty() || left - centers.last() > tolNorm) centers += left
+        }
+        return centers
+    }
+
+    private fun nearestColumn(leftNorm: Float, columns: List<Float>): Int {
+        var best = 0
+        var bestDistance = abs(leftNorm - columns[0])
+        for (i in 1 until columns.size) {
+            val distance = abs(leftNorm - columns[i])
+            if (distance < bestDistance) {
+                bestDistance = distance
+                best = i
+            }
+        }
+        return best
+    }
+
+    /** Группирует строки таблицы в ряды по вертикальному зазору (перенос ячейки — тот же ряд). */
+    private fun groupTableRows(
+        lines: List<Line>,
+        lineSegments: List<List<Segment>>,
+        fontSize: Float,
+    ): List<List<Segment>> {
+        val rows = mutableListOf<MutableList<Segment>>()
+        var prevBottom = 0f
+        lines.forEachIndexed { index, line ->
+            val isNewRow = rows.isEmpty() || (line.top - prevBottom) > fontSize * PARA_GAP_FACTOR
+            if (isNewRow) rows.add(mutableListOf())
+            rows.last().addAll(lineSegments[index])
+            prevBottom = line.bottom
+        }
+        return rows
+    }
+
+    /** Текст ячейки + провенанс: сегменты (в т.ч. перенесённые) склеиваются пробелом. */
+    private fun buildCell(segments: List<Segment>): BuiltText {
+        val sb = StringBuilder()
+        val spans = mutableListOf<SourceSpan>()
+        for (segment in segments) {
+            if (sb.isNotEmpty()) sb.append(' ')
+            segment.pieces.forEachIndexed { index, piece ->
+                if (index > 0 && segment.spaceBefore[index]) sb.append(' ')
+                val start = sb.length
+                sb.append(piece.text)
+                spans += SourceSpan(piece.pageIndex, start, sb.length, piece.bounds, piece.bold, piece.monospace)
+            }
+        }
+        return BuiltText(sb.toString(), spans)
     }
 
     private fun groupLines(glyphs: List<RawGlyph>, bodyFont: Float, page: RawPage): List<Line> {
@@ -141,13 +287,21 @@ internal object ReflowAssembler {
             // (в сканах буквы внутри слова могут стоять с заметными зазорами).
             val spaceThreshold =
                 if (glyph.spaceWidthPt > 0f) glyph.spaceWidthPt * SPACE_WIDTH_FRACTION else fontSize * SPACE_FACTOR
-            val needsSpace = pieces.isNotEmpty() &&
+            // Знаки препинания примыкают к предыдущему слову, даже если глиф стоит
+            // с заметным зазором (типично для PDF) — иначе получается «слово ,».
+            // Исключение — моноширинные глифы: в коде «.» начинает токен
+            // (`.bodyAsText()`), и пробел перед ним нужно сохранить.
+            val attachesToPrev = !glyph.monospace &&
+                glyph.text.firstOrNull()?.let { it in TRAILING_PUNCT } == true
+            val needsSpace = pieces.isNotEmpty() && !attachesToPrev &&
                 (pendingSpace || (gap != null && gap > spaceThreshold))
             spaceBefore += needsSpace
             pieces += SourcePiece(
                 text = glyph.text,
                 pageIndex = page.pageIndex,
                 bounds = glyph.rect.normalised(page.widthPt, page.heightPt),
+                bold = glyph.bold,
+                monospace = glyph.monospace,
             )
             pendingSpace = false
             prevRight = glyph.rect.right
@@ -200,9 +354,17 @@ internal object ReflowAssembler {
         /** 0 — в накоплении абзац основного текста; >0 — заголовок этого уровня. */
         private var pendingHeadingLevel = 0
 
+        /** true — накапливается элемент списка (строка началась с маркера). */
+        private var pendingList = false
+
         fun addImage(rect: ReflowRect) {
             flush()
             blocks += ReflowBlock.Figure(pageIndex, rect.normalised(widthPt, heightPt))
+        }
+
+        fun addTable(table: ReflowBlock.Table) {
+            flush()
+            blocks += table
         }
 
         fun addLine(line: Line) {
@@ -215,6 +377,14 @@ internal object ReflowAssembler {
                     pendingHeadingLevel = level
                     pending += line
                 }
+                return
+            }
+            // Маркер списка всегда начинает новый блок-элемент: соседние пункты
+            // стоят плотно и иначе слиплись бы в один абзац.
+            if (line.startsListItem()) {
+                flush()
+                pendingList = true
+                pending += line
                 return
             }
             if (pending.isNotEmpty() && breaksParagraph(line)) flush()
@@ -243,17 +413,23 @@ internal object ReflowAssembler {
         }
 
         private fun flush() {
-            if (pending.isEmpty()) return
+            if (pending.isEmpty()) {
+                pendingList = false
+                return
+            }
+            // Элемент списка склеивается как абзац (перенос строк/дефис), но
+            // эмитится отдельным типом блока для отступа в ридере.
             val built = if (pendingHeadingLevel > 0) buildHeading(pending) else buildParagraph(pending)
             if (built.text.isNotEmpty()) {
-                blocks += if (pendingHeadingLevel > 0) {
-                    ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
-                } else {
-                    ReflowBlock.Paragraph(built.text, built.source)
+                blocks += when {
+                    pendingHeadingLevel > 0 -> ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
+                    pendingList -> ReflowBlock.ListItem(built.text, built.source)
+                    else -> ReflowBlock.Paragraph(built.text, built.source)
                 }
             }
             pending.clear()
             pendingHeadingLevel = 0
+            pendingList = false
         }
 
         /** Абзац: межстрочный пробел, со снятием переноса по дефису. */
@@ -263,9 +439,14 @@ internal object ReflowAssembler {
             for (line in lines) {
                 if (line.pieces.isEmpty()) continue
                 if (sb.isNotEmpty()) {
-                    if (isSoftHyphen(sb) && line.startsLowercase()) {
-                        sb.deleteAt(sb.length - 1)
-                        shrinkLastSpan(spans)
+                    if (isSoftHyphen(sb)) {
+                        // Строка кончается «буква+дефис»: слово перенесено — соединяем
+                        // без пробела. Мягкий перенос (следующая строка со строчной)
+                        // — дефис убираем; составной (`Plugin-Name`) — оставляем.
+                        if (line.startsLowercase()) {
+                            sb.deleteAt(sb.length - 1)
+                            shrinkLastSpan(spans)
+                        }
                     } else {
                         sb.append(' ')
                     }
@@ -297,7 +478,7 @@ internal object ReflowAssembler {
                 if (index > 0 && line.spaceBefore[index]) sb.append(' ')
                 val start = sb.length
                 sb.append(piece.text)
-                spans += SourceSpan(piece.pageIndex, start, sb.length, piece.bounds)
+                spans += SourceSpan(piece.pageIndex, start, sb.length, piece.bounds, piece.bold, piece.monospace)
             }
         }
 
@@ -316,6 +497,8 @@ internal object ReflowAssembler {
         val text: String,
         val pageIndex: Int,
         val bounds: ReflowRect,
+        val bold: Boolean = false,
+        val monospace: Boolean = false,
     )
 
     private data class BuiltText(
@@ -331,7 +514,64 @@ internal object ReflowAssembler {
         val fontSize: Float,
     ) {
         fun startsLowercase(): Boolean = pieces.firstOrNull()?.text?.firstOrNull()?.isLowerCase() == true
+
+        /**
+         * Строка открывает элемент списка: начинается с маркера-буллета
+         * (`•`, `-`, `*`… — см. [BULLET_CHARS]) либо с нумерации вида `1.` / `2)`.
+         * За номером должен идти не-цифровой символ — так `1.` (пункт) отличается
+         * от `3.14` (дробь): пробелы тут не помогают, их глифы отбрасываются в
+         * [buildLine].
+         */
+        fun startsListItem(): Boolean {
+            val lead = buildString {
+                for (piece in pieces) {
+                    append(piece.text)
+                    if (length >= LIST_MARKER_SCAN) break
+                }
+            }.trimStart()
+            if (lead.isEmpty()) return false
+            if (lead[0] in BULLET_CHARS) return true
+            val digits = lead.takeWhile { it.isDigit() }
+            if (digits.isEmpty() || digits.length >= lead.length || lead[digits.length] !in NUMBER_MARKERS) {
+                return false
+            }
+            val afterMarker = lead.getOrNull(digits.length + 1)
+            return afterMarker == null || !afterMarker.isDigit()
+        }
+
+        /**
+         * Делит строку на сегменты по горизонтальным зазорам шире [columnGapPt]
+         * (пунктов) — кандидаты в ячейки таблицы. Без больших зазоров — один сегмент.
+         */
+        fun toSegments(pageWidthPt: Float, columnGapPt: Float): List<Segment> {
+            if (pieces.isEmpty()) return emptyList()
+            val segments = mutableListOf<Segment>()
+            var start = 0
+            for (i in 1 until pieces.size) {
+                val gapPt = (pieces[i].bounds.left - pieces[i - 1].bounds.right) * pageWidthPt
+                if (gapPt > columnGapPt) {
+                    segments += segmentOf(start, i)
+                    start = i
+                }
+            }
+            segments += segmentOf(start, pieces.size)
+            return segments
+        }
+
+        private fun segmentOf(from: Int, to: Int): Segment =
+            Segment(
+                pieces = pieces.subList(from, to),
+                spaceBefore = spaceBefore.subList(from, to),
+                leftNorm = pieces[from].bounds.left,
+            )
     }
+
+    /** Часть строки между большими зазорами — кандидат в ячейку колонки. */
+    private data class Segment(
+        val pieces: List<SourcePiece>,
+        val spaceBefore: List<Boolean>,
+        val leftNorm: Float,
+    )
 
     private sealed interface Item {
         val top: Float
@@ -343,5 +583,20 @@ internal object ReflowAssembler {
         data class Image(val rect: ReflowRect) : Item {
             override val top: Float get() = rect.top
         }
+
+        data class Table(val table: ReflowBlock.Table, override val top: Float) : Item
     }
 }
+
+/** Сколько первых символов строки сканировать на маркер списка. */
+private const val LIST_MARKER_SCAN = 6
+
+/**
+ * Символы-буллеты, открывающие элемент списка. Тире `—`/`–` сюда НЕ входят: в
+ * русском тексте это знак предложения (в т.ч. в начале перенесённой строки), а
+ * не маркер списка — иначе абзац ложно становится пунктом списка.
+ */
+private val BULLET_CHARS = "•‣◦▪●·-*".toSet()
+
+/** Разделители после номера в нумерованном списке (`1.`, `2)`). */
+private const val NUMBER_MARKERS = ".)"

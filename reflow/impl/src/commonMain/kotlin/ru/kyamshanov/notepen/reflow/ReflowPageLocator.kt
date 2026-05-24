@@ -52,6 +52,8 @@ public object ReflowPageLocator {
     private fun ReflowBlock.sourcePage(): Int? = when (this) {
         is ReflowBlock.Paragraph -> source.minOfOrNull { it.pageIndex }
         is ReflowBlock.Heading -> source.minOfOrNull { it.pageIndex }
+        is ReflowBlock.ListItem -> source.minOfOrNull { it.pageIndex }
+        is ReflowBlock.Table -> rows.asSequence().flatMap { it.cells }.flatMap { it.source }.minOfOrNull { it.pageIndex }
         is ReflowBlock.Figure -> pageIndex
     }
 }

@@ -43,6 +43,55 @@ public sealed interface ReflowBlock {
     ) : ReflowBlock
 
     /**
+     * Элемент маркированного или нумерованного списка.
+     *
+     * Маркер (`•`, `–`, `1.`…) намеренно сохраняется в начале [text]: так
+     * провенанс ([source]) не требует пересчёта смещений, а отступ-«висячая
+     * строка» полностью на стороне ридера.
+     *
+     * @property text текст элемента списка вместе с исходным маркером
+     * @property source фрагменты исходного текста с привязкой к странице
+     *   (см. [SourceSpan]); [SourceSpan.charStart]/[SourceSpan.charEnd]
+     *   индексируют [text]
+     */
+    public data class ListItem(
+        public val text: String,
+        public val source: List<SourceSpan> = emptyList(),
+    ) : ReflowBlock
+
+    /**
+     * Таблица: восстановленная по выравниванию текста сетка ячеек. PDF не несёт
+     * структуры таблиц — она выводится из позиций глифов (выровненные колонки на
+     * нескольких строках), поэтому реконструкция приблизительная.
+     *
+     * @property rows строки таблицы сверху вниз; первая обычно — заголовок
+     */
+    public data class Table(
+        public val rows: List<TableRow>,
+    ) : ReflowBlock
+
+    /**
+     * Строка таблицы — упорядоченный слева направо набор ячеек.
+     *
+     * @property cells ячейки строки; длина одинакова у всех строк таблицы
+     */
+    public data class TableRow(
+        public val cells: List<TableCell>,
+    )
+
+    /**
+     * Ячейка таблицы.
+     *
+     * @property text текст ячейки (перенос строк внутри ячейки склеен в пробел)
+     * @property source фрагменты исходного текста с привязкой к странице
+     *   (см. [SourceSpan]); [SourceSpan.charStart]/[SourceSpan.charEnd] индексируют [text]
+     */
+    public data class TableCell(
+        public val text: String,
+        public val source: List<SourceSpan> = emptyList(),
+    )
+
+    /**
      * Нетекстовая область (картинка, таблица, формула), которую нельзя
      * осмысленно переформатировать в текст. Рендерится как кроп-изображение
      * соответствующей области исходной страницы внутри потока.

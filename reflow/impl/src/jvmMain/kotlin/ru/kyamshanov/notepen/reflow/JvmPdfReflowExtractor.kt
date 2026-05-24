@@ -3,7 +3,7 @@ package ru.kyamshanov.notepen.reflow
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.apache.pdfbox.Loader
-1import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine
+import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine
 import org.apache.pdfbox.cos.COSName
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
@@ -80,6 +80,7 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
 
     private fun TextPosition.toGlyph(): RawGlyph? {
         val text = unicode?.takeIf { it.isNotEmpty() } ?: return null
+        val fontName = font?.name
         return RawGlyph(
             text = text,
             rect = ReflowRect(
@@ -90,6 +91,8 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
             ),
             fontSizePt = fontSizeInPt,
             spaceWidthPt = widthOfSpace,
+            bold = FontStyles.isBold(fontName),
+            monospace = FontStyles.isMonospace(fontName),
         )
     }
 

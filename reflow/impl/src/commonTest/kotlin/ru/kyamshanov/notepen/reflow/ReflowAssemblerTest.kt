@@ -6,6 +6,7 @@ import ru.kyamshanov.notepen.reflow.api.ReflowRect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 class ReflowAssemblerTest {
 
@@ -83,6 +84,136 @@ class ReflowAssemblerTest {
         assertAlmostEquals(300f / 600f, figure.bounds.right)
         assertAlmostEquals(180f / 800f, figure.bounds.bottom)
         assertEquals("after image", (blocks[2] as ReflowBlock.Paragraph).text)
+    }
+
+    @Test
+    fun `no space inserted before trailing punctuation`() {
+        // глиф-запятая стоит с зазором, как часто бывает в PDF, но примыкает к слову
+        val blocks = ReflowAssembler.assemble(listOf(page(line("word , next", top = 100f)))).blocks
+        assertEquals("word, next", (blocks.single() as ReflowBlock.Paragraph).text)
+    }
+
+    @Test
+    fun `bold and monospace styles propagate to source spans`() {
+        val glyphs = line("bold", top = 100f, bold = true) +
+            line("code", top = 100f, startX = 120f, monospace = true)
+        val paragraph = assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals("bold code", paragraph.text)
+        assertTrue(paragraph.source.filter { it.charEnd <= 4 }.all { it.bold && !it.monospace })
+        assertTrue(paragraph.source.filter { it.charStart >= 5 }.all { it.monospace && !it.bold })
+    }
+
+    @Test
+    fun `tightly spaced bullet lines become separate list items`() {
+        val glyphs = line("- first item", top = 100f) + line("- second item", top = 112f)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        assertEquals(2, blocks.size)
+        assertEquals("- first item", assertIs<ReflowBlock.ListItem>(blocks[0]).text)
+        assertEquals("- second item", assertIs<ReflowBlock.ListItem>(blocks[1]).text)
+    }
+
+    @Test
+    fun `numbered lines become list items`() {
+        val glyphs = line("1. first", top = 100f) + line("2. second", top = 112f)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        assertEquals(2, blocks.size)
+        assertIs<ReflowBlock.ListItem>(blocks[0])
+        assertIs<ReflowBlock.ListItem>(blocks[1])
+    }
+
+    @Test
+    fun `wrapped continuation line merges into the list item`() {
+        val glyphs = line("- long item", top = 100f) + line("continued here", top = 112f)
+        val item = assertIs<ReflowBlock.ListItem>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals("- long item continued here", item.text)
+    }
+
+    @Test
+    fun `decimal number does not start a list item`() {
+        val blocks = ReflowAssembler.assemble(listOf(page(line("3.14 is pi", top = 100f)))).blocks
+        assertIs<ReflowBlock.Paragraph>(blocks.single())
+    }
+
+    @Test
+    fun `em-dash continuation line stays in the paragraph, not a list item`() {
+        // тире в начале перенесённой строки — знак предложения, а не маркер списка
+        val glyphs = line("request looks like code", top = 100f) + line("— returns a response", top = 112f)
+        val block = assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals("request looks like code — returns a response", block.text)
+    }
+
+    @Test
+    fun `space before a monospace method call is preserved`() {
+        // ведущая «.» в коде начинает токен (.method) — пробел перед ним не снимаем
+        val glyphs = line("call", top = 100f) + line(".method", top = 100f, startX = 120f, monospace = true)
+        val block = assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals("call .method", block.text)
+    }
+
+    @Test
+    fun `compound hyphen across line break keeps the hyphen without a space`() {
+        val glyphs = line("Plugin-", top = 100f) + line("Name here", top = 112f)
+        val block = assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals("Plugin-Name here", block.text)
+    }
+
+    @Test
+    fun `aligned columns across rows form a table`() {
+        // три строки по три колонки (большие горизонтальные зазоры, ряды по вертикали)
+        val glyphs =
+            line("Name", top = 100f, startX = 50f) +
+                line("Type", top = 100f, startX = 250f) +
+                line("Default", top = 100f, startX = 450f) +
+                line("Age", top = 130f, startX = 50f) +
+                line("Int", top = 130f, startX = 250f) +
+                line("Zero", top = 130f, startX = 450f) +
+                line("City", top = 160f, startX = 50f) +
+                line("Text", top = 160f, startX = 250f) +
+                line("None", top = 160f, startX = 450f)
+        val table = assertIs<ReflowBlock.Table>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals(3, table.rows.size)
+        assertEquals(listOf("Name", "Type", "Default"), table.rows[0].cells.map { it.text })
+        assertEquals(listOf("Age", "Int", "Zero"), table.rows[1].cells.map { it.text })
+        assertEquals(listOf("City", "Text", "None"), table.rows[2].cells.map { it.text })
+    }
+
+    @Test
+    fun `wrapped cell merges into one row of the table`() {
+        val glyphs =
+            line("Key", top = 100f, startX = 50f) +
+                line("First part", top = 100f, startX = 250f) +
+                line("wrapped", top = 112f, startX = 250f) + // перенос ячейки col1, тот же ряд
+                line("Key2", top = 150f, startX = 50f) +
+                line("Second", top = 150f, startX = 250f)
+        val table = assertIs<ReflowBlock.Table>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals(2, table.rows.size)
+        assertEquals(listOf("Key", "First part wrapped"), table.rows[0].cells.map { it.text })
+        assertEquals(listOf("Key2", "Second"), table.rows[1].cells.map { it.text })
+    }
+
+    @Test
+    fun `table cell provenance indexes the cell text`() {
+        val glyphs =
+            line("AA", top = 100f, startX = 50f) + line("BB", top = 100f, startX = 250f) +
+                line("CC", top = 130f, startX = 50f) + line("DD", top = 130f, startX = 250f)
+        val table = assertIs<ReflowBlock.Table>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        val cell = table.rows[0].cells[0]
+        assertEquals("AA", cell.text)
+        assertTrue(cell.source.isNotEmpty())
+        cell.source.forEach { assertTrue(it.charStart in 0..cell.text.length && it.charEnd in it.charStart..cell.text.length) }
+    }
+
+    @Test
+    fun `single aligned line is not a table`() {
+        // одна «колоночная» строка — это не таблица (нужно ≥2 строки)
+        val glyphs = line("Key", top = 100f, startX = 50f) + line("Value", top = 100f, startX = 300f)
+        assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+    }
+
+    @Test
+    fun `plain prose is not detected as a table`() {
+        val glyphs = line("just some normal prose", top = 100f) + line("second line of the prose", top = 112f)
+        assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
     }
 
 }

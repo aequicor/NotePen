@@ -54,12 +54,13 @@ class SourceSpanTest {
     }
 
     @Test
-    fun `hyphen kept when next line starts uppercase`() {
+    fun `compound hyphen kept and joined without a space when next line is uppercase`() {
+        // составной перенос «Plugin-Name»: дефис сохраняем, но пробел не вставляем
         val glyphs = line("exam-", top = 100f) + line("Ple", top = 112f)
         val paragraph = assertIs<ReflowBlock.Paragraph>(
             ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single(),
         )
-        assertEquals("exam- Ple", paragraph.text)
+        assertEquals("exam-Ple", paragraph.text)
         assertTrue(paragraph.source.any { paragraph.text.substring(it.charStart, it.charEnd) == "-" })
     }
 
