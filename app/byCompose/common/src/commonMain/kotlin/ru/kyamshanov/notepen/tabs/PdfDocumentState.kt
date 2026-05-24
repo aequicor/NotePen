@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import ru.kyamshanov.notepen.PdfDrawingState
@@ -103,6 +104,13 @@ class PdfDocumentState internal constructor(
 
     /** Magnifier overlay state. One instance per tab — always independent. */
     val magnifierState: MagnifierState = MagnifierState()
+
+    /**
+     * Включён ли режим чтения (reflow) для этого таба. Per-tab (как
+     * [pdfViewerState]) и персистится в сайдкар вида документа, поэтому
+     * восстанавливается при повторном открытии.
+     */
+    var readingMode: Boolean by mutableStateOf(false)
 
     private val annotationsLoadedState: MutableState<Boolean> = sharedAnnotationsLoaded
 

@@ -82,6 +82,7 @@ private data class AnnotationViewStateDto(
     val scale: Int = 100,
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
+    val readingMode: Boolean = false,
 )
 
 @Serializable
@@ -175,9 +176,13 @@ class AnnotationRepositoryJvmAndroid(
                 writeJson.encodeToStream(AnnotationDataDto.serializer(), dto, out)
             }
             // Лёгкий сайдкар с состоянием вида — читается при открытии отдельно и быстро,
-            // чтобы зум/страница восстанавливались до парсинга всех штрихов.
-            writeAtomically(viewFileFor(file)) { out ->
-                val viewDto = AnnotationViewStateDto(scale, currentPage, currentPageOffset)
+            // чтобы зум/страница восстанавливались до парсинга всех штрихов. readingMode
+            // тут не передаётся (это сейв штрихов) — сохраняем уже записанный, чтобы не
+            // затереть режим чтения; его пишет отдельный saveViewState.
+            val viewFile = viewFileFor(file)
+            val preservedReadingMode = readReadingMode(viewFile)
+            writeAtomically(viewFile) { out ->
+                val viewDto = AnnotationViewStateDto(scale, currentPage, currentPageOffset, preservedReadingMode)
                 writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
             }
             Result.success(Unit)
@@ -233,9 +238,33 @@ class AnnotationRepositoryJvmAndroid(
                 val dto = viewFile.inputStream().buffered().use { input ->
                     json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
                 }
-                Result.success(AnnotationViewState(dto.scale, dto.currentPage, dto.currentPageOffset))
+                Result.success(
+                    AnnotationViewState(dto.scale, dto.currentPage, dto.currentPageOffset, dto.readingMode),
+                )
             }
         } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    override suspend fun saveViewState(
+        pdfPath: String,
+        viewState: AnnotationViewState,
+    ): Result<Unit> = withContext(ioDispatcher) {
+        try {
+            val viewFile = viewFileFor(storeFileFor(pdfPath))
+            writeAtomically(viewFile) { out ->
+                val viewDto = AnnotationViewStateDto(
+                    scale = viewState.scale,
+                    currentPage = viewState.currentPage,
+                    currentPageOffset = viewState.currentPageOffset,
+                    readingMode = viewState.readingMode,
+                )
+                writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+            }
+            Result.success(Unit)
+        } catch (e: IOException) {
             Result.failure(e)
         }
     }
@@ -243,6 +272,19 @@ class AnnotationRepositoryJvmAndroid(
     /** Имя лёгкого сайдкара состояния вида рядом с основным файлом аннотаций. */
     private fun viewFileFor(annotationFile: File): File =
         File(annotationFile.parentFile, "${annotationFile.name}.view")
+
+    /** Читает уже записанный режим чтения из сайдкара (для preserve в [save]); `false`, если файла/поля нет. */
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun readReadingMode(viewFile: File): Boolean =
+        if (viewFile.exists()) {
+            runCatching {
+                viewFile.inputStream().buffered().use { input ->
+                    json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
+                }.readingMode
+            }.getOrDefault(false)
+        } else {
+            false
+        }
 
     /** Пишет [file] через временный файл + rename, чтобы прерывание не оставило битый JSON. */
     private fun writeAtomically(file: File, write: (OutputStream) -> Unit) {

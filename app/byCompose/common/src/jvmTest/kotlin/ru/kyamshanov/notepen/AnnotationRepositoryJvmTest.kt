@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationBundle
+import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
@@ -270,6 +271,35 @@ class AnnotationRepositoryJvmTest {
         repo.save(pdfPath, emptyMap(), scale = 110, currentPage = 2)
 
         assertTrue(java.io.File("$pdfPath.notepen.json.view").exists(), "view sidecar must be created")
+    }
+
+    @Test
+    fun saveViewState_roundTrip_returnsReadingMode() = runBlocking {
+        val dir = createTempDirectory("notepen_view_reading")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        repo.saveViewState(
+            pdfPath,
+            AnnotationViewState(scale = 130, currentPage = 5, currentPageOffset = 64, readingMode = true),
+        )
+
+        val view = repo.loadViewState(pdfPath).getOrThrow()
+
+        assertEquals(130, view?.scale)
+        assertEquals(5, view?.currentPage)
+        assertEquals(64, view?.currentPageOffset)
+        assertEquals(true, view?.readingMode)
+    }
+
+    @Test
+    fun save_afterSaveViewState_preservesReadingMode() = runBlocking {
+        val dir = createTempDirectory("notepen_view_preserve")
+        val pdfPath = dir.resolve("doc.pdf").toString()
+        // Режим чтения включён через лёгкий saveViewState.
+        repo.saveViewState(pdfPath, AnnotationViewState(scale = 100, readingMode = true))
+        // Последующий сейв штрихов (save) не передаёт readingMode — он не должен его затереть.
+        repo.save(pdfPath, emptyMap(), scale = 100, currentPage = 1)
+
+        assertEquals(true, repo.loadViewState(pdfPath).getOrThrow()?.readingMode)
     }
 
     // TC-19 surrogate: JSON produced by save/load round-trip is valid (same schema across platforms)

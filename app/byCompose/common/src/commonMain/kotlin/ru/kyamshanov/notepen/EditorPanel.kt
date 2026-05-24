@@ -60,6 +60,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
+import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
@@ -234,10 +235,9 @@ fun EditorPanel(
             .getOrNull()
             ?.also { figurePageCache[pageIndex] = it }
     }
-    var readingMode by remember(pdfState) { mutableStateOf(false) }
     var reflowReading by remember(pdfState) { mutableStateOf<ReflowReading?>(null) }
-    LaunchedEffect(readingMode, pdfState) {
-        if (!readingMode) {
+    LaunchedEffect(pdfState.readingMode, pdfState) {
+        if (!pdfState.readingMode) {
             reflowReading = null
             return@LaunchedEffect
         }
@@ -256,8 +256,8 @@ fun EditorPanel(
     }
     // В режиме чтения держим текущую страницу (счётчик + позиция при выходе) в
     // синхроне с прокруткой ридера: первый видимый блок → его исходная страница.
-    LaunchedEffect(readingMode, pdfState) {
-        if (!readingMode) return@LaunchedEffect
+    LaunchedEffect(pdfState.readingMode, pdfState) {
+        if (!pdfState.readingMode) return@LaunchedEffect
         snapshotFlow { reflowListState.firstVisibleItemIndex }
             .mapNotNull { index -> reflowReading?.let { ReflowPageLocator.pageForBlock(it.document, index) } }
             .distinctUntilChanged()
@@ -491,6 +491,9 @@ fun EditorPanel(
                 pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
                 pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
             )
+            // Вторичный таб того же файла открываем в обычном (не reading) режиме —
+            // как и позицию, режим чтения для него не восстанавливаем.
+            pdfState.readingMode = if (pdfState.skipPageRestore) false else view.readingMode
         }
         val projectionStrokes = hostAnnotationSnapshotFor?.let { provider ->
             runCatching { provider(documentId) }.getOrElse { e ->
@@ -580,6 +583,30 @@ fun EditorPanel(
             .collect {
                 saveTab(pdfState)
                 if (isRemoteOpenedDoc) coroutineScope.launch { requestRemoteSaveIfConnected() }
+            }
+    }
+
+    // ---- View-state autosave (зум/страница/режим чтения) ------------------
+    // Пишем только лёгкий .view-сайдкар, не тяжёлый файл штрихов, поэтому не
+    // жалко дёргать на каждый скролл (debounce срезает частоту). Закрывает и
+    // «убийство приложения»: навигация успевает сохраниться по ходу сессии,
+    // а не только на «назад»/«в библиотеку».
+    LaunchedEffect(pdfState) {
+        snapshotFlow {
+            AnnotationViewState(
+                scale = pdfViewerState.scalePercent,
+                currentPage = pdfViewerState.firstVisiblePageIndex,
+                currentPageOffset = pdfViewerState.firstVisiblePageOffsetPx,
+                readingMode = pdfState.readingMode,
+            )
+        }
+            .drop(1)
+            .distinctUntilChanged()
+            .debounce(PANEL_AUTOSAVE_DEBOUNCE)
+            .collect { view ->
+                annotationRepository.saveViewState(filePath, view).onFailure { e ->
+                    panelLogger.warn { "View-state save failed for $filePath: ${e::class.simpleName}" }
+                }
             }
     }
 
@@ -858,7 +885,7 @@ fun EditorPanel(
         // not register a recomposition dependency, so without this read toggling
         // thumbnails would never re-run the effect nor republish PanelControls.
         val thumbnailsVisible = showThumbnails
-        val readingModeVisible = readingMode
+        val readingModeVisible = pdfState.readingMode
         // Read scrollMode in composition (not only inside SideEffect) so the
         // composition subscribes to it — toggling it republishes PanelControls.
         val currentScrollMode = pdfViewerState.scrollMode
@@ -880,9 +907,9 @@ fun EditorPanel(
                     toggleMagnifier = onMagnifierToggle,
                     export = onExport,
                     toggleThumbnails = { showThumbnails = !showThumbnails },
-                    toggleReadingMode = { readingMode = !readingMode },
+                    toggleReadingMode = { pdfState.readingMode = !pdfState.readingMode },
                     navigateToPage = { page ->
-                        if (readingMode) {
+                        if (pdfState.readingMode) {
                             reflowReading?.let { reading ->
                                 ReflowPageLocator.blockIndexForPage(reading.document, page)?.let { blockIndex ->
                                     coroutineScope.launch { reflowListState.animateScrollToItem(blockIndex) }
@@ -1090,7 +1117,7 @@ fun EditorPanel(
                 )
             }
 
-            if (readingMode) {
+            if (pdfState.readingMode) {
                 val reading = reflowReading
                 if (reading != null) {
                     ReflowReader(

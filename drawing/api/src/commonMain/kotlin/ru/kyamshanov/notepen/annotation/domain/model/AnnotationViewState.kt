@@ -12,9 +12,11 @@ package ru.kyamshanov.notepen.annotation.domain.model
  * @property scale масштаб в процентах.
  * @property currentPage индекс верхней видимой страницы.
  * @property currentPageOffset вертикальный сдвиг внутри [currentPage] в пикселях.
+ * @property readingMode включён ли режим чтения (reflow) для документа.
  */
 data class AnnotationViewState(
     val scale: Int = 100,
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
+    val readingMode: Boolean = false,
 )

@@ -33,4 +33,12 @@ interface AnnotationRepository {
      * @return состояние вида или `null`, если оно ещё не сохранялось.
      */
     suspend fun loadViewState(pdfPath: String): Result<AnnotationViewState?>
+
+    /**
+     * Сохраняет только лёгкое [viewState] (масштаб/страница/режим чтения),
+     * не трогая тяжёлый набор штрихов. Предназначен для частого автосейва
+     * навигации (зум/скролл) — запись большого файла аннотаций на каждый
+     * скролл была бы лишним I/O.
+     */
+    suspend fun saveViewState(pdfPath: String, viewState: AnnotationViewState): Result<Unit>
 }

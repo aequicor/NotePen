@@ -134,6 +134,10 @@ actual class PdfViewerState internal constructor(
             pan = centeredAndClamped(Offset.Zero)
         } else {
             scrollToPage(pageIndex.coerceIn(0, pages.lastIndex), offsetPx)
+            // scrollToPage сохраняет pan.x (на свежем стейте = 0 → левый край),
+            // т.к. горизонтальный pan не персистится. Доцентровываем X по
+            // помещающейся оси, сохраняя проскролленный Y.
+            pan = centeredAndClamped(pan)
         }
     }
 
