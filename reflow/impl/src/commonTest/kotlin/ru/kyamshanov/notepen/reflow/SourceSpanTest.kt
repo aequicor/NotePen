@@ -45,6 +45,15 @@ class SourceSpanTest {
     }
 
     @Test
+    fun `join word split by typographic hyphen`() {
+        val glyphs = line("дог‐", top = 100f) + line("мы конец", top = 112f)
+        val paragraph = assertIs<ReflowBlock.Paragraph>(
+            ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single(),
+        )
+        assertEquals("догмы конец", paragraph.text)
+    }
+
+    @Test
     fun `hyphen kept when next line starts uppercase`() {
         val glyphs = line("exam-", top = 100f) + line("Ple", top = 112f)
         val paragraph = assertIs<ReflowBlock.Paragraph>(
@@ -132,6 +141,20 @@ class SourceSpanTest {
         assertAlmostEquals(100f / 1000f, figure.bounds.top)
         assertAlmostEquals(200f / 400f, figure.bounds.right)
         assertAlmostEquals(300f / 1000f, figure.bounds.bottom)
+    }
+
+    @Test
+    fun `loose letter tracking does not split a word`() {
+        val fontSize = 10f
+        val spaceWidth = 12f
+        fun glyph(char: String, left: Float) =
+            RawGlyph(char, ReflowRect(left, 100f, left + 5f, 110f), fontSize, spaceWidth)
+        // Зазоры между буквами 4pt: > 0.25*кегль (2.5), но < 0.5*пробел (6) → не пробел.
+        val glyphs = listOf(glyph("c", 50f), glyph("a", 59f), glyph("t", 68f))
+        val paragraph = assertIs<ReflowBlock.Paragraph>(
+            ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single(),
+        )
+        assertEquals("cat", paragraph.text)
     }
 
     /** Каждый неблэнк-символ покрыт ровно одним спаном; пробелы — ничем. */

@@ -6,7 +6,6 @@ import ru.kyamshanov.notepen.reflow.api.ReflowRect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import kotlin.test.assertTrue
 
 class ReflowAssemblerTest {
 
@@ -86,12 +85,4 @@ class ReflowAssemblerTest {
         assertEquals("after image", (blocks[2] as ReflowBlock.Paragraph).text)
     }
 
-    @Test
-    fun `order two columns left then right`() {
-        val left = (0 until 6).flatMap { line("left column line text", top = 100f + it * 14f, startX = 40f) }
-        val right = (0 until 6).flatMap { line("right column line text", top = 100f + it * 14f, startX = 340f) }
-        val blocks = ReflowAssembler.assemble(listOf(page(left + right))).blocks
-        val firstParagraph = blocks.filterIsInstance<ReflowBlock.Paragraph>().first().text
-        assertTrue(firstParagraph.startsWith("left column"), "expected left column first, got: $firstParagraph")
-    }
 }

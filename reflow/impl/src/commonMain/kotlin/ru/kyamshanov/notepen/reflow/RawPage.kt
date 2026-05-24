@@ -11,11 +11,14 @@ import ru.kyamshanov.notepen.reflow.api.ReflowRect
  * @property text юникод-текст глифа/рана
  * @property rect ограничивающий прямоугольник в координатах PDF-страницы (пункты)
  * @property fontSizePt кегль шрифта в пунктах
+ * @property spaceWidthPt ширина пробела текущего шрифта в пунктах; 0 — неизвестна.
+ *   Используется, чтобы отличить межсловный зазор от широкого трекинга букв.
  */
 internal data class RawGlyph(
     val text: String,
     val rect: ReflowRect,
     val fontSizePt: Float,
+    val spaceWidthPt: Float = 0f,
 )
 
 /**

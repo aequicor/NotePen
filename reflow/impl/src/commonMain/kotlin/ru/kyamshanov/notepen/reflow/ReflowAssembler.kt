@@ -20,8 +20,8 @@ import kotlin.math.abs
  *
  * Этапы:
  *  1. классификация типа содержимого ([classify]);
- *  2. для каждой страницы — детекция колонок, группировка глифов в строки,
- *     строк в абзацы/заголовки, вставка нетекстовых областей как фигур;
+ *  2. для каждой страницы — группировка глифов в строки, строк в абзацы и
+ *     заголовки, вставка нетекстовых областей как фигур;
  *  3. провенанс: на каждый исходный ран глифов — [SourceSpan] с диапазоном
  *     символов в итоговом тексте блока.
  */
@@ -39,24 +39,14 @@ internal object ReflowAssembler {
     /** Допуск группировки глифов в одну строку (доля основного кегля). */
     private const val LINE_TOLERANCE_FRAC = 0.5f
 
-    /** Горизонтальный зазор (доля кегля строки), трактуемый как пробел между словами. */
+    /** Горизонтальный зазор (доля кегля строки), трактуемый как пробел между словами (когда ширина пробела неизвестна). */
     private const val SPACE_FACTOR = 0.25f
 
-    /** Минимум глифов на странице, при котором вообще ищем колонки. */
-    private const val MIN_GLYPHS_FOR_COLUMNS = 40
+    /** Доля ширины пробела шрифта, начиная с которой зазор считается межсловным (при известной ширине). */
+    private const val SPACE_WIDTH_FRACTION = 0.5f
 
-    /** Центральная полоса страницы (доли ширины), где ищем межколоночный «ручей». */
-    private const val COLUMN_BAND_START = 0.35f
-    private const val COLUMN_BAND_END = 0.65f
-
-    /** Число шагов сканирования при поиске межколоночного зазора. */
-    private const val COLUMN_SCAN_STEPS = 20
-
-    /** Максимальная доля глифов, пересекающих линию разреза, при которой это всё ещё две колонки. */
-    private const val COLUMN_CROSS_FRAC = 0.02f
-
-    /** Минимальная доля глифов с каждой стороны разреза, чтобы признать две колонки. */
-    private const val COLUMN_SIDE_FRAC = 0.2f
+    /** Дефисы, снимаемые при переносе слова на конце строки: ASCII, типографский (‐), мягкий. */
+    private const val HYPHEN_CHARS = "-‐­"
 
     private const val HEADING_LEVEL_1_RATIO = 1.8f
     private const val HEADING_LEVEL_2_RATIO = 1.4f
@@ -85,25 +75,19 @@ internal object ReflowAssembler {
     }
 
     private fun buildPageBlocks(page: RawPage, bodyFont: Float): List<ReflowBlock> {
-        val result = mutableListOf<ReflowBlock>()
-        for (col in detectColumns(page)) {
-            val colGlyphs = page.glyphs.filter { col.contains(centerX(it.rect)) }
-            val colImages = page.images.filter { col.contains(centerX(it)) }
-            val items = buildList {
-                groupLines(colGlyphs, bodyFont, page).forEach { add(Item.Text(it)) }
-                colImages.forEach { add(Item.Image(it)) }
-            }.sortedBy { it.top }
+        val items = buildList {
+            groupLines(page.glyphs, bodyFont, page).forEach { add(Item.Text(it)) }
+            page.images.forEach { add(Item.Image(it)) }
+        }.sortedBy { it.top }
 
-            val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont)
-            items.forEach { item ->
-                when (item) {
-                    is Item.Text -> builder.addLine(item.line)
-                    is Item.Image -> builder.addImage(item.rect)
-                }
+        val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont)
+        items.forEach { item ->
+            when (item) {
+                is Item.Text -> builder.addLine(item.line)
+                is Item.Image -> builder.addImage(item.rect)
             }
-            result += builder.build()
         }
-        return result
+        return builder.build()
     }
 
     private fun groupLines(glyphs: List<RawGlyph>, bodyFont: Float, page: RawPage): List<Line> {
@@ -137,14 +121,30 @@ internal object ReflowAssembler {
         val pieces = ArrayList<SourcePiece>(sorted.size)
         val spaceBefore = ArrayList<Boolean>(sorted.size)
         var prevRight: Float? = null
+        var pendingSpace = false
         for (glyph in sorted) {
+            // Пробел PDFBox отдаёт отдельным глифом — это надёжная граница слова;
+            // держим его как разделитель, но не как фрагмент-провенанс.
+            if (glyph.text.isBlank()) {
+                pendingSpace = true
+                prevRight = glyph.rect.right
+                continue
+            }
             val gap = prevRight?.let { glyph.rect.left - it }
-            spaceBefore += gap != null && gap > fontSize * SPACE_FACTOR && pieces.isNotEmpty()
+            // Порог пробела — по ширине пробела шрифта (если известна), иначе по кеглю.
+            // Так настоящий межсловный зазор отличается от широкого трекинга букв
+            // (в сканах буквы внутри слова могут стоять с заметными зазорами).
+            val spaceThreshold =
+                if (glyph.spaceWidthPt > 0f) glyph.spaceWidthPt * SPACE_WIDTH_FRACTION else fontSize * SPACE_FACTOR
+            val needsSpace = pieces.isNotEmpty() &&
+                (pendingSpace || (gap != null && gap > spaceThreshold))
+            spaceBefore += needsSpace
             pieces += SourcePiece(
                 text = glyph.text,
                 pageIndex = page.pageIndex,
                 bounds = glyph.rect.normalised(page.widthPt, page.heightPt),
             )
+            pendingSpace = false
             prevRight = glyph.rect.right
         }
         return Line(
@@ -154,40 +154,6 @@ internal object ReflowAssembler {
             bottom = sorted.maxOf { it.rect.bottom },
             fontSize = fontSize,
         )
-    }
-
-    private fun detectColumns(page: RawPage): List<ColumnRange> {
-        val full = listOf(ColumnRange(0f, page.widthPt + 1f))
-        val glyphs = page.glyphs
-        if (glyphs.size < MIN_GLYPHS_FOR_COLUMNS) return full
-
-        val minX = glyphs.minOf { it.rect.left }
-        val maxX = glyphs.maxOf { it.rect.right }
-        val step = ((maxX - minX) / COLUMN_SCAN_STEPS).coerceAtLeast(1f)
-
-        var cut = page.widthPt * COLUMN_BAND_START
-        var bestCross = Int.MAX_VALUE
-        var x = page.widthPt * COLUMN_BAND_START
-        while (x <= page.widthPt * COLUMN_BAND_END) {
-            val crossing = glyphs.count { it.rect.left < x && it.rect.right > x }
-            if (crossing < bestCross) {
-                bestCross = crossing
-                cut = x
-            }
-            x += step
-        }
-
-        val crossFraction = bestCross.toFloat() / glyphs.size
-        val leftCount = glyphs.count { centerX(it.rect) < cut }
-        val rightCount = glyphs.size - leftCount
-        val sidesBalanced = leftCount >= glyphs.size * COLUMN_SIDE_FRAC &&
-            rightCount >= glyphs.size * COLUMN_SIDE_FRAC
-
-        return if (crossFraction <= COLUMN_CROSS_FRAC && sidesBalanced) {
-            listOf(ColumnRange(minX - 1f, cut), ColumnRange(cut, maxX + 1f))
-        } else {
-            full
-        }
     }
 
     private fun medianFontSize(glyphs: List<RawGlyph>): Float {
@@ -201,8 +167,6 @@ internal object ReflowAssembler {
         ratio >= HEADING_LEVEL_2_RATIO -> 2
         else -> 3
     }
-
-    private fun centerX(rect: ReflowRect): Float = (rect.left + rect.right) / 2f
 
     /** Нормализует прямоугольник из пунктов в доли `[0..1]` страницы. */
     private fun ReflowRect.normalised(widthPt: Float, heightPt: Float): ReflowRect =
@@ -340,7 +304,7 @@ internal object ReflowAssembler {
         }
 
         private fun isSoftHyphen(sb: StringBuilder): Boolean =
-            sb.length >= 2 && sb.last() == '-' && sb[sb.length - 2].isLetter()
+            sb.length >= 2 && sb.last() in HYPHEN_CHARS && sb[sb.length - 2].isLetter()
     }
 
     private data class SourcePiece(
@@ -362,10 +326,6 @@ internal object ReflowAssembler {
         val fontSize: Float,
     ) {
         fun startsLowercase(): Boolean = pieces.firstOrNull()?.text?.firstOrNull()?.isLowerCase() == true
-    }
-
-    private class ColumnRange(private val left: Float, private val right: Float) {
-        fun contains(x: Float): Boolean = x >= left && x < right
     }
 
     private sealed interface Item {

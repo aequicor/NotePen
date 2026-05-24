@@ -3,6 +3,8 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
+    alias(libs.plugins.composeMultiplatform)
+    alias(libs.plugins.composeCompiler)
     alias(libs.plugins.androidLibrary)
 }
 
@@ -20,6 +22,9 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.reflow.api)
             implementation(projects.drawing.api)
+            implementation(compose.runtime)
+            implementation(compose.foundation)
+            implementation(compose.ui)
             implementation(libs.kotlin.logging.common)
             implementation(libs.kotlinx.coroutines.core)
         }
