@@ -310,6 +310,7 @@ fun DetailsContent(
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
     val pdfExporter = remember { createPdfExporter() }
+    val reflowExtractor = remember { createPdfReflowExtractor() }
 
     // Global tool presets, persisted across documents.
     val toolPresetsRepository = remember { createToolPresetsRepository() }
@@ -371,6 +372,7 @@ fun DetailsContent(
     val isExporting = controls?.isExporting ?: false
     val magnifierEnabled = controls?.magnifierEnabled ?: false
     val showThumbnails = controls?.showThumbnails ?: false
+    val readingModeEnabled = controls?.readingModeEnabled ?: false
 
     // ---- Save helpers (across all panels) ---------------------------------
     val saveTab: suspend (PdfDocumentState) -> Unit = { state ->
@@ -545,6 +547,7 @@ fun DetailsContent(
                     penButtonsPressed = penButtonsPressed,
                     annotationRepository = annotationRepository,
                     pdfExporter = pdfExporter,
+                    reflowExtractor = reflowExtractor,
                     syncEngineFor = syncEngineFor,
                     peerClient = peerClient,
                     pendingDeltaCounts = pendingDeltaCounts,
@@ -705,6 +708,8 @@ fun DetailsContent(
                     },
                     showThumbnails = showThumbnails,
                     onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                    readingModeEnabled = readingModeEnabled,
+                    onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
                     showPencilModeButton = SupportsPencilMode,
                     pencilModeEnabled = pencilModeEnabled,
                     onPencilModeChange = onPencilModeChange,
@@ -811,7 +816,10 @@ fun DetailsContent(
                         renderer = renderer,
                         currentPage = focusedState.pdfViewerState.firstVisiblePageIndex,
                         onPageClick = { pageIndex ->
-                            focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
+                            // В режиме чтения переход уходит в reflow-ридер (ветка в
+                            // PanelControls.navigateToPage); иначе — обычная прокрутка вьювера.
+                            controls?.navigateToPage?.invoke(pageIndex)
+                                ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
                         },
                         annotatedPageIndices = annotatedPageIndices,
                         favoritePageIndices = focusedState.favoritePageIndices.toSet(),
@@ -864,6 +872,8 @@ fun DetailsContent(
                     },
                     showThumbnails = showThumbnails,
                     onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                    readingModeEnabled = readingModeEnabled,
+                    onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
                     showPencilModeButton = SupportsPencilMode,
                     pencilModeEnabled = pencilModeEnabled,
                     onPencilModeChange = onPencilModeChange,

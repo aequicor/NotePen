@@ -14,9 +14,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
+import ru.kyamshanov.notepen.reflow.ReflowPageLocator
+import ru.kyamshanov.notepen.reflow.ReflowReading
+import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
+import ru.kyamshanov.notepen.reflow.ui.ReflowReader
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -48,6 +54,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.random.Random
@@ -118,6 +125,7 @@ class PanelControls(
     val isExporting: Boolean,
     val magnifierEnabled: Boolean,
     val showThumbnails: Boolean,
+    val readingModeEnabled: Boolean,
     val quickLoupeArmed: Boolean,
     val scrollMode: ScrollMode,
     val zoomIn: () -> Unit,
@@ -125,6 +133,7 @@ class PanelControls(
     val toggleMagnifier: () -> Unit,
     val export: () -> Unit,
     val toggleThumbnails: () -> Unit,
+    val toggleReadingMode: () -> Unit,
     val navigateToPage: (Int) -> Unit,
     val toggleQuickLoupe: () -> Unit,
     val cycleScrollMode: () -> Unit,
@@ -164,6 +173,7 @@ fun EditorPanel(
     penButtonsPressed: Set<Int>,
     annotationRepository: AnnotationRepository,
     pdfExporter: PdfExporter,
+    reflowExtractor: PdfReflowExtractor,
     syncEngineFor: ((documentId: String) -> SyncEngine)?,
     peerClient: SyncClient?,
     pendingDeltaCounts: kotlinx.coroutines.flow.Flow<Map<String, Int>>?,
@@ -206,6 +216,39 @@ fun EditorPanel(
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
     var showThumbnails by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
+
+    // ---- Reading (reflow) mode -------------------------------------------
+    val reflowReadingUseCase = remember(reflowExtractor) { BuildReflowReadingUseCase(reflowExtractor) }
+    val reflowListState = remember(pdfState) { LazyListState() }
+    var readingMode by remember(pdfState) { mutableStateOf(false) }
+    var reflowReading by remember(pdfState) { mutableStateOf<ReflowReading?>(null) }
+    LaunchedEffect(readingMode, pdfState) {
+        if (!readingMode) {
+            reflowReading = null
+            return@LaunchedEffect
+        }
+        // Запоминаем текущую страницу до извлечения, чтобы при открытии режима
+        // чтения сразу встать на соответствующий абзац.
+        val targetPage = pdfViewerState.firstVisiblePageIndex
+        val strokesByPage = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
+        val reading = runCatching { reflowReadingUseCase(filePath, strokesByPage) }
+            .onFailure { e -> panelLogger.warn { "Reflow reading build failed: ${e::class.simpleName}" } }
+            .getOrNull()
+        reflowReading = reading
+        if (reading != null) {
+            ReflowPageLocator.blockIndexForPage(reading.document, targetPage)
+                ?.let { reflowListState.scrollToItem(it) }
+        }
+    }
+    // В режиме чтения держим текущую страницу (счётчик + позиция при выходе) в
+    // синхроне с прокруткой ридера: первый видимый блок → его исходная страница.
+    LaunchedEffect(readingMode, pdfState) {
+        if (!readingMode) return@LaunchedEffect
+        snapshotFlow { reflowListState.firstVisibleItemIndex }
+            .mapNotNull { index -> reflowReading?.let { ReflowPageLocator.pageForBlock(it.document, index) } }
+            .distinctUntilChanged()
+            .collect { page -> pdfViewerState.scrollToPage(page, 0) }
+    }
 
     val hasAnnotations by remember {
         derivedStateOf { drawingStates.values.any { it.currentPaths.isNotEmpty() } }
@@ -801,6 +844,7 @@ fun EditorPanel(
         // not register a recomposition dependency, so without this read toggling
         // thumbnails would never re-run the effect nor republish PanelControls.
         val thumbnailsVisible = showThumbnails
+        val readingModeVisible = readingMode
         // Read scrollMode in composition (not only inside SideEffect) so the
         // composition subscribes to it — toggling it republishes PanelControls.
         val currentScrollMode = pdfViewerState.scrollMode
@@ -814,6 +858,7 @@ fun EditorPanel(
                     isExporting = isExporting,
                     magnifierEnabled = magnifierState.enabled,
                     showThumbnails = thumbnailsVisible,
+                    readingModeEnabled = readingModeVisible,
                     quickLoupeArmed = quickLoupeArmed.value,
                     scrollMode = currentScrollMode,
                     zoomIn = onZoomIn,
@@ -821,7 +866,18 @@ fun EditorPanel(
                     toggleMagnifier = onMagnifierToggle,
                     export = onExport,
                     toggleThumbnails = { showThumbnails = !showThumbnails },
-                    navigateToPage = { pdfViewerState.scrollToPage(it, 0) },
+                    toggleReadingMode = { readingMode = !readingMode },
+                    navigateToPage = { page ->
+                        if (readingMode) {
+                            reflowReading?.let { reading ->
+                                ReflowPageLocator.blockIndexForPage(reading.document, page)?.let { blockIndex ->
+                                    coroutineScope.launch { reflowListState.animateScrollToItem(blockIndex) }
+                                }
+                            }
+                        } else {
+                            pdfViewerState.scrollToPage(page, 0)
+                        }
+                    },
                     toggleQuickLoupe = onToggleQuickLoupe,
                     cycleScrollMode = onCycleScrollMode,
                 ),
@@ -1018,6 +1074,26 @@ fun EditorPanel(
                     onClose = { magnifierState.disable() },
                     externalInputController = magnifierInputController,
                 )
+            }
+
+            if (readingMode) {
+                val reading = reflowReading
+                if (reading != null) {
+                    ReflowReader(
+                        document = reading.document,
+                        modifier = Modifier.fillMaxSize(),
+                        highlights = reading.highlights,
+                        listState = reflowListState,
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                        Text(
+                            text = "Готовим режим чтения…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.align(Alignment.Center),
+                        )
+                    }
+                }
             }
         }
 

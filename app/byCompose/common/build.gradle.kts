@@ -43,6 +43,8 @@ kotlin {
             implementation(projects.qrConnect)
             implementation(projects.rendering.api)
             implementation(projects.rendering.impl)
+            implementation(projects.reflow.api)
+            implementation(projects.reflow.impl)
 
             //decompose
             implementation(libs.decompose)

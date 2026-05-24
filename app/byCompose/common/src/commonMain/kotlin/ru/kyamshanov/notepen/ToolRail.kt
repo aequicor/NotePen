@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -135,6 +136,8 @@ internal fun unifiedToolWheelEntries(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    readingModeEnabled: Boolean,
+    onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
@@ -176,6 +179,8 @@ internal fun unifiedToolWheelEntries(
         onZoomOut = onZoomOut,
         showThumbnails = showThumbnails,
         onToggleThumbnails = onToggleThumbnails,
+        readingModeEnabled = readingModeEnabled,
+        onToggleReadingMode = onToggleReadingMode,
         showPencilModeButton = showPencilModeButton,
         pencilModeEnabled = pencilModeEnabled,
         onPencilModeChange = onPencilModeChange,
@@ -238,6 +243,8 @@ internal fun systemControlEntries(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    readingModeEnabled: Boolean,
+    onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
@@ -261,6 +268,14 @@ internal fun systemControlEntries(
             contentDescription = "Миниатюры страниц",
             selected = showThumbnails,
             onClick = onToggleThumbnails,
+        )
+    }
+    val readingModeButton: @Composable () -> Unit = {
+        ToolToggleButton(
+            icon = Icons.AutoMirrored.Filled.MenuBook,
+            contentDescription = "Режим чтения",
+            selected = readingModeEnabled,
+            onClick = onToggleReadingMode,
         )
     }
     val shortcutsButton: @Composable () -> Unit = {
@@ -341,6 +356,7 @@ internal fun systemControlEntries(
         if (showPencilModeButton) add(WheelEntry("sys_pencil") { pencilModeButton() })
         add(WheelEntry("sys_magnifier") { magnifierButton() })
         add(WheelEntry("sys_thumbnails") { thumbnailsButton() })
+        add(WheelEntry("sys_reading") { readingModeButton() })
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
         add(WheelEntry("sys_export") { exportButton() })
         add(WheelEntry("sys_zoom_in") { zoomInButton() })
@@ -383,6 +399,8 @@ fun LandscapeToolRail(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    readingModeEnabled: Boolean,
+    onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
@@ -462,6 +480,8 @@ fun LandscapeToolRail(
             onZoomOut = onZoomOut,
             showThumbnails = showThumbnails,
             onToggleThumbnails = onToggleThumbnails,
+            readingModeEnabled = readingModeEnabled,
+            onToggleReadingMode = onToggleReadingMode,
             showPencilModeButton = showPencilModeButton,
             pencilModeEnabled = pencilModeEnabled,
             onPencilModeChange = onPencilModeChange,
