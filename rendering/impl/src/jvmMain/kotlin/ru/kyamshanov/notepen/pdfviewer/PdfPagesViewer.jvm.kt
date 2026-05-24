@@ -134,6 +134,16 @@ private const val SCROLL_H_CENTER_TOLERANCE_PX = 2f
 private const val RENDER_DEBOUNCE_MS = 300L
 private const val MAX_CACHE_ENTRIES = 6
 private const val MAX_RENDER_DIM_PX = 4000
+
+/**
+ * Нижний порог отношения «пиксели растра / пиксели на экране» (суперсэмплинг).
+ * На десктопе `density` == 1.0 при 100% масштабе ОС, поэтому без порога страница
+ * растеризуется 1:1 с экраном и у векторного текста нет запаса на сглаживание —
+ * он выглядит мыльным уже при открытии. 2× даёт резкий текст после
+ * high-quality даунскейла на отрисовке. Сверху ограничено [MAX_RENDER_DIM_PX],
+ * поэтому глубокий зум не затронут (тот же потолок 4000px).
+ */
+private const val MIN_RENDER_SUPERSAMPLE = 2.0f
 private const val BUFFER_PAGES = 1
 private const val ZOOM_BURST_RESET_PX = 8f
 
@@ -380,7 +390,8 @@ actual fun PdfPagesViewer(
                     if (cached != null && cached.renderedAtScalePercent >= snap.scalePercent) continue
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
-                    val desiredWidthPx = (basePageWidthPx * snap.scalePercent / 100f * density.density)
+                    val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
+                    val desiredWidthPx = (basePageWidthPx * snap.scalePercent / 100f * supersample)
                         .toInt()
                         .coerceAtLeast(1)
                     // Clamp обе оси с сохранением aspect: если высота, рассчитанная

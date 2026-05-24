@@ -58,6 +58,15 @@ private const val MAX_CACHE_ENTRIES = 6
  * allocation by ~36 % and shrinks the GPU draw cost on mobile.
  */
 private const val MAX_RENDER_DIM_PX = 2400
+
+/**
+ * Нижний порог отношения «пиксели растра / пиксели на экране» (суперсэмплинг).
+ * Без порога страница растеризуется ровно в размер показа, и даунскейл с
+ * дефолтным `FilterQuality.Low` смягчает текст. 2× даёт запас на сглаживание;
+ * на типичном планшете `density` уже ≥ 2, так что [maxOf] там обычно no-op, и
+ * лишней памяти при открытии не тратится. Сверху ограничено [MAX_RENDER_DIM_PX].
+ */
+private const val MIN_RENDER_SUPERSAMPLE = 2.0f
 private const val BUFFER_PAGES = 1
 private const val STALE_SCALE_RATIO_THRESHOLD = 2f
 
@@ -157,7 +166,8 @@ actual fun PdfPagesViewer(
                     if (cached != null && cached.renderedAtScalePercent >= snap.scalePercent) continue
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
-                    val targetWidthPx = (basePageWidthPx * snap.scalePercent / 100f * density.density)
+                    val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
+                    val targetWidthPx = (basePageWidthPx * snap.scalePercent / 100f * supersample)
                         .toInt()
                         .coerceAtLeast(1)
                         .coerceAtMost(MAX_RENDER_DIM_PX)

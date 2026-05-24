@@ -19,6 +19,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -399,6 +400,7 @@ fun DrawablePdfPage(
                 srcSize = IntSize(bitmap.width, bitmap.height),
                 dstOffset = pdfDstOffset,
                 dstSize = pdfDstSize,
+                filterQuality = FilterQuality.High,
             )
             drawRect(
                 color = indicatorColor.copy(alpha = 0.35f),

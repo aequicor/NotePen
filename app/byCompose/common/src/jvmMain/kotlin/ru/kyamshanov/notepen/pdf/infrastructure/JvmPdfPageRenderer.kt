@@ -7,6 +7,7 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfPageData
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import org.apache.pdfbox.text.PDFTextStripper
 import org.apache.pdfbox.text.TextPosition
+import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 
 /**
@@ -100,6 +101,9 @@ class JvmPdfPageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfPag
         }
         val target = BufferedImage(widthPx, heightPx, BufferedImage.TYPE_INT_ARGB)
         val g = target.createGraphics()
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BICUBIC)
+        g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.drawImage(source, 0, 0, widthPx, heightPx, null)
         g.dispose()
         return target.getRGB(0, 0, widthPx, heightPx, null, 0, widthPx)
