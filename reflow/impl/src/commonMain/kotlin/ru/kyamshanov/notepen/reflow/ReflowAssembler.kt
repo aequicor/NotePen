@@ -162,19 +162,22 @@ internal object ReflowAssembler {
     }
 
     /**
-     * Собирает [ReflowBlock.Table] из строк таблицы: колонки — по кластерам
-     * левых краёв сегментов, строки — по вертикальным зазорам (как абзацы),
-     * перенос ячейки склеивается в одну ячейку. `null`, если колонок < 2.
+     * Собирает [ReflowBlock.Table]: границы колонок выводятся из строк с явными
+     * зазорами, а ячейки режутся **по позиции каждого глифа** относительно этих
+     * границ — поэтому широкая ячейка, вплотную подошедшая к соседней колонке (без
+     * заметного зазора), всё равно делится правильно. Ряды — по вертикальным
+     * зазорам (как абзацы), перенос ячейки склеивается. `null`, если колонок < 2.
      */
     private fun buildTable(lines: List<Line>, pageWidthPt: Float, fontSize: Float): ReflowBlock.Table? {
         if (pageWidthPt <= 0f || fontSize <= 0f) return null
-        val columnGapPt = fontSize * COLUMN_GAP_FACTOR
-        val lineSegments = lines.map { it.toSegments(pageWidthPt, columnGapPt) }
-        val columns = columnCenters(lineSegments.flatten(), fontSize * COLUMN_ALIGN_FACTOR / pageWidthPt)
+        val tolNorm = fontSize * COLUMN_ALIGN_FACTOR / pageWidthPt
+        val gapSegments = lines.map { it.toSegments(pageWidthPt, fontSize * COLUMN_GAP_FACTOR) }
+        val columns = columnLefts(gapSegments.flatten(), tolNorm)
         if (columns.size < 2) return null
-        val rows = groupTableRows(lines, lineSegments, fontSize).map { rowSegments ->
+        val columnSegments = lines.map { it.toColumnSegments(columns, tolNorm) }
+        val rows = groupTableRows(lines, columnSegments, fontSize).map { rowSegments ->
             val cellSegments = List(columns.size) { mutableListOf<Segment>() }
-            rowSegments.forEach { segment -> cellSegments[nearestColumn(segment.leftNorm, columns)].add(segment) }
+            rowSegments.forEach { cellSegments[it.columnIndex].add(it.segment) }
             ReflowBlock.TableRow(
                 cells = cellSegments.map { segments ->
                     val built = buildCell(segments)
@@ -186,35 +189,22 @@ internal object ReflowAssembler {
     }
 
     /** Левые края колонок: кластеризует левые края сегментов с допуском [tolNorm]. */
-    private fun columnCenters(segments: List<Segment>, tolNorm: Float): List<Float> {
+    private fun columnLefts(segments: List<Segment>, tolNorm: Float): List<Float> {
         val lefts = segments.map { it.leftNorm }.sorted()
-        val centers = mutableListOf<Float>()
+        val edges = mutableListOf<Float>()
         for (left in lefts) {
-            if (centers.isEmpty() || left - centers.last() > tolNorm) centers += left
+            if (edges.isEmpty() || left - edges.last() > tolNorm) edges += left
         }
-        return centers
-    }
-
-    private fun nearestColumn(leftNorm: Float, columns: List<Float>): Int {
-        var best = 0
-        var bestDistance = abs(leftNorm - columns[0])
-        for (i in 1 until columns.size) {
-            val distance = abs(leftNorm - columns[i])
-            if (distance < bestDistance) {
-                bestDistance = distance
-                best = i
-            }
-        }
-        return best
+        return edges
     }
 
     /** Группирует строки таблицы в ряды по вертикальному зазору (перенос ячейки — тот же ряд). */
     private fun groupTableRows(
         lines: List<Line>,
-        lineSegments: List<List<Segment>>,
+        lineSegments: List<List<IndexedSegment>>,
         fontSize: Float,
-    ): List<List<Segment>> {
-        val rows = mutableListOf<MutableList<Segment>>()
+    ): List<List<IndexedSegment>> {
+        val rows = mutableListOf<MutableList<IndexedSegment>>()
         var prevBottom = 0f
         lines.forEachIndexed { index, line ->
             val isNewRow = rows.isEmpty() || (line.top - prevBottom) > fontSize * PARA_GAP_FACTOR
@@ -558,6 +548,28 @@ internal object ReflowAssembler {
             return segments
         }
 
+        /**
+         * Режет строку на сегменты по принадлежности глифов колонкам [columns]
+         * (новый сегмент — там, где глиф попадает в другую колонку). Так ячейки
+         * делятся по позиции, даже если между ними нет заметного зазора.
+         */
+        fun toColumnSegments(columns: List<Float>, tolNorm: Float): List<IndexedSegment> {
+            if (pieces.isEmpty()) return emptyList()
+            val segments = mutableListOf<IndexedSegment>()
+            var start = 0
+            var currentColumn = columnOf(pieces[0].bounds.left, columns, tolNorm)
+            for (i in 1 until pieces.size) {
+                val column = columnOf(pieces[i].bounds.left, columns, tolNorm)
+                if (column != currentColumn) {
+                    segments += IndexedSegment(segmentOf(start, i), currentColumn)
+                    start = i
+                    currentColumn = column
+                }
+            }
+            segments += IndexedSegment(segmentOf(start, pieces.size), currentColumn)
+            return segments
+        }
+
         private fun segmentOf(from: Int, to: Int): Segment =
             Segment(
                 pieces = pieces.subList(from, to),
@@ -571,6 +583,12 @@ internal object ReflowAssembler {
         val pieces: List<SourcePiece>,
         val spaceBefore: List<Boolean>,
         val leftNorm: Float,
+    )
+
+    /** Сегмент с известным индексом колонки. */
+    private data class IndexedSegment(
+        val segment: Segment,
+        val columnIndex: Int,
     )
 
     private sealed interface Item {
@@ -600,3 +618,12 @@ private val BULLET_CHARS = "•‣◦▪●·-*".toSet()
 
 /** Разделители после номера в нумерованном списке (`1.`, `2)`). */
 private const val NUMBER_MARKERS = ".)"
+
+/** Индекс колонки для левого края [left]: самая правая граница `columns`, не превышающая `left` (+ допуск). */
+private fun columnOf(left: Float, columns: List<Float>, tolNorm: Float): Int {
+    var column = 0
+    for (i in columns.indices) {
+        if (left + tolNorm >= columns[i]) column = i else break
+    }
+    return column
+}

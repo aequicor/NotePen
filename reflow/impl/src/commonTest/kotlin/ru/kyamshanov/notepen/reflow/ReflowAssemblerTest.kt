@@ -204,6 +204,20 @@ class ReflowAssemblerTest {
     }
 
     @Test
+    fun `wide first cell still splits at the column boundary learned from other rows`() {
+        // ряд 1: col0 почти вплотную к col1 (зазор < порога) — но граница колонки
+        // известна из соседних рядов, поэтому деление идёт по позиции глифа
+        val wide = "A".repeat(32) // правый край ~242pt при старте 50 и ширине символа 6
+        val glyphs =
+            line("K", top = 100f, startX = 50f) + line("V", top = 100f, startX = 250f) +
+                line(wide, top = 130f, startX = 50f) + line("Z", top = 130f, startX = 250f) +
+                line("M", top = 160f, startX = 50f) + line("N", top = 160f, startX = 250f)
+        val table = assertIs<ReflowBlock.Table>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals(3, table.rows.size)
+        assertEquals(listOf(wide, "Z"), table.rows[1].cells.map { it.text })
+    }
+
+    @Test
     fun `single aligned line is not a table`() {
         // одна «колоночная» строка — это не таблица (нужно ≥2 строки)
         val glyphs = line("Key", top = 100f, startX = 50f) + line("Value", top = 100f, startX = 300f)
