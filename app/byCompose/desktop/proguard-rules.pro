@@ -55,6 +55,14 @@
 # относительный lookup по-прежнему попадал в каталог с ресурсами.
 -keeppackagenames org.apache.fontbox.**
 -keeppackagenames org.apache.pdfbox.**
+# JBIG2-кодированные изображения (типичны для сканированных PDF) декодирует
+# ImageIO-плагин org.apache.pdfbox:jbig2-imageio. Он подключён как runtimeOnly и
+# регистрируется ИСКЛЮЧИТЕЛЬНО через META-INF/services/javax.imageio.spi.ImageReaderSpi
+# — статических ссылок на JBIG2ImageReaderSpi в коде нет (как у sqlite-драйвера выше).
+# Поэтому ProGuard вырезает/обфусцирует класс, а файл сервиса по-прежнему указывает на
+# исходное имя → ImageIO падает с "Provider org.apache.pdfbox.jbig2.JBIG2ImageReaderSpi
+# not found" при открытии такого PDF. Keep сохраняет SPI и декодер под исходными именами.
+-keep class org.apache.pdfbox.jbig2.** { *; }
 -keep class ru.kyamshanov.notepen.sync.domain.model.** { *; }
 -keep class ru.kyamshanov.notepen.annotation.domain.model.** { *; }
 -keepclassmembers class ru.kyamshanov.notepen.** {
