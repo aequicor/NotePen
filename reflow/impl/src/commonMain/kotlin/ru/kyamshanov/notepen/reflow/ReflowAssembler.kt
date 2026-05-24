@@ -4,6 +4,7 @@ import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
+import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import kotlin.math.abs
 
 /**
@@ -12,10 +13,17 @@ import kotlin.math.abs
  * здесь, чтобы покрываться unit-тестами и переиспользоваться обоими
  * экстракторами (PDFBox на JVM, PdfBox-Android на Android).
  *
+ * Геометрия группировки (зазоры строк/абзацев) считается в **пунктах PDF**
+ * (как и `bodyFont`), а итоговые [SourceSpan.bounds] / [ReflowBlock.Figure]
+ * нормализуются в `[0..1]` относительно страницы — одно и то же из глифа, но в
+ * разных системах координат.
+ *
  * Этапы:
  *  1. классификация типа содержимого ([classify]);
  *  2. для каждой страницы — детекция колонок, группировка глифов в строки,
- *     строк в абзацы/заголовки, вставка нетекстовых областей как фигур.
+ *     строк в абзацы/заголовки, вставка нетекстовых областей как фигур;
+ *  3. провенанс: на каждый исходный ран глифов — [SourceSpan] с диапазоном
+ *     символов в итоговом тексте блока.
  */
 internal object ReflowAssembler {
 
@@ -82,11 +90,11 @@ internal object ReflowAssembler {
             val colGlyphs = page.glyphs.filter { col.contains(centerX(it.rect)) }
             val colImages = page.images.filter { col.contains(centerX(it)) }
             val items = buildList {
-                groupLines(colGlyphs, bodyFont).forEach { add(Item.Text(it)) }
+                groupLines(colGlyphs, bodyFont, page).forEach { add(Item.Text(it)) }
                 colImages.forEach { add(Item.Image(it)) }
             }.sortedBy { it.top }
 
-            val builder = BlockBuilder(page.pageIndex, bodyFont)
+            val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont)
             items.forEach { item ->
                 when (item) {
                     is Item.Text -> builder.addLine(item.line)
@@ -98,7 +106,7 @@ internal object ReflowAssembler {
         return result
     }
 
-    private fun groupLines(glyphs: List<RawGlyph>, bodyFont: Float): List<Line> {
+    private fun groupLines(glyphs: List<RawGlyph>, bodyFont: Float, page: RawPage): List<Line> {
         if (glyphs.isEmpty()) return emptyList()
         val reference = if (bodyFont > 0f) bodyFont else medianFontSize(glyphs)
         val tolerance = reference * LINE_TOLERANCE_FRAC
@@ -113,24 +121,35 @@ internal object ReflowAssembler {
                 lines.last() += glyph
             }
         }
-        return lines.map { buildLine(it) }
+        return lines.map { buildLine(it, page) }
     }
 
-    private fun buildLine(glyphs: List<RawGlyph>): Line {
+    /**
+     * Строит [Line] из глифов одной строки: каждый глиф становится
+     * [SourcePiece] с нормализованным прямоугольником; [Line.spaceBefore]
+     * помечает позиции, перед которыми по горизонтальному зазору нужен пробел.
+     * Геометрия строки ([Line.top]/[Line.bottom]/[Line.fontSize]) остаётся в
+     * пунктах для последующей группировки в абзацы.
+     */
+    private fun buildLine(glyphs: List<RawGlyph>, page: RawPage): Line {
         val sorted = glyphs.sortedBy { it.rect.left }
         val fontSize = medianFontSize(sorted)
-        val sb = StringBuilder()
+        val pieces = ArrayList<SourcePiece>(sorted.size)
+        val spaceBefore = ArrayList<Boolean>(sorted.size)
         var prevRight: Float? = null
         for (glyph in sorted) {
             val gap = prevRight?.let { glyph.rect.left - it }
-            if (gap != null && gap > fontSize * SPACE_FACTOR && sb.isNotEmpty() && !sb.last().isWhitespace()) {
-                sb.append(' ')
-            }
-            sb.append(glyph.text)
+            spaceBefore += gap != null && gap > fontSize * SPACE_FACTOR && pieces.isNotEmpty()
+            pieces += SourcePiece(
+                text = glyph.text,
+                pageIndex = page.pageIndex,
+                bounds = glyph.rect.normalised(page.widthPt, page.heightPt),
+            )
             prevRight = glyph.rect.right
         }
         return Line(
-            text = sb.toString(),
+            pieces = pieces,
+            spaceBefore = spaceBefore,
             top = sorted.minOf { it.rect.top },
             bottom = sorted.maxOf { it.rect.bottom },
             fontSize = fontSize,
@@ -185,12 +204,26 @@ internal object ReflowAssembler {
 
     private fun centerX(rect: ReflowRect): Float = (rect.left + rect.right) / 2f
 
+    /** Нормализует прямоугольник из пунктов в доли `[0..1]` страницы. */
+    private fun ReflowRect.normalised(widthPt: Float, heightPt: Float): ReflowRect =
+        if (widthPt <= 0f || heightPt <= 0f) {
+            this
+        } else {
+            ReflowRect(left / widthPt, top / heightPt, right / widthPt, bottom / heightPt)
+        }
+
     /**
      * Накопитель блоков одной колонки: преобразует поток строк/изображений в
      * [ReflowBlock.Heading] / [ReflowBlock.Paragraph] / [ReflowBlock.Figure],
-     * склеивая строки в абзацы и снимая переносы по дефису.
+     * склеивая строки в абзацы, снимая переносы по дефису и собирая провенанс
+     * ([SourceSpan]) в координатах итогового текста блока.
      */
-    private class BlockBuilder(private val pageIndex: Int, private val bodyFont: Float) {
+    private class BlockBuilder(
+        private val pageIndex: Int,
+        private val widthPt: Float,
+        private val heightPt: Float,
+        private val bodyFont: Float,
+    ) {
 
         private val blocks = mutableListOf<ReflowBlock>()
         private val pending = mutableListOf<Line>()
@@ -200,7 +233,7 @@ internal object ReflowAssembler {
 
         fun addImage(rect: ReflowRect) {
             flush()
-            blocks += ReflowBlock.Figure(pageIndex, rect)
+            blocks += ReflowBlock.Figure(pageIndex, rect.normalised(widthPt, heightPt))
         }
 
         fun addLine(line: Line) {
@@ -242,46 +275,94 @@ internal object ReflowAssembler {
 
         private fun flush() {
             if (pending.isEmpty()) return
-            if (pendingHeadingLevel > 0) {
-                val text = pending.joinToString(" ") { it.text.trim() }.trim()
-                if (text.isNotEmpty()) blocks += ReflowBlock.Heading(text, pendingHeadingLevel)
-            } else {
-                val text = joinParagraph(pending)
-                if (text.isNotEmpty()) blocks += ReflowBlock.Paragraph(text)
+            val built = if (pendingHeadingLevel > 0) buildHeading(pending) else buildParagraph(pending)
+            if (built.text.isNotEmpty()) {
+                blocks += if (pendingHeadingLevel > 0) {
+                    ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
+                } else {
+                    ReflowBlock.Paragraph(built.text, built.source)
+                }
             }
             pending.clear()
             pendingHeadingLevel = 0
         }
 
-        private fun joinParagraph(lines: List<Line>): String {
+        /** Абзац: межстрочный пробел, со снятием переноса по дефису. */
+        private fun buildParagraph(lines: List<Line>): BuiltText {
             val sb = StringBuilder()
+            val spans = mutableListOf<SourceSpan>()
             for (line in lines) {
-                val text = line.text.trim()
-                if (text.isEmpty()) continue
-                if (sb.isEmpty()) {
-                    sb.append(text)
-                    continue
+                if (line.pieces.isEmpty()) continue
+                if (sb.isNotEmpty()) {
+                    if (isSoftHyphen(sb) && line.startsLowercase()) {
+                        sb.deleteAt(sb.length - 1)
+                        shrinkLastSpan(spans)
+                    } else {
+                        sb.append(' ')
+                    }
                 }
-                if (isSoftHyphen(sb) && text.first().isLowerCase()) {
-                    sb.deleteAt(sb.length - 1)
-                    sb.append(text)
-                } else {
-                    sb.append(' ').append(text)
-                }
+                appendPieces(line, sb, spans)
             }
-            return sb.toString()
+            return BuiltText(sb.toString(), spans.filter { it.charStart < it.charEnd })
+        }
+
+        /** Заголовок: всегда межстрочный пробел, без логики переноса. */
+        private fun buildHeading(lines: List<Line>): BuiltText {
+            val sb = StringBuilder()
+            val spans = mutableListOf<SourceSpan>()
+            for (line in lines) {
+                if (line.pieces.isEmpty()) continue
+                if (sb.isNotEmpty()) sb.append(' ')
+                appendPieces(line, sb, spans)
+            }
+            return BuiltText(sb.toString(), spans.filter { it.charStart < it.charEnd })
+        }
+
+        /**
+         * Дописывает раны строки в [sb], вставляя внутристрочные пробелы по
+         * [Line.spaceBefore], и фиксирует [SourceSpan] на каждый ран. Разделители
+         * (пробелы) не покрываются ни одним спаном.
+         */
+        private fun appendPieces(line: Line, sb: StringBuilder, spans: MutableList<SourceSpan>) {
+            line.pieces.forEachIndexed { index, piece ->
+                if (index > 0 && line.spaceBefore[index]) sb.append(' ')
+                val start = sb.length
+                sb.append(piece.text)
+                spans += SourceSpan(piece.pageIndex, start, sb.length, piece.bounds)
+            }
+        }
+
+        /** Укорачивает последний спан на 1 символ (снятый дефис в конце буфера). */
+        private fun shrinkLastSpan(spans: MutableList<SourceSpan>) {
+            if (spans.isEmpty()) return
+            val last = spans.removeAt(spans.size - 1)
+            spans += last.copy(charEnd = last.charEnd - 1)
         }
 
         private fun isSoftHyphen(sb: StringBuilder): Boolean =
             sb.length >= 2 && sb.last() == '-' && sb[sb.length - 2].isLetter()
     }
 
-    private data class Line(
+    private data class SourcePiece(
         val text: String,
+        val pageIndex: Int,
+        val bounds: ReflowRect,
+    )
+
+    private data class BuiltText(
+        val text: String,
+        val source: List<SourceSpan>,
+    )
+
+    private data class Line(
+        val pieces: List<SourcePiece>,
+        val spaceBefore: List<Boolean>,
         val top: Float,
         val bottom: Float,
         val fontSize: Float,
-    )
+    ) {
+        fun startsLowercase(): Boolean = pieces.firstOrNull()?.text?.firstOrNull()?.isLowerCase() == true
+    }
 
     private class ColumnRange(private val left: Float, private val right: Float) {
         fun contains(x: Float): Boolean = x >= left && x < right

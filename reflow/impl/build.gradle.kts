@@ -19,6 +19,7 @@ kotlin {
     sourceSets {
         commonMain.dependencies {
             implementation(projects.reflow.api)
+            implementation(projects.drawing.api)
             implementation(libs.kotlin.logging.common)
             implementation(libs.kotlinx.coroutines.core)
         }

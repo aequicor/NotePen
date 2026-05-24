@@ -78,7 +78,11 @@ class ReflowAssemblerTest {
         assertEquals(3, blocks.size)
         assertEquals("before image", (blocks[0] as ReflowBlock.Paragraph).text)
         val figure = assertIs<ReflowBlock.Figure>(blocks[1])
-        assertEquals(image, figure.bounds)
+        // bounds нормализованы в [0..1] относительно страницы 600×800
+        assertAlmostEquals(50f / 600f, figure.bounds.left)
+        assertAlmostEquals(130f / 800f, figure.bounds.top)
+        assertAlmostEquals(300f / 600f, figure.bounds.right)
+        assertAlmostEquals(180f / 800f, figure.bounds.bottom)
         assertEquals("after image", (blocks[2] as ReflowBlock.Paragraph).text)
     }
 
@@ -89,37 +93,5 @@ class ReflowAssemblerTest {
         val blocks = ReflowAssembler.assemble(listOf(page(left + right))).blocks
         val firstParagraph = blocks.filterIsInstance<ReflowBlock.Paragraph>().first().text
         assertTrue(firstParagraph.startsWith("left column"), "expected left column first, got: $firstParagraph")
-    }
-
-    private fun page(glyphs: List<RawGlyph>, images: List<ReflowRect> = emptyList()): RawPage =
-        RawPage(pageIndex = 0, widthPt = 600f, heightPt = 800f, glyphs = glyphs, images = images)
-
-    /**
-     * Раскладывает строку в глифы по символам: пробел сдвигает курсор без
-     * глифа (создавая межсловный зазор), остальные символы получают
-     * прямоугольник шириной [charWidth].
-     */
-    private fun line(
-        text: String,
-        top: Float,
-        fontSize: Float = 10f,
-        startX: Float = 50f,
-        charWidth: Float = 6f,
-    ): List<RawGlyph> {
-        var x = startX
-        val glyphs = mutableListOf<RawGlyph>()
-        for (ch in text) {
-            if (ch == ' ') {
-                x += charWidth
-                continue
-            }
-            glyphs += RawGlyph(
-                text = ch.toString(),
-                rect = ReflowRect(left = x, top = top, right = x + charWidth, bottom = top + fontSize),
-                fontSizePt = fontSize,
-            )
-            x += charWidth
-        }
-        return glyphs
     }
 }
