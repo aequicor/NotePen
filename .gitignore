@@ -65,3 +65,7 @@ bin/
 /.claude/worktrees/
 /org/
 /META-INF/
+
+# Compose Desktop packaging defaults (generated templates, regenerated on demand)
+/default-compose-desktop-*
+/default-entitlements.plist
