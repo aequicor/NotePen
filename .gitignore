@@ -63,3 +63,5 @@ bin/
 /.claude/settings.local.json
 .aikit/bin/
 /.claude/worktrees/
+/org/
+/META-INF/
