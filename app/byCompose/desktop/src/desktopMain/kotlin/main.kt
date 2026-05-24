@@ -146,14 +146,6 @@ fun main(args: Array<String>) {
     args.firstOrNull { it.endsWith(".pdf", ignoreCase = true) }
         ?.let { OpenFileRouter.submit(java.io.File(it).absolutePath) }
 
-    // On Windows, AWT DropTarget registration (via dragAndDropTarget) conflicts with
-    // Skia's DirectX/ANGLE swap chain and breaks ImageBitmap rendering.
-    // Switching to OpenGL avoids the conflict while keeping hardware acceleration.
-    // macOS doesn't support OPENGL via Skiko (Metal only), so scope this to Windows.
-    if (System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true)) {
-        System.setProperty("skiko.renderApi", "OPENGL")
-    }
-
     // Must be set BEFORE any AWT class is loaded — Taskbar.isTaskbarSupported() already
     // initialises AWT Toolkit, so this has to come first.
     // The system property is read by the macOS AWT port when it first touches NSApplication
@@ -505,6 +497,16 @@ fun main(args: Array<String>) {
                     titleBarStartInset = setup.startInset
                     titleBarEndInset = setup.endInset
                 }
+                // setCustomTitleBar drops the window out of the maximized placement it
+                // was created with, yet windowState stays stale-Maximized — so simply
+                // re-assigning windowState.placement is a no-op and Compose never
+                // re-applies it. Maximize the AWT frame directly, then bring it to
+                // front. (Raw extendedState was unsafe before because it recreated the
+                // GPU swap chain while an AWT DropTarget was registered, dropping
+                // thumbnail ImageBitmaps — but Windows DnD, and its DropTarget, is now
+                // disabled, so that conflict is gone.)
+                composeWindow.extendedState = java.awt.Frame.MAXIMIZED_BOTH
+                composeWindow.toFront()
             }
 
             // Attach the platform-specific tablet input after the window peer
