@@ -77,7 +77,12 @@ internal object ReflowAssembler {
     private fun buildPageBlocks(page: RawPage, bodyFont: Float): List<ReflowBlock> {
         val items = buildList {
             groupLines(page.glyphs, bodyFont, page).forEach { add(Item.Text(it)) }
-            page.images.forEach { add(Item.Image(it)) }
+            page.images
+                .filter {
+                    !FigureGeometry.isFullPage(it, page.widthPt, page.heightPt) &&
+                        !FigureGeometry.isTooSmall(it, page.widthPt, page.heightPt)
+                }
+                .forEach { add(Item.Image(it)) }
         }.sortedBy { it.top }
 
         val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont)

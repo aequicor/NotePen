@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onSizeChanged
@@ -109,6 +110,7 @@ private const val PANEL_TOOLBAR_ZOOM_STEP_OUT = 1f / PANEL_TOOLBAR_ZOOM_STEP_IN
 private val PANEL_REPLAY_DEADLINE = 10.seconds
 private const val PANEL_AUTOSAVE_DEBOUNCE = 2_000L
 private const val PANEL_HIGH_RES_DIM_PX = 4000
+private const val FIGURE_PAGE_RENDER_WIDTH_PX = 1600
 private const val PANEL_SIDEBAR_ANIM_MS = 220
 
 /**
@@ -220,6 +222,18 @@ fun EditorPanel(
     // ---- Reading (reflow) mode -------------------------------------------
     val reflowReadingUseCase = remember(reflowExtractor) { BuildReflowReadingUseCase(reflowExtractor) }
     val reflowListState = remember(pdfState) { LazyListState() }
+    // Кэш растеризованных страниц для врезок-картинок reflow (одна страница — много фигур).
+    val figurePageCache = remember(pdfState) { mutableMapOf<Int, ImageBitmap>() }
+    val renderFigurePage: suspend (Int) -> ImageBitmap? = renderFig@{ pageIndex ->
+        figurePageCache[pageIndex]?.let { return@renderFig it }
+        val doc = pdfState.pdfDocument ?: return@renderFig null
+        val info = doc.info.pages.getOrNull(pageIndex) ?: return@renderFig null
+        val width = FIGURE_PAGE_RENDER_WIDTH_PX
+        val height = (width / (info.aspectRatio.takeIf { it > 0f } ?: 1f)).toInt().coerceAtLeast(1)
+        runCatching { renderer.renderPage(doc, pageIndex, width, height).toImageBitmap() }
+            .getOrNull()
+            ?.also { figurePageCache[pageIndex] = it }
+    }
     var readingMode by remember(pdfState) { mutableStateOf(false) }
     var reflowReading by remember(pdfState) { mutableStateOf<ReflowReading?>(null) }
     LaunchedEffect(readingMode, pdfState) {
@@ -1084,6 +1098,7 @@ fun EditorPanel(
                         modifier = Modifier.fillMaxSize(),
                         highlights = reading.highlights,
                         listState = reflowListState,
+                        renderPage = renderFigurePage,
                     )
                 } else {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {

@@ -1,9 +1,15 @@
 package ru.kyamshanov.notepen.reflow
 
 import android.content.Context
+import android.graphics.Path
+import android.graphics.PointF
 import android.net.Uri
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.contentstream.PDFGraphicsStreamEngine
+import com.tom_roush.pdfbox.cos.COSName
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPage
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImage
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.CoroutineDispatcher
@@ -22,9 +28,9 @@ import java.io.File
  * [ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader]:
  * абсолютный путь, `file://…` и `content://…` URI.
  *
- * Сборка делегируется платформенно-нейтральному [ReflowAssembler]. Извлечение
- * нетекстовых областей ([ru.kyamshanov.notepen.reflow.api.ReflowBlock.Figure])
- * пока не реализовано — это следующий инкремент.
+ * Сборка делегируется платформенно-нейтральному [ReflowAssembler]. Встроенные
+ * растровые изображения собираются через [PDFGraphicsStreamEngine] как
+ * [ru.kyamshanov.notepen.reflow.api.ReflowBlock.Figure].
  *
  * @param context контекст приложения (для ContentResolver и инициализации шрифтов PdfBox-Android)
  * @param ioDispatcher диспетчер для блокирующего парсинга; не должен быть Main-диспетчером
@@ -64,7 +70,8 @@ class AndroidPdfReflowExtractor(
     }
 
     private fun extractPage(document: PDDocument, pageIndex: Int): RawPage {
-        val box = document.getPage(pageIndex).mediaBox
+        val page = document.getPage(pageIndex)
+        val box = page.mediaBox
         val glyphs = mutableListOf<RawGlyph>()
         val stripper = object : PDFTextStripper() {
             override fun writeString(text: String, textPositions: List<TextPosition>) {
@@ -80,9 +87,14 @@ class AndroidPdfReflowExtractor(
             widthPt = box.width,
             heightPt = box.height,
             glyphs = glyphs,
-            images = emptyList(),
+            images = collectImageRegions(page),
         )
     }
+
+    /** Прямоугольники встроенных растровых изображений страницы (в пунктах, top-left). */
+    private fun collectImageRegions(page: PDPage): List<ReflowRect> =
+        runCatching { ImageRegionCollector(page).also { it.processPage(page) }.regions }
+            .getOrDefault(emptyList())
 
     private fun TextPosition.toGlyph(): RawGlyph? {
         val text = unicode?.takeIf { it.isNotEmpty() } ?: return null
@@ -97,6 +109,41 @@ class AndroidPdfReflowExtractor(
             fontSizePt = fontSizeInPt,
             spaceWidthPt = widthOfSpace,
         )
+    }
+
+    /**
+     * Stream-engine PdfBox-Android, собирающий размещение встроенных растровых
+     * изображений (через CTM в [drawImage]); прочие операции игнорируются.
+     */
+    private class ImageRegionCollector(page: PDPage) : PDFGraphicsStreamEngine(page) {
+        val regions = mutableListOf<ReflowRect>()
+        private val pageHeight = page.mediaBox.height
+
+        override fun drawImage(pdImage: PDImage) {
+            val m = graphicsState.currentTransformationMatrix
+            regions += FigureGeometry.imageRectFromCtm(
+                scaleX = m.scaleX,
+                shearY = m.shearY,
+                shearX = m.shearX,
+                scaleY = m.scaleY,
+                translateX = m.translateX,
+                translateY = m.translateY,
+                pageHeightPt = pageHeight,
+            )
+        }
+
+        override fun appendRectangle(p0: PointF, p1: PointF, p2: PointF, p3: PointF) {}
+        override fun clip(windingRule: Path.FillType) {}
+        override fun moveTo(x: Float, y: Float) {}
+        override fun lineTo(x: Float, y: Float) {}
+        override fun curveTo(x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float) {}
+        override fun getCurrentPoint(): PointF = PointF(0f, 0f)
+        override fun closePath() {}
+        override fun endPath() {}
+        override fun strokePath() {}
+        override fun fillPath(windingRule: Path.FillType) {}
+        override fun fillAndStrokePath(windingRule: Path.FillType) {}
+        override fun shadingFill(shadingName: COSName) {}
     }
 
     private companion object {

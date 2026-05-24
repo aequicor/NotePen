@@ -23,6 +23,13 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.sp
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
@@ -37,14 +44,16 @@ import ru.kyamshanov.notepen.reflow.api.TextAnchor
  * от привязанных к координатам страницы штрихов. Обычно [highlights] получают
  * из `StrokeTextMapper.anchorsFor` по рукописным аннотациям документа.
  *
- * Картинки ([ReflowBlock.Figure]) пока показываются плейсхолдером — извлечение
- * их пикселей в reflow ещё не реализовано.
+ * Картинки ([ReflowBlock.Figure]) рендерятся как кроп исходной страницы, если
+ * передан [renderPage]; иначе — плейсхолдер.
  *
  * @param document документ для отображения
  * @param modifier модификатор корневого контейнера
  * @param highlights диапазоны-выделения по блокам
  * @param settings типографика и палитра
  * @param listState состояние прокрутки списка блоков (для перехода к нужному блоку)
+ * @param renderPage растеризатор страницы в [ImageBitmap] по нулевому индексу
+ *   (для отрисовки врезок-картинок); `null` — показывать плейсхолдер
  */
 @Composable
 public fun ReflowReader(
@@ -53,6 +62,7 @@ public fun ReflowReader(
     highlights: List<TextAnchor> = emptyList(),
     settings: ReflowReaderSettings = ReflowReaderSettings(),
     listState: LazyListState = rememberLazyListState(),
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)? = null,
 ) {
     val anchorsByBlock = remember(highlights) { highlights.groupBy { it.blockIndex } }
     Box(modifier = modifier.fillMaxSize().background(settings.background)) {
@@ -66,14 +76,19 @@ public fun ReflowReader(
             verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
         ) {
             itemsIndexed(document.blocks) { index, block ->
-                ReflowBlockView(block, anchorsByBlock[index].orEmpty(), settings)
+                ReflowBlockView(block, anchorsByBlock[index].orEmpty(), settings, renderPage)
             }
         }
     }
 }
 
 @Composable
-private fun ReflowBlockView(block: ReflowBlock, anchors: List<TextAnchor>, settings: ReflowReaderSettings) {
+private fun ReflowBlockView(
+    block: ReflowBlock,
+    anchors: List<TextAnchor>,
+    settings: ReflowReaderSettings,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+) {
     when (block) {
         is ReflowBlock.Heading -> BasicText(
             text = block.text.withHighlights(anchors, settings.highlightColor),
@@ -85,7 +100,46 @@ private fun ReflowBlockView(block: ReflowBlock, anchors: List<TextAnchor>, setti
             style = settings.paragraphStyle(),
         )
 
-        is ReflowBlock.Figure -> FigurePlaceholder(settings)
+        is ReflowBlock.Figure -> FigureView(block, settings, renderPage)
+    }
+}
+
+/**
+ * Рисует врезку-картинку как кроп исходной страницы: лениво растеризует страницу
+ * через [renderPage] (только когда блок попал во вьюпорт LazyColumn) и рисует её
+ * подобласть по [ReflowBlock.Figure.bounds]. Пока грузится / без [renderPage] —
+ * плейсхолдер.
+ */
+@Composable
+private fun FigureView(
+    figure: ReflowBlock.Figure,
+    settings: ReflowReaderSettings,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+) {
+    if (renderPage == null) {
+        FigurePlaceholder(settings)
+        return
+    }
+    val pageBitmap by produceState<ImageBitmap?>(initialValue = null, figure.pageIndex) {
+        value = renderPage(figure.pageIndex)
+    }
+    val bitmap = pageBitmap
+    if (bitmap == null) {
+        FigurePlaceholder(settings)
+        return
+    }
+    val bounds = figure.bounds
+    val srcLeft = (bounds.left * bitmap.width).toInt().coerceIn(0, bitmap.width - 1)
+    val srcTop = (bounds.top * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
+    val srcWidth = (bounds.width * bitmap.width).toInt().coerceIn(1, bitmap.width - srcLeft)
+    val srcHeight = (bounds.height * bitmap.height).toInt().coerceIn(1, bitmap.height - srcTop)
+    Canvas(modifier = Modifier.fillMaxWidth().aspectRatio(srcWidth.toFloat() / srcHeight.toFloat())) {
+        drawImage(
+            image = bitmap,
+            srcOffset = IntOffset(srcLeft, srcTop),
+            srcSize = IntSize(srcWidth, srcHeight),
+            dstSize = IntSize(size.width.toInt(), size.height.toInt()),
+        )
     }
 }
 

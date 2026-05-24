@@ -3,13 +3,18 @@ package ru.kyamshanov.notepen.reflow
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.apache.pdfbox.Loader
+1import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine
+import org.apache.pdfbox.cos.COSName
 import org.apache.pdfbox.pdmodel.PDDocument
+import org.apache.pdfbox.pdmodel.PDPage
+import org.apache.pdfbox.pdmodel.graphics.image.PDImage
 import org.apache.pdfbox.text.PDFTextStripper
 import org.apache.pdfbox.text.TextPosition
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
+import java.awt.geom.Point2D
 import java.io.File
 
 /**
@@ -19,8 +24,9 @@ import java.io.File
  * сборка в заголовки/абзацы и порядок чтения делегируются платформенно-
  * нейтральному [ReflowAssembler].
  *
- * Извлечение нетекстовых областей ([ru.kyamshanov.notepen.reflow.api.ReflowBlock.Figure])
- * пока не реализовано — `images` страниц пусты; это следующий инкремент.
+ * Встроенные растровые изображения собираются через [PDFGraphicsStreamEngine]
+ * как [ru.kyamshanov.notepen.reflow.api.ReflowBlock.Figure]. Векторные таблицы
+ * и формулы как изображения не детектируются.
  *
  * @param ioDispatcher диспетчер для блокирующего парсинга; не должен быть Main-диспетчером
  */
@@ -46,7 +52,8 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
     }
 
     private fun extractPage(document: PDDocument, pageIndex: Int): RawPage {
-        val box = document.getPage(pageIndex).mediaBox
+        val page = document.getPage(pageIndex)
+        val box = page.mediaBox
         val glyphs = mutableListOf<RawGlyph>()
         val stripper = object : PDFTextStripper() {
             override fun writeString(text: String, textPositions: List<TextPosition>) {
@@ -62,9 +69,14 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
             widthPt = box.width,
             heightPt = box.height,
             glyphs = glyphs,
-            images = emptyList(),
+            images = collectImageRegions(page),
         )
     }
+
+    /** Прямоугольники встроенных растровых изображений страницы (в пунктах, top-left). */
+    private fun collectImageRegions(page: PDPage): List<ReflowRect> =
+        runCatching { ImageRegionCollector(page).also { it.processPage(page) }.regions }
+            .getOrDefault(emptyList())
 
     private fun TextPosition.toGlyph(): RawGlyph? {
         val text = unicode?.takeIf { it.isNotEmpty() } ?: return null
@@ -79,6 +91,41 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
             fontSizePt = fontSizeInPt,
             spaceWidthPt = widthOfSpace,
         )
+    }
+
+    /**
+     * Stream-engine, собирающий размещение встроенных растровых изображений
+     * (через CTM в [drawImage]); прочие операции рисования игнорируются.
+     */
+    private class ImageRegionCollector(page: PDPage) : PDFGraphicsStreamEngine(page) {
+        val regions = mutableListOf<ReflowRect>()
+        private val pageHeight = page.mediaBox.height
+
+        override fun drawImage(pdImage: PDImage) {
+            val m = graphicsState.currentTransformationMatrix
+            regions += FigureGeometry.imageRectFromCtm(
+                scaleX = m.scaleX,
+                shearY = m.shearY,
+                shearX = m.shearX,
+                scaleY = m.scaleY,
+                translateX = m.translateX,
+                translateY = m.translateY,
+                pageHeightPt = pageHeight,
+            )
+        }
+
+        override fun appendRectangle(p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D) {}
+        override fun clip(windingRule: Int) {}
+        override fun moveTo(x: Float, y: Float) {}
+        override fun lineTo(x: Float, y: Float) {}
+        override fun curveTo(x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float) {}
+        override fun getCurrentPoint(): Point2D = Point2D.Float(0f, 0f)
+        override fun closePath() {}
+        override fun endPath() {}
+        override fun strokePath() {}
+        override fun fillPath(windingRule: Int) {}
+        override fun fillAndStrokePath(windingRule: Int) {}
+        override fun shadingFill(shadingName: COSName) {}
     }
 
     private companion object {
