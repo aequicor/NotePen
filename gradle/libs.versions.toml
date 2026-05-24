@@ -15,6 +15,7 @@ android-minSdk = "24"
 kotlin-logging = "7.0.13"
 slf4j = "2.0.17"
 apache-pdfbox = "3.0.5"
+pdfbox-android = "2.0.27.0"
 jna = "5.14.0"
 jbr-api = "1.9.0"
 androidx-graphics-core = "1.0.3"
@@ -43,6 +44,7 @@ slf4j-api = { module = "org.slf4j:slf4j-api", version.ref = "slf4j" }
 slf4j-simple = { module = "org.slf4j:slf4j-simple", version.ref = "slf4j" }
 apache-pdfbox = { module = "org.apache.pdfbox:pdfbox", version.ref = "apache-pdfbox" }
 apache-pdfbox-jbig2 = { module = "org.apache.pdfbox:jbig2-imageio", version = "3.0.4" }
+pdfbox-android = { module = "com.tom-roush:pdfbox-android", version.ref = "pdfbox-android" }
 ktor-server-core = { module = "io.ktor:ktor-server-core-jvm", version.ref = "ktor" }
 ktor-server-cio = { module = "io.ktor:ktor-server-cio-jvm", version.ref = "ktor" }
 ktor-server-websockets = { module = "io.ktor:ktor-server-websockets-jvm", version.ref = "ktor" }
