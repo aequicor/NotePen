@@ -33,7 +33,7 @@ actual class FilePicker {
 
     actual suspend fun pickDocument(): String? {
         val activeLauncher = launcher ?: return null
-        activeLauncher.launch(arrayOf("application/pdf", "image/png", "image/jpeg"))
+        activeLauncher.launch(arrayOf("application/pdf", "image/png", "image/jpeg", "application/epub+zip"))
         return resultChannel.receive()
     }
 }

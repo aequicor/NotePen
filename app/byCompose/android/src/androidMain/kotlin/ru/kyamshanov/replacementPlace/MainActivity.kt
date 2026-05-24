@@ -40,6 +40,8 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroi
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
+import ru.kyamshanov.notepen.epub.AndroidEpubToPdfConverter
+import ru.kyamshanov.notepen.epub.EpubAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImageDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImagePageRenderer
@@ -88,10 +90,13 @@ class MainActivity : ComponentActivity() {
         }
         filePicker.init(filePickerLauncher)
 
-        val pdfDocumentLoader = AndroidDocumentLoader(
-            context = context,
-            pdfLoader = AndroidPdfDocumentLoader(context, Dispatchers.IO),
-            imageLoader = AndroidImageDocumentLoader(context, Dispatchers.IO),
+        val pdfDocumentLoader = EpubAwarePdfDocumentLoader(
+            delegate = AndroidDocumentLoader(
+                context = context,
+                pdfLoader = AndroidPdfDocumentLoader(context, Dispatchers.IO),
+                imageLoader = AndroidImageDocumentLoader(context, Dispatchers.IO),
+            ),
+            converter = AndroidEpubToPdfConverter(context, Dispatchers.IO),
         )
         val pdfPageRenderer = AndroidPageRenderer(
             pdfRenderer = AndroidPdfPageRenderer(Dispatchers.IO),

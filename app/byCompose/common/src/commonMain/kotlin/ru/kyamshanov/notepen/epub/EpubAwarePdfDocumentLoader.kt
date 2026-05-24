@@ -1,0 +1,24 @@
+package ru.kyamshanov.notepen.epub
+
+import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
+import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
+
+/**
+ * [PdfDocumentLoader]-декоратор, прозрачно открывающий EPUB: если путь
+ * указывает на EPUB, файл сначала верстается в PDF через [converter], а затем
+ * открывается базовым [delegate]; для всех прочих форматов вызов проксируется
+ * без изменений.
+ *
+ * @param delegate базовый загрузчик (PDF/изображения)
+ * @param converter конвертер EPUB → PDF
+ */
+class EpubAwarePdfDocumentLoader(
+    private val delegate: PdfDocumentLoader,
+    private val converter: EpubToPdfConverter,
+) : PdfDocumentLoader {
+
+    override suspend fun load(path: String): PdfDocument {
+        val effectivePath = if (converter.isEpub(path)) converter.ensurePdf(path) else path
+        return delegate.load(effectivePath)
+    }
+}
