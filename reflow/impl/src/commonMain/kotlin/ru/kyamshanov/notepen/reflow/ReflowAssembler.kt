@@ -26,7 +26,6 @@ import kotlin.math.abs
  *     символов в итоговом тексте блока.
  */
 internal object ReflowAssembler {
-
     /** Кегль строки относительно основного, начиная с которого она — заголовок. */
     private const val HEADING_RATIO = 1.2f
 
@@ -89,25 +88,30 @@ internal object ReflowAssembler {
         return ReflowDocument(kind = classify(pages), blocks = blocks)
     }
 
-    private fun buildPageBlocks(page: RawPage, bodyFont: Float): List<ReflowBlock> {
+    private fun buildPageBlocks(
+        page: RawPage,
+        bodyFont: Float,
+    ): List<ReflowBlock> {
         val lines = groupLines(page.glyphs, bodyFont, page)
         // Таблицы вытаскиваем до сборки абзацев: их строки не должны слипнуться в текст.
-        val tables = detectTableRanges(lines, page.widthPt, bodyFont).mapNotNull { range ->
-            buildTable(lines.subList(range.first, range.last + 1), page.widthPt, bodyFont)?.let { range to it }
-        }
+        val tables =
+            detectTableRanges(lines, page.widthPt, bodyFont).mapNotNull { range ->
+                buildTable(lines.subList(range.first, range.last + 1), page.widthPt, bodyFont)?.let { range to it }
+            }
         val inTable = BooleanArray(lines.size)
         tables.forEach { (range, _) -> for (index in range) inTable[index] = true }
 
-        val items = buildList {
-            tables.forEach { (range, table) -> add(Item.Table(table, lines[range.first].top)) }
-            lines.forEachIndexed { index, line -> if (!inTable[index]) add(Item.Text(line)) }
-            page.images
-                .filter {
-                    !FigureGeometry.isFullPage(it, page.widthPt, page.heightPt) &&
-                        !FigureGeometry.isTooSmall(it, page.widthPt, page.heightPt)
-                }
-                .forEach { add(Item.Image(it)) }
-        }.sortedBy { it.top }
+        val items =
+            buildList {
+                tables.forEach { (range, table) -> add(Item.Table(table, lines[range.first].top)) }
+                lines.forEachIndexed { index, line -> if (!inTable[index]) add(Item.Text(line)) }
+                page.images
+                    .filter {
+                        !FigureGeometry.isFullPage(it, page.widthPt, page.heightPt) &&
+                            !FigureGeometry.isTooSmall(it, page.widthPt, page.heightPt)
+                    }
+                    .forEach { add(Item.Image(it)) }
+            }.sortedBy { it.top }
 
         val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont)
         items.forEach { item ->
@@ -125,7 +129,11 @@ internal object ReflowAssembler {
      * (≥2 сегмента, разделённых большими зазорами). Между ними допускаются
      * переносы ячеек (одиночные сегменты) — до [MAX_TABLE_GAP_LINES] строк.
      */
-    private fun detectTableRanges(lines: List<Line>, pageWidthPt: Float, fontSize: Float): List<IntRange> {
+    private fun detectTableRanges(
+        lines: List<Line>,
+        pageWidthPt: Float,
+        fontSize: Float,
+    ): List<IntRange> {
         if (lines.size < MIN_TABLE_ROWS || fontSize <= 0f) return emptyList()
         val columnGapPt = fontSize * COLUMN_GAP_FACTOR
         val columnar = lines.map { it.toSegments(pageWidthPt, columnGapPt).size >= 2 }
@@ -168,28 +176,37 @@ internal object ReflowAssembler {
      * заметного зазора), всё равно делится правильно. Ряды — по вертикальным
      * зазорам (как абзацы), перенос ячейки склеивается. `null`, если колонок < 2.
      */
-    private fun buildTable(lines: List<Line>, pageWidthPt: Float, fontSize: Float): ReflowBlock.Table? {
+    private fun buildTable(
+        lines: List<Line>,
+        pageWidthPt: Float,
+        fontSize: Float,
+    ): ReflowBlock.Table? {
         if (pageWidthPt <= 0f || fontSize <= 0f) return null
         val tolNorm = fontSize * COLUMN_ALIGN_FACTOR / pageWidthPt
         val gapSegments = lines.map { it.toSegments(pageWidthPt, fontSize * COLUMN_GAP_FACTOR) }
         val columns = columnLefts(gapSegments.flatten(), tolNorm)
         if (columns.size < 2) return null
         val columnSegments = lines.map { it.toColumnSegments(columns, tolNorm) }
-        val rows = groupTableRows(lines, columnSegments, fontSize).map { rowSegments ->
-            val cellSegments = List(columns.size) { mutableListOf<Segment>() }
-            rowSegments.forEach { cellSegments[it.columnIndex].add(it.segment) }
-            ReflowBlock.TableRow(
-                cells = cellSegments.map { segments ->
-                    val built = buildCell(segments)
-                    ReflowBlock.TableCell(built.text, built.source)
-                },
-            )
-        }
+        val rows =
+            groupTableRows(lines, columnSegments, fontSize).map { rowSegments ->
+                val cellSegments = List(columns.size) { mutableListOf<Segment>() }
+                rowSegments.forEach { cellSegments[it.columnIndex].add(it.segment) }
+                ReflowBlock.TableRow(
+                    cells =
+                        cellSegments.map { segments ->
+                            val built = buildCell(segments)
+                            ReflowBlock.TableCell(built.text, built.source)
+                        },
+                )
+            }
         return if (rows.size >= MIN_TABLE_ROWS) ReflowBlock.Table(rows) else null
     }
 
     /** Левые края колонок: кластеризует левые края сегментов с допуском [tolNorm]. */
-    private fun columnLefts(segments: List<Segment>, tolNorm: Float): List<Float> {
+    private fun columnLefts(
+        segments: List<Segment>,
+        tolNorm: Float,
+    ): List<Float> {
         val lefts = segments.map { it.leftNorm }.sorted()
         val edges = mutableListOf<Float>()
         for (left in lefts) {
@@ -231,7 +248,11 @@ internal object ReflowAssembler {
         return BuiltText(sb.toString(), spans)
     }
 
-    private fun groupLines(glyphs: List<RawGlyph>, bodyFont: Float, page: RawPage): List<Line> {
+    private fun groupLines(
+        glyphs: List<RawGlyph>,
+        bodyFont: Float,
+        page: RawPage,
+    ): List<Line> {
         if (glyphs.isEmpty()) return emptyList()
         val reference = if (bodyFont > 0f) bodyFont else medianFontSize(glyphs)
         val tolerance = reference * LINE_TOLERANCE_FRAC
@@ -256,7 +277,10 @@ internal object ReflowAssembler {
      * Геометрия строки ([Line.top]/[Line.bottom]/[Line.fontSize]) остаётся в
      * пунктах для последующей группировки в абзацы.
      */
-    private fun buildLine(glyphs: List<RawGlyph>, page: RawPage): Line {
+    private fun buildLine(
+        glyphs: List<RawGlyph>,
+        page: RawPage,
+    ): Line {
         val sorted = glyphs.sortedBy { it.rect.left }
         val fontSize = medianFontSize(sorted)
         val pieces = ArrayList<SourcePiece>(sorted.size)
@@ -281,18 +305,21 @@ internal object ReflowAssembler {
             // с заметным зазором (типично для PDF) — иначе получается «слово ,».
             // Исключение — моноширинные глифы: в коде «.» начинает токен
             // (`.bodyAsText()`), и пробел перед ним нужно сохранить.
-            val attachesToPrev = !glyph.monospace &&
-                glyph.text.firstOrNull()?.let { it in TRAILING_PUNCT } == true
-            val needsSpace = pieces.isNotEmpty() && !attachesToPrev &&
-                (pendingSpace || (gap != null && gap > spaceThreshold))
+            val attachesToPrev =
+                !glyph.monospace &&
+                    glyph.text.firstOrNull()?.let { it in TRAILING_PUNCT } == true
+            val needsSpace =
+                pieces.isNotEmpty() && !attachesToPrev &&
+                    (pendingSpace || (gap != null && gap > spaceThreshold))
             spaceBefore += needsSpace
-            pieces += SourcePiece(
-                text = glyph.text,
-                pageIndex = page.pageIndex,
-                bounds = glyph.rect.normalised(page.widthPt, page.heightPt),
-                bold = glyph.bold,
-                monospace = glyph.monospace,
-            )
+            pieces +=
+                SourcePiece(
+                    text = glyph.text,
+                    pageIndex = page.pageIndex,
+                    bounds = glyph.rect.normalised(page.widthPt, page.heightPt),
+                    bold = glyph.bold,
+                    monospace = glyph.monospace,
+                )
             pendingSpace = false
             prevRight = glyph.rect.right
         }
@@ -311,14 +338,18 @@ internal object ReflowAssembler {
         return sizes[sizes.size / 2]
     }
 
-    private fun headingLevelForRatio(ratio: Float): Int = when {
-        ratio >= HEADING_LEVEL_1_RATIO -> 1
-        ratio >= HEADING_LEVEL_2_RATIO -> 2
-        else -> 3
-    }
+    private fun headingLevelForRatio(ratio: Float): Int =
+        when {
+            ratio >= HEADING_LEVEL_1_RATIO -> 1
+            ratio >= HEADING_LEVEL_2_RATIO -> 2
+            else -> 3
+        }
 
     /** Нормализует прямоугольник из пунктов в доли `[0..1]` страницы. */
-    private fun ReflowRect.normalised(widthPt: Float, heightPt: Float): ReflowRect =
+    private fun ReflowRect.normalised(
+        widthPt: Float,
+        heightPt: Float,
+    ): ReflowRect =
         if (widthPt <= 0f || heightPt <= 0f) {
             this
         } else {
@@ -337,7 +368,6 @@ internal object ReflowAssembler {
         private val heightPt: Float,
         private val bodyFont: Float,
     ) {
-
         private val blocks = mutableListOf<ReflowBlock>()
         private val pending = mutableListOf<Line>()
 
@@ -411,11 +441,12 @@ internal object ReflowAssembler {
             // эмитится отдельным типом блока для отступа в ридере.
             val built = if (pendingHeadingLevel > 0) buildHeading(pending) else buildParagraph(pending)
             if (built.text.isNotEmpty()) {
-                blocks += when {
-                    pendingHeadingLevel > 0 -> ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
-                    pendingList -> ReflowBlock.ListItem(built.text, built.source)
-                    else -> ReflowBlock.Paragraph(built.text, built.source)
-                }
+                blocks +=
+                    when {
+                        pendingHeadingLevel > 0 -> ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
+                        pendingList -> ReflowBlock.ListItem(built.text, built.source)
+                        else -> ReflowBlock.Paragraph(built.text, built.source)
+                    }
             }
             pending.clear()
             pendingHeadingLevel = 0
@@ -463,7 +494,11 @@ internal object ReflowAssembler {
          * [Line.spaceBefore], и фиксирует [SourceSpan] на каждый ран. Разделители
          * (пробелы) не покрываются ни одним спаном.
          */
-        private fun appendPieces(line: Line, sb: StringBuilder, spans: MutableList<SourceSpan>) {
+        private fun appendPieces(
+            line: Line,
+            sb: StringBuilder,
+            spans: MutableList<SourceSpan>,
+        ) {
             line.pieces.forEachIndexed { index, piece ->
                 if (index > 0 && line.spaceBefore[index]) sb.append(' ')
                 val start = sb.length
@@ -479,8 +514,7 @@ internal object ReflowAssembler {
             spans += last.copy(charEnd = last.charEnd - 1)
         }
 
-        private fun isSoftHyphen(sb: StringBuilder): Boolean =
-            sb.length >= 2 && sb.last() in HYPHEN_CHARS && sb[sb.length - 2].isLetter()
+        private fun isSoftHyphen(sb: StringBuilder): Boolean = sb.length >= 2 && sb.last() in HYPHEN_CHARS && sb[sb.length - 2].isLetter()
     }
 
     private data class SourcePiece(
@@ -513,12 +547,13 @@ internal object ReflowAssembler {
          * [buildLine].
          */
         fun startsListItem(): Boolean {
-            val lead = buildString {
-                for (piece in pieces) {
-                    append(piece.text)
-                    if (length >= LIST_MARKER_SCAN) break
-                }
-            }.trimStart()
+            val lead =
+                buildString {
+                    for (piece in pieces) {
+                        append(piece.text)
+                        if (length >= LIST_MARKER_SCAN) break
+                    }
+                }.trimStart()
             if (lead.isEmpty()) return false
             if (lead[0] in BULLET_CHARS) return true
             val digits = lead.takeWhile { it.isDigit() }
@@ -533,7 +568,10 @@ internal object ReflowAssembler {
          * Делит строку на сегменты по горизонтальным зазорам шире [columnGapPt]
          * (пунктов) — кандидаты в ячейки таблицы. Без больших зазоров — один сегмент.
          */
-        fun toSegments(pageWidthPt: Float, columnGapPt: Float): List<Segment> {
+        fun toSegments(
+            pageWidthPt: Float,
+            columnGapPt: Float,
+        ): List<Segment> {
             if (pieces.isEmpty()) return emptyList()
             val segments = mutableListOf<Segment>()
             var start = 0
@@ -553,7 +591,10 @@ internal object ReflowAssembler {
          * (новый сегмент — там, где глиф попадает в другую колонку). Так ячейки
          * делятся по позиции, даже если между ними нет заметного зазора.
          */
-        fun toColumnSegments(columns: List<Float>, tolNorm: Float): List<IndexedSegment> {
+        fun toColumnSegments(
+            columns: List<Float>,
+            tolNorm: Float,
+        ): List<IndexedSegment> {
             if (pieces.isEmpty()) return emptyList()
             val segments = mutableListOf<IndexedSegment>()
             var start = 0
@@ -570,7 +611,10 @@ internal object ReflowAssembler {
             return segments
         }
 
-        private fun segmentOf(from: Int, to: Int): Segment =
+        private fun segmentOf(
+            from: Int,
+            to: Int,
+        ): Segment =
             Segment(
                 pieces = pieces.subList(from, to),
                 spaceBefore = spaceBefore.subList(from, to),
@@ -620,7 +664,11 @@ private val BULLET_CHARS = "•‣◦▪●·-*".toSet()
 private const val NUMBER_MARKERS = ".)"
 
 /** Индекс колонки для левого края [left]: самая правая граница `columns`, не превышающая `left` (+ допуск). */
-private fun columnOf(left: Float, columns: List<Float>, tolNorm: Float): Int {
+private fun columnOf(
+    left: Float,
+    columns: List<Float>,
+    tolNorm: Float,
+): Int {
     var column = 0
     for (i in columns.indices) {
         if (left + tolNorm >= columns[i]) column = i else break

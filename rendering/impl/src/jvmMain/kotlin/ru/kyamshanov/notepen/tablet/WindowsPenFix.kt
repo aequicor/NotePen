@@ -48,17 +48,21 @@ private const val TABLET_DISABLE_FLICKS: Long = 0x00010000
  * Setting this window property tells the Tablet Input Service to skip the
  * recogniser entirely for our HWND, so events flow without delay.
  */
+
 /**
  * Direct binding to `user32!SetPropA`. JNA's bundled `User32` interface omits
  * `SetProp` in our version, so we wire it ourselves — a one-method library.
  */
 @Suppress("FunctionName")
 private interface User32Ext : Library {
-    fun SetPropA(hWnd: HWND, lpString: String, hData: Pointer): Boolean
+    fun SetPropA(
+        hWnd: HWND,
+        lpString: String,
+        hData: Pointer,
+    ): Boolean
 }
 
 object WindowsPenFix {
-
     private val user32: User32Ext? by lazy {
         if (!Platform.isWindows()) {
             null
@@ -87,10 +91,11 @@ object WindowsPenFix {
      */
     fun apply(hwnd: HWND) {
         val lib = user32 ?: return
-        val flags = TABLET_DISABLE_PRESSANDHOLD or
-            TABLET_DISABLE_PENTAPFEEDBACK or
-            TABLET_DISABLE_PENBARRELFEEDBACK or
-            TABLET_DISABLE_FLICKS
+        val flags =
+            TABLET_DISABLE_PRESSANDHOLD or
+                TABLET_DISABLE_PENTAPFEEDBACK or
+                TABLET_DISABLE_PENBARRELFEEDBACK or
+                TABLET_DISABLE_FLICKS
         val data = Pointer.createConstant(flags)
         val tagged = intArrayOf(0)
         val failed = intArrayOf(0)

@@ -37,7 +37,6 @@ data class OpenDocuments(
     val tabs: List<DocumentTab> = emptyList(),
     val activeId: DocumentId? = null,
 ) {
-
     init {
         require(activeId == null || tabs.any { it.id == activeId }) {
             "activeId $activeId not present in tabs"
@@ -60,7 +59,10 @@ data class OpenDocuments(
      * when [makeActive] is `true` (default), otherwise the active tab
      * is unchanged.
      */
-    fun addTab(tab: DocumentTab, makeActive: Boolean = true): OpenDocuments {
+    fun addTab(
+        tab: DocumentTab,
+        makeActive: Boolean = true,
+    ): OpenDocuments {
         require(tabs.none { it.id == tab.id }) { "duplicate tab id ${tab.id}" }
         val newTabs = tabs + tab
         val newActive = if (makeActive) tab.id else activeId ?: tab.id
@@ -79,11 +81,12 @@ data class OpenDocuments(
         if (idx < 0) return this
         val newTabs = tabs.toMutableList().apply { removeAt(idx) }
         if (newTabs.isEmpty()) return null
-        val newActive = when {
-            activeId != id -> activeId
-            idx < newTabs.size -> newTabs[idx].id
-            else -> newTabs.last().id
-        }
+        val newActive =
+            when {
+                activeId != id -> activeId
+                idx < newTabs.size -> newTabs[idx].id
+                else -> newTabs.last().id
+            }
         return copy(tabs = newTabs, activeId = newActive)
     }
 
@@ -98,7 +101,6 @@ data class OpenDocuments(
         val Empty: OpenDocuments = OpenDocuments()
 
         /** Convenience: a single-tab state seeded with [tab]. */
-        fun of(tab: DocumentTab): OpenDocuments =
-            OpenDocuments(tabs = listOf(tab), activeId = tab.id)
+        fun of(tab: DocumentTab): OpenDocuments = OpenDocuments(tabs = listOf(tab), activeId = tab.id)
     }
 }

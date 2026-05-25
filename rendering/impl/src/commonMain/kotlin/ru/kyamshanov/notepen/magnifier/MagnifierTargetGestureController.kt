@@ -47,8 +47,9 @@ class MagnifierTargetGestureController(
         if (!rect.contains(viewportPos)) return Mode.NONE
         val layout = viewerState.layout
         val zoom = viewerState.zoom
-        val handlePx = (layout.basePageWidthPx * zoom * RESIZE_HANDLE_FRAC)
-            .coerceAtLeast(MIN_HANDLE_PX)
+        val handlePx =
+            (layout.basePageWidthPx * zoom * RESIZE_HANDLE_FRAC)
+                .coerceAtLeast(MIN_HANDLE_PX)
         val nearRight = viewportPos.x >= rect.right - handlePx
         val nearBottom = viewportPos.y >= rect.bottom - handlePx
         return if (nearRight && nearBottom) Mode.RESIZE else Mode.MOVE
@@ -127,13 +128,15 @@ class MagnifierTargetGestureController(
         val width = startWidthNorm
         val height = startHeightNorm
         val intendedTopYDoc = startTopYDoc + totalDragDocY
-        val intendedLeftNorm = (startLeftXNorm + totalDragDocX / basePageW)
-            .coerceIn(0f, (1f - width).coerceAtLeast(0f))
+        val intendedLeftNorm =
+            (startLeftXNorm + totalDragDocX / basePageW)
+                .coerceIn(0f, (1f - width).coerceAtLeast(0f))
 
         // Какая страница содержит intendedTopYDoc?
         val tops = layout.pageTopsPx
-        val newPageIdx = resolvePageForDocY(tops, intendedTopYDoc)
-            .coerceAtMost(pageCount - 1)
+        val newPageIdx =
+            resolvePageForDocY(tops, intendedTopYDoc)
+                .coerceAtMost(pageCount - 1)
         val newPdfH = layout.pdfHeightsPx[newPageIdx]
         val newPageTop = tops[newPageIdx]
         val rawNewTopNorm = (intendedTopYDoc - newPageTop) / newPdfH
@@ -141,12 +144,13 @@ class MagnifierTargetGestureController(
 
         state.setSingleSegmentTarget(
             pageIndex = newPageIdx,
-            targetOnPage = Rect(
-                intendedLeftNorm,
-                newTopNorm,
-                intendedLeftNorm + width,
-                newTopNorm + height,
-            ),
+            targetOnPage =
+                Rect(
+                    intendedLeftNorm,
+                    newTopNorm,
+                    intendedLeftNorm + width,
+                    newTopNorm + height,
+                ),
         )
     }
 

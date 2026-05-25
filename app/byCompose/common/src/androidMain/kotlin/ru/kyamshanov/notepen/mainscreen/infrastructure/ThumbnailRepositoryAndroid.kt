@@ -24,17 +24,17 @@ class ThumbnailRepositoryAndroid(
     private val context: Context,
     private val maxCacheSizeBytes: Long = 50 * 1024 * 1024L,
 ) : ThumbnailRepository {
-
     private val cacheDir get() = java.io.File(context.cacheDir, "thumbnails").also { it.mkdirs() }
     private val mutex = Mutex()
 
-    private fun keyToFile(uri: String): java.io.File =
-        java.io.File(cacheDir, uri.hashCode().toString() + ".png")
+    private fun keyToFile(uri: String): java.io.File = java.io.File(cacheDir, uri.hashCode().toString() + ".png")
 
-    private fun keyToMetaFile(uri: String): java.io.File =
-        java.io.File(cacheDir, uri.hashCode().toString() + ".meta")
+    private fun keyToMetaFile(uri: String): java.io.File = java.io.File(cacheDir, uri.hashCode().toString() + ".meta")
 
-    override suspend fun get(uri: String, currentFileMtime: Long?): ByteArray? =
+    override suspend fun get(
+        uri: String,
+        currentFileMtime: Long?,
+    ): ByteArray? =
         withContext(Dispatchers.IO) {
             try {
                 withTimeout(3_000) {
@@ -59,28 +59,33 @@ class ThumbnailRepositoryAndroid(
             }
         }
 
-    override suspend fun put(uri: String, imageData: ByteArray, fileMtime: Long?) =
-        withContext(Dispatchers.IO) {
-            try {
-                withTimeout(3_000) {
-                    mutex.withLock {
-                        keyToFile(uri).writeBytes(imageData)
-                        fileMtime?.let { keyToMetaFile(uri).writeText(it.toString()) }
-                        evictIfNeeded()
-                    }
+    override suspend fun put(
+        uri: String,
+        imageData: ByteArray,
+        fileMtime: Long?,
+    ) = withContext(Dispatchers.IO) {
+        try {
+            withTimeout(3_000) {
+                mutex.withLock {
+                    keyToFile(uri).writeBytes(imageData)
+                    fileMtime?.let { keyToMetaFile(uri).writeText(it.toString()) }
+                    evictIfNeeded()
                 }
-            } catch (e: Exception) {
-                logger.warn { "Thumbnail cache write failed: ${e::class.simpleName}" }
             }
+        } catch (e: Exception) {
+            logger.warn { "Thumbnail cache write failed: ${e::class.simpleName}" }
         }
-
-    override suspend fun totalSizeBytes(): Long = withContext(Dispatchers.IO) {
-        cacheDir.listFiles()?.sumOf { it.length() } ?: 0L
     }
 
+    override suspend fun totalSizeBytes(): Long =
+        withContext(Dispatchers.IO) {
+            cacheDir.listFiles()?.sumOf { it.length() } ?: 0L
+        }
+
     private fun evictIfNeeded() {
-        val pngFiles = cacheDir.listFiles()?.filter { it.extension == "png" }
-            ?.sortedBy { it.lastModified() } ?: return
+        val pngFiles =
+            cacheDir.listFiles()?.filter { it.extension == "png" }
+                ?.sortedBy { it.lastModified() } ?: return
         var total = pngFiles.sumOf { it.length() }
         for (f in pngFiles) {
             if (total <= maxCacheSizeBytes) break

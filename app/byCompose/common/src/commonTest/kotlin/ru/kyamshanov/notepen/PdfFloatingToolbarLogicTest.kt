@@ -17,7 +17,6 @@ import kotlin.test.assertEquals
  * tool returns to [ToolMode.NONE].
  */
 class PdfFloatingToolbarLogicTest {
-
     @Test
     fun `clicking PEN when current is NONE switches to PEN`() {
         // AC-2: pen toggle activates pen.

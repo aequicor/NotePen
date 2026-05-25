@@ -24,7 +24,6 @@ data class PageExtent(
     val right: Float = 1f,
     val bottom: Float = 1f,
 ) {
-
     /** Ширина в долях ширины PDF-страницы. Всегда ≥ 1. */
     val width: Float get() = right - left
 
@@ -41,7 +40,11 @@ data class PageExtent(
      * extent во все стороны: иначе каждое первое касание любой страницы
      * триггерило бы relayout вьюера.
      */
-    fun including(x: Float, y: Float, pad: Float = 0f): PageExtent {
+    fun including(
+        x: Float,
+        y: Float,
+        pad: Float = 0f,
+    ): PageExtent {
         val l = if (x < left) x - pad else left
         val t = if (y < top) y - pad else top
         val r = if (x > right) x + pad else right
@@ -67,7 +70,6 @@ data class PageExtent(
     }
 
     companion object {
-
         /** Extent, равный самой PDF-странице (без дополнительной рисуемой зоны). */
         val Pdf: PageExtent = PageExtent()
     }

@@ -11,7 +11,5 @@ class JvmDocumentLoader(
     private val pdfLoader: PdfDocumentLoader,
     private val imageLoader: PdfDocumentLoader,
 ) : PdfDocumentLoader {
-
-    override suspend fun load(path: String): PdfDocument =
-        if (isSupportedImagePath(path)) imageLoader.load(path) else pdfLoader.load(path)
+    override suspend fun load(path: String): PdfDocument = if (isSupportedImagePath(path)) imageLoader.load(path) else pdfLoader.load(path)
 }

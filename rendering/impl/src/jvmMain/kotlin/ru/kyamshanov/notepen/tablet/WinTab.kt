@@ -27,10 +27,25 @@ import com.sun.jna.platform.win32.WinDef.UINT
  */
 @Suppress("FunctionName", "PropertyName", "VariableNaming")
 internal interface WinTab : Library {
-    fun WTInfoA(category: UINT, index: UINT, output: Pointer?): UINT
-    fun WTOpenA(hwnd: HWND, logContext: LOGCONTEXTA, enable: Boolean): Pointer?
+    fun WTInfoA(
+        category: UINT,
+        index: UINT,
+        output: Pointer?,
+    ): UINT
+
+    fun WTOpenA(
+        hwnd: HWND,
+        logContext: LOGCONTEXTA,
+        enable: Boolean,
+    ): Pointer?
+
     fun WTClose(hctx: Pointer): Boolean
-    fun WTPacketsGet(hctx: Pointer, maxPackets: Int, packetsOut: Pointer): Int
+
+    fun WTPacketsGet(
+        hctx: Pointer,
+        maxPackets: Int,
+        packetsOut: Pointer,
+    ): Int
 
     companion object {
         /** Categories for `WTInfoA`. */
@@ -64,48 +79,82 @@ internal interface WinTab : Library {
 @Suppress("PropertyName", "VariableNaming")
 internal open class LOGCONTEXTA : Structure() {
     @JvmField var lcName: ByteArray = ByteArray(LC_NAMELEN)
+
     @JvmField var lcOptions: Int = 0
+
     @JvmField var lcStatus: Int = 0
+
     @JvmField var lcLocks: Int = 0
+
     @JvmField var lcMsgBase: Int = 0
+
     @JvmField var lcDevice: Int = 0
+
     @JvmField var lcPktRate: Int = 0
+
     @JvmField var lcPktData: Int = 0
+
     @JvmField var lcPktMode: Int = 0
+
     @JvmField var lcMoveMask: Int = 0
+
     @JvmField var lcBtnDnMask: Int = 0
+
     @JvmField var lcBtnUpMask: Int = 0
+
     @JvmField var lcInOrgX: Int = 0
+
     @JvmField var lcInOrgY: Int = 0
+
     @JvmField var lcInOrgZ: Int = 0
+
     @JvmField var lcInExtX: Int = 0
+
     @JvmField var lcInExtY: Int = 0
+
     @JvmField var lcInExtZ: Int = 0
+
     @JvmField var lcOutOrgX: Int = 0
+
     @JvmField var lcOutOrgY: Int = 0
+
     @JvmField var lcOutOrgZ: Int = 0
+
     @JvmField var lcOutExtX: Int = 0
+
     @JvmField var lcOutExtY: Int = 0
+
     @JvmField var lcOutExtZ: Int = 0
+
     @JvmField var lcSensX: Int = 0
+
     @JvmField var lcSensY: Int = 0
+
     @JvmField var lcSensZ: Int = 0
+
     @JvmField var lcSysMode: Int = 0
+
     @JvmField var lcSysOrgX: Int = 0
+
     @JvmField var lcSysOrgY: Int = 0
+
     @JvmField var lcSysExtX: Int = 0
+
     @JvmField var lcSysExtY: Int = 0
+
     @JvmField var lcSysSensX: Int = 0
+
     @JvmField var lcSysSensY: Int = 0
 
-    override fun getFieldOrder(): List<String> = listOf(
-        "lcName", "lcOptions", "lcStatus", "lcLocks", "lcMsgBase", "lcDevice",
-        "lcPktRate", "lcPktData", "lcPktMode", "lcMoveMask", "lcBtnDnMask", "lcBtnUpMask",
-        "lcInOrgX", "lcInOrgY", "lcInOrgZ", "lcInExtX", "lcInExtY", "lcInExtZ",
-        "lcOutOrgX", "lcOutOrgY", "lcOutOrgZ", "lcOutExtX", "lcOutExtY", "lcOutExtZ",
-        "lcSensX", "lcSensY", "lcSensZ", "lcSysMode",
-        "lcSysOrgX", "lcSysOrgY", "lcSysExtX", "lcSysExtY", "lcSysSensX", "lcSysSensY",
-    )
+    override fun getFieldOrder(): List<String> =
+        listOf(
+            "lcName", "lcOptions", "lcStatus", "lcLocks", "lcMsgBase", "lcDevice",
+            "lcPktRate", "lcPktData", "lcPktMode", "lcMoveMask", "lcBtnDnMask", "lcBtnUpMask",
+            "lcInOrgX", "lcInOrgY", "lcInOrgZ", "lcInExtX", "lcInExtY", "lcInExtZ",
+            "lcOutOrgX", "lcOutOrgY", "lcOutOrgZ", "lcOutExtX", "lcOutExtY", "lcOutExtZ",
+            "lcSensX", "lcSensY", "lcSensZ", "lcSysMode",
+            "lcSysOrgX", "lcSysOrgY", "lcSysExtX", "lcSysExtY", "lcSysSensX", "lcSysSensY",
+        )
 
     companion object {
         const val LC_NAMELEN: Int = 40
@@ -130,13 +179,17 @@ internal data class WinTabPacket(
     val pressure: Int,
 )
 
-internal fun readPacket(buffer: Pointer, offset: Long): WinTabPacket = WinTabPacket(
-    time = buffer.getInt(offset + 0),
-    buttons = buffer.getInt(offset + 4),
-    x = buffer.getInt(offset + 8),
-    y = buffer.getInt(offset + 12),
-    pressure = buffer.getInt(offset + 16),
-)
+internal fun readPacket(
+    buffer: Pointer,
+    offset: Long,
+): WinTabPacket =
+    WinTabPacket(
+        time = buffer.getInt(offset + 0),
+        buttons = buffer.getInt(offset + 4),
+        x = buffer.getInt(offset + 8),
+        y = buffer.getInt(offset + 12),
+        pressure = buffer.getInt(offset + 16),
+    )
 
 /**
  * Wintab `AXIS` structure — used to read pressure range from `WTI_DEVICES /
@@ -145,8 +198,11 @@ internal fun readPacket(buffer: Pointer, offset: Long): WinTabPacket = WinTabPac
 @Suppress("PropertyName", "VariableNaming")
 internal open class AXIS : Structure() {
     @JvmField var axMin: Int = 0
+
     @JvmField var axMax: Int = 0
+
     @JvmField var axUnits: UINT = UINT(0)
+
     @JvmField var axResolution: LONG = LONG(0)
 
     override fun getFieldOrder(): List<String> = listOf("axMin", "axMax", "axUnits", "axResolution")

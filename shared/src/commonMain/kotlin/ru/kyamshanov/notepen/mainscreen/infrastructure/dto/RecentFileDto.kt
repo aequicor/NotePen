@@ -17,30 +17,32 @@ data class RecentFileDto(
     val lastPageIndex: Int = 0,
 ) {
     /** Преобразует DTO в доменную модель. */
-    fun toDomain(): RecentFile = RecentFile(
-        id = id,
-        uri = uri,
-        displayName = displayName,
-        fileSize = fileSize,
-        openedAt = openedAt,
-        availabilityStatus = availabilityStatus.toDomain(),
-        thumbnailKey = thumbnailKey,
-        fileMtime = fileMtime,
-        lastPageIndex = lastPageIndex,
-    )
+    fun toDomain(): RecentFile =
+        RecentFile(
+            id = id,
+            uri = uri,
+            displayName = displayName,
+            fileSize = fileSize,
+            openedAt = openedAt,
+            availabilityStatus = availabilityStatus.toDomain(),
+            thumbnailKey = thumbnailKey,
+            fileMtime = fileMtime,
+            lastPageIndex = lastPageIndex,
+        )
 
     companion object {
         /** Преобразует доменную модель в DTO. */
-        fun fromDomain(f: RecentFile): RecentFileDto = RecentFileDto(
-            id = f.id,
-            uri = f.uri,
-            displayName = f.displayName,
-            fileSize = f.fileSize,
-            openedAt = f.openedAt,
-            availabilityStatus = AvailabilityStatusDto.fromDomain(f.availabilityStatus),
-            thumbnailKey = f.thumbnailKey,
-            fileMtime = f.fileMtime,
-            lastPageIndex = f.lastPageIndex,
-        )
+        fun fromDomain(f: RecentFile): RecentFileDto =
+            RecentFileDto(
+                id = f.id,
+                uri = f.uri,
+                displayName = f.displayName,
+                fileSize = f.fileSize,
+                openedAt = f.openedAt,
+                availabilityStatus = AvailabilityStatusDto.fromDomain(f.availabilityStatus),
+                thumbnailKey = f.thumbnailKey,
+                fileMtime = f.fileMtime,
+                lastPageIndex = f.lastPageIndex,
+            )
     }
 }

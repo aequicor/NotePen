@@ -7,11 +7,16 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class WorkspaceLayoutTest {
+    private fun tab(
+        id: Long,
+        path: String = "/p/$id.pdf",
+        name: String = "doc-$id",
+    ) = DocumentTab(id = DocumentId(id), filePath = path, displayName = name)
 
-    private fun tab(id: Long, path: String = "/p/$id.pdf", name: String = "doc-$id") =
-        DocumentTab(id = DocumentId(id), filePath = path, displayName = name)
-
-    private fun panel(panelId: Long, vararg tabIds: Long): Panel {
+    private fun panel(
+        panelId: Long,
+        vararg tabIds: Long,
+    ): Panel {
         val tabs = tabIds.map { tab(it) }
         return Panel(
             id = PanelId(panelId),
@@ -19,8 +24,10 @@ class WorkspaceLayoutTest {
         )
     }
 
-    private fun singlePanel(panelId: Long = 1L, vararg tabIds: Long): WorkspaceLayout =
-        WorkspaceLayout.single(panel(panelId, *(if (tabIds.isEmpty()) longArrayOf(10L) else tabIds)))
+    private fun singlePanel(
+        panelId: Long = 1L,
+        vararg tabIds: Long,
+    ): WorkspaceLayout = WorkspaceLayout.single(panel(panelId, *(if (tabIds.isEmpty()) longArrayOf(10L) else tabIds)))
 
     // -- invariants --
 
@@ -59,8 +66,9 @@ class WorkspaceLayoutTest {
 
     @Test
     fun `addPanel to COLUMNS_2 appends and focuses new panel`() {
-        val layout = WorkspaceLayout.single(panel(1, 10))
-            .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
+        val layout =
+            WorkspaceLayout.single(panel(1, 10))
+                .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
         assertEquals(LayoutTemplate.COLUMNS_2, layout.template)
         assertEquals(listOf(PanelId(1), PanelId(2)), layout.panels.map { it.id })
         assertEquals(PanelId(2), layout.focusedPanelId)
@@ -76,9 +84,10 @@ class WorkspaceLayoutTest {
 
     @Test
     fun `addPanel supports LEFT_PLUS_STACK three-panel template`() {
-        val layout = WorkspaceLayout.single(panel(1, 10))
-            .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
-            .addPanel(LayoutTemplate.LEFT_PLUS_STACK, panel(3, 30))
+        val layout =
+            WorkspaceLayout.single(panel(1, 10))
+                .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
+                .addPanel(LayoutTemplate.LEFT_PLUS_STACK, panel(3, 30))
         assertEquals(LayoutTemplate.LEFT_PLUS_STACK, layout.template)
         assertEquals(3, layout.panels.size)
         assertEquals(WorkspaceLayout.defaultRatios(LayoutTemplate.LEFT_PLUS_STACK), layout.ratios)
@@ -95,8 +104,9 @@ class WorkspaceLayoutTest {
 
     @Test
     fun `closing last tab of a panel removes panel and downgrades template`() {
-        val layout = WorkspaceLayout.single(panel(1, 10))
-            .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
+        val layout =
+            WorkspaceLayout.single(panel(1, 10))
+                .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
         val after = layout.withPanelTabs(PanelId(2)) { it.closeTab(DocumentId(20)) }
         assertEquals(LayoutTemplate.FULL, after?.template)
         assertEquals(listOf(PanelId(1)), after?.panels?.map { it.id })
@@ -104,8 +114,9 @@ class WorkspaceLayoutTest {
 
     @Test
     fun `removing focused panel moves focus to a survivor`() {
-        val layout = WorkspaceLayout.single(panel(1, 10))
-            .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20)) // focus = panel 2
+        val layout =
+            WorkspaceLayout.single(panel(1, 10))
+                .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20)) // focus = panel 2
         val after = layout.withPanelTabs(PanelId(2)) { it.closeTab(DocumentId(20)) }
         assertEquals(PanelId(1), after?.focusedPanelId)
     }
@@ -122,16 +133,18 @@ class WorkspaceLayoutTest {
 
     @Test
     fun `focusPanel changes focus`() {
-        val layout = WorkspaceLayout.single(panel(1, 10))
-            .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
-            .focusPanel(PanelId(1))
+        val layout =
+            WorkspaceLayout.single(panel(1, 10))
+                .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
+                .focusPanel(PanelId(1))
         assertEquals(PanelId(1), layout.focusedPanelId)
     }
 
     @Test
     fun `setRatio clamps to bounds`() {
-        val layout = WorkspaceLayout.single(panel(1, 10))
-            .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
+        val layout =
+            WorkspaceLayout.single(panel(1, 10))
+                .addPanel(LayoutTemplate.COLUMNS_2, panel(2, 20))
         assertEquals(WorkspaceLayout.MIN_RATIO, layout.setRatio(0, 0.01f).ratios[0])
         assertEquals(WorkspaceLayout.MAX_RATIO, layout.setRatio(0, 0.99f).ratios[0])
     }

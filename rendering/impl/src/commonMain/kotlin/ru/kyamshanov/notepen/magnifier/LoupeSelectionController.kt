@@ -31,7 +31,6 @@ class LoupeSelectionController(
         panelCenter: Offset,
     ) -> Unit,
 ) {
-
     private val _selectionRect: MutableState<Rect?> = mutableStateOf(null)
 
     /** Текущий прямоугольник выделения в viewport-пикселях, или `null` если жест не активен. */
@@ -84,12 +83,16 @@ class LoupeSelectionController(
         _selectionRect.value = null
     }
 
-    private fun rectFromCorners(a: Offset, b: Offset): Rect = Rect(
-        left = min(a.x, b.x),
-        top = min(a.y, b.y),
-        right = max(a.x, b.x),
-        bottom = max(a.y, b.y),
-    )
+    private fun rectFromCorners(
+        a: Offset,
+        b: Offset,
+    ): Rect =
+        Rect(
+            left = min(a.x, b.x),
+            top = min(a.y, b.y),
+            right = max(a.x, b.x),
+            bottom = max(a.y, b.y),
+        )
 
     /**
      * Разбивает viewport-прямоугольник на сегменты по страницам.
@@ -138,12 +141,13 @@ class LoupeSelectionController(
             val panelTopFrac = ((interTop - docTop) / totalDocH).coerceIn(0f, 1f)
             val panelBottomFrac = ((interBottom - docTop) / totalDocH).coerceIn(0f, 1f)
 
-            out += MagnifierPageSegment(
-                pageIndex = pageIndex,
-                targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
-                panelTopFrac = panelTopFrac,
-                panelBottomFrac = panelBottomFrac,
-            )
+            out +=
+                MagnifierPageSegment(
+                    pageIndex = pageIndex,
+                    targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
+                    panelTopFrac = panelTopFrac,
+                    panelBottomFrac = panelBottomFrac,
+                )
         }
         return out.takeIf { it.isNotEmpty() }
     }

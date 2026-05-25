@@ -19,9 +19,11 @@ import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
  * survives restarts and powers the "не синхронизировано" badge across launches.
  */
 interface PendingDeltaQueue {
-
     /** Appends [delta] to the end of [documentId]'s queue. */
-    suspend fun enqueue(documentId: String, delta: StrokeDelta)
+    suspend fun enqueue(
+        documentId: String,
+        delta: StrokeDelta,
+    )
 
     /**
      * Returns the current queue for [documentId] in FIFO order, without
@@ -35,7 +37,10 @@ interface PendingDeltaQueue {
      * Drops every delta in [documentId]'s queue whose `clock` is `≤ upToClock`.
      * Idempotent.
      */
-    suspend fun markSent(documentId: String, upToClock: Long)
+    suspend fun markSent(
+        documentId: String,
+        upToClock: Long,
+    )
 
     /** Current pending count for one document. */
     suspend fun pendingCount(documentId: String): Int

@@ -27,11 +27,15 @@ fun documentIdFromFilePath(filePath: String): String {
  * `RemoteDocumentOpener` / `FileTransferReceiver` для уникального имени
  * кеш-копии при одинаковом `displayName`.
  */
-fun documentIdToCacheFileName(documentId: String, displayName: String): String {
-    val sanitisedDocId = documentId
-        .replace('#', '_')
-        .replace('/', '_')
-        .replace('\\', '_')
+fun documentIdToCacheFileName(
+    documentId: String,
+    displayName: String,
+): String {
+    val sanitisedDocId =
+        documentId
+            .replace('#', '_')
+            .replace('/', '_')
+            .replace('\\', '_')
     return "${sanitisedDocId}__$displayName"
 }
 

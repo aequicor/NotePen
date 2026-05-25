@@ -15,7 +15,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class FileHistoryManagerTest {
-
     private fun makeFile(
         uri: String,
         status: AvailabilityStatus = AvailabilityStatus.AVAILABLE,
@@ -35,11 +34,12 @@ class FileHistoryManagerTest {
      */
     @Test
     fun findEvictIndex_notFoundEvictedBeforeAvailable() {
-        val entries = listOf(
-            makeFile("a", AvailabilityStatus.AVAILABLE, openedAt = 100),
-            makeFile("b", AvailabilityStatus.NOT_FOUND, openedAt = 200),
-            makeFile("c", AvailabilityStatus.AVAILABLE, openedAt = 50),
-        )
+        val entries =
+            listOf(
+                makeFile("a", AvailabilityStatus.AVAILABLE, openedAt = 100),
+                makeFile("b", AvailabilityStatus.NOT_FOUND, openedAt = 200),
+                makeFile("c", AvailabilityStatus.AVAILABLE, openedAt = 50),
+            )
         val idx = FileHistoryManager.findEvictIndex(entries)
         assertEquals(AvailabilityStatus.NOT_FOUND, entries[idx].availabilityStatus)
     }
@@ -49,11 +49,12 @@ class FileHistoryManagerTest {
      */
     @Test
     fun findEvictIndex_allUnknown_evictsOldest() {
-        val entries = listOf(
-            makeFile("a", AvailabilityStatus.UNKNOWN, openedAt = 300),
-            makeFile("b", AvailabilityStatus.UNKNOWN, openedAt = 100),
-            makeFile("c", AvailabilityStatus.UNKNOWN, openedAt = 200),
-        )
+        val entries =
+            listOf(
+                makeFile("a", AvailabilityStatus.UNKNOWN, openedAt = 300),
+                makeFile("b", AvailabilityStatus.UNKNOWN, openedAt = 100),
+                makeFile("c", AvailabilityStatus.UNKNOWN, openedAt = 200),
+            )
         val idx = FileHistoryManager.findEvictIndex(entries)
         assertEquals("b", entries[idx].uri)
     }
@@ -63,15 +64,16 @@ class FileHistoryManagerTest {
      */
     @Test
     fun findEvictIndex_allUnknown_twentyEntries_evictsOldestByOpenedAt() {
-        val list = (1..20).map { i ->
-            RecentFile(
-                id = "id-$i",
-                uri = "/file$i.pdf",
-                displayName = "file$i.pdf",
-                openedAt = i.toLong(),
-                availabilityStatus = AvailabilityStatus.UNKNOWN,
-            )
-        }
+        val list =
+            (1..20).map { i ->
+                RecentFile(
+                    id = "id-$i",
+                    uri = "/file$i.pdf",
+                    displayName = "file$i.pdf",
+                    openedAt = i.toLong(),
+                    availabilityStatus = AvailabilityStatus.UNKNOWN,
+                )
+            }
         val idx = FileHistoryManager.findEvictIndex(list)
         // Oldest entry has openedAt=1, which is index 0
         assertEquals(0, idx, "Oldest UNKNOWN entry (openedAt=1) must be evicted")
@@ -82,11 +84,12 @@ class FileHistoryManagerTest {
      */
     @Test
     fun findEvictIndex_allAvailable_evictsOldest() {
-        val entries = listOf(
-            makeFile("a", AvailabilityStatus.AVAILABLE, openedAt = 300),
-            makeFile("b", AvailabilityStatus.AVAILABLE, openedAt = 100),
-            makeFile("c", AvailabilityStatus.AVAILABLE, openedAt = 200),
-        )
+        val entries =
+            listOf(
+                makeFile("a", AvailabilityStatus.AVAILABLE, openedAt = 300),
+                makeFile("b", AvailabilityStatus.AVAILABLE, openedAt = 100),
+                makeFile("c", AvailabilityStatus.AVAILABLE, openedAt = 200),
+            )
         val idx = FileHistoryManager.findEvictIndex(entries)
         assertEquals("b", entries[idx].uri)
     }
@@ -97,11 +100,12 @@ class FileHistoryManagerTest {
      */
     @Test
     fun findEvictIndex_notFoundNewest_stillEvictedOverOlderAvailable() {
-        val entries = listOf(
-            makeFile("old_available", AvailabilityStatus.AVAILABLE, openedAt = 1),
-            makeFile("not_found_newest", AvailabilityStatus.NOT_FOUND, openedAt = 9999),
-            makeFile("recent_available", AvailabilityStatus.AVAILABLE, openedAt = 500),
-        )
+        val entries =
+            listOf(
+                makeFile("old_available", AvailabilityStatus.AVAILABLE, openedAt = 1),
+                makeFile("not_found_newest", AvailabilityStatus.NOT_FOUND, openedAt = 9999),
+                makeFile("recent_available", AvailabilityStatus.AVAILABLE, openedAt = 500),
+            )
         val idx = FileHistoryManager.findEvictIndex(entries)
         assertEquals("not_found_newest", entries[idx].uri)
     }
@@ -113,10 +117,11 @@ class FileHistoryManagerTest {
      */
     @Test
     fun applyUpsert_existingUri_movedToFront_sizeUnchanged() {
-        val existing = listOf(
-            makeFile("first", openedAt = 200),
-            makeFile("second", openedAt = 100),
-        )
+        val existing =
+            listOf(
+                makeFile("first", openedAt = 200),
+                makeFile("second", openedAt = 100),
+            )
         val newFile = makeFile("second", openedAt = 999)
         val (result, evicted) = FileHistoryManager.applyUpsert(existing, newFile)
         assertEquals("second", result.first().uri)
@@ -202,17 +207,18 @@ class FileHistoryManagerTest {
      */
     @Test
     fun recentFile_dataClass_equalityAndCopy() {
-        val file = RecentFile(
-            id = "id-1",
-            uri = "/docs/file.pdf",
-            displayName = "file.pdf",
-            fileSize = 1024L,
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-            thumbnailKey = "thumb-key",
-            fileMtime = 900L,
-            lastPageIndex = 3,
-        )
+        val file =
+            RecentFile(
+                id = "id-1",
+                uri = "/docs/file.pdf",
+                displayName = "file.pdf",
+                fileSize = 1024L,
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+                thumbnailKey = "thumb-key",
+                fileMtime = 900L,
+                lastPageIndex = 3,
+            )
         val copy = file.copy(lastPageIndex = 5)
 
         assertEquals(file, file.copy())

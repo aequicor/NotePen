@@ -27,7 +27,6 @@ public data class ReflowReading(
 public class BuildReflowReadingUseCase(
     private val extractor: PdfReflowExtractor,
 ) {
-
     /**
      * @param path путь/URI к PDF
      * @param strokesByPage рукописные штрихи по нулевому индексу страницы
@@ -38,9 +37,10 @@ public class BuildReflowReadingUseCase(
         strokesByPage: Map<Int, List<DrawingPath>>,
     ): ReflowReading {
         val document = extractor.extract(path)
-        val highlights = strokesByPage.entries.flatMap { (pageIndex, strokes) ->
-            strokes.flatMap { stroke -> StrokeTextMapper.anchorsFor(document, pageIndex, stroke) }
-        }
+        val highlights =
+            strokesByPage.entries.flatMap { (pageIndex, strokes) ->
+                strokes.flatMap { stroke -> StrokeTextMapper.anchorsFor(document, pageIndex, stroke) }
+            }
         return ReflowReading(document = document, highlights = highlights)
     }
 }

@@ -51,18 +51,18 @@ class MainScreenComponent(
     /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
 ) : MainComponent, ComponentContext by componentContext {
-
     /** ViewModel главного экрана, привязанная к жизненному циклу компонента. */
-    val viewModel = MainScreenViewModel(
-        lifecycle = lifecycle,
-        historyRepository = historyRepository,
-        folderRepository = folderRepository,
-        addToHistory = addToHistory,
-        checkAvailability = checkAvailability,
-        openRecentFile = openRecentFileUseCase,
-        thumbnailRepository = thumbnailRepository,
-        thumbnailGenerator = thumbnailGenerator,
-        remoteCatalogsFlow = remoteCatalogsFlow,
-        onlinePeerIdsFlow = onlinePeerIdsFlow,
-    )
+    val viewModel =
+        MainScreenViewModel(
+            lifecycle = lifecycle,
+            historyRepository = historyRepository,
+            folderRepository = folderRepository,
+            addToHistory = addToHistory,
+            checkAvailability = checkAvailability,
+            openRecentFile = openRecentFileUseCase,
+            thumbnailRepository = thumbnailRepository,
+            thumbnailGenerator = thumbnailGenerator,
+            remoteCatalogsFlow = remoteCatalogsFlow,
+            onlinePeerIdsFlow = onlinePeerIdsFlow,
+        )
 }

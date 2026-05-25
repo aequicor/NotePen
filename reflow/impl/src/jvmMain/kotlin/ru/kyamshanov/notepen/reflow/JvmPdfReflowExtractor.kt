@@ -31,19 +31,20 @@ import java.io.File
  * @param ioDispatcher диспетчер для блокирующего парсинга; не должен быть Main-диспетчером
  */
 class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : PdfReflowExtractor {
-
-    override suspend fun probe(path: String): PdfContentKind = withContext(ioDispatcher) {
-        openDocument(path).use { document ->
-            val limit = minOf(PROBE_PAGE_LIMIT, document.numberOfPages)
-            ReflowAssembler.classify((0 until limit).map { extractPage(document, it) })
+    override suspend fun probe(path: String): PdfContentKind =
+        withContext(ioDispatcher) {
+            openDocument(path).use { document ->
+                val limit = minOf(PROBE_PAGE_LIMIT, document.numberOfPages)
+                ReflowAssembler.classify((0 until limit).map { extractPage(document, it) })
+            }
         }
-    }
 
-    override suspend fun extract(path: String): ReflowDocument = withContext(ioDispatcher) {
-        openDocument(path).use { document ->
-            ReflowAssembler.assemble((0 until document.numberOfPages).map { extractPage(document, it) })
+    override suspend fun extract(path: String): ReflowDocument =
+        withContext(ioDispatcher) {
+            openDocument(path).use { document ->
+                ReflowAssembler.assemble((0 until document.numberOfPages).map { extractPage(document, it) })
+            }
         }
-    }
 
     private fun openDocument(path: String): PDDocument {
         val file = File(path)
@@ -51,15 +52,22 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
         return Loader.loadPDF(file)
     }
 
-    private fun extractPage(document: PDDocument, pageIndex: Int): RawPage {
+    private fun extractPage(
+        document: PDDocument,
+        pageIndex: Int,
+    ): RawPage {
         val page = document.getPage(pageIndex)
         val box = page.mediaBox
         val glyphs = mutableListOf<RawGlyph>()
-        val stripper = object : PDFTextStripper() {
-            override fun writeString(text: String, textPositions: List<TextPosition>) {
-                textPositions.forEach { position -> position.toGlyph()?.let(glyphs::add) }
+        val stripper =
+            object : PDFTextStripper() {
+                override fun writeString(
+                    text: String,
+                    textPositions: List<TextPosition>,
+                ) {
+                    textPositions.forEach { position -> position.toGlyph()?.let(glyphs::add) }
+                }
             }
-        }
         stripper.sortByPosition = true
         stripper.startPage = pageIndex + 1
         stripper.endPage = pageIndex + 1
@@ -83,12 +91,13 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
         val fontName = font?.name
         return RawGlyph(
             text = text,
-            rect = ReflowRect(
-                left = xDirAdj,
-                top = yDirAdj - heightDir,
-                right = xDirAdj + widthDirAdj,
-                bottom = yDirAdj,
-            ),
+            rect =
+                ReflowRect(
+                    left = xDirAdj,
+                    top = yDirAdj - heightDir,
+                    right = xDirAdj + widthDirAdj,
+                    bottom = yDirAdj,
+                ),
             fontSizePt = fontSizeInPt,
             spaceWidthPt = widthOfSpace,
             bold = FontStyles.isBold(fontName),
@@ -106,28 +115,58 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
 
         override fun drawImage(pdImage: PDImage) {
             val m = graphicsState.currentTransformationMatrix
-            regions += FigureGeometry.imageRectFromCtm(
-                scaleX = m.scaleX,
-                shearY = m.shearY,
-                shearX = m.shearX,
-                scaleY = m.scaleY,
-                translateX = m.translateX,
-                translateY = m.translateY,
-                pageHeightPt = pageHeight,
-            )
+            regions +=
+                FigureGeometry.imageRectFromCtm(
+                    scaleX = m.scaleX,
+                    shearY = m.shearY,
+                    shearX = m.shearX,
+                    scaleY = m.scaleY,
+                    translateX = m.translateX,
+                    translateY = m.translateY,
+                    pageHeightPt = pageHeight,
+                )
         }
 
-        override fun appendRectangle(p0: Point2D, p1: Point2D, p2: Point2D, p3: Point2D) {}
+        override fun appendRectangle(
+            p0: Point2D,
+            p1: Point2D,
+            p2: Point2D,
+            p3: Point2D,
+        ) {}
+
         override fun clip(windingRule: Int) {}
-        override fun moveTo(x: Float, y: Float) {}
-        override fun lineTo(x: Float, y: Float) {}
-        override fun curveTo(x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float) {}
+
+        override fun moveTo(
+            x: Float,
+            y: Float,
+        ) {}
+
+        override fun lineTo(
+            x: Float,
+            y: Float,
+        ) {}
+
+        override fun curveTo(
+            x1: Float,
+            y1: Float,
+            x2: Float,
+            y2: Float,
+            x3: Float,
+            y3: Float,
+        ) {}
+
         override fun getCurrentPoint(): Point2D = Point2D.Float(0f, 0f)
+
         override fun closePath() {}
+
         override fun endPath() {}
+
         override fun strokePath() {}
+
         override fun fillPath(windingRule: Int) {}
+
         override fun fillAndStrokePath(windingRule: Int) {}
+
         override fun shadingFill(shadingName: COSName) {}
     }
 

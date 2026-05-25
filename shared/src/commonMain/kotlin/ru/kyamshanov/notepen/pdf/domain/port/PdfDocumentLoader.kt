@@ -10,7 +10,6 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
  * `Dispatchers.IO` напрямую.
  */
 interface PdfDocumentLoader {
-
     /**
      * Открывает PDF-файл по заданному пути.
      *

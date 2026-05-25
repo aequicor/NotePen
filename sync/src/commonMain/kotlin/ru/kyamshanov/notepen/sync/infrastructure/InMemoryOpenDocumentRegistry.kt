@@ -13,7 +13,6 @@ import ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry
  * сама карта счётчиков мутируется однопоточно.
  */
 class InMemoryOpenDocumentRegistry : OpenDocumentRegistry {
-
     private val refCounts = mutableMapOf<String, Int>()
     private val _openDocumentIds = MutableStateFlow<Set<String>>(emptySet())
 

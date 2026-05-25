@@ -13,16 +13,15 @@ import ru.kyamshanov.notepen.mainscreen.domain.port.FileAvailabilityChecker
  * Нечитаемый файл или ошибка → FILE_ERROR.
  */
 class FileAvailabilityCheckerDesktop : FileAvailabilityChecker {
-
-    override suspend fun check(uri: String): AvailabilityStatus =
-        withContext(Dispatchers.IO) { checkSync(uri) }
+    override suspend fun check(uri: String): AvailabilityStatus = withContext(Dispatchers.IO) { checkSync(uri) }
 
     override fun checkSync(uri: String): AvailabilityStatus {
-        val file = try {
-            java.io.File(uri).canonicalFile
-        } catch (_: Exception) {
-            return AvailabilityStatus.FILE_ERROR
-        }
+        val file =
+            try {
+                java.io.File(uri).canonicalFile
+            } catch (_: Exception) {
+                return AvailabilityStatus.FILE_ERROR
+            }
         return when {
             !file.exists() -> AvailabilityStatus.NOT_FOUND
             !file.canRead() -> AvailabilityStatus.FILE_ERROR

@@ -30,7 +30,6 @@ import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
  * другой так, чтобы выровнять пропорции (см. [resizePanel] / [resizeTarget]).
  */
 class MagnifierState {
-
     /** Включён ли инструмент. */
     var enabled: Boolean by mutableStateOf(false)
         private set
@@ -105,8 +104,7 @@ class MagnifierState {
     private val highResBitmapsState = mutableStateMapOf<Int, ImageBitmap>()
 
     /** Битмап страницы по индексу — high-res имеет приоритет над viewer-битмапом. */
-    fun pageBitmap(pageIndex: Int): ImageBitmap? =
-        highResBitmapsState[pageIndex] ?: pageBitmapsState[pageIndex]
+    fun pageBitmap(pageIndex: Int): ImageBitmap? = highResBitmapsState[pageIndex] ?: pageBitmapsState[pageIndex]
 
     /** Низкоразрешённый viewer-битмап (без приоритета high-res); для рендера на странице. */
     fun viewerPageBitmap(pageIndex: Int): ImageBitmap? = pageBitmapsState[pageIndex]
@@ -116,9 +114,15 @@ class MagnifierState {
         get() = pageBitmap(pageIndex)
 
     /** Обновить high-res битмап страницы [pageIndex]. */
-    fun updateHighResBitmap(pageIndex: Int, bitmap: ImageBitmap?) {
-        if (bitmap == null) highResBitmapsState.remove(pageIndex)
-        else highResBitmapsState[pageIndex] = bitmap
+    fun updateHighResBitmap(
+        pageIndex: Int,
+        bitmap: ImageBitmap?,
+    ) {
+        if (bitmap == null) {
+            highResBitmapsState.remove(pageIndex)
+        } else {
+            highResBitmapsState[pageIndex] = bitmap
+        }
     }
 
     /** Включена ли авто-прокрутка рамки при подходе пера к правому краю панели. */
@@ -172,34 +176,38 @@ class MagnifierState {
     ) {
         // Квадратное окно лупы — комфортнее для письма, и совпадает с
         // квадратной (в page-pixels) дефолтной рамкой.
-        val panelSide = minOf(viewportSize.width * 0.3f, viewportSize.height * 0.5f)
-            .coerceAtLeast(MIN_USABLE_PANEL_W_PX)
+        val panelSide =
+            minOf(viewportSize.width * 0.3f, viewportSize.height * 0.5f)
+                .coerceAtLeast(MIN_USABLE_PANEL_W_PX)
         panelSize = Size(panelSide, panelSide)
         // Слева от PDF, по центру по вертикали.
-        panelTopLeft = Offset(
-            x = PANEL_BOTTOM_MARGIN_PX,
-            y = ((viewportSize.height - panelSide) / 2f).coerceAtLeast(0f),
-        )
+        panelTopLeft =
+            Offset(
+                x = PANEL_BOTTOM_MARGIN_PX,
+                y = ((viewportSize.height - panelSide) / 2f).coerceAtLeast(0f),
+            )
 
         // target.W/target.H × pageAspect = panel.W/panel.H
         // → target.H = target.W × pageAspect × panel.H/panel.W
         // Для квадратной панели panel.H/panel.W = 1, поэтому target.H = target.W × pageAspect.
         // В page-pixels это даёт квадратную рамку (target.W × basePageW = target.H × pdfH).
         val targetWidthN = TOOLBAR_DEFAULT_TARGET_WIDTH_FRAC
-        val targetHeightN = (targetWidthN * pageAspect * panelSide / panelSide)
-            .coerceIn(MIN_TARGET_DIM, 1f)
+        val targetHeightN =
+            (targetWidthN * pageAspect * panelSide / panelSide)
+                .coerceIn(MIN_TARGET_DIM, 1f)
         val safeWidthN = targetWidthN.coerceIn(MIN_TARGET_DIM, 1f)
         val left = (targetCenterOnPage.x - safeWidthN / 2f).coerceIn(0f, 1f - safeWidthN)
         val top = (targetCenterOnPage.y - targetHeightN / 2f).coerceIn(0f, 1f - targetHeightN)
 
-        segments = listOf(
-            MagnifierPageSegment(
-                pageIndex = onPage,
-                targetOnPage = Rect(left, top, left + safeWidthN, top + targetHeightN),
-                panelTopFrac = 0f,
-                panelBottomFrac = 1f,
-            ),
-        )
+        segments =
+            listOf(
+                MagnifierPageSegment(
+                    pageIndex = onPage,
+                    targetOnPage = Rect(left, top, left + safeWidthN, top + targetHeightN),
+                    panelTopFrac = 0f,
+                    panelBottomFrac = 1f,
+                ),
+            )
         enabled = true
     }
 
@@ -207,7 +215,10 @@ class MagnifierState {
      * Перепривязать single-page рамку к (возможно другой) странице с новым
      * прямоугольником. Используется при cross-page move рамки.
      */
-    fun setSingleSegmentTarget(pageIndex: Int, targetOnPage: Rect) {
+    fun setSingleSegmentTarget(
+        pageIndex: Int,
+        targetOnPage: Rect,
+    ) {
         if (segments.size != 1) return
         segments = listOf(segments[0].copy(pageIndex = pageIndex, targetOnPage = targetOnPage))
     }
@@ -244,14 +255,15 @@ class MagnifierState {
         val safeTarget = clampTargetToPage(target)
         enableMulti(
             viewportSize = viewportSize,
-            segs = listOf(
-                MagnifierPageSegment(
-                    pageIndex = onPage,
-                    targetOnPage = safeTarget,
-                    panelTopFrac = 0f,
-                    panelBottomFrac = 1f,
+            segs =
+                listOf(
+                    MagnifierPageSegment(
+                        pageIndex = onPage,
+                        targetOnPage = safeTarget,
+                        panelTopFrac = 0f,
+                        panelBottomFrac = 1f,
+                    ),
                 ),
-            ),
             selectionSizePx = selectionSizePx,
             panelCenter = panelCenter,
         )
@@ -290,10 +302,11 @@ class MagnifierState {
         val rawTop = panelCenter.y - panelH / 2f
         val maxLeft = (viewportSize.width - panelW).coerceAtLeast(0f)
         val maxTop = (viewportSize.height - panelH).coerceAtLeast(0f)
-        panelTopLeft = Offset(
-            x = rawLeft.coerceIn(0f, maxLeft),
-            y = rawTop.coerceIn(0f, maxTop),
-        )
+        panelTopLeft =
+            Offset(
+                x = rawLeft.coerceIn(0f, maxLeft),
+                y = rawTop.coerceIn(0f, maxTop),
+            )
         enabled = true
     }
 
@@ -312,12 +325,12 @@ class MagnifierState {
 
     /** Переключить тип привязки рамки PAGE ↔ SCREEN. */
     fun toggleAttachment() {
-        attachment = when (attachment) {
-            MagnifierAttachment.PAGE -> MagnifierAttachment.SCREEN
-            MagnifierAttachment.SCREEN -> MagnifierAttachment.PAGE
-        }
+        attachment =
+            when (attachment) {
+                MagnifierAttachment.PAGE -> MagnifierAttachment.SCREEN
+                MagnifierAttachment.SCREEN -> MagnifierAttachment.PAGE
+            }
     }
-
 
     /**
      * Пересчитывает `targetOnPage` (и при необходимости `pageIndex`) первого
@@ -327,7 +340,10 @@ class MagnifierState {
      *
      * Multi-page — no-op.
      */
-    fun repinFromViewportRect(viewportRect: Rect, viewerState: PdfViewerState) {
+    fun repinFromViewportRect(
+        viewportRect: Rect,
+        viewerState: PdfViewerState,
+    ) {
         if (segments.size != 1) return
         val layout = viewerState.layout
         val zoom = viewerState.zoom
@@ -338,8 +354,9 @@ class MagnifierState {
         val docTop = (viewportRect.top - pan.y) / zoom
         val docRight = (viewportRect.right - pan.x) / zoom
         val docBottom = (viewportRect.bottom - pan.y) / zoom
-        val pageIdx = resolvePageForDocY(layout.pageTopsPx, docTop)
-            .coerceIn(0, layout.pdfHeightsPx.size - 1)
+        val pageIdx =
+            resolvePageForDocY(layout.pageTopsPx, docTop)
+                .coerceIn(0, layout.pdfHeightsPx.size - 1)
         val pageTop = layout.pageTopsPx[pageIdx]
         val pdfH = layout.pdfHeightsPx[pageIdx]
         if (pdfH <= 0f) return
@@ -388,14 +405,15 @@ class MagnifierState {
         if (segments.size != 1) return
         val s = segments[0]
         val r = s.targetOnPage
-        val moved = clampTargetToPage(
-            Rect(
-                left = r.left + deltaPageSpace.x,
-                top = r.top + deltaPageSpace.y,
-                right = r.right + deltaPageSpace.x,
-                bottom = r.bottom + deltaPageSpace.y,
-            ),
-        )
+        val moved =
+            clampTargetToPage(
+                Rect(
+                    left = r.left + deltaPageSpace.x,
+                    top = r.top + deltaPageSpace.y,
+                    right = r.right + deltaPageSpace.x,
+                    bottom = r.bottom + deltaPageSpace.y,
+                ),
+            )
         segments = listOf(s.copy(targetOnPage = moved))
     }
 
@@ -403,18 +421,22 @@ class MagnifierState {
      * Изменить размер рамки. Доступно только для single-page; для multi-page
      * — no-op (см. [moveTarget]).
      */
-    fun resizeTarget(newWidth: Float, newHeight: Float) {
+    fun resizeTarget(
+        newWidth: Float,
+        newHeight: Float,
+    ) {
         if (segments.size != 1) return
         val s = segments[0]
         val r = s.targetOnPage
-        val clamped = clampTargetToPage(
-            Rect(
-                left = r.left,
-                top = r.top,
-                right = r.left + newWidth,
-                bottom = r.top + newHeight,
-            ),
-        )
+        val clamped =
+            clampTargetToPage(
+                Rect(
+                    left = r.left,
+                    top = r.top,
+                    right = r.left + newWidth,
+                    bottom = r.top + newHeight,
+                ),
+            )
         segments = listOf(s.copy(targetOnPage = clamped))
         alignPanelAspectToTarget()
     }
@@ -452,9 +474,10 @@ class MagnifierState {
         val newH = (th / scaleFactor).coerceIn(MIN_TARGET_DIM, 1f)
         val newLeft = anchorX - fx * newW
         val newTop = anchorY - fy * newH
-        val clamped = clampTargetToPage(
-            Rect(newLeft, newTop, newLeft + newW, newTop + newH),
-        )
+        val clamped =
+            clampTargetToPage(
+                Rect(newLeft, newTop, newLeft + newW, newTop + newH),
+            )
         segments = listOf(s.copy(targetOnPage = clamped))
         alignTargetAspectToPanel()
     }
@@ -464,7 +487,10 @@ class MagnifierState {
      * пересчитав её в page-normalized с учётом текущих `panelSize` и
      * `targetOnPage`. Single-page only.
      */
-    fun panTargetByPanelPx(deltaPanelPx: Offset, panelSize: Size) {
+    fun panTargetByPanelPx(
+        deltaPanelPx: Offset,
+        panelSize: Size,
+    ) {
         if (segments.size != 1) return
         if (panelSize.width <= 0f || panelSize.height <= 0f) return
         val r = segments[0].targetOnPage
@@ -500,15 +526,24 @@ class MagnifierState {
      * Обновить размер canvas страницы. Вызывается из `DrawablePdfPage`
      * при изменении его размера, пока magnifier активен на этой странице.
      */
-    fun updatePageCanvasPx(widthPx: Float, heightPx: Float = pageCanvasHeightPx) {
+    fun updatePageCanvasPx(
+        widthPx: Float,
+        heightPx: Float = pageCanvasHeightPx,
+    ) {
         pageCanvasWidthPx = widthPx
         if (heightPx > 0f) pageCanvasHeightPx = heightPx
     }
 
     /** Обновить ссылку на битмап страницы [pageIndex]. */
-    fun updatePageBitmap(pageIndex: Int, bitmap: ImageBitmap?) {
-        if (bitmap == null) pageBitmapsState.remove(pageIndex)
-        else pageBitmapsState[pageIndex] = bitmap
+    fun updatePageBitmap(
+        pageIndex: Int,
+        bitmap: ImageBitmap?,
+    ) {
+        if (bitmap == null) {
+            pageBitmapsState.remove(pageIndex)
+        } else {
+            pageBitmapsState[pageIndex] = bitmap
+        }
     }
 
     /**
@@ -528,22 +563,25 @@ class MagnifierState {
             AutoScrollDir.RIGHT -> {
                 val shifted = r.left + w * AUTO_SCROLL_ADVANCE
                 if (shifted + w <= 1f - EDGE_EPS) {
-                    segments = listOf(
-                        s.copy(targetOnPage = Rect(shifted, r.top, shifted + w, r.bottom)),
-                    )
+                    segments =
+                        listOf(
+                            s.copy(targetOnPage = Rect(shifted, r.top, shifted + w, r.bottom)),
+                        )
                     true
                 } else {
                     // Перевод строки.
                     val newTop = r.top + h * AUTO_SCROLL_LINE_FEED
                     if (newTop + h > 1f) return false
-                    segments = listOf(
-                        s.copy(
-                            targetOnPage = Rect(
-                                LINE_LEFT_MARGIN, newTop,
-                                LINE_LEFT_MARGIN + w, newTop + h,
+                    segments =
+                        listOf(
+                            s.copy(
+                                targetOnPage =
+                                    Rect(
+                                        LINE_LEFT_MARGIN, newTop,
+                                        LINE_LEFT_MARGIN + w, newTop + h,
+                                    ),
                             ),
-                        ),
-                    )
+                        )
                     true
                 }
             }
@@ -576,9 +614,10 @@ class MagnifierState {
         // Обратное к alignPanelAspectToTarget: target.height (page-normalized)
         // = panel-pixel-aspect / page-pixel-aspect * target.width.
         val targetH = tw * panelSize.height / panelSize.width * pageAspect
-        val newRect = clampTargetToPage(
-            Rect(r.left, r.top, r.right, r.top + targetH),
-        )
+        val newRect =
+            clampTargetToPage(
+                Rect(r.left, r.top, r.right, r.top + targetH),
+            )
         segments = listOf(s.copy(targetOnPage = newRect))
     }
 
@@ -624,7 +663,7 @@ class MagnifierState {
 }
 
 /** Направление авто-прокрутки рамки при подходе пера к краю панели. */
-enum class AutoScrollDir { RIGHT }
+enum class AutoScrollDir { RIGHT, }
 
 /**
  * Способ привязки target rect лупы к содержимому.

@@ -54,19 +54,21 @@ fun ProjectionViewerOverlay(
         }
 
         Surface(
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp),
+            modifier =
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp),
             shape = MaterialTheme.shapes.small,
             tonalElevation = 2.dp,
         ) {
             Button(
                 onClick = { if (following) controller.detach() else controller.attach() },
-                colors = if (following) {
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                } else {
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                },
+                colors =
+                    if (following) {
+                        ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    } else {
+                        ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    },
             ) {
                 Icon(
                     imageVector = if (following) Icons.Default.CenterFocusStrong else Icons.Default.OpenWith,

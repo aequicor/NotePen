@@ -14,6 +14,5 @@ internal class JvmImageDocument(
     override val pixels: IntArray,
     override val info: PdfDocumentInfo,
 ) : ImageBackedDocument {
-
     override fun close() = Unit
 }

@@ -24,9 +24,10 @@ class ClientQrScanViewModel(
     private val selfInfo: DeviceInfo,
     private val scope: CoroutineScope,
 ) {
-    private val _state = MutableStateFlow<ClientQrPairingCoordinator.State>(
-        ClientQrPairingCoordinator.State.Scanning,
-    )
+    private val _state =
+        MutableStateFlow<ClientQrPairingCoordinator.State>(
+            ClientQrPairingCoordinator.State.Scanning,
+        )
     val state: StateFlow<ClientQrPairingCoordinator.State> = _state.asStateFlow()
 
     private var runJob: Job? = null
@@ -39,14 +40,16 @@ class ClientQrScanViewModel(
     fun start(scanner: QrScanner): Job {
         runJob?.cancel()
         _state.value = ClientQrPairingCoordinator.State.Scanning
-        val coordinator = ClientQrPairingCoordinator(
-            syncClient = syncClient,
-            scanner = scanner,
-            selfInfo = selfInfo,
-        )
-        val job = scope.launch {
-            coordinator.run().collect { s -> _state.value = s }
-        }
+        val coordinator =
+            ClientQrPairingCoordinator(
+                syncClient = syncClient,
+                scanner = scanner,
+                selfInfo = selfInfo,
+            )
+        val job =
+            scope.launch {
+                coordinator.run().collect { s -> _state.value = s }
+            }
         runJob = job
         return job
     }

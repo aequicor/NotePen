@@ -7,19 +7,19 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class FigureGeometryTest {
-
     @Test
     fun `axis-aligned image maps to top-left rect`() {
         // Изображение 200×100, сдвинуто в (50, 300) пользовательского пространства, страница высотой 800.
-        val rect = FigureGeometry.imageRectFromCtm(
-            scaleX = 200f,
-            shearY = 0f,
-            shearX = 0f,
-            scaleY = 100f,
-            translateX = 50f,
-            translateY = 300f,
-            pageHeightPt = 800f,
-        )
+        val rect =
+            FigureGeometry.imageRectFromCtm(
+                scaleX = 200f,
+                shearY = 0f,
+                shearX = 0f,
+                scaleY = 100f,
+                translateX = 50f,
+                translateY = 300f,
+                pageHeightPt = 800f,
+            )
         assertEquals(50f, rect.left)
         assertEquals(250f, rect.right)
         assertEquals(400f, rect.top) // 800 - (300 + 100)

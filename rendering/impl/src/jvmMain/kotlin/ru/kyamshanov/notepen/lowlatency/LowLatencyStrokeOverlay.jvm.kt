@@ -6,7 +6,10 @@ import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 
 /** Desktop has no front-buffered surface — Compose Canvas renders the live stroke. */
 @Composable
-actual fun LowLatencyStrokeOverlay(drawingState: PdfDrawingState, modifier: Modifier) {
+actual fun LowLatencyStrokeOverlay(
+    drawingState: PdfDrawingState,
+    modifier: Modifier,
+) {
     // no-op
 }
 

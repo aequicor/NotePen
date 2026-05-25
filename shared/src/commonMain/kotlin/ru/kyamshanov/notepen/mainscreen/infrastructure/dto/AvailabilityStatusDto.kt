@@ -10,25 +10,28 @@ enum class AvailabilityStatusDto {
     AVAILABLE,
     NOT_FOUND,
     FILE_ERROR,
-    ARCHIVED_UNAVAILABLE;
+    ARCHIVED_UNAVAILABLE,
+    ;
 
     /** Преобразует DTO в доменную модель. */
-    fun toDomain(): AvailabilityStatus = when (this) {
-        UNKNOWN -> AvailabilityStatus.UNKNOWN
-        AVAILABLE -> AvailabilityStatus.AVAILABLE
-        NOT_FOUND -> AvailabilityStatus.NOT_FOUND
-        FILE_ERROR -> AvailabilityStatus.FILE_ERROR
-        ARCHIVED_UNAVAILABLE -> AvailabilityStatus.ARCHIVED_UNAVAILABLE
-    }
+    fun toDomain(): AvailabilityStatus =
+        when (this) {
+            UNKNOWN -> AvailabilityStatus.UNKNOWN
+            AVAILABLE -> AvailabilityStatus.AVAILABLE
+            NOT_FOUND -> AvailabilityStatus.NOT_FOUND
+            FILE_ERROR -> AvailabilityStatus.FILE_ERROR
+            ARCHIVED_UNAVAILABLE -> AvailabilityStatus.ARCHIVED_UNAVAILABLE
+        }
 
     companion object {
         /** Преобразует доменную модель в DTO. */
-        fun fromDomain(status: AvailabilityStatus): AvailabilityStatusDto = when (status) {
-            AvailabilityStatus.UNKNOWN -> UNKNOWN
-            AvailabilityStatus.AVAILABLE -> AVAILABLE
-            AvailabilityStatus.NOT_FOUND -> NOT_FOUND
-            AvailabilityStatus.FILE_ERROR -> FILE_ERROR
-            AvailabilityStatus.ARCHIVED_UNAVAILABLE -> ARCHIVED_UNAVAILABLE
-        }
+        fun fromDomain(status: AvailabilityStatus): AvailabilityStatusDto =
+            when (status) {
+                AvailabilityStatus.UNKNOWN -> UNKNOWN
+                AvailabilityStatus.AVAILABLE -> AVAILABLE
+                AvailabilityStatus.NOT_FOUND -> NOT_FOUND
+                AvailabilityStatus.FILE_ERROR -> FILE_ERROR
+                AvailabilityStatus.ARCHIVED_UNAVAILABLE -> ARCHIVED_UNAVAILABLE
+            }
     }
 }

@@ -22,6 +22,7 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.reflow.api)
             implementation(projects.drawing.api)
+            implementation(projects.app.byCompose.uikit)
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.ui)

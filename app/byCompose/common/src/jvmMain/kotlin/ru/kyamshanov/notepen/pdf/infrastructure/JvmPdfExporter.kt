@@ -3,7 +3,6 @@ package ru.kyamshanov.notepen.pdf.infrastructure
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.apache.pdfbox.Loader
-import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPageContentStream
 import org.apache.pdfbox.pdmodel.PDPageContentStream.AppendMode
 import org.apache.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
@@ -24,52 +23,52 @@ import java.io.File
  * @param ioDispatcher dispatcher for blocking file I/O
  */
 class JvmPdfExporter(private val ioDispatcher: CoroutineDispatcher) : PdfExporter {
-
     override suspend fun export(
         sourcePdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,
         outputPath: String,
-    ): Result<Unit> = withContext(ioDispatcher) {
-        runCatching {
-            Loader.loadPDF(File(sourcePdfPath)).use { doc ->
-                for ((pageIndex, paths) in annotations) {
-                    if (pageIndex < 0 || pageIndex >= doc.numberOfPages) continue
-                    if (paths.isEmpty()) continue
+    ): Result<Unit> =
+        withContext(ioDispatcher) {
+            runCatching {
+                Loader.loadPDF(File(sourcePdfPath)).use { doc ->
+                    for ((pageIndex, paths) in annotations) {
+                        if (pageIndex < 0 || pageIndex >= doc.numberOfPages) continue
+                        if (paths.isEmpty()) continue
 
-                    val page = doc.pages[pageIndex]
-                    val wPt = page.mediaBox.width
-                    val hPt = page.mediaBox.height
+                        val page = doc.pages[pageIndex]
+                        val wPt = page.mediaBox.width
+                        val hPt = page.mediaBox.height
 
-                    PDPageContentStream(doc, page, AppendMode.APPEND, true, true).use { cs ->
-                        for (path in paths) {
-                            if (path.points.size < 2) continue
-                            val argb = path.colorArgb.toInt()
-                            val r = ((argb shr 16) and 0xFF) / 255f
-                            val g = ((argb shr 8) and 0xFF) / 255f
-                            val b = (argb and 0xFF) / 255f
-                            val a = ((argb ushr 24) and 0xFF) / 255f
+                        PDPageContentStream(doc, page, AppendMode.APPEND, true, true).use { cs ->
+                            for (path in paths) {
+                                if (path.points.size < 2) continue
+                                val argb = path.colorArgb.toInt()
+                                val r = ((argb shr 16) and 0xFF) / 255f
+                                val g = ((argb shr 8) and 0xFF) / 255f
+                                val b = (argb and 0xFF) / 255f
+                                val a = ((argb ushr 24) and 0xFF) / 255f
 
-                            cs.saveGraphicsState()
-                            cs.setLineWidth(path.strokeWidth * wPt)
-                            cs.setStrokingColor(r, g, b)
+                                cs.saveGraphicsState()
+                                cs.setLineWidth(path.strokeWidth * wPt)
+                                cs.setStrokingColor(r, g, b)
 
-                            if (a < 1f) {
-                                val gs = PDExtendedGraphicsState()
-                                gs.strokingAlphaConstant = a
-                                gs.nonStrokingAlphaConstant = a
-                                cs.setGraphicsStateParameters(gs)
+                                if (a < 1f) {
+                                    val gs = PDExtendedGraphicsState()
+                                    gs.strokingAlphaConstant = a
+                                    gs.nonStrokingAlphaConstant = a
+                                    cs.setGraphicsStateParameters(gs)
+                                }
+
+                                drawPathOnStream(cs, path.points, wPt, hPt)
+                                cs.stroke()
+                                cs.restoreGraphicsState()
                             }
-
-                            drawPathOnStream(cs, path.points, wPt, hPt)
-                            cs.stroke()
-                            cs.restoreGraphicsState()
                         }
                     }
+                    doc.save(File(outputPath))
                 }
-                doc.save(File(outputPath))
             }
         }
-    }
 
     /**
      * Draws a [DrawingPath] as a Catmull-Rom → cubic-Bézier approximation on [cs].

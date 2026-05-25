@@ -54,18 +54,18 @@ class MagnifierInputController(
      */
     private val pageAspect: (pageIndex: Int) -> Float,
 ) {
-
     private var activeErase: EraseGesture? = null
     private var activeMode: Mode = Mode.NONE
     private var activePageIndex: Int = -1
     private var activeDrawingState: PdfDrawingState? = null
 
-    private val holdTracker = HoldGestureTracker(
-        scope = scope,
-        delayMs = SHAPE_SNAP_HOLD_MS,
-        toleranceNorm = SHAPE_SNAP_TOLERANCE_NORM,
-        onHold = ::triggerShapeSnap,
-    )
+    private val holdTracker =
+        HoldGestureTracker(
+            scope = scope,
+            delayMs = SHAPE_SNAP_HOLD_MS,
+            toleranceNorm = SHAPE_SNAP_TOLERANCE_NORM,
+            onHold = ::triggerShapeSnap,
+        )
 
     private fun triggerShapeSnap() {
         if (activeMode != Mode.DRAW) return
@@ -75,7 +75,12 @@ class MagnifierInputController(
         state.snapLiveStrokeToShape(pageAspect(pi))
     }
 
-    fun onDown(panelLocal: Offset, panelSize: Size, pressure: Float, tilt: Float) {
+    fun onDown(
+        panelLocal: Offset,
+        panelSize: Size,
+        pressure: Float,
+        tilt: Float,
+    ) {
         val pageCanvasW = geometry.pageCanvasWidthPx
         if (pageCanvasW <= 0f || panelSize.width <= 0f || panelSize.height <= 0f) return
         val segment = segmentForPanelY(panelLocal.y, panelSize.height) ?: return
@@ -89,16 +94,18 @@ class MagnifierInputController(
                 // strokeWidth is a fraction of page width. Inside the loupe the
                 // page is magnified by `mag`, so we divide by `mag` to keep the
                 // visual stroke thickness the same as outside the loupe.
-                val widthFrac = if (effectiveTool == ToolMode.PEN) {
-                    penSettings().strokeWidth
-                } else {
-                    markerSettings().strokeWidth
-                }
-                val colorArgb = if (effectiveTool == ToolMode.PEN) {
-                    penSettings().colorArgb
-                } else {
-                    markerSettings().colorArgb
-                }
+                val widthFrac =
+                    if (effectiveTool == ToolMode.PEN) {
+                        penSettings().strokeWidth
+                    } else {
+                        markerSettings().strokeWidth
+                    }
+                val colorArgb =
+                    if (effectiveTool == ToolMode.PEN) {
+                        penSettings().colorArgb
+                    } else {
+                        markerSettings().colorArgb
+                    }
                 onGestureStart(segment.pageIndex, pdfDrawingState.currentPaths.toList())
                 pdfDrawingState.strokeColorArgb.value = colorArgb
                 pdfDrawingState.strokeWidth.value = widthFrac
@@ -116,20 +123,26 @@ class MagnifierInputController(
             }
             ToolMode.ERASER -> {
                 val pi = segment.pageIndex
-                activeErase = EraseGesture(
-                    pdfDrawingState = pdfDrawingState,
-                    eraserSettings = eraserSettings(),
-                    eraserPos = eraserPos,
-                    onGestureStart = { snapshot -> onGestureStart(pi, snapshot) },
-                    onEraseFinished = { b, a -> onEraseFinished(pi, b, a) },
-                ).also { it.start(page.x, page.y) }
+                activeErase =
+                    EraseGesture(
+                        pdfDrawingState = pdfDrawingState,
+                        eraserSettings = eraserSettings(),
+                        eraserPos = eraserPos,
+                        onGestureStart = { snapshot -> onGestureStart(pi, snapshot) },
+                        onEraseFinished = { b, a -> onEraseFinished(pi, b, a) },
+                    ).also { it.start(page.x, page.y) }
                 activeMode = Mode.ERASE
             }
             ToolMode.NONE -> activeMode = Mode.NONE
         }
     }
 
-    fun onMove(panelLocal: Offset, panelSize: Size, pressure: Float, tilt: Float) {
+    fun onMove(
+        panelLocal: Offset,
+        panelSize: Size,
+        pressure: Float,
+        tilt: Float,
+    ) {
         if (activeMode == Mode.NONE) return
         if (panelSize.width <= 0f || panelSize.height <= 0f) return
 
@@ -138,10 +151,11 @@ class MagnifierInputController(
         val page = panelLocalToPage(panelLocal, panelSize, segment)
         val pdfDrawingState = activeDrawingState ?: return
         when (activeMode) {
-            Mode.DRAW -> if (pdfDrawingState.isDrawing.value) {
-                pdfDrawingState.addPoint(x = page.x, y = page.y, pressure = pressure, tilt = tilt)
-                holdTracker.onMove(page.x, page.y)
-            }
+            Mode.DRAW ->
+                if (pdfDrawingState.isDrawing.value) {
+                    pdfDrawingState.addPoint(x = page.x, y = page.y, pressure = pressure, tilt = tilt)
+                    holdTracker.onMove(page.x, page.y)
+                }
             Mode.ERASE -> activeErase?.move(page.x, page.y)
             Mode.NONE -> Unit
         }
@@ -201,10 +215,16 @@ class MagnifierInputController(
         val leftZone = panelSize.width * AUTO_SCROLL_EDGE_FRAC
         val bottomZone = panelSize.height * (1f - AUTO_SCROLL_EDGE_FRAC)
         val topZone = panelSize.height * AUTO_SCROLL_EDGE_FRAC
-        if (lastPanelX > rightZone) shiftX = width * AUTO_SCROLL_LIFT_OFF_FRAC
-        else if (lastPanelX < leftZone) shiftX = -width * AUTO_SCROLL_LIFT_OFF_FRAC
-        if (lastPanelY > bottomZone) shiftY = height * AUTO_SCROLL_LIFT_OFF_FRAC
-        else if (lastPanelY < topZone) shiftY = -height * AUTO_SCROLL_LIFT_OFF_FRAC
+        if (lastPanelX > rightZone) {
+            shiftX = width * AUTO_SCROLL_LIFT_OFF_FRAC
+        } else if (lastPanelX < leftZone) {
+            shiftX = -width * AUTO_SCROLL_LIFT_OFF_FRAC
+        }
+        if (lastPanelY > bottomZone) {
+            shiftY = height * AUTO_SCROLL_LIFT_OFF_FRAC
+        } else if (lastPanelY < topZone) {
+            shiftY = -height * AUTO_SCROLL_LIFT_OFF_FRAC
+        }
 
         if (shiftX == 0f && shiftY == 0f) return
         val maxLeft = (1f - width).coerceAtLeast(0f)
@@ -226,7 +246,10 @@ class MagnifierInputController(
     /**
      * Находит сегмент, в чей panel-y диапазон попадает [panelY].
      */
-    internal fun segmentForPanelY(panelY: Float, panelHeight: Float): MagnifierPageSegment? {
+    internal fun segmentForPanelY(
+        panelY: Float,
+        panelHeight: Float,
+    ): MagnifierPageSegment? {
         if (panelHeight <= 0f) return null
         val frac = (panelY / panelHeight).coerceIn(0f, 1f)
         // Берём первый сегмент, у которого frac < panelBottomFrac. Граничный
@@ -246,19 +269,28 @@ class MagnifierInputController(
         segment: MagnifierPageSegment,
     ): Offset {
         val target = segment.targetOnPage
-        val nx = if (panelSize.width > 0f) {
-            target.left + (panelLocal.x / panelSize.width) * (target.right - target.left)
-        } else target.left
-        val fy = if (panelSize.height > 0f) {
-            (panelLocal.y / panelSize.height).coerceIn(0f, 1f)
-        } else 0f
+        val nx =
+            if (panelSize.width > 0f) {
+                target.left + (panelLocal.x / panelSize.width) * (target.right - target.left)
+            } else {
+                target.left
+            }
+        val fy =
+            if (panelSize.height > 0f) {
+                (panelLocal.y / panelSize.height).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
         val segH = (segment.panelBottomFrac - segment.panelTopFrac).coerceAtLeast(1e-6f)
         val localY = ((fy - segment.panelTopFrac) / segH).coerceIn(0f, 1f)
         val ny = target.top + localY * (target.bottom - target.top)
         return Offset(nx, ny)
     }
 
-    private fun loupeMagnification(panelSize: Size, segment: MagnifierPageSegment): Float {
+    private fun loupeMagnification(
+        panelSize: Size,
+        segment: MagnifierPageSegment,
+    ): Float {
         val targetW = segment.targetOnPage.right - segment.targetOnPage.left
         val pageCanvasW = geometry.pageCanvasWidthPx
         if (targetW <= 0f || pageCanvasW <= 0f || panelSize.width <= 0f) return 1f

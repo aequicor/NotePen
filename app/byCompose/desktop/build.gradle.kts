@@ -71,17 +71,19 @@ abstract class PruneDesktopRuntimeJars : TransformAction<TransformParameters.Non
     private fun currentPlatformNativeDir(): String {
         val os = System.getProperty("os.name").lowercase()
         val arch = System.getProperty("os.arch").lowercase()
-        val osDir = when {
-            os.contains("mac") || os.contains("darwin") -> "Mac"
-            os.contains("win") -> "Windows"
-            else -> "Linux"
-        }
-        val archDir = when (arch) {
-            "aarch64", "arm64" -> "aarch64"
-            "amd64", "x86_64", "x64" -> "x86_64"
-            "x86", "i386", "i686" -> "x86"
-            else -> arch
-        }
+        val osDir =
+            when {
+                os.contains("mac") || os.contains("darwin") -> "Mac"
+                os.contains("win") -> "Windows"
+                else -> "Linux"
+            }
+        val archDir =
+            when (arch) {
+                "aarch64", "arm64" -> "aarch64"
+                "amd64", "x86_64", "x64" -> "x86_64"
+                "x86", "i386", "i686" -> "x86"
+                else -> arch
+            }
         return "$SQLITE_NATIVE_ROOT$osDir/$archDir/"
     }
 
@@ -150,11 +152,11 @@ kotlin {
             implementation(libs.ktor.client.websockets)
             implementation(libs.ktor.serialization.kotlinx.json)
 
-            //decompose
+            // decompose
             implementation(libs.decompose)
             implementation(libs.decompose.compose)
 
-            //compose
+            // compose
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material)
@@ -178,27 +180,29 @@ compose.desktop {
         // в собранном дистрибутиве (jpackage берёт рантайм из того же javaHome).
         // Поэтому явно указываем JBR. compilerFor (требует javac) выбирает
         // полноценный jbrsdk с jpackage/jlink/jmods, а не runtime-only jbr.
-        javaHome = javaToolchains.compilerFor {
-            languageVersion.set(JavaLanguageVersion.of(21))
-            vendor.set(JvmVendorSpec.JETBRAINS)
-        }.map { it.metadata.installationPath.asFile.absolutePath }.get()
+        javaHome =
+            javaToolchains.compilerFor {
+                languageVersion.set(JavaLanguageVersion.of(21))
+                vendor.set(JvmVendorSpec.JETBRAINS)
+            }.map { it.metadata.installationPath.asFile.absolutePath }.get()
 
         nativeDistributions {
             includeAllModules = false
-            modules = arrayListOf(
-                "java.base",
-                "java.desktop",
-                "java.logging",
-                "java.sql",
-                "jdk.crypto.ec"
-            )
+            modules =
+                arrayListOf(
+                    "java.base",
+                    "java.desktop",
+                    "java.logging",
+                    "java.sql",
+                    "jdk.crypto.ec",
+                )
             // Windows .exe собирается НЕ через jpackage (TargetFormat.Exe), а из
             // app-image (createReleaseDistributable) внешним инсталлятором Inno Setup
             // — см. installer/windows/notepen.iss. Причина: jpackage не умеет
             // добавить финальный чекбокс «Запустить NotePen» и opt-in галочку ярлыка.
             targetFormats(
                 TargetFormat.Dmg,
-                TargetFormat.Deb
+                TargetFormat.Deb,
             )
             packageName = "NotePen"
             packageVersion = providers.gradleProperty("app.version").getOrElse("1.0.0")
@@ -232,14 +236,15 @@ compose.desktop {
                 bundleID = "ru.kyamshanov.notepen"
                 iconFile.set(project.file("icons/app_icon.icns"))
                 infoPlist {
-                    extraKeysRawXml = """
+                    extraKeysRawXml =
+                        """
                         <key>NSLocalNetworkUsageDescription</key>
                         <string>NotePen uses the local network to sync notes with your other devices.</string>
                         <key>NSBonjourServices</key>
                         <array>
                             <string>_notepen._tcp</string>
                         </array>
-                    """.trimIndent()
+                        """.trimIndent()
                 }
             }
             appResourcesRootDir.set(project.layout.projectDirectory.dir("assets"))
@@ -251,14 +256,15 @@ compose.desktop {
             configurationFiles.from("proguard-rules.pro")
         }
 
-        jvmArgs += listOf(
-            "-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG",
-            // In dev (:run), compose.application.resources.dir may not be set,
-            // so JNA won't find dylibs in assets/ automatically. Point it there
-            // explicitly; in packaged builds CocoaTabletInputController.addComposeResourcesToJnaPath()
-            // does the same at runtime.
-            "-Djna.library.path=${project.layout.projectDirectory.file("assets").asFile.absolutePath}",
-        )
+        jvmArgs +=
+            listOf(
+                "-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG",
+                // In dev (:run), compose.application.resources.dir may not be set,
+                // so JNA won't find dylibs in assets/ automatically. Point it there
+                // explicitly; in packaged builds CocoaTabletInputController.addComposeResourcesToJnaPath()
+                // does the same at runtime.
+                "-Djna.library.path=${project.layout.projectDirectory.file("assets").asFile.absolutePath}",
+            )
 
         // -Xdock:icon is a macOS-only launcher option; passing it on Windows/Linux
         // aborts JVM startup ("Unrecognized option"). Gate on the host OS — only a

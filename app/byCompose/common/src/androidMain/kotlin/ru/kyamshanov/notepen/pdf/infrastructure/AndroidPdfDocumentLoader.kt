@@ -27,39 +27,44 @@ class AndroidPdfDocumentLoader(
     private val context: Context,
     private val ioDispatcher: CoroutineDispatcher,
 ) : PdfDocumentLoader {
+    override suspend fun load(path: String): PdfDocument =
+        withContext(ioDispatcher) {
+            val uri = Uri.parse(path)
+            val pfd =
+                when (uri.scheme) {
+                    null, "file" -> openFromFile(uri.path ?: path)
+                    else ->
+                        context.contentResolver.openFileDescriptor(uri, "r")
+                            ?: throw IllegalArgumentException("Cannot open file descriptor for: $path")
+                }
 
-    override suspend fun load(path: String): PdfDocument = withContext(ioDispatcher) {
-        val uri = Uri.parse(path)
-        val pfd = when (uri.scheme) {
-            null, "file" -> openFromFile(uri.path ?: path)
-            else -> context.contentResolver.openFileDescriptor(uri, "r")
-                ?: throw IllegalArgumentException("Cannot open file descriptor for: $path")
-        }
+            val renderer =
+                try {
+                    PdfRenderer(pfd)
+                } catch (e: Exception) {
+                    pfd.close()
+                    throw IllegalArgumentException("Failed to open PDF renderer: $path", e)
+                }
 
-        val renderer = try {
-            PdfRenderer(pfd)
-        } catch (e: Exception) {
-            pfd.close()
-            throw IllegalArgumentException("Failed to open PDF renderer: $path", e)
-        }
+            val pages =
+                (0 until renderer.pageCount).map { index ->
+                    val page = renderer.openPage(index)
+                    val info =
+                        PdfPageInfo(
+                            pageIndex = index,
+                            widthPt = page.width.toFloat(),
+                            heightPt = page.height.toFloat(),
+                        )
+                    page.close()
+                    info
+                }
 
-        val pages = (0 until renderer.pageCount).map { index ->
-            val page = renderer.openPage(index)
-            val info = PdfPageInfo(
-                pageIndex = index,
-                widthPt = page.width.toFloat(),
-                heightPt = page.height.toFloat(),
+            AndroidPdfDocument(
+                renderer = renderer,
+                pfd = pfd,
+                info = PdfDocumentInfo(pageCount = renderer.pageCount, pages = pages),
             )
-            page.close()
-            info
         }
-
-        AndroidPdfDocument(
-            renderer = renderer,
-            pfd = pfd,
-            info = PdfDocumentInfo(pageCount = renderer.pageCount, pages = pages),
-        )
-    }
 
     private fun openFromFile(filePath: String): ParcelFileDescriptor {
         val file = File(filePath)

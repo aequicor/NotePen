@@ -29,15 +29,16 @@ class WebSocketFileTransfer(
     private val peerId: String? = null,
     private val hostId: String? = null,
 ) : FileTransfer {
-
     init {
         require((server != null) xor (client != null)) {
             "Exactly one of server or client must be provided"
         }
     }
 
-    override fun send(sourcePath: String, transferId: String): Flow<TransferProgress> =
-        send(sourcePath = sourcePath, transferId = transferId, documentId = "")
+    override fun send(
+        sourcePath: String,
+        transferId: String,
+    ): Flow<TransferProgress> = send(sourcePath = sourcePath, transferId = transferId, documentId = "")
 
     /**
      * Sends the file at [sourcePath] tagged with [documentId]. The id propagates
@@ -48,42 +49,45 @@ class WebSocketFileTransfer(
         sourcePath: String,
         transferId: String,
         documentId: String,
-    ): Flow<TransferProgress> = flow {
-        val bytes = okio_readBytes(sourcePath)
-        val total = bytes.size.toLong()
-        val chunkCount = (bytes.size + CHUNK_SIZE_BYTES - 1) / CHUNK_SIZE_BYTES
-        val fileName = sourcePath.substringAfterLast('/').substringAfterLast('\\')
+    ): Flow<TransferProgress> =
+        flow {
+            val bytes = okio_readBytes(sourcePath)
+            val total = bytes.size.toLong()
+            val chunkCount = (bytes.size + CHUNK_SIZE_BYTES - 1) / CHUNK_SIZE_BYTES
+            val fileName = sourcePath.substringAfterLast('/').substringAfterLast('\\')
 
-        val header = NetworkMessage.FileTransferStart(
-            transferId = transferId,
-            fileName = fileName,
-            totalChunks = chunkCount,
-            totalSize = total,
-            sha256 = "",
-            documentId = documentId,
-        )
-        dispatch(header)
+            val header =
+                NetworkMessage.FileTransferStart(
+                    transferId = transferId,
+                    fileName = fileName,
+                    totalChunks = chunkCount,
+                    totalSize = total,
+                    sha256 = "",
+                    documentId = documentId,
+                )
+            dispatch(header)
 
-        var sent = 0L
-        for (i in 0 until chunkCount) {
-            val start = i * CHUNK_SIZE_BYTES
-            val end = minOf(start + CHUNK_SIZE_BYTES, bytes.size)
-            val chunk = bytes.copyOfRange(start, end)
-            val encoded = encodeBase64(chunk)
-            val msg = NetworkMessage.FileChunk(
-                transferId = transferId,
-                fileName = fileName,
-                chunkIndex = i,
-                totalChunks = chunkCount,
-                dataBase64 = encoded,
-                documentId = documentId,
-            )
-            dispatch(msg)
-            sent += (end - start)
-            emit(TransferProgress(transferred = sent, total = total))
-            logger.debug { "Sent chunk ${i + 1}/$chunkCount for $transferId (doc=$documentId)" }
+            var sent = 0L
+            for (i in 0 until chunkCount) {
+                val start = i * CHUNK_SIZE_BYTES
+                val end = minOf(start + CHUNK_SIZE_BYTES, bytes.size)
+                val chunk = bytes.copyOfRange(start, end)
+                val encoded = encodeBase64(chunk)
+                val msg =
+                    NetworkMessage.FileChunk(
+                        transferId = transferId,
+                        fileName = fileName,
+                        chunkIndex = i,
+                        totalChunks = chunkCount,
+                        dataBase64 = encoded,
+                        documentId = documentId,
+                    )
+                dispatch(msg)
+                sent += (end - start)
+                emit(TransferProgress(transferred = sent, total = total))
+                logger.debug { "Sent chunk ${i + 1}/$chunkCount for $transferId (doc=$documentId)" }
+            }
         }
-    }
 
     private suspend fun dispatch(message: NetworkMessage) {
         when {
@@ -94,7 +98,10 @@ class WebSocketFileTransfer(
         }
     }
 
-    override suspend fun receive(transferId: String, destPath: String) {
+    override suspend fun receive(
+        transferId: String,
+        destPath: String,
+    ) {
         // Full chunked-receive flow is handled by [FileTransferReceiver] which
         // subscribes to the active session's incomingMessages flow.
         logger.info { "WebSocketFileTransfer.receive() is a no-op; use FileTransferReceiver" }
@@ -105,7 +112,10 @@ class WebSocketFileTransfer(
 expect fun okio_readBytes(path: String): ByteArray
 
 /** Writes [bytes] to the file at [path], creating parent directories. */
-expect fun okio_writeBytes(path: String, bytes: ByteArray)
+expect fun okio_writeBytes(
+    path: String,
+    bytes: ByteArray,
+)
 
 /** True when a regular file exists at [path]. Used for offline cache lookups. */
 expect fun okio_exists(path: String): Boolean

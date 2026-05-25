@@ -15,7 +15,6 @@ import kotlin.test.assertTrue
  *    internal app drags (text/plain) and rejects external OS drags.
  */
 class FolderCardStateTest {
-
     // TC-23 / AC-6 / HIGH #2: isHovered is true when onEntered has been called
     @Test
     fun `isHovered becomes true after drag enters folder bounds`() {
@@ -59,7 +58,10 @@ class FolderCardStateTest {
     fun folderCard_hoverDetectionAfterDragEnter_marksAsHovered() {
         // TC-23 / AC-6
         val isHovered = computeLocalHoverState(entered = true, exited = false)
-        assertTrue(isHovered, "isHovered must be true immediately after onDragEntered — the 400ms visual persistence is handled by Compose DragAndDropTarget, not this state machine")
+        assertTrue(
+            isHovered,
+            "isHovered must be true immediately after onDragEntered — the 400ms visual persistence is handled by Compose DragAndDropTarget, not this state machine",
+        )
     }
 
     // MEDIUM #2 / EC-11: shouldAcceptDragEvent returns true for text/plain (internal app drag)
@@ -105,12 +107,13 @@ class FolderCardStateTest {
         entered: Boolean,
         exited: Boolean,
         ended: Boolean = false,
-    ): Boolean = when {
-        ended -> false
-        exited -> false
-        entered -> true
-        else -> false
-    }
+    ): Boolean =
+        when {
+            ended -> false
+            exited -> false
+            entered -> true
+            else -> false
+        }
 
     /**
      * Mirrors the [shouldAcceptDragEvent] production helper from FolderCard

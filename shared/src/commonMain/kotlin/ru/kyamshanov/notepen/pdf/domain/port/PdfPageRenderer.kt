@@ -10,7 +10,6 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfPageData
  * через инжектируемый [kotlinx.coroutines.CoroutineDispatcher].
  */
 interface PdfPageRenderer {
-
     /**
      * Растеризует страницу [pageIndex] из [document] в буфер заданного размера.
      *

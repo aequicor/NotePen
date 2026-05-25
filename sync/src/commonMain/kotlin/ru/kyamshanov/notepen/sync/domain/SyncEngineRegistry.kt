@@ -30,7 +30,6 @@ class SyncEngineRegistry(
     /** Shared offline buffer threaded into every engine the registry produces. */
     private val pendingQueue: PendingDeltaQueue? = null,
 ) {
-
     private val engines = mutableMapOf<String, SyncEngine>()
 
     /** Returns the engine for [documentId], creating it on first request. */

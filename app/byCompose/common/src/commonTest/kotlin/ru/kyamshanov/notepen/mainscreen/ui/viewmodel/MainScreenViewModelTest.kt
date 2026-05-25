@@ -40,7 +40,6 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MainScreenViewModelTest {
-
     private val testDispatcher = UnconfinedTestDispatcher()
 
     private lateinit var lifecycle: LifecycleRegistry
@@ -64,22 +63,24 @@ class MainScreenViewModelTest {
 
         val addToHistory = AddToHistoryUseCase(fakeHistoryRepo)
         val checkAvailability = CheckAvailabilityUseCase(fakeAvailabilityChecker, fakeHistoryRepo)
-        val openRecentFile = OpenRecentFileUseCase(
-            checker = fakeAvailabilityChecker,
-            ioDispatcher = testDispatcher,
-        )
+        val openRecentFile =
+            OpenRecentFileUseCase(
+                checker = fakeAvailabilityChecker,
+                ioDispatcher = testDispatcher,
+            )
 
-        viewModel = MainScreenViewModel(
-            lifecycle = lifecycle,
-            historyRepository = fakeHistoryRepo,
-            folderRepository = fakeFolderRepo,
-            addToHistory = addToHistory,
-            checkAvailability = checkAvailability,
-            openRecentFile = openRecentFile,
-            thumbnailRepository = fakeThumbnailRepo,
-            thumbnailGenerator = fakeThumbnailGen,
-            nowMillis = { 1_000_000L },
-        )
+        viewModel =
+            MainScreenViewModel(
+                lifecycle = lifecycle,
+                historyRepository = fakeHistoryRepo,
+                folderRepository = fakeFolderRepo,
+                addToHistory = addToHistory,
+                checkAvailability = checkAvailability,
+                openRecentFile = openRecentFile,
+                thumbnailRepository = fakeThumbnailRepo,
+                thumbnailGenerator = fakeThumbnailGen,
+                nowMillis = { 1_000_000L },
+            )
         lifecycle.resume()
     }
 
@@ -98,13 +99,14 @@ class MainScreenViewModelTest {
     // CC-7 High: OpenRecentFile called twice quickly → second is ignored
     @Test
     fun openRecentFile_doubleTap_secondIsIgnored() {
-        val file = RecentFile(
-            id = "file-1",
-            uri = "file:///test.pdf",
-            displayName = "test.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-        )
+        val file =
+            RecentFile(
+                id = "file-1",
+                uri = "file:///test.pdf",
+                displayName = "test.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(file)
         fakeAvailabilityChecker.syncResult = AvailabilityStatus.AVAILABLE
 
@@ -121,14 +123,15 @@ class MainScreenViewModelTest {
     // AC-10, AC-57: OpenRecentFile → SUCCESS → navigationTarget = Editor(uri, lastPageIndex)
     @Test
     fun openRecentFile_success_setsEditorNavigationTarget() {
-        val file = RecentFile(
-            id = "file-2",
-            uri = "file:///doc.pdf",
-            displayName = "doc.pdf",
-            openedAt = 2000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-            lastPageIndex = 3,
-        )
+        val file =
+            RecentFile(
+                id = "file-2",
+                uri = "file:///doc.pdf",
+                displayName = "doc.pdf",
+                openedAt = 2000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+                lastPageIndex = 3,
+            )
         fakeHistoryRepo.files = listOf(file)
         fakeAvailabilityChecker.syncResult = AvailabilityStatus.AVAILABLE
 
@@ -144,13 +147,14 @@ class MainScreenViewModelTest {
     // AC-11: OpenRecentFile → NOT_FOUND → errorEvent = FileNotFound, navigationTarget = null
     @Test
     fun openRecentFile_notFound_setsFileNotFoundError() {
-        val file = RecentFile(
-            id = "file-3",
-            uri = "file:///missing.pdf",
-            displayName = "missing.pdf",
-            openedAt = 3000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-        )
+        val file =
+            RecentFile(
+                id = "file-3",
+                uri = "file:///missing.pdf",
+                displayName = "missing.pdf",
+                openedAt = 3000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(file)
         fakeAvailabilityChecker.syncResult = AvailabilityStatus.NOT_FOUND
 
@@ -164,14 +168,15 @@ class MainScreenViewModelTest {
     // CC-6 High: CancelNavigation → rollbackUpsert called, navigationTarget = null
     @Test
     fun cancelNavigation_rollbackCalled_navigationCleared() {
-        val file = RecentFile(
-            id = "file-4",
-            uri = "file:///cancel.pdf",
-            displayName = "cancel.pdf",
-            openedAt = 4000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-            lastPageIndex = 1,
-        )
+        val file =
+            RecentFile(
+                id = "file-4",
+                uri = "file:///cancel.pdf",
+                displayName = "cancel.pdf",
+                openedAt = 4000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+                lastPageIndex = 1,
+            )
         fakeHistoryRepo.files = listOf(file)
         fakeAvailabilityChecker.syncResult = AvailabilityStatus.AVAILABLE
 
@@ -226,13 +231,14 @@ class MainScreenViewModelTest {
     // CC-1: RejectSafMerge → existing record marked FILE_ERROR, dialog dismissed
     @Test
     fun rejectSafMerge_marksExistingRecordFileError() {
-        val existingFile = RecentFile(
-            id = "file-cc1",
-            uri = "file:///cc1.pdf",
-            displayName = "cc1.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-        )
+        val existingFile =
+            RecentFile(
+                id = "file-cc1",
+                uri = "file:///cc1.pdf",
+                displayName = "cc1.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(existingFile)
         viewModel.onIntent(MainScreenIntent.ScreenVisible)
 
@@ -256,13 +262,14 @@ class MainScreenViewModelTest {
     // CC-1 (new URI branch): RejectSafMerge → new URI is added as a fresh entry in recentFiles
     @Test
     fun rejectSafMerge_addsNewUriAsNewEntry() {
-        val existingFile = RecentFile(
-            id = "file-cc1b",
-            uri = "file:///cc1b.pdf",
-            displayName = "cc1b.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-        )
+        val existingFile =
+            RecentFile(
+                id = "file-cc1b",
+                uri = "file:///cc1b.pdf",
+                displayName = "cc1b.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(existingFile)
         viewModel.onIntent(MainScreenIntent.ScreenVisible)
 
@@ -279,13 +286,14 @@ class MainScreenViewModelTest {
     // CC-23: OpenRecentFile → ARCHIVED_UNAVAILABLE status is preserved, not overwritten
     @Test
     fun openRecentFile_archivedUnavailable_statusPreservedAfterOpenFail() {
-        val archivedFile = RecentFile(
-            id = "file-cc23",
-            uri = "file:///cc23.pdf",
-            displayName = "cc23.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.ARCHIVED_UNAVAILABLE,
-        )
+        val archivedFile =
+            RecentFile(
+                id = "file-cc23",
+                uri = "file:///cc23.pdf",
+                displayName = "cc23.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(archivedFile)
         fakeAvailabilityChecker.syncResult = AvailabilityStatus.NOT_FOUND
 
@@ -306,19 +314,21 @@ class MainScreenViewModelTest {
     @Test
     fun openFilePicker_safFuzzyMatch_dialogShowsBothUris() {
         // SafMergeDialogState already has both fields; verify the state model holds both
-        val existingUiModel = ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel(
-            id = "existing-id",
-            uri = "content://test/existing",
-            displayName = "doc.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-            thumbnailState = ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState.Loading,
-            lastPageIndex = 0,
-        )
-        val dialogState = ru.kyamshanov.notepen.mainscreen.ui.model.SafMergeDialogState(
-            existingRecord = existingUiModel,
-            newUri = "file:///new-doc.pdf",
-        )
+        val existingUiModel =
+            ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel(
+                id = "existing-id",
+                uri = "content://test/existing",
+                displayName = "doc.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+                thumbnailState = ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState.Loading,
+                lastPageIndex = 0,
+            )
+        val dialogState =
+            ru.kyamshanov.notepen.mainscreen.ui.model.SafMergeDialogState(
+                existingRecord = existingUiModel,
+                newUri = "file:///new-doc.pdf",
+            )
         assertEquals("existing-id", dialogState.existingRecord.id)
         assertEquals("file:///new-doc.pdf", dialogState.newUri)
     }
@@ -326,14 +336,15 @@ class MainScreenViewModelTest {
     // CC-2: FilePickerResult with SAF fuzzy match → safMergeDialog populated with existingRecord and newUri
     @Test
     fun filePickerResult_safFuzzyMatch_dialogShowsBothUris() {
-        val existingFile = RecentFile(
-            id = "saf-existing-id",
-            uri = "content://com.android.providers/doc/old",
-            displayName = "doc.pdf",
-            fileSize = 2048L,
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-        )
+        val existingFile =
+            RecentFile(
+                id = "saf-existing-id",
+                uri = "content://com.android.providers/doc/old",
+                displayName = "doc.pdf",
+                fileSize = 2048L,
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(existingFile)
         viewModel.onIntent(MainScreenIntent.ScreenVisible)
 
@@ -357,13 +368,14 @@ class MainScreenViewModelTest {
     // TC-85 / CC-23: OpenRecentFile with ARCHIVED_UNAVAILABLE → does NOT open editor
     @Test
     fun openRecentFile_archivedUnavailable_doesNotOpenEditor() {
-        val archivedFile = RecentFile(
-            id = "arc-1",
-            uri = "file:///archived.pdf",
-            displayName = "archived.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.ARCHIVED_UNAVAILABLE,
-        )
+        val archivedFile =
+            RecentFile(
+                id = "arc-1",
+                uri = "file:///archived.pdf",
+                displayName = "archived.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(archivedFile)
         fakeAvailabilityChecker.syncResult = AvailabilityStatus.ARCHIVED_UNAVAILABLE
 
@@ -377,13 +389,14 @@ class MainScreenViewModelTest {
     @Test
     fun thumbnailGeneration_oom_emitsThumbnailStateError() {
         val fileUri = "file:///oom-file.pdf"
-        val file = RecentFile(
-            id = "oom-id",
-            uri = fileUri,
-            displayName = "oom-file.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-        )
+        val file =
+            RecentFile(
+                id = "oom-id",
+                uri = fileUri,
+                displayName = "oom-file.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+            )
         fakeHistoryRepo.files = listOf(file)
         fakeThumbnailGen.setResult(fileUri, Result.failure(OutOfMemoryError("simulated OOM")))
 
@@ -396,13 +409,14 @@ class MainScreenViewModelTest {
     // TC-50 / CC-18: ScreenVisible re-triggers availability check (file transitions UNKNOWN → AVAILABLE)
     @Test
     fun screenVisible_retriggersAvailabilityCheck_unknownBecomesAvailable() {
-        val file = RecentFile(
-            id = "id-1",
-            uri = "file:///file.pdf",
-            displayName = "file.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.UNKNOWN,
-        )
+        val file =
+            RecentFile(
+                id = "id-1",
+                uri = "file:///file.pdf",
+                displayName = "file.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.UNKNOWN,
+            )
         fakeHistoryRepo.files = listOf(file)
         fakeAvailabilityChecker.asyncResult = AvailabilityStatus.AVAILABLE
 
@@ -583,7 +597,10 @@ class MainScreenViewModelTest {
         assertNull(viewModel.state.value.errorEvent, "No error when isLoading=true on drop")
         assertNull(viewModel.state.value.successEvent, "No success event when isLoading=true on drop")
         // TC-6: dragState must remain Active — drop was silently ignored, drag was not cleared
-        assertIs<DragState.Active>(viewModel.state.value.dragState, "dragState must remain Active when drop is ignored due to isLoading=true")
+        assertIs<DragState.Active>(
+            viewModel.state.value.dragState,
+            "dragState must remain Active when drop is ignored due to isLoading=true",
+        )
     }
 
     // TC-7: DropOnFolder → FileDuplicateInFolderException → successEvent = FileAlreadyInFolder (NOT errorEvent)
@@ -799,13 +816,14 @@ class MainScreenViewModelTest {
     @Test
     fun dragStarted_parallelWithAvailabilityCheck_stateConsistent() {
         // TC-11: DragStarted + launchAvailabilityCheck running simultaneously (EC-6 High)
-        val file = RecentFile(
-            id = "avail-file-1",
-            uri = "file:///avail.pdf",
-            displayName = "avail.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.UNKNOWN,
-        )
+        val file =
+            RecentFile(
+                id = "avail-file-1",
+                uri = "file:///avail.pdf",
+                displayName = "avail.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.UNKNOWN,
+            )
         fakeHistoryRepo.files = listOf(file)
         // Availability check will update to AVAILABLE
         fakeAvailabilityChecker.asyncResult = AvailabilityStatus.AVAILABLE
@@ -852,9 +870,10 @@ class MainScreenViewModelTest {
         fakeFolderRepo.filesInFolder["folder-count-other"] = listOf()
         viewModel.onIntent(MainScreenIntent.ScreenVisible)
 
-        val initialOtherCount = viewModel.state.value.folders
-            .firstOrNull { it.id == "folder-count-other" }
-            ?.fileCount
+        val initialOtherCount =
+            viewModel.state.value.folders
+                .firstOrNull { it.id == "folder-count-other" }
+                ?.fileCount
         assertEquals(0, initialOtherCount, "other folder must start with 0 files")
 
         viewModel.onIntent(
@@ -916,13 +935,14 @@ class MainScreenViewModelTest {
     fun dropOnFolder_archivedUnavailableFile_addFileCalledAndStatusUnchanged() {
         // TC-13 (AC-12): a file with ARCHIVED_UNAVAILABLE status is still droppable.
         // addFile must be called, and the file's availabilityStatus must NOT change.
-        val archivedFile = RecentFile(
-            id = "arc-drag-1",
-            uri = "file:///archived-drag.pdf",
-            displayName = "archived-drag.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.ARCHIVED_UNAVAILABLE,
-        )
+        val archivedFile =
+            RecentFile(
+                id = "arc-drag-1",
+                uri = "file:///archived-drag.pdf",
+                displayName = "archived-drag.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+            )
         val targetFolder = Folder(id = "folder-arc", name = "АрхивнаяПапка", createdAt = 0L)
         fakeHistoryRepo.files = listOf(archivedFile)
         fakeFolderRepo.folders.add(targetFolder)
@@ -1076,6 +1096,7 @@ private class ControllableAvailabilityChecker : FileAvailabilityChecker {
     var syncResult: AvailabilityStatus = AvailabilityStatus.AVAILABLE
 
     override suspend fun check(uri: String): AvailabilityStatus = asyncResult
+
     override fun checkSync(uri: String): AvailabilityStatus = syncResult
 }
 
@@ -1088,18 +1109,32 @@ private class FakeFileHistoryRepository : FileHistoryRepository {
     val updatedStatuses: MutableList<Pair<String, AvailabilityStatus>> = mutableListOf()
 
     override suspend fun getAll(): List<RecentFile> = files
-    override suspend fun upsert(file: RecentFile, lastPageIndex: Int) {
+
+    override suspend fun upsert(
+        file: RecentFile,
+        lastPageIndex: Int,
+    ) {
         val existing = files.indexOfFirst { it.id == file.id }
-        files = if (existing >= 0) {
-            files.toMutableList().also { it[existing] = file }
-        } else {
-            files + file
-        }
+        files =
+            if (existing >= 0) {
+                files.toMutableList().also { it[existing] = file }
+            } else {
+                files + file
+            }
     }
-    override suspend fun updateStatus(id: String, status: AvailabilityStatus) {
+
+    override suspend fun updateStatus(
+        id: String,
+        status: AvailabilityStatus,
+    ) {
         updatedStatuses.add(Pair(id, status))
     }
-    override suspend fun updateLastPage(uri: String, pageIndex: Int) {}
+
+    override suspend fun updateLastPage(
+        uri: String,
+        pageIndex: Int,
+    ) {}
+
     override suspend fun rollbackUpsert(uri: String) {
         rollbackUpsertCalled = true
         lastRollbackUri = uri
@@ -1110,44 +1145,79 @@ private class FakeFolderRepository : FolderRepository {
     var createThrows: Exception? = null
     var addFileThrows: Exception? = null
     val folders: MutableList<Folder> = mutableListOf()
+
     /** Per-folder file lists returned by [getFilesInFolder]. Defaults to empty if key is absent. */
     val filesInFolder: MutableMap<String, List<String>> = mutableMapOf()
+
     /** Records every (folderId, uri) passed to [addFile]. */
     val addFileCalls: MutableList<Pair<String, String>> = mutableListOf()
 
-    override suspend fun create(name: String, parentId: String?): Folder {
+    override suspend fun create(
+        name: String,
+        parentId: String?,
+    ): Folder {
         val ex = createThrows
         if (ex != null) throw ex
         return Folder(id = "folder-${name.hashCode()}", name = name, createdAt = 0L, parentId = parentId)
             .also { folders.add(it) }
     }
 
-    override suspend fun delete(id: String) { folders.removeAll { it.id == id } }
-    override suspend fun addFile(folderId: String, uri: String) {
+    override suspend fun delete(id: String) {
+        folders.removeAll { it.id == id }
+    }
+
+    override suspend fun addFile(
+        folderId: String,
+        uri: String,
+    ) {
         addFileCalls.add(folderId to uri)
         val ex = addFileThrows
         if (ex != null) throw ex
     }
-    override suspend fun removeFile(folderId: String, uri: String) {}
-    override suspend fun rename(id: String, newName: String) {}
+
+    override suspend fun removeFile(
+        folderId: String,
+        uri: String,
+    ) {}
+
+    override suspend fun rename(
+        id: String,
+        newName: String,
+    ) {}
+
     override suspend fun getAll(): List<Folder> = folders
-    override suspend fun getFilesInFolder(folderId: String): List<String> =
-        filesInFolder[folderId] ?: emptyList()
+
+    override suspend fun getFilesInFolder(folderId: String): List<String> = filesInFolder[folderId] ?: emptyList()
 }
 
 private class FakeThumbnailRepository : ThumbnailRepository {
-    override suspend fun get(uri: String, currentFileMtime: Long?): ByteArray? = null
-    override suspend fun put(uri: String, imageData: ByteArray, fileMtime: Long?) {}
+    override suspend fun get(
+        uri: String,
+        currentFileMtime: Long?,
+    ): ByteArray? = null
+
+    override suspend fun put(
+        uri: String,
+        imageData: ByteArray,
+        fileMtime: Long?,
+    ) {}
+
     override suspend fun totalSizeBytes(): Long = 0L
 }
 
 private class FakePdfThumbnailGenerator : PdfThumbnailGenerator {
     private val results: MutableMap<String, Result<ByteArray>> = mutableMapOf()
 
-    fun setResult(id: String, result: Result<ByteArray>) {
+    fun setResult(
+        id: String,
+        result: Result<ByteArray>,
+    ) {
         results[id] = result
     }
 
-    override suspend fun generate(uri: String, widthPx: Int, heightPx: Int): Result<ByteArray> =
-        results[uri] ?: Result.success(byteArrayOf())
+    override suspend fun generate(
+        uri: String,
+        widthPx: Int,
+        heightPx: Int,
+    ): Result<ByteArray> = results[uri] ?: Result.success(byteArrayOf())
 }

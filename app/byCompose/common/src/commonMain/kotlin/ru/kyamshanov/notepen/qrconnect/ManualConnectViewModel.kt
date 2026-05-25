@@ -46,9 +46,10 @@ class ManualConnectViewModel(
     private val _status = MutableStateFlow<Status>(Status.Idle)
     val status: StateFlow<Status> = _status.asStateFlow()
 
-    val canConnect: StateFlow<Boolean> = combine(_payload, _status) { p, st ->
-        st !is Status.Connecting && PairingUri.parse(p.trim()) != null
-    }.stateIn(scope, SharingStarted.Eagerly, false)
+    val canConnect: StateFlow<Boolean> =
+        combine(_payload, _status) { p, st ->
+            st !is Status.Connecting && PairingUri.parse(p.trim()) != null
+        }.stateIn(scope, SharingStarted.Eagerly, false)
 
     private var connectJob: Job? = null
 
@@ -62,17 +63,20 @@ class ManualConnectViewModel(
         val uri = PairingUri.parse(_payload.value.trim()) ?: return
         connectJob?.cancel()
         _status.value = Status.Connecting
-        connectJob = scope.launch {
-            val result = runCatching {
-                syncClient.connect(uri.toServerDeviceInfo(), uri.code, selfInfo)
-            }.getOrElse { Result.failure(it) }
-            _status.value = result.fold(
-                onSuccess = { peer ->
-                    _payload.value = ""
-                    Status.Connected(peer)
-                },
-                onFailure = { e -> Status.Failed(e.message ?: "Не удалось подключиться") },
-            )
-        }
+        connectJob =
+            scope.launch {
+                val result =
+                    runCatching {
+                        syncClient.connect(uri.toServerDeviceInfo(), uri.code, selfInfo)
+                    }.getOrElse { Result.failure(it) }
+                _status.value =
+                    result.fold(
+                        onSuccess = { peer ->
+                            _payload.value = ""
+                            Status.Connected(peer)
+                        },
+                        onFailure = { e -> Status.Failed(e.message ?: "Не удалось подключиться") },
+                    )
+            }
     }
 }

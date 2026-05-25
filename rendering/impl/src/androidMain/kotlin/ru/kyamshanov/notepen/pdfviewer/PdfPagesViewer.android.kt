@@ -1,12 +1,8 @@
 package ru.kyamshanov.notepen.pdfviewer
 
-import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.ScrollableDefaults
-import androidx.compose.foundation.gestures.ScrollableState
 import androidx.compose.foundation.gestures.scrollable
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.overscroll
-import androidx.compose.foundation.rememberOverscrollEffect
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -15,7 +11,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -23,7 +18,6 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
-import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
@@ -35,6 +29,7 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
+import kotlin.math.roundToInt
 
 /**
  * Период сэмплинга рендер-триггера. Раньше тут был `debounce`, но он ждёт
@@ -131,12 +126,13 @@ actual fun PdfPagesViewer(
     LaunchedEffect(pdfDocument, state, renderer) {
         val doc = pdfDocument ?: return@LaunchedEffect
         snapshotFlow {
-            val range = PdfViewerMath.visiblePageRange(
-                layout = state.layout,
-                panY = state.pan.y,
-                zoom = state.zoom,
-                viewportHeight = state.viewportSize.height.toFloat(),
-            )
+            val range =
+                PdfViewerMath.visiblePageRange(
+                    layout = state.layout,
+                    panY = state.pan.y,
+                    zoom = state.zoom,
+                    viewportHeight = state.viewportSize.height.toFloat(),
+                )
             VisibleSnapshot(
                 first = (range.first - BUFFER_PAGES).coerceAtLeast(0),
                 last = (range.last + BUFFER_PAGES).coerceAtMost(state.pages.lastIndex),
@@ -167,19 +163,22 @@ actual fun PdfPagesViewer(
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
                     val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
-                    val targetWidthPx = (basePageWidthPx * snap.scalePercent / 100f * supersample)
-                        .toInt()
-                        .coerceAtLeast(1)
-                        .coerceAtMost(MAX_RENDER_DIM_PX)
-                    val targetHeightPx = (targetWidthPx / aspect)
-                        .toInt()
-                        .coerceAtLeast(1)
-                        .coerceAtMost(MAX_RENDER_DIM_PX)
+                    val targetWidthPx =
+                        (basePageWidthPx * snap.scalePercent / 100f * supersample)
+                            .toInt()
+                            .coerceAtLeast(1)
+                            .coerceAtMost(MAX_RENDER_DIM_PX)
+                    val targetHeightPx =
+                        (targetWidthPx / aspect)
+                            .toInt()
+                            .coerceAtLeast(1)
+                            .coerceAtMost(MAX_RENDER_DIM_PX)
                     launch {
-                        val bitmap = withContext(renderDispatcher) {
-                            renderer.renderPage(doc, i, targetWidthPx, targetHeightPx)
-                                .toImageBitmap()
-                        }
+                        val bitmap =
+                            withContext(renderDispatcher) {
+                                renderer.renderPage(doc, i, targetWidthPx, targetHeightPx)
+                                    .toImageBitmap()
+                            }
                         cache.put(
                             i,
                             RenderedPage(
@@ -193,55 +192,57 @@ actual fun PdfPagesViewer(
     }
 
     Box(
-        modifier = modifier
-            .onSizeChanged { size ->
-                if (state.viewportSize != size) {
-                    val hadWidth = state.viewportSize.width > 0
-                    state.viewportSize = size
-                    state.applyPendingInitialScrollIfNeeded()
-                    // A genuine resize (panel opened/closed, divider dragged)
-                    // re-centres the page in the new viewport.
-                    if (hadWidth && size.width > 0) state.reCenterAfterResize()
+        modifier =
+            modifier
+                .onSizeChanged { size ->
+                    if (state.viewportSize != size) {
+                        val hadWidth = state.viewportSize.width > 0
+                        state.viewportSize = size
+                        state.applyPendingInitialScrollIfNeeded()
+                        // A genuine resize (panel opened/closed, divider dragged)
+                        // re-centres the page in the new viewport.
+                        if (hadWidth && size.width > 0) state.reCenterAfterResize()
+                    }
                 }
-            }
-            .clipToBounds()
-            // Pinch — Initial pass, перехват до pan-обработчика; жесты <2
-            // пальцев проходят дальше.
-            .pdfAndroidPointerInput(state)
-            // Одно-пальцевый pan по обеим осям (диагональ) + инерционный fling.
-            // Стоит ПЕРЕД gestureModifier: рисование/лупа (inner) обрабатывают
-            // Main-pass раньше и, если потребили жест, pan отступает.
-            .pdfSingleFingerPanInput(
-                state = state,
-                flingScope = flingScope,
-                flingHolder = flingHolder,
-            )
-            // gestureModifier должен быть ПОСЛЕ pan-обработчика: в Main-pass
-            // события идут inner→outer, т.е. этот modifier обрабатывает
-            // события раньше pan'а. Если gesture-handler потребил событие
-            // (consume), pan видит isConsumed=true и отступает — pan не
-            // запускается параллельно с рисованием / выделением лупой.
-            .then(gestureModifier),
+                .clipToBounds()
+                // Pinch — Initial pass, перехват до pan-обработчика; жесты <2
+                // пальцев проходят дальше.
+                .pdfAndroidPointerInput(state)
+                // Одно-пальцевый pan по обеим осям (диагональ) + инерционный fling.
+                // Стоит ПЕРЕД gestureModifier: рисование/лупа (inner) обрабатывают
+                // Main-pass раньше и, если потребили жест, pan отступает.
+                .pdfSingleFingerPanInput(
+                    state = state,
+                    flingScope = flingScope,
+                    flingHolder = flingHolder,
+                )
+                // gestureModifier должен быть ПОСЛЕ pan-обработчика: в Main-pass
+                // события идут inner→outer, т.е. этот modifier обрабатывает
+                // события раньше pan'а. Если gesture-handler потребил событие
+                // (consume), pan видит isConsumed=true и отступает — pan не
+                // запускается параллельно с рисованием / выделением лупой.
+                .then(gestureModifier),
     ) {
         SubcomposeLayout(
-            modifier = Modifier
-                .fillMaxSize()
-                // Transient pinch-трансформа: scale + translate через GPU
-                // render node, без layout-pass'а. См. KDoc у
-                // [PdfViewerState.gestureScale]. Lambda-форма читает state
-                // в graphicsLayer-блоке — он переоценивается на DRAW-pass'е,
-                // без рекомпозиции / ремежа SubcomposeLayout'а.
-                .graphicsLayer {
-                    // residualScale — зум сверх layoutCap, который НЕ запечён в
-                    // размер layout'а (страница разложена в layoutZoom-пиксели),
-                    // поэтому домножаем его сюда. Ниже cap residualScale == 1f.
-                    val s = state.gestureScale * state.residualScale
-                    scaleX = s
-                    scaleY = s
-                    transformOrigin = TransformOrigin(0f, 0f)
-                    translationX = state.gestureTranslation.x
-                    translationY = state.gestureTranslation.y
-                },
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    // Transient pinch-трансформа: scale + translate через GPU
+                    // render node, без layout-pass'а. См. KDoc у
+                    // [PdfViewerState.gestureScale]. Lambda-форма читает state
+                    // в graphicsLayer-блоке — он переоценивается на DRAW-pass'е,
+                    // без рекомпозиции / ремежа SubcomposeLayout'а.
+                    .graphicsLayer {
+                        // residualScale — зум сверх layoutCap, который НЕ запечён в
+                        // размер layout'а (страница разложена в layoutZoom-пиксели),
+                        // поэтому домножаем его сюда. Ниже cap residualScale == 1f.
+                        val s = state.gestureScale * state.residualScale
+                        scaleX = s
+                        scaleY = s
+                        transformOrigin = TransformOrigin(0f, 0f)
+                        translationX = state.gestureTranslation.x
+                        translationY = state.gestureTranslation.y
+                    },
         ) { constraints ->
             val layout = state.layout
             val zoom = state.zoom
@@ -250,12 +251,13 @@ actual fun PdfPagesViewer(
             if (pageCount == 0 || layout.basePageWidthPx <= 0f) {
                 return@SubcomposeLayout layout(constraints.maxWidth, constraints.maxHeight) {}
             }
-            val visible = PdfViewerMath.visiblePageRange(
-                layout = layout,
-                panY = pan.y,
-                zoom = zoom,
-                viewportHeight = constraints.maxHeight.toFloat(),
-            )
+            val visible =
+                PdfViewerMath.visiblePageRange(
+                    layout = layout,
+                    panY = pan.y,
+                    zoom = zoom,
+                    viewportHeight = constraints.maxHeight.toFloat(),
+                )
             if (visible.isEmpty()) {
                 return@SubcomposeLayout layout(constraints.maxWidth, constraints.maxHeight) {}
             }
@@ -281,25 +283,29 @@ actual fun PdfPagesViewer(
                 val h = (pdfH * ext.height * lz).roundToInt().coerceAtLeast(1)
                 val visualWidthDp = with(density) { w.toDp() }
                 val visualHeightDp = with(density) { h.toDp() }
-                val pdfWidthDp = with(density) {
-                    (layout.basePageWidthPx * lz).roundToInt().coerceAtLeast(1).toDp()
-                }
-                val pdfHeightDp = with(density) {
-                    (pdfH * lz).roundToInt().coerceAtLeast(1).toDp()
-                }
-                val pagePlaceables = subcompose(i) {
-                    val cached = cache.entries[i]?.bitmap
-                    val scope = ImmutablePdfPageScope(
-                        pageIndex = i,
-                        bitmap = cached,
-                        visualWidth = visualWidthDp,
-                        visualHeight = visualHeightDp,
-                        pdfWidth = pdfWidthDp,
-                        pdfHeight = pdfHeightDp,
-                        extent = ext,
-                    )
-                    with(scope) { pageContent() }
-                }.map { it.measure(Constraints.fixed(w, h)) }
+                val pdfWidthDp =
+                    with(density) {
+                        (layout.basePageWidthPx * lz).roundToInt().coerceAtLeast(1).toDp()
+                    }
+                val pdfHeightDp =
+                    with(density) {
+                        (pdfH * lz).roundToInt().coerceAtLeast(1).toDp()
+                    }
+                val pagePlaceables =
+                    subcompose(i) {
+                        val cached = cache.entries[i]?.bitmap
+                        val scope =
+                            ImmutablePdfPageScope(
+                                pageIndex = i,
+                                bitmap = cached,
+                                visualWidth = visualWidthDp,
+                                visualHeight = visualHeightDp,
+                                pdfWidth = pdfWidthDp,
+                                pdfHeight = pdfHeightDp,
+                                extent = ext,
+                            )
+                        with(scope) { pageContent() }
+                    }.map { it.measure(Constraints.fixed(w, h)) }
                 // PDF-страница i фиксирована в document space на pageTopsPx[i];
                 // слот всего лишь выходит наружу по extent. Соседние страницы
                 // не двигаются, PDF под пером тоже не смещается при росте

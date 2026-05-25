@@ -23,7 +23,7 @@ kotlin {
         commonMain.dependencies {
             implementation(projects.app.byCompose.theme)
             implementation(projects.drawing.api)
-            //compose
+            // compose
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

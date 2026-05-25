@@ -5,7 +5,6 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class PdfPageInfoTest {
-
     @Test
     fun aspectRatioNoRotation() {
         val page = PdfPageInfo(pageIndex = 0, widthPt = 612f, heightPt = 792f)

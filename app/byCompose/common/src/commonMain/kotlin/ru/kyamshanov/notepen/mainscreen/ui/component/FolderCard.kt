@@ -44,8 +44,7 @@ private val logger = KotlinLogging.logger {}
  *
  * @param mimeTypes The set of MIME types advertised by the drag event.
  */
-internal fun shouldAcceptDragEvent(mimeTypes: Set<String>): Boolean =
-    mimeTypes.contains("text/plain")
+internal fun shouldAcceptDragEvent(mimeTypes: Set<String>): Boolean = mimeTypes.contains("text/plain")
 
 /**
  * Карточка папки с иконкой, именем, количеством файлов и кнопкой меню.
@@ -74,69 +73,72 @@ fun FolderCard(
 ) {
     var isHovered by remember { mutableStateOf(false) }
 
-    val dropTarget = remember(onDropFile, onDropExternalFiles) {
-        object : DragAndDropTarget {
-            override fun onDrop(event: DragAndDropEvent): Boolean {
-                if (event.isExternalFileDrop()) {
-                    val uris = extractExternalFileUris(event)
-                    return if (uris.isNotEmpty()) {
-                        onDropExternalFiles(uris)
+    val dropTarget =
+        remember(onDropFile, onDropExternalFiles) {
+            object : DragAndDropTarget {
+                override fun onDrop(event: DragAndDropEvent): Boolean {
+                    if (event.isExternalFileDrop()) {
+                        val uris = extractExternalFileUris(event)
+                        return if (uris.isNotEmpty()) {
+                            onDropExternalFiles(uris)
+                            true
+                        } else {
+                            logger.warn { "FolderCard.onDrop: external drop carried no supported files" }
+                            false
+                        }
+                    }
+                    val uri = extractFileUri(event)
+                    return if (uri != null) {
+                        onDropFile(uri)
                         true
                     } else {
-                        logger.warn { "FolderCard.onDrop: external drop carried no supported files" }
+                        logger.warn { "FolderCard.onDrop: could not extract file URI from event" }
                         false
                     }
                 }
-                val uri = extractFileUri(event)
-                return if (uri != null) {
-                    onDropFile(uri)
-                    true
-                } else {
-                    logger.warn { "FolderCard.onDrop: could not extract file URI from event" }
-                    false
+
+                override fun onEntered(event: DragAndDropEvent) {
+                    isHovered = true
+                }
+
+                override fun onExited(event: DragAndDropEvent) {
+                    isHovered = false
+                }
+
+                override fun onEnded(event: DragAndDropEvent) {
+                    isHovered = false
                 }
             }
-
-            override fun onEntered(event: DragAndDropEvent) {
-                isHovered = true
-            }
-
-            override fun onExited(event: DragAndDropEvent) {
-                isHovered = false
-            }
-
-            override fun onEnded(event: DragAndDropEvent) {
-                isHovered = false
-            }
         }
-    }
 
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .then(
-                if (isDragAndDropSupported) {
-                    Modifier.dragAndDropTarget(
-                        shouldStartDragAndDrop = { event ->
-                            shouldAcceptDragEvent(event.dragEventMimeTypes()) || event.isExternalFileDrop()
-                        },
-                        target = dropTarget,
-                    )
-                } else {
-                    Modifier
-                },
-            ),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .then(
+                    if (isDragAndDropSupported) {
+                        Modifier.dragAndDropTarget(
+                            shouldStartDragAndDrop = { event ->
+                                shouldAcceptDragEvent(event.dragEventMimeTypes()) || event.isExternalFileDrop()
+                            },
+                            target = dropTarget,
+                        )
+                    } else {
+                        Modifier
+                    },
+                ),
         onClick = onClick,
     ) {
         Row(
             Modifier
                 .padding(12.dp)
                 .background(
-                    color = if (isHovered) {
-                        MaterialTheme.colorScheme.primaryContainer
-                    } else {
-                        Color.Transparent
-                    },
+                    color =
+                        if (isHovered) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            Color.Transparent
+                        },
                     shape = RoundedCornerShape(4.dp),
                 ),
             verticalAlignment = Alignment.CenterVertically,

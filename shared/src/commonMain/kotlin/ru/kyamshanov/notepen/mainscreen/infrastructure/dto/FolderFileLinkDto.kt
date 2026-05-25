@@ -11,18 +11,20 @@ data class FolderFileLinkDto(
     val lastOpenedAt: Long,
 ) {
     /** Преобразует DTO в доменную модель. */
-    fun toDomain(): FolderFileLink = FolderFileLink(
-        folderId = folderId,
-        fileUri = fileUri,
-        lastOpenedAt = lastOpenedAt,
-    )
+    fun toDomain(): FolderFileLink =
+        FolderFileLink(
+            folderId = folderId,
+            fileUri = fileUri,
+            lastOpenedAt = lastOpenedAt,
+        )
 
     companion object {
         /** Преобразует доменную модель в DTO. */
-        fun fromDomain(f: FolderFileLink): FolderFileLinkDto = FolderFileLinkDto(
-            folderId = f.folderId,
-            fileUri = f.fileUri,
-            lastOpenedAt = f.lastOpenedAt,
-        )
+        fun fromDomain(f: FolderFileLink): FolderFileLinkDto =
+            FolderFileLinkDto(
+                folderId = f.folderId,
+                fileUri = f.fileUri,
+                lastOpenedAt = f.lastOpenedAt,
+            )
     }
 }

@@ -40,9 +40,10 @@ internal data class JbrTitleBarSetup(
  */
 internal fun setupJbrTitleBar(window: Frame): JbrTitleBarSetup? {
     if (!JBR.isWindowDecorationsSupported()) return null
-    val tb = JBR.getWindowDecorations().createCustomTitleBar().apply {
-        height = TAB_BAR_HEIGHT.value
-    }
+    val tb =
+        JBR.getWindowDecorations().createCustomTitleBar().apply {
+            height = TAB_BAR_HEIGHT.value
+        }
     JBR.getWindowDecorations().setCustomTitleBar(window, tb)
     return JbrTitleBarSetup(
         interaction = JbrTitleBarInteraction(tb),
@@ -52,21 +53,21 @@ internal fun setupJbrTitleBar(window: Frame): JbrTitleBarSetup? {
 }
 
 private class JbrTitleBarInteraction(private val titleBar: CustomTitleBar) : TitleBarInteraction {
-
     /**
      * Registers this node as the window-drag zone.  Every pointer event reaching
      * the node calls [CustomTitleBar.forceHitTest] with `false`, telling the OS
      * "treat this as the title bar, allow dragging". Interactive children that
      * use [interactive] override this per-event with `true`.
      */
-    override fun dragArea(modifier: Modifier): Modifier = modifier.pointerInput(titleBar) {
-        awaitPointerEventScope {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Main)
-                event.changes.forEach { _ -> titleBar.forceHitTest(false) }
+    override fun dragArea(modifier: Modifier): Modifier =
+        modifier.pointerInput(titleBar) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    event.changes.forEach { _ -> titleBar.forceHitTest(false) }
+                }
             }
         }
-    }
 
     /**
      * Registers this node as an interactive element.  Every pointer event
@@ -77,12 +78,13 @@ private class JbrTitleBarInteraction(private val titleBar: CustomTitleBar) : Tit
      * after [dragArea] for events landing on an interactive child — so `true`
      * wins and the click reaches the component normally.
      */
-    override fun interactive(modifier: Modifier): Modifier = modifier.pointerInput(titleBar) {
-        awaitPointerEventScope {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Main)
-                event.changes.forEach { _ -> titleBar.forceHitTest(true) }
+    override fun interactive(modifier: Modifier): Modifier =
+        modifier.pointerInput(titleBar) {
+            awaitPointerEventScope {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    event.changes.forEach { _ -> titleBar.forceHitTest(true) }
+                }
             }
         }
-    }
 }

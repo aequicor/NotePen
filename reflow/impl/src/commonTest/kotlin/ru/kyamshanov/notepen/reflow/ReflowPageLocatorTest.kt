@@ -5,10 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class ReflowPageLocatorTest {
-
-    private fun docOfPages(vararg pageIndices: Int) = ReflowAssembler.assemble(
-        pageIndices.map { pageIndex -> page(line("page $pageIndex text", top = 100f), pageIndex = pageIndex) },
-    )
+    private fun docOfPages(vararg pageIndices: Int) =
+        ReflowAssembler.assemble(
+            pageIndices.map { pageIndex -> page(line("page $pageIndex text", top = 100f), pageIndex = pageIndex) },
+        )
 
     @Test
     fun `maps each page to its first block`() {

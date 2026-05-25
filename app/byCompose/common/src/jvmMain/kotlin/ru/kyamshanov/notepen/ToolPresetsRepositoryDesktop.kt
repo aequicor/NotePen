@@ -21,20 +21,21 @@ class ToolPresetsRepositoryDesktop(
     private val dataDir: java.io.File = getAppDataDir(),
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : ToolPresetsRepository {
-
     private val presetsFile get() = java.io.File(dataDir, "tool_presets.json")
     private val lockFile get() = java.io.File(dataDir, "tool_presets.lock")
     private val inProcessMutex = Mutex()
 
-    override suspend fun load(): StoredToolPresets = withContext(Dispatchers.IO) {
-        try {
-            val text = presetsFile.takeIf { it.exists() }?.readText()
-                ?: return@withContext StoredToolPresets()
-            json.decodeFromString<StoredToolPresets>(text)
-        } catch (_: Exception) {
-            StoredToolPresets()
+    override suspend fun load(): StoredToolPresets =
+        withContext(Dispatchers.IO) {
+            try {
+                val text =
+                    presetsFile.takeIf { it.exists() }?.readText()
+                        ?: return@withContext StoredToolPresets()
+                json.decodeFromString<StoredToolPresets>(text)
+            } catch (_: Exception) {
+                StoredToolPresets()
+            }
         }
-    }
 
     override suspend fun save(presets: StoredToolPresets) {
         inProcessMutex.withLock {

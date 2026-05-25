@@ -7,7 +7,6 @@ import ru.kyamshanov.notepen.mainscreen.domain.exception.ThumbnailGenerationExce
  * Декларируется в `:shared`. Реализуется в инфраструктурном слое.
  */
 interface PdfThumbnailGenerator {
-
     /**
      * Генерирует миниатюру первой страницы PDF по указанному URI.
      *
@@ -19,5 +18,9 @@ interface PdfThumbnailGenerator {
      * @param heightPx Высота целевого изображения в пикселях.
      * @return [Result.success] с байтами изображения или [Result.failure] с [ThumbnailGenerationException].
      */
-    suspend fun generate(uri: String, widthPx: Int, heightPx: Int): Result<ByteArray>
+    suspend fun generate(
+        uri: String,
+        widthPx: Int,
+        heightPx: Int,
+    ): Result<ByteArray>
 }

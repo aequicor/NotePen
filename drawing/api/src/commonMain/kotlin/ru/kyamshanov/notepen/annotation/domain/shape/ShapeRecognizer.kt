@@ -15,7 +15,6 @@ import kotlin.math.sqrt
  * выглядеть эллипсом в нормализованном пространстве.
  */
 public object ShapeRecognizer {
-
     private const val MIN_POINTS: Int = 8
 
     /** `chord / pathLength` > этого порога → штрих считаем линией. */
@@ -39,7 +38,10 @@ public object ShapeRecognizer {
      * Возвращает распознанный примитив или `null`, если штрих не соответствует
      * ни одному из поддерживаемых шаблонов.
      */
-    public fun recognize(points: List<DrawingPoint>, aspect: Float): RecognizedShape? {
+    public fun recognize(
+        points: List<DrawingPoint>,
+        aspect: Float,
+    ): RecognizedShape? {
         if (points.size < MIN_POINTS) return null
         val safeAspect = if (aspect > 0f) aspect else 1f
 

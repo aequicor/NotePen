@@ -8,7 +8,6 @@ package ru.kyamshanov.notepen.reflow.api
  * новых наследников, а не через флаги.
  */
 public sealed interface ReflowBlock {
-
     /**
      * Заголовок раздела: текст с укрупнённым относительно основного кеглем.
      *

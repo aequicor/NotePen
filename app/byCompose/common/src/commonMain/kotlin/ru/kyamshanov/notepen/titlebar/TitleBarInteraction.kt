@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.dp
  * and leave pointer events unconsumed for normal Compose handling.
  */
 interface TitleBarInteraction {
-
     /** Marks [modifier]'s node as a window-drag zone. */
     fun dragArea(modifier: Modifier): Modifier
 

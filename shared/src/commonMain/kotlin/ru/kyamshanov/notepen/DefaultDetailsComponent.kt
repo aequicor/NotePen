@@ -32,7 +32,6 @@ class DefaultDetailsComponent(
     override val pendingTabUri: Value<String>,
     private val onPendingTabHandledListener: () -> Unit,
 ) : DetailsComponent, ComponentContext by componentContext {
-
     private val scope = coroutineScope()
 
     private val uri: String = title

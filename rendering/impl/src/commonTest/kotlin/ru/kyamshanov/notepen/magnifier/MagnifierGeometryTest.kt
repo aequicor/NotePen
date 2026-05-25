@@ -10,7 +10,6 @@ import kotlin.test.assertTrue
 
 /** Юнит-тесты чистой координатной математики magnifier'а. */
 class MagnifierGeometryTest {
-
     private val panel = Size(400f, 200f)
     private val target = Rect(0.2f, 0.4f, 0.6f, 0.6f) // width = 0.4, height = 0.2
 
@@ -77,7 +76,11 @@ class MagnifierGeometryTest {
         assertEquals(Offset.Zero, out)
     }
 
-    private fun assertNear(expected: Float, actual: Float, eps: Float = 1e-4f) {
+    private fun assertNear(
+        expected: Float,
+        actual: Float,
+        eps: Float = 1e-4f,
+    ) {
         assertTrue(
             abs(expected - actual) <= eps,
             "Expected $expected, got $actual (diff > $eps)",

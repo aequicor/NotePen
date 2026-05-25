@@ -21,22 +21,26 @@ import ru.kyamshanov.notepen.sync.domain.port.PendingDeltaQueue
  * coarse locking is fine for the expected stroke-rate.
  */
 class InMemoryPendingDeltaQueue : PendingDeltaQueue {
-
     private val mutex = Mutex()
     private val queues = mutableMapOf<String, ArrayDeque<StrokeDelta>>()
     private val _counts = MutableStateFlow<Map<String, Int>>(emptyMap())
 
-    override suspend fun enqueue(documentId: String, delta: StrokeDelta) {
+    override suspend fun enqueue(
+        documentId: String,
+        delta: StrokeDelta,
+    ) {
         mutex.withLock {
             queues.getOrPut(documentId) { ArrayDeque() }.addLast(delta)
             publishCountsLocked()
         }
     }
 
-    override suspend fun peek(documentId: String): List<StrokeDelta> =
-        mutex.withLock { queues[documentId]?.toList() ?: emptyList() }
+    override suspend fun peek(documentId: String): List<StrokeDelta> = mutex.withLock { queues[documentId]?.toList() ?: emptyList() }
 
-    override suspend fun markSent(documentId: String, upToClock: Long) {
+    override suspend fun markSent(
+        documentId: String,
+        upToClock: Long,
+    ) {
         mutex.withLock {
             val deque = queues[documentId] ?: return@withLock
             while (deque.isNotEmpty() && deque.first().clock <= upToClock) {
@@ -47,8 +51,7 @@ class InMemoryPendingDeltaQueue : PendingDeltaQueue {
         }
     }
 
-    override suspend fun pendingCount(documentId: String): Int =
-        mutex.withLock { queues[documentId]?.size ?: 0 }
+    override suspend fun pendingCount(documentId: String): Int = mutex.withLock { queues[documentId]?.size ?: 0 }
 
     override fun pendingCounts(): Flow<Map<String, Int>> = _counts.asStateFlow()
 

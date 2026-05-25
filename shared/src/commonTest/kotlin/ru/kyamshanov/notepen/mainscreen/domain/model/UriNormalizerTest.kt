@@ -11,7 +11,6 @@ import kotlin.test.assertNotNull
  * impl: shared/src/commonMain/.../domain/model/UriNormalizer.kt
  */
 class UriNormalizerTest {
-
     /**
      * [CC-3] Trailing slash удаляется для desktop-путей.
      */

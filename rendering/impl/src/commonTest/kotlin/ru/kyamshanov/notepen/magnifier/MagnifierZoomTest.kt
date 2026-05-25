@@ -11,15 +11,15 @@ import kotlin.test.assertTrue
  * Android pinch/two-finger pan жестом в [MagnifierInputPanel]).
  */
 class MagnifierZoomTest {
-
     @Test
     fun `zoom around panel center halves target width and keeps center`() {
         val state = enabledState(left = 0.4f, top = 0.4f, width = 0.2f, height = 0.2f)
         val panel = Size(500f, 500f)
-        val centerBefore = Offset(
-            x = (state.targetRect.left + state.targetRect.right) / 2f,
-            y = (state.targetRect.top + state.targetRect.bottom) / 2f,
-        )
+        val centerBefore =
+            Offset(
+                x = (state.targetRect.left + state.targetRect.right) / 2f,
+                y = (state.targetRect.top + state.targetRect.bottom) / 2f,
+            )
         state.zoomTargetAroundPanelFocus(
             scaleFactor = 2f,
             focusPanelLocal = Offset(panel.width / 2f, panel.height / 2f),
@@ -27,10 +27,11 @@ class MagnifierZoomTest {
         )
         // Ширина уменьшилась вдвое (pinch out ⇒ больше зум ⇒ меньше rect).
         assertNear(0.1f, state.targetRect.right - state.targetRect.left)
-        val centerAfter = Offset(
-            x = (state.targetRect.left + state.targetRect.right) / 2f,
-            y = (state.targetRect.top + state.targetRect.bottom) / 2f,
-        )
+        val centerAfter =
+            Offset(
+                x = (state.targetRect.left + state.targetRect.right) / 2f,
+                y = (state.targetRect.top + state.targetRect.bottom) / 2f,
+            )
         // Центр сохранён.
         assertNear(centerBefore.x, centerAfter.x)
         assertNear(centerBefore.y, centerAfter.y)
@@ -67,19 +68,24 @@ class MagnifierZoomTest {
         top: Float,
         width: Float,
         height: Float,
-    ): MagnifierState = MagnifierState().also { s ->
-        s.enable(onPage = 0, viewportSize = Size(1000f, 800f))
-        s.updatePageCanvasPx(widthPx = 800f, heightPx = 800f)
-        s.moveTarget(
-            Offset(
-                x = left - s.targetRect.left,
-                y = top - s.targetRect.top,
-            ),
-        )
-        s.resizeTarget(newWidth = width, newHeight = height)
-    }
+    ): MagnifierState =
+        MagnifierState().also { s ->
+            s.enable(onPage = 0, viewportSize = Size(1000f, 800f))
+            s.updatePageCanvasPx(widthPx = 800f, heightPx = 800f)
+            s.moveTarget(
+                Offset(
+                    x = left - s.targetRect.left,
+                    y = top - s.targetRect.top,
+                ),
+            )
+            s.resizeTarget(newWidth = width, newHeight = height)
+        }
 
-    private fun assertNear(expected: Float, actual: Float, eps: Float = 1e-3f) {
+    private fun assertNear(
+        expected: Float,
+        actual: Float,
+        eps: Float = 1e-3f,
+    ) {
         assertTrue(
             abs(expected - actual) <= eps,
             "Expected $expected, got $actual (diff > $eps)",

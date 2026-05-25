@@ -17,13 +17,9 @@ class EbookAwarePdfReflowExtractor(
     private val delegate: PdfReflowExtractor,
     private val converter: EbookToPdfConverter,
 ) : PdfReflowExtractor {
+    override suspend fun probe(path: String): PdfContentKind = delegate.probe(resolve(path))
 
-    override suspend fun probe(path: String): PdfContentKind =
-        delegate.probe(resolve(path))
+    override suspend fun extract(path: String): ReflowDocument = delegate.extract(resolve(path))
 
-    override suspend fun extract(path: String): ReflowDocument =
-        delegate.extract(resolve(path))
-
-    private suspend fun resolve(path: String): String =
-        if (converter.canConvert(path)) converter.ensurePdf(path) else path
+    private suspend fun resolve(path: String): String = if (converter.canConvert(path)) converter.ensurePdf(path) else path
 }

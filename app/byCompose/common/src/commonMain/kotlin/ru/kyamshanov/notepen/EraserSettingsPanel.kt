@@ -8,14 +8,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FilterChip
-import ru.kyamshanov.notepen.annotation.domain.model.applyShape
-import ru.kyamshanov.notepen.annotation.domain.model.applySize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.annotation.domain.model.applyShape
+import ru.kyamshanov.notepen.annotation.domain.model.applySize
 
 /**
  * Panel with shape toggle (CIRCLE / SQUARE) and a size slider for the eraser

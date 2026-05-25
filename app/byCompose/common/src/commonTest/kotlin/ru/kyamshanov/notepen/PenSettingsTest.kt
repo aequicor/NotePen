@@ -11,8 +11,11 @@ import kotlin.test.assertTrue
 // covers TC-10, TC-11, TC-13, TC-14
 
 class PenSettingsTest {
-
-    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+    private val json =
+        Json {
+            encodeDefaults = true
+            ignoreUnknownKeys = true
+        }
 
     // TC-10: PenSettings defaults: black, normalised text-thickness stroke, full alpha
     @Test
@@ -36,11 +39,12 @@ class PenSettingsTest {
     // TC-13: PenSettings round-trip serialization preserves colorArgb and alpha
     @Test
     fun penSettings_roundTripSerialization_preservesAlpha() {
-        val original = PenSettings(
-            colorArgb = 0x80FF0000L,
-            strokeWidth = 0.01f,
-            alpha = 0.5f,
-        )
+        val original =
+            PenSettings(
+                colorArgb = 0x80FF0000L,
+                strokeWidth = 0.01f,
+                alpha = 0.5f,
+            )
 
         val text = json.encodeToString(PenSettings.serializer(), original)
         val decoded = json.decodeFromString(PenSettings.serializer(), text)

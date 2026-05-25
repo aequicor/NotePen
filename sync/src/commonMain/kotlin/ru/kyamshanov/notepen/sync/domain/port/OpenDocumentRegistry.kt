@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.StateFlow
  * считается «отпускание последнего держателя».
  */
 interface OpenDocumentRegistry {
-
     /** Снимок множества открытых documentId-ов. Реактивный — обновляется на каждом acquire/release. */
     val openDocumentIds: StateFlow<Set<String>>
 

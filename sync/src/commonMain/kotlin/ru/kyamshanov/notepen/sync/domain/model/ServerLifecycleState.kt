@@ -8,7 +8,6 @@ package ru.kyamshanov.notepen.sync.domain.model
  * [ru.kyamshanov.notepen.sync.domain.port.PeerServer.connectedPeers].
  */
 sealed class ServerLifecycleState {
-
     /** Server has not been started yet (or finished tearing down after [Stopped]). */
     data object Idle : ServerLifecycleState()
 

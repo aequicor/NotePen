@@ -33,22 +33,32 @@ class ProjectionHostController(
     }
 
     /** Emit a new viewport snapshot. Thread-safe. */
-    fun updateViewport(page: Int, viewportOffsetY: Float, viewportScale: Float) {
+    fun updateViewport(
+        page: Int,
+        viewportOffsetY: Float,
+        viewportScale: Float,
+    ) {
         val current = _pendingFrame.value
-        _pendingFrame.value = NetworkMessage.ProjectionFrame(
-            page = page,
-            viewportOffsetY = viewportOffsetY,
-            viewportScale = viewportScale,
-            pointerX = current?.pointerX,
-            pointerY = current?.pointerY,
-        )
+        _pendingFrame.value =
+            NetworkMessage.ProjectionFrame(
+                page = page,
+                viewportOffsetY = viewportOffsetY,
+                viewportScale = viewportScale,
+                pointerX = current?.pointerX,
+                pointerY = current?.pointerY,
+            )
     }
 
     /** Emit a new pointer position (normalised to current page). Thread-safe. */
-    fun updatePointer(page: Int, pointerX: Float, pointerY: Float) {
+    fun updatePointer(
+        page: Int,
+        pointerX: Float,
+        pointerY: Float,
+    ) {
         val current = _pendingFrame.value
-        _pendingFrame.value = (current ?: NetworkMessage.ProjectionFrame(page, 0f, 1f))
-            .copy(pointerX = pointerX, pointerY = pointerY)
+        _pendingFrame.value =
+            (current ?: NetworkMessage.ProjectionFrame(page, 0f, 1f))
+                .copy(pointerX = pointerX, pointerY = pointerY)
     }
 
     fun clearPointer() {

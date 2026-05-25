@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.mainscreen.ui
 
 /** Интенты (действия пользователя) для главного экрана. */
 sealed class MainScreenIntent {
-
     /** Открыть системный файловый менеджер для выбора PDF. */
     object OpenFilePicker : MainScreenIntent()
 

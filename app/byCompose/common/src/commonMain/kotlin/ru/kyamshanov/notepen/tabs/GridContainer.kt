@@ -91,10 +91,11 @@ private fun Columns(
     var widthPx by remember { mutableStateOf(0f) }
     Row(Modifier.fillMaxSize().onSizeChanged { widthPx = it.width.toFloat() }) {
         val r = layout.ratios
-        val weights = when (layout.panels.size) {
-            2 -> listOf(r[0], 1f - r[0])
-            else -> listOf(r[0], r[1] - r[0], 1f - r[1])
-        }
+        val weights =
+            when (layout.panels.size) {
+                2 -> listOf(r[0], 1f - r[0])
+                else -> listOf(r[0], r[1] - r[0], 1f - r[1])
+            }
         layout.panels.forEachIndexed { index, panel ->
             Cell(layout, panel, onFocusPanel, content, Modifier.fillMaxHeight().weight(weights[index]))
             if (index < layout.panels.size - 1) {
@@ -159,7 +160,10 @@ private fun GridTwoByTwo(
     val p = layout.panels
     Row(
         Modifier.fillMaxSize()
-            .onSizeChanged { widthPx = it.width.toFloat(); heightPx = it.height.toFloat() },
+            .onSizeChanged {
+                widthPx = it.width.toFloat()
+                heightPx = it.height.toFloat()
+            },
     ) {
         GridColumn(layout, p[0], p[2], onSetRatio, onFocusPanel, content, heightPx, Modifier.weight(layout.ratios[0]))
         VerticalDivider { dx -> onSetRatio(0, layout.ratios[0] + delta(dx, widthPx)) }
@@ -185,10 +189,15 @@ private fun GridColumn(
     }
 }
 
-private fun ratioAt(layout: WorkspaceLayout, index: Int): Float = layout.ratios[index]
+private fun ratioAt(
+    layout: WorkspaceLayout,
+    index: Int,
+): Float = layout.ratios[index]
 
-private fun delta(dragPx: Float, extentPx: Float): Float =
-    if (extentPx > 0f) dragPx / extentPx else 0f
+private fun delta(
+    dragPx: Float,
+    extentPx: Float,
+): Float = if (extentPx > 0f) dragPx / extentPx else 0f
 
 @Composable
 private fun Cell(
@@ -211,14 +220,15 @@ private fun Cell(
 }
 
 /** Reports a press on the initial pass without consuming it (so panel gestures still work). */
-private fun Modifier.focusOnPress(onFocus: () -> Unit): Modifier = pointerInput(Unit) {
-    awaitPointerEventScope {
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            if (event.changes.any { it.pressed && it.previousPressed.not() }) onFocus()
+private fun Modifier.focusOnPress(onFocus: () -> Unit): Modifier =
+    pointerInput(Unit) {
+        awaitPointerEventScope {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                if (event.changes.any { it.pressed && it.previousPressed.not() }) onFocus()
+            }
         }
     }
-}
 
 @Composable
 private fun RowScope.VerticalDivider(onDrag: (Float) -> Unit) {

@@ -29,10 +29,11 @@ internal fun GlassSurface(
         shape = shape,
         color = tint.copy(alpha = fillAlpha),
         tonalElevation = 0.dp,
-        border = BorderStroke(
-            width = GlassBorderWidth,
-            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = GlassBorderAlpha),
-        ),
+        border =
+            BorderStroke(
+                width = GlassBorderWidth,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = GlassBorderAlpha),
+            ),
         content = content,
     )
 }

@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.mainscreen.ui.model
 
 /** Цель навигации, устанавливаемая ViewModel при переходе из главного экрана. */
 sealed class NavigationTarget {
-
     /**
      * Открыть редактор PDF.
      *

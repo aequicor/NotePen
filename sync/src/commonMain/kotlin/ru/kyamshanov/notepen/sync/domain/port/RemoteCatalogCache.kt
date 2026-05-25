@@ -13,12 +13,14 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  * across app restarts and disconnects.
  */
 interface RemoteCatalogCache {
-
     /** Snapshot keyed by host. New host catalogs are added on each `update`. */
     val catalogs: StateFlow<Map<DeviceInfo, RemoteCatalog>>
 
     /** Inserts or replaces the cached catalog for [host]. */
-    suspend fun update(host: DeviceInfo, value: RemoteCatalog)
+    suspend fun update(
+        host: DeviceInfo,
+        value: RemoteCatalog,
+    )
 
     /** Removes the cached catalog for [hostId] (e.g. when the host disconnects). */
     suspend fun clear(hostId: String)

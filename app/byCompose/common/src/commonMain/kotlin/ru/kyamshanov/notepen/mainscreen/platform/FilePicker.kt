@@ -7,7 +7,6 @@ package ru.kyamshanov.notepen.mainscreen.platform
  * Возвращает нормализованный URI выбранного файла или null, если пользователь отменил выбор.
  */
 expect class FilePicker {
-
     /**
      * Открывает системный диалог выбора документа (PDF, PNG или JPEG).
      *

@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.rendering.api
 
 /** Общие константы рендеринга, разделяемые между всеми контекстами отрисовки. */
 public object RenderingConstants {
-
     /** Множитель расширения штриха при наклоне пера (tilt 0..1 → ширина ×(1..1+[TILT_WIDTH_GAIN])). */
     public const val TILT_WIDTH_GAIN: Float = 0.5f
 

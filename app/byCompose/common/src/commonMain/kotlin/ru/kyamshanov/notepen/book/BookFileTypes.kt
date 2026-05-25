@@ -21,25 +21,27 @@ enum class BookFormat {
 }
 
 /** Расширение файла (без точки, в нижнем регистре) → формат. */
-private val EXTENSION_FORMATS: Map<String, BookFormat> = mapOf(
-    "epub" to BookFormat.EPUB,
-    "fb2" to BookFormat.FB2,
-    "cbz" to BookFormat.CBZ,
-    "cbr" to BookFormat.CBR,
-)
+private val EXTENSION_FORMATS: Map<String, BookFormat> =
+    mapOf(
+        "epub" to BookFormat.EPUB,
+        "fb2" to BookFormat.FB2,
+        "cbz" to BookFormat.CBZ,
+        "cbr" to BookFormat.CBR,
+    )
 
 /** MIME-тип (в нижнем регистре) → формат. */
-private val MIME_FORMATS: Map<String, BookFormat> = mapOf(
-    "application/epub+zip" to BookFormat.EPUB,
-    "application/epub" to BookFormat.EPUB,
-    "application/x-fictionbook+xml" to BookFormat.FB2,
-    "application/x-fictionbook" to BookFormat.FB2,
-    "application/fb2+zip" to BookFormat.FB2,
-    "application/vnd.comicbook+zip" to BookFormat.CBZ,
-    "application/vnd.comicbook-rar" to BookFormat.CBR,
-    "application/x-cbz" to BookFormat.CBZ,
-    "application/x-cbr" to BookFormat.CBR,
-)
+private val MIME_FORMATS: Map<String, BookFormat> =
+    mapOf(
+        "application/epub+zip" to BookFormat.EPUB,
+        "application/epub" to BookFormat.EPUB,
+        "application/x-fictionbook+xml" to BookFormat.FB2,
+        "application/x-fictionbook" to BookFormat.FB2,
+        "application/fb2+zip" to BookFormat.FB2,
+        "application/vnd.comicbook+zip" to BookFormat.CBZ,
+        "application/vnd.comicbook-rar" to BookFormat.CBR,
+        "application/x-cbz" to BookFormat.CBZ,
+        "application/x-cbr" to BookFormat.CBR,
+    )
 
 /**
  * Определяет формат книги по пути/URI и (опционально) MIME-типу, без чтения
@@ -53,7 +55,10 @@ private val MIME_FORMATS: Map<String, BookFormat> = mapOf(
  * @param mimeType MIME-тип источника, если известен (Android `content://`)
  * @return формат книги или `null`, если источник не является поддерживаемой книгой
  */
-fun detectBookFormat(path: String, mimeType: String? = null): BookFormat? {
+fun detectBookFormat(
+    path: String,
+    mimeType: String? = null,
+): BookFormat? {
     mimeType?.lowercase()?.let { mime -> MIME_FORMATS[mime]?.let { return it } }
     val clean = path.substringBefore('?').substringBefore('#').lowercase()
     if (clean.endsWith(".fb2.zip")) return BookFormat.FB2

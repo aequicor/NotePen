@@ -3,14 +3,15 @@ package ru.kyamshanov.notepen.mainscreen.ui.peer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items as gridItems
-import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -24,6 +25,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -36,15 +38,13 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.EditorBackHandler
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.union
-import androidx.compose.material3.TopAppBarDefaults
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteEntryCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteFolderCard
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 
@@ -79,15 +79,17 @@ fun PeerCatalogContent(
             TopAppBar(
                 modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
                 title = {
-                    val suffix = when {
-                        state.currentFolderName != null -> " / ${state.currentFolderName}"
-                        state.isDisconnected -> " (не в сети)"
-                        else -> ""
-                    }
+                    val suffix =
+                        when {
+                            state.currentFolderName != null -> " / ${state.currentFolderName}"
+                            state.isDisconnected -> " (не в сети)"
+                            else -> ""
+                        }
                     Text(state.peerName + suffix)
                 },
-                windowInsets = WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
-                    .union(TopAppBarDefaults.windowInsets),
+                windowInsets =
+                    WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
+                        .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
                     // Внутри папки «назад» возвращает в корень каталога, а не выходит с экрана.
                     IconButton(
@@ -185,4 +187,3 @@ private fun SectionHeader(text: String) {
         modifier = Modifier.padding(bottom = 8.dp),
     )
 }
-

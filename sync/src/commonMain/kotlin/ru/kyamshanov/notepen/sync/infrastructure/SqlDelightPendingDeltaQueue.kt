@@ -37,11 +37,13 @@ class SqlDelightPendingDeltaQueue(
     private val ioDispatcher: CoroutineDispatcher,
     private val clock: () -> Long = { currentTimeMillis() },
 ) : PendingDeltaQueue {
-
     private val queries by lazy { databaseProvider().pendingDeltaQueries }
     private val json = Json { classDiscriminator = "type" }
 
-    override suspend fun enqueue(documentId: String, delta: StrokeDelta) {
+    override suspend fun enqueue(
+        documentId: String,
+        delta: StrokeDelta,
+    ) {
         val payload = json.encodeToString(StrokeDelta.serializer(), delta)
         withContext(ioDispatcher) {
             queries.enqueue(
@@ -60,7 +62,10 @@ class SqlDelightPendingDeltaQueue(
             }
         }
 
-    override suspend fun markSent(documentId: String, upToClock: Long) {
+    override suspend fun markSent(
+        documentId: String,
+        upToClock: Long,
+    ) {
         withContext(ioDispatcher) {
             queries.deleteUpToClock(document_id = documentId, clock = upToClock)
         }

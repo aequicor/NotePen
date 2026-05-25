@@ -8,7 +8,6 @@ package ru.kyamshanov.notepen.reflow.api
  * `Dispatchers.*` напрямую.
  */
 public interface PdfReflowExtractor {
-
     /**
      * Быстро классифицирует тип содержимого, не выполняя полного извлечения
      * и группировки. Предназначен для решения, предлагать ли пользователю

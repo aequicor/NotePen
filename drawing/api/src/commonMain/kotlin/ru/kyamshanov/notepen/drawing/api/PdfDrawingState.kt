@@ -6,14 +6,14 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
+import ru.kyamshanov.notepen.annotation.domain.StrokeSimplifier
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
-import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
-import ru.kyamshanov.notepen.annotation.domain.StrokeSimplifier
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.shape.ShapeRecognizer
 import ru.kyamshanov.notepen.annotation.domain.shape.ShapeResampler
 
@@ -84,7 +84,10 @@ public class PdfDrawingState {
      * Расширить [extent], чтобы он включал точку `(x, y)` с запасом.
      * Возвращает `true`, если extent изменился.
      */
-    public fun growExtentToInclude(x: Float, y: Float): Boolean {
+    public fun growExtentToInclude(
+        x: Float,
+        y: Float,
+    ): Boolean {
         val current = extent.value
         val grown = current.including(x, y, pad = EXTENT_GROW_PAD)
         if (grown === current) return false
@@ -119,7 +122,12 @@ public class PdfDrawingState {
     }
 
     /** Добавить точку к текущему штриху. */
-    public fun addPoint(x: Float, y: Float, pressure: Float = 1f, tilt: Float = 0f) {
+    public fun addPoint(
+        x: Float,
+        y: Float,
+        pressure: Float = 1f,
+        tilt: Float = 0f,
+    ) {
         if (isDrawing.value && !gestureSnapped) {
             livePoints.add(DrawingPoint(x, y, pressure = pressure, tilt = tilt))
             growExtentToInclude(x, y)
@@ -149,22 +157,24 @@ public class PdfDrawingState {
 
     /** Завершить штрих и коммитить в [currentPaths]. Возвращает коммитнутый путь или `null`. */
     public fun finishDrawing(): DrawingPath? {
-        val completed = if (isDrawing.value && livePoints.size > 1) {
-            val raw = livePoints.toList()
-            // Распознанные фигуры (gestureSnapped) уже минимальны — не прореживаем.
-            val points = if (gestureSnapped) raw else StrokeSimplifier.simplify(raw)
-            val path = DrawingPath(
-                points = points,
-                colorArgb = liveColorArgb.value,
-                strokeWidth = liveStrokeWidth.value,
-                toolType = liveToolKind.value,
-            )
-            currentPaths.add(path)
-            markHistoryChanged()
-            path
-        } else {
-            null
-        }
+        val completed =
+            if (isDrawing.value && livePoints.size > 1) {
+                val raw = livePoints.toList()
+                // Распознанные фигуры (gestureSnapped) уже минимальны — не прореживаем.
+                val points = if (gestureSnapped) raw else StrokeSimplifier.simplify(raw)
+                val path =
+                    DrawingPath(
+                        points = points,
+                        colorArgb = liveColorArgb.value,
+                        strokeWidth = liveStrokeWidth.value,
+                        toolType = liveToolKind.value,
+                    )
+                currentPaths.add(path)
+                markHistoryChanged()
+                path
+            } else {
+                null
+            }
         isDrawing.value = false
         gestureSnapped = false
         livePoints.clear()
@@ -225,11 +235,13 @@ public fun PdfDrawingState.erasePointsInZone(
         for (pt in path.points) {
             val dx = pt.x - centerX
             val dy = pt.y - centerY
-            val inZone = when (shape) {
-                EraserShape.CIRCLE -> dx * dx + dy * dy <= r2
-                EraserShape.SQUARE -> kotlin.math.abs(dx) <= halfSizeNormalized &&
-                        kotlin.math.abs(dy) <= halfSizeNormalized
-            }
+            val inZone =
+                when (shape) {
+                    EraserShape.CIRCLE -> dx * dx + dy * dy <= r2
+                    EraserShape.SQUARE ->
+                        kotlin.math.abs(dx) <= halfSizeNormalized &&
+                            kotlin.math.abs(dy) <= halfSizeNormalized
+                }
             if (inZone) {
                 pathChanged = true
                 current = null
@@ -305,7 +317,8 @@ public fun PdfDrawingState.eraseStrokesInZone(
             val dy = pt.y - centerY
             when (shape) {
                 EraserShape.CIRCLE -> dx * dx + dy * dy <= r2
-                EraserShape.SQUARE -> kotlin.math.abs(dx) <= halfSizeNormalized &&
+                EraserShape.SQUARE ->
+                    kotlin.math.abs(dx) <= halfSizeNormalized &&
                         kotlin.math.abs(dy) <= halfSizeNormalized
             }
         }
@@ -327,12 +340,23 @@ public fun PdfDrawingState.eraseInZone(
     halfSizeNormalized: Float,
     settings: EraserSettings,
     bumpHistory: Boolean = true,
-): Boolean = when (settings.mode) {
-    EraserMode.POINT -> erasePointsInZone(
-        centerX, centerY, halfSizeNormalized, settings.shape, bumpHistory,
-    )
+): Boolean =
+    when (settings.mode) {
+        EraserMode.POINT ->
+            erasePointsInZone(
+                centerX,
+                centerY,
+                halfSizeNormalized,
+                settings.shape,
+                bumpHistory,
+            )
 
-    EraserMode.OBJECT -> eraseStrokesInZone(
-        centerX, centerY, halfSizeNormalized, settings.shape, bumpHistory,
-    )
-}
+        EraserMode.OBJECT ->
+            eraseStrokesInZone(
+                centerX,
+                centerY,
+                halfSizeNormalized,
+                settings.shape,
+                bumpHistory,
+            )
+    }

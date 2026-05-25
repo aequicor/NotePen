@@ -18,14 +18,18 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
  * @param modifier Модификатор компонента.
  */
 @Composable
-fun StatusBadge(status: AvailabilityStatus, modifier: Modifier = Modifier) {
-    val (label, color) = when (status) {
-        AvailabilityStatus.AVAILABLE -> return
-        AvailabilityStatus.UNKNOWN -> return
-        AvailabilityStatus.NOT_FOUND -> "Не найден" to MaterialTheme.colorScheme.error
-        AvailabilityStatus.FILE_ERROR -> "Ошибка" to MaterialTheme.colorScheme.error
-        AvailabilityStatus.ARCHIVED_UNAVAILABLE -> "Архив / Недоступен" to MaterialTheme.colorScheme.outline
-    }
+fun StatusBadge(
+    status: AvailabilityStatus,
+    modifier: Modifier = Modifier,
+) {
+    val (label, color) =
+        when (status) {
+            AvailabilityStatus.AVAILABLE -> return
+            AvailabilityStatus.UNKNOWN -> return
+            AvailabilityStatus.NOT_FOUND -> "Не найден" to MaterialTheme.colorScheme.error
+            AvailabilityStatus.FILE_ERROR -> "Ошибка" to MaterialTheme.colorScheme.error
+            AvailabilityStatus.ARCHIVED_UNAVAILABLE -> "Архив / Недоступен" to MaterialTheme.colorScheme.outline
+        }
     Surface(
         color = color.copy(alpha = 0.12f),
         shape = MaterialTheme.shapes.extraSmall,

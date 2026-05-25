@@ -12,7 +12,6 @@ package ru.kyamshanov.notepen.pdf.domain.model
  * не завязываясь на платформенные реализации.
  */
 interface ImageBackedDocument : PdfDocument {
-
     /** Ширина исходного изображения в пикселях. */
     val widthPx: Int
 

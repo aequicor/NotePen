@@ -8,7 +8,6 @@ package ru.kyamshanov.notepen.pdf.domain.model
  * После вызова [close] поведение любых методов не определено.
  */
 interface PdfDocument {
-
     /** Метаданные документа: число страниц и их геометрия. */
     val info: PdfDocumentInfo
 

@@ -28,7 +28,10 @@ import androidx.compose.ui.unit.dp
  * @param modifier Модификатор компонента.
  */
 @Composable
-fun EmptyState(onOpenFile: () -> Unit, modifier: Modifier = Modifier) {
+fun EmptyState(
+    onOpenFile: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,

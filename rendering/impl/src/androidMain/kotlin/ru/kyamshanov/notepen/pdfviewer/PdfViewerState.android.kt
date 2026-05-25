@@ -11,9 +11,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.IntSize
-import kotlin.math.roundToInt
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
+import kotlin.math.roundToInt
 
 /**
  * Android-реализация [PdfViewerState] — single-zoom модель, зеркало
@@ -34,7 +34,6 @@ actual class PdfViewerState internal constructor(
     initialPageIndex: Int = 0,
     initialPageOffsetPx: Int = 0,
 ) {
-
     /** Текущий зум (1.0 = 100%). */
     actual var zoom: Float by mutableFloatStateOf(initialZoom.coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM))
         private set
@@ -129,7 +128,10 @@ actual class PdfViewerState internal constructor(
      * [applyPendingInitialScrollIfNeeded], и [applyInitialState], чтобы
      * восстановление состояния не затирало центрирование top-align'ом.
      */
-    private fun applyInitialPosition(pageIndex: Int, offsetPx: Int) {
+    private fun applyInitialPosition(
+        pageIndex: Int,
+        offsetPx: Int,
+    ) {
         if (pageIndex <= 0 && offsetPx <= 0) {
             pan = centeredAndClamped(Offset.Zero)
         } else {
@@ -141,7 +143,11 @@ actual class PdfViewerState internal constructor(
         }
     }
 
-    actual fun applyInitialState(scalePercent: Int, pageIndex: Int, pageOffsetPx: Int) {
+    actual fun applyInitialState(
+        scalePercent: Int,
+        pageIndex: Int,
+        pageOffsetPx: Int,
+    ) {
         if (viewportSize.width > 0 && pages.isNotEmpty()) {
             setScalePercent(scalePercent)
             applyInitialPosition(pageIndex, pageOffsetPx)
@@ -186,18 +192,25 @@ actual class PdfViewerState internal constructor(
      * Cursor-anchored zoom: переводит масштаб в [targetZoom], сохраняя
      * точку под [focus] (centroid пинча) на месте.
      */
-    fun zoomTo(targetZoom: Float, focus: Offset) {
-        val (newPan, newZoom) = PdfViewerMath.zoomAroundFocus(
-            focus = focus,
-            panOld = pan,
-            zoomOld = zoom,
-            zoomTarget = targetZoom,
-        )
+    fun zoomTo(
+        targetZoom: Float,
+        focus: Offset,
+    ) {
+        val (newPan, newZoom) =
+            PdfViewerMath.zoomAroundFocus(
+                focus = focus,
+                panOld = pan,
+                zoomOld = zoom,
+                zoomTarget = targetZoom,
+            )
         zoom = newZoom
         pan = newPan
     }
 
-    actual fun zoomBy(factor: Float, focus: Offset) {
+    actual fun zoomBy(
+        factor: Float,
+        focus: Offset,
+    ) {
         zoomTo(zoom * factor, focus)
     }
 
@@ -213,20 +226,26 @@ actual class PdfViewerState internal constructor(
      * gestureTranslation пересчитывается уже с учётом клампа — точка под
      * пальцем остаётся стабильной даже на упоре в предел.
      */
-    internal fun pinchGestureUpdate(prevCentroid: Offset, newCentroid: Offset, factor: Float) {
+    internal fun pinchGestureUpdate(
+        prevCentroid: Offset,
+        newCentroid: Offset,
+        factor: Float,
+    ) {
         val oldScale = gestureScale
         if (oldScale <= 0f || zoom <= 0f) return
         val oldTrans = gestureTranslation
         val docX = (prevCentroid.x - oldTrans.x) / oldScale
         val docY = (prevCentroid.y - oldTrans.y) / oldScale
-        val effectiveNewZoom = (zoom * oldScale * factor)
-            .coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        val effectiveNewZoom =
+            (zoom * oldScale * factor)
+                .coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
         val newScale = effectiveNewZoom / zoom
         gestureScale = newScale
-        gestureTranslation = Offset(
-            x = newCentroid.x - docX * newScale,
-            y = newCentroid.y - docY * newScale,
-        )
+        gestureTranslation =
+            Offset(
+                x = newCentroid.x - docX * newScale,
+                y = newCentroid.y - docY * newScale,
+            )
     }
 
     /**
@@ -273,22 +292,27 @@ actual class PdfViewerState internal constructor(
     fun panBy(delta: Offset) {
         val candidate = pan + delta
         val c = clamped(candidate)
-        pan = Offset(
-            x = if (delta.x == 0f) pan.x else c.x,
-            y = if (delta.y == 0f) pan.y else c.y,
-        )
+        pan =
+            Offset(
+                x = if (delta.x == 0f) pan.x else c.x,
+                y = if (delta.y == 0f) pan.y else c.y,
+            )
     }
 
-    actual fun scrollToPage(pageIndex: Int, offsetPx: Int) {
+    actual fun scrollToPage(
+        pageIndex: Int,
+        offsetPx: Int,
+    ) {
         if (pages.isEmpty()) return
         val idx = pageIndex.coerceIn(0, pages.lastIndex)
-        val newPan = PdfViewerMath.panForPageScroll(
-            layout = layout,
-            pageIndex = idx,
-            offsetPx = offsetPx,
-            zoom = zoom,
-            currentPanX = pan.x,
-        )
+        val newPan =
+            PdfViewerMath.panForPageScroll(
+                layout = layout,
+                pageIndex = idx,
+                offsetPx = offsetPx,
+                zoom = zoom,
+                currentPanX = pan.x,
+            )
         pan = clamped(newPan)
     }
 
@@ -297,28 +321,31 @@ actual class PdfViewerState internal constructor(
         val base = layout.basePageWidthPx
         if (base <= 0f || zoom <= 0f) return
         val availableWidth = viewportSize.width - fitWidthInsetStartPx - fitWidthInsetEndPx
-        val target = PdfViewerMath.doubleTapTargetZoom(
-            currentZoom = zoom,
-            basePageWidthPx = base,
-            availableWidthPx = availableWidth,
-        )
-        val fitZoom = (availableWidth.coerceAtLeast(1f) / base)
-            .coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        val target =
+            PdfViewerMath.doubleTapTargetZoom(
+                currentZoom = zoom,
+                basePageWidthPx = base,
+                availableWidthPx = availableWidth,
+            )
+        val fitZoom =
+            (availableWidth.coerceAtLeast(1f) / base)
+                .coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
         if (target <= fitZoom * PdfViewerMath.DOUBLE_TAP_FIT_EPSILON) {
             // Fit-width (отдаление): укладываем страницу в свободную область —
             // правее тулрейла и ниже счётчика, а не под ними.
             zoom = target
-            pan = clamped(
-                PdfViewerMath.panForFitWidth(
-                    layout = layout,
-                    pageIndex = firstVisiblePageIndex,
-                    zoom = target,
-                    viewportWidth = viewportSize.width.toFloat(),
-                    insetStartPx = fitWidthInsetStartPx,
-                    insetTopPx = fitWidthInsetTopPx,
-                    insetEndPx = fitWidthInsetEndPx,
-                ),
-            )
+            pan =
+                clamped(
+                    PdfViewerMath.panForFitWidth(
+                        layout = layout,
+                        pageIndex = firstVisiblePageIndex,
+                        zoom = target,
+                        viewportWidth = viewportSize.width.toFloat(),
+                        insetStartPx = fitWidthInsetStartPx,
+                        insetTopPx = fitWidthInsetTopPx,
+                        insetEndPx = fitWidthInsetEndPx,
+                    ),
+                )
         } else {
             // Приближение — cursor-anchored: точка документа под пальцем на месте.
             val docX = (focus.x - pan.x) / zoom
@@ -328,16 +355,17 @@ actual class PdfViewerState internal constructor(
         }
     }
 
-    private fun clamped(p: Offset): Offset = PdfViewerMath.clampPan(
-        pan = p,
-        layout = layout,
-        zoom = zoom,
-        viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
-        // Touch: оверскролл-буфер — половина экрана по каждой оси, чтобы
-        // страницу можно было увести к центру вьюпорта для рисования у краёв.
-        horizontalBuffer = viewportSize.width / 2f,
-        verticalBuffer = viewportSize.height / 2f,
-    )
+    private fun clamped(p: Offset): Offset =
+        PdfViewerMath.clampPan(
+            pan = p,
+            layout = layout,
+            zoom = zoom,
+            viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
+            // Touch: оверскролл-буфер — половина экрана по каждой оси, чтобы
+            // страницу можно было увести к центру вьюпорта для рисования у краёв.
+            horizontalBuffer = viewportSize.width / 2f,
+            verticalBuffer = viewportSize.height / 2f,
+        )
 
     /**
      * Центрирует [p] по тем осям, где лист помещается во вьюпорт; по
@@ -367,27 +395,27 @@ actual class PdfViewerState internal constructor(
     }
 
     companion object {
-
         /** Доля ширины окна, занимаемая страничной колонкой при zoom = 1. */
         internal const val BASE_PAGE_WIDTH_FRACTION: Float = 2f / 3f
 
         /** Saver для [rememberSaveable]: сохраняет zoom + положение скролла. */
-        val Saver: Saver<PdfViewerState, Any> = listSaver(
-            save = { s: PdfViewerState ->
-                listOf(
-                    s.zoom.toDouble(),
-                    s.firstVisiblePageIndex,
-                    s.firstVisiblePageOffsetPx,
-                )
-            },
-            restore = { saved: List<Any?> ->
-                PdfViewerState(
-                    initialZoom = (saved[0] as Number).toFloat(),
-                    initialPageIndex = (saved[1] as Number).toInt(),
-                    initialPageOffsetPx = (saved[2] as Number).toInt(),
-                )
-            },
-        )
+        val Saver: Saver<PdfViewerState, Any> =
+            listSaver(
+                save = { s: PdfViewerState ->
+                    listOf(
+                        s.zoom.toDouble(),
+                        s.firstVisiblePageIndex,
+                        s.firstVisiblePageOffsetPx,
+                    )
+                },
+                restore = { saved: List<Any?> ->
+                    PdfViewerState(
+                        initialZoom = (saved[0] as Number).toFloat(),
+                        initialPageIndex = (saved[1] as Number).toInt(),
+                        initialPageOffsetPx = (saved[2] as Number).toInt(),
+                    )
+                },
+            )
     }
 }
 
@@ -396,10 +424,11 @@ actual fun rememberPdfViewerState(
     initialZoom: Float,
     initialPage: Int,
     initialPageOffsetPx: Int,
-): PdfViewerState = rememberSaveable(saver = PdfViewerState.Saver) {
-    PdfViewerState(
-        initialZoom = initialZoom,
-        initialPageIndex = initialPage,
-        initialPageOffsetPx = initialPageOffsetPx,
-    )
-}
+): PdfViewerState =
+    rememberSaveable(saver = PdfViewerState.Saver) {
+        PdfViewerState(
+            initialZoom = initialZoom,
+            initialPageIndex = initialPage,
+            initialPageOffsetPx = initialPageOffsetPx,
+        )
+    }

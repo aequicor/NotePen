@@ -12,7 +12,6 @@ import java.io.FileOutputStream
  * после отрисовки страницы.
  */
 object AndroidComicPdfRenderer {
-
     private const val FALLBACK_WIDTH = 595 // A4 in points
     private const val FALLBACK_HEIGHT = 842
 
@@ -20,7 +19,10 @@ object AndroidComicPdfRenderer {
      * @param images байты изображений страниц в порядке чтения
      * @param output файл назначения PDF (создаётся/перезаписывается)
      */
-    fun render(images: List<ByteArray>, output: File) {
+    fun render(
+        images: List<ByteArray>,
+        output: File,
+    ) {
         val pdf = PdfDocument()
         var pageNumber = 1
         for (bytes in images) {

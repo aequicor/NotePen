@@ -57,7 +57,6 @@ class KtorPeerServer(
     private val selfInfo: DeviceInfo,
     private val ioDispatcher: CoroutineDispatcher,
 ) : PeerServer {
-
     private val _lifecycle = MutableStateFlow<ServerLifecycleState>(ServerLifecycleState.Idle)
     override val lifecycle: Flow<ServerLifecycleState> = _lifecycle.asStateFlow()
 
@@ -86,27 +85,29 @@ class KtorPeerServer(
     private var engine: EmbeddedServer<*, *>? = null
     private val serverScope = CoroutineScope(ioDispatcher + Job())
 
-    override suspend fun start(): Result<ServerLifecycleState.Running> = runCatching {
-        val code = pairing.generateCode()
-        val host = pickLanIpv4Address() ?: InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
-        val port = findFreePort()
+    override suspend fun start(): Result<ServerLifecycleState.Running> =
+        runCatching {
+            val code = pairing.generateCode()
+            val host = pickLanIpv4Address() ?: InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
+            val port = findFreePort()
 
-        engine = embeddedServer(CIO, port = port) {
-            install(ContentNegotiation) { json(json) }
-            install(WebSockets) {
-                pingPeriod = 30.seconds
-                contentConverter = KotlinxWebsocketSerializationConverter(json)
-            }
-            routing {
-                webSocket("/ws") { handleSession(this) }
-            }
-        }.also { it.start(wait = false) }
+            engine =
+                embeddedServer(CIO, port = port) {
+                    install(ContentNegotiation) { json(json) }
+                    install(WebSockets) {
+                        pingPeriod = 30.seconds
+                        contentConverter = KotlinxWebsocketSerializationConverter(json)
+                    }
+                    routing {
+                        webSocket("/ws") { handleSession(this) }
+                    }
+                }.also { it.start(wait = false) }
 
-        val running = ServerLifecycleState.Running(host = host, port = port, code = code)
-        _lifecycle.value = running
-        logger.info { "PeerServer started on $host:$port (code=$code)" }
-        running
-    }
+            val running = ServerLifecycleState.Running(host = host, port = port, code = code)
+            _lifecycle.value = running
+            logger.info { "PeerServer started on $host:$port (code=$code)" }
+            running
+        }
 
     private fun findFreePort(): Int = java.net.ServerSocket(0).use { it.localPort }
 
@@ -130,13 +131,14 @@ class KtorPeerServer(
                 if (addr !is Inet4Address) continue
                 if (addr.isLoopbackAddress || addr.isLinkLocalAddress || addr.isAnyLocalAddress) continue
                 val host = addr.hostAddress ?: continue
-                val rank = when {
-                    looksVpn -> 100
-                    host.startsWith("192.168.") -> 0
-                    host.startsWith("10.") -> 1
-                    host.startsWith("172.") -> 2
-                    else -> 50
-                }
+                val rank =
+                    when {
+                        looksVpn -> 100
+                        host.startsWith("192.168.") -> 0
+                        host.startsWith("10.") -> 1
+                        host.startsWith("172.") -> 2
+                        else -> 50
+                    }
                 candidates += rank to host
             }
         }
@@ -236,7 +238,10 @@ class KtorPeerServer(
         _connectedPeers.value = snapshot
     }
 
-    override suspend fun send(peerId: String, message: NetworkMessage) {
+    override suspend fun send(
+        peerId: String,
+        message: NetworkMessage,
+    ) {
         val session = sessionMutex.withLock { sessions[peerId] } ?: return
         runCatching { session.sendSerialized<NetworkMessage>(message) }
             .onFailure { logger.warn { "send to $peerId failed: ${it.message}" } }

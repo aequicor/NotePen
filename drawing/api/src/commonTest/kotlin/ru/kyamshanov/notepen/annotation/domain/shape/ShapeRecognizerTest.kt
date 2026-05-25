@@ -10,7 +10,6 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class ShapeRecognizerTest {
-
     private val aspectA4 = 595f / 842f
     private val rng = Random(seed = 42)
 
@@ -18,13 +17,14 @@ class ShapeRecognizerTest {
 
     @Test
     fun straightishStrokeRecognizedAsLine() {
-        val pts = List(40) { i ->
-            val t = i / 39f
-            DrawingPoint(
-                x = 0.1f + 0.6f * t + jitter(0.002f),
-                y = 0.2f + 0.4f * t + jitter(0.002f),
-            )
-        }
+        val pts =
+            List(40) { i ->
+                val t = i / 39f
+                DrawingPoint(
+                    x = 0.1f + 0.6f * t + jitter(0.002f),
+                    y = 0.2f + 0.4f * t + jitter(0.002f),
+                )
+            }
         val shape = ShapeRecognizer.recognize(pts, aspectA4)
         assertTrue(shape is RecognizedShape.Line, "expected Line, got $shape")
     }
@@ -36,13 +36,14 @@ class ShapeRecognizerTest {
         val rx = 0.20f
         val ry = 0.20f * aspectA4 // визуально круг на A4
         val n = 80
-        val pts = List(n + 1) { i ->
-            val theta = (i.toFloat() / n) * 2f * PI.toFloat()
-            DrawingPoint(
-                x = cx + rx * cos(theta) + jitter(0.006f),
-                y = cy + ry * sin(theta) + jitter(0.006f),
-            )
-        }
+        val pts =
+            List(n + 1) { i ->
+                val theta = (i.toFloat() / n) * 2f * PI.toFloat()
+                DrawingPoint(
+                    x = cx + rx * cos(theta) + jitter(0.006f),
+                    y = cy + ry * sin(theta) + jitter(0.006f),
+                )
+            }
         val shape = ShapeRecognizer.recognize(pts, aspectA4)
         assertTrue(shape is RecognizedShape.Ellipse, "expected Ellipse, got $shape")
     }
@@ -56,13 +57,14 @@ class ShapeRecognizerTest {
         val bottom = 0.6f
         val perSide = 30
         val pts = ArrayList<DrawingPoint>()
-        val corners = listOf(
-            left to top,
-            right to top,
-            right to bottom,
-            left to bottom,
-            left to top,
-        )
+        val corners =
+            listOf(
+                left to top,
+                right to top,
+                right to bottom,
+                left to bottom,
+                left to top,
+            )
         for (side in 0 until 4) {
             val (sx, sy) = corners[side]
             val (ex, ey) = corners[side + 1]
@@ -83,22 +85,24 @@ class ShapeRecognizerTest {
 
     @Test
     fun shortZigzagNotRecognized() {
-        val pts = listOf(
-            DrawingPoint(0.1f, 0.1f),
-            DrawingPoint(0.2f, 0.3f),
-            DrawingPoint(0.1f, 0.5f),
-            DrawingPoint(0.2f, 0.7f),
-            DrawingPoint(0.1f, 0.9f),
-        )
+        val pts =
+            listOf(
+                DrawingPoint(0.1f, 0.1f),
+                DrawingPoint(0.2f, 0.3f),
+                DrawingPoint(0.1f, 0.5f),
+                DrawingPoint(0.2f, 0.7f),
+                DrawingPoint(0.1f, 0.9f),
+            )
         assertNull(ShapeRecognizer.recognize(pts, aspectA4))
     }
 
     @Test
     fun tooFewPointsRejected() {
-        val pts = listOf(
-            DrawingPoint(0.1f, 0.1f),
-            DrawingPoint(0.9f, 0.9f),
-        )
+        val pts =
+            listOf(
+                DrawingPoint(0.1f, 0.1f),
+                DrawingPoint(0.9f, 0.9f),
+            )
         assertNull(ShapeRecognizer.recognize(pts, aspectA4))
     }
 }

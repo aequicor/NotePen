@@ -15,11 +15,13 @@ import ru.kyamshanov.notepen.sync.domain.port.RemoteCatalogCache
  * that survives app restarts so the Remote section can be shown in offline mode.
  */
 class InMemoryRemoteCatalogCache : RemoteCatalogCache {
-
     private val _catalogs = MutableStateFlow<Map<DeviceInfo, RemoteCatalog>>(emptyMap())
     override val catalogs: StateFlow<Map<DeviceInfo, RemoteCatalog>> = _catalogs.asStateFlow()
 
-    override suspend fun update(host: DeviceInfo, value: RemoteCatalog) {
+    override suspend fun update(
+        host: DeviceInfo,
+        value: RemoteCatalog,
+    ) {
         _catalogs.update { current ->
             // Re-key by host id: drop any earlier entry whose `DeviceInfo` had stale fields.
             val withoutOld = current.filterKeys { it.id != host.id }

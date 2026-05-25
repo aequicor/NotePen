@@ -28,7 +28,6 @@ class PdfBitmapCache(
     private val maxEntries: Int,
     private val maxTotalPixels: Long = DEFAULT_MAX_PIXELS,
 ) {
-
     private val accessOrder = ArrayDeque<Int>()
 
     val entries: SnapshotStateMap<Int, RenderedPage> = SnapshotStateMap()
@@ -39,7 +38,10 @@ class PdfBitmapCache(
         return r
     }
 
-    fun put(pageIndex: Int, rendered: RenderedPage) {
+    fun put(
+        pageIndex: Int,
+        rendered: RenderedPage,
+    ) {
         if (entries.containsKey(pageIndex)) {
             entries[pageIndex] = rendered
             touch(pageIndex)

@@ -6,5 +6,4 @@ import ru.kyamshanov.notepen.book.EbookAwarePdfExporter
 import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfExporter
 
-actual fun createPdfExporter(): PdfExporter =
-    EbookAwarePdfExporter(JvmPdfExporter(Dispatchers.IO), JvmEbookToPdfConverter(Dispatchers.IO))
+actual fun createPdfExporter(): PdfExporter = EbookAwarePdfExporter(JvmPdfExporter(Dispatchers.IO), JvmEbookToPdfConverter(Dispatchers.IO))

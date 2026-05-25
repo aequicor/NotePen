@@ -28,39 +28,46 @@ private data class InlineStyle(
     val subscript: Boolean = false,
     val link: Boolean = false,
 ) {
-    fun with(tag: String): InlineStyle = when (tag) {
-        "b", "strong" -> copy(bold = true)
-        "i", "em", "emphasis", "cite", "dfn", "var" -> copy(italic = true)
-        "code", "kbd", "samp", "tt" -> copy(code = true)
-        "sup" -> copy(superscript = true)
-        "sub" -> copy(subscript = true)
-        "a" -> copy(link = true)
-        else -> this
-    }
+    fun with(tag: String): InlineStyle =
+        when (tag) {
+            "b", "strong" -> copy(bold = true)
+            "i", "em", "emphasis", "cite", "dfn", "var" -> copy(italic = true)
+            "code", "kbd", "samp", "tt" -> copy(code = true)
+            "sup" -> copy(superscript = true)
+            "sub" -> copy(subscript = true)
+            "a" -> copy(link = true)
+            else -> this
+        }
 }
 
-private fun collectInline(node: Node, style: InlineStyle, out: MutableList<InlineSpan>) {
+private fun collectInline(
+    node: Node,
+    style: InlineStyle,
+    out: MutableList<InlineSpan>,
+) {
     for (child in node.childNodes()) {
         when (child) {
-            is TextNode -> child.wholeText.takeIf { it.isNotEmpty() }?.let { text ->
-                out.add(
-                    InlineSpan(
-                        text = text,
-                        bold = style.bold,
-                        italic = style.italic,
-                        code = style.code,
-                        superscript = style.superscript,
-                        subscript = style.subscript,
-                        link = style.link,
-                    ),
-                )
-            }
+            is TextNode ->
+                child.wholeText.takeIf { it.isNotEmpty() }?.let { text ->
+                    out.add(
+                        InlineSpan(
+                            text = text,
+                            bold = style.bold,
+                            italic = style.italic,
+                            code = style.code,
+                            superscript = style.superscript,
+                            subscript = style.subscript,
+                            link = style.link,
+                        ),
+                    )
+                }
 
-            is Element -> if (child.normalName() == "br") {
-                out.add(InlineSpan(text = " "))
-            } else {
-                collectInline(child, style.with(child.normalName()), out)
-            }
+            is Element ->
+                if (child.normalName() == "br") {
+                    out.add(InlineSpan(text = " "))
+                } else {
+                    collectInline(child, style.with(child.normalName()), out)
+                }
 
             else -> Unit
         }

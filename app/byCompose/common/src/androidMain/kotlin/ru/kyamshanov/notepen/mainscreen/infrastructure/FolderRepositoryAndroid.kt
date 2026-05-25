@@ -15,10 +15,10 @@ import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNameTooLongExcept
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNotFoundException
 import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
 import ru.kyamshanov.notepen.mainscreen.domain.model.FolderFileLink
+import ru.kyamshanov.notepen.mainscreen.domain.model.generateUuid
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
 import ru.kyamshanov.notepen.mainscreen.infrastructure.dto.FolderDto
 import ru.kyamshanov.notepen.mainscreen.infrastructure.dto.FolderFileLinkDto
-import ru.kyamshanov.notepen.mainscreen.domain.model.generateUuid
 
 /**
  * Android-реализация [FolderRepository].
@@ -31,26 +31,27 @@ class FolderRepositoryAndroid(
     private val context: Context,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : FolderRepository {
-
     private val foldersFile get() = java.io.File(context.filesDir, "folders.json")
     private val linksFile get() = java.io.File(context.filesDir, "folder_links.json")
     private val mutex = Mutex()
 
-    private fun readFolders(): List<Folder> = try {
-        foldersFile.takeIf { it.exists() }
-            ?.let { json.decodeFromString<List<FolderDto>>(it.readText()).map { dto -> dto.toDomain() } }
-            ?: emptyList()
-    } catch (_: Exception) {
-        emptyList()
-    }
+    private fun readFolders(): List<Folder> =
+        try {
+            foldersFile.takeIf { it.exists() }
+                ?.let { json.decodeFromString<List<FolderDto>>(it.readText()).map { dto -> dto.toDomain() } }
+                ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
 
-    private fun readLinks(): List<FolderFileLink> = try {
-        linksFile.takeIf { it.exists() }
-            ?.let { json.decodeFromString<List<FolderFileLinkDto>>(it.readText()).map { dto -> dto.toDomain() } }
-            ?: emptyList()
-    } catch (_: Exception) {
-        emptyList()
-    }
+    private fun readLinks(): List<FolderFileLink> =
+        try {
+            linksFile.takeIf { it.exists() }
+                ?.let { json.decodeFromString<List<FolderFileLinkDto>>(it.readText()).map { dto -> dto.toDomain() } }
+                ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
 
     private fun writeFolders(folders: List<Folder>) {
         val tmp = java.io.File(context.filesDir, "folders.tmp.json")
@@ -64,33 +65,42 @@ class FolderRepositoryAndroid(
         tmp.renameTo(linksFile)
     }
 
-    override suspend fun create(name: String, parentId: String?): Folder = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            validateName(name)
-            val folders = readFolders()
-            if (folders.size >= 100) throw FolderLimitExceededException()
-            if (parentId != null && folders.none { it.id == parentId }) throw FolderNotFoundException(parentId)
-            val folder = Folder(
-                id = generateUuid(),
-                name = name.trim(),
-                createdAt = System.currentTimeMillis(),
-                parentId = parentId,
-            )
-            writeFolders(folders + folder)
-            folder
+    override suspend fun create(
+        name: String,
+        parentId: String?,
+    ): Folder =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                validateName(name)
+                val folders = readFolders()
+                if (folders.size >= 100) throw FolderLimitExceededException()
+                if (parentId != null && folders.none { it.id == parentId }) throw FolderNotFoundException(parentId)
+                val folder =
+                    Folder(
+                        id = generateUuid(),
+                        name = name.trim(),
+                        createdAt = System.currentTimeMillis(),
+                        parentId = parentId,
+                    )
+                writeFolders(folders + folder)
+                folder
+            }
         }
-    }
 
-    override suspend fun delete(id: String) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val folders = readFolders()
-            val toRemove = descendantsOf(id, folders) + id
-            writeFolders(folders.filter { it.id !in toRemove })
-            writeLinks(readLinks().filter { it.folderId !in toRemove })
+    override suspend fun delete(id: String) =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val folders = readFolders()
+                val toRemove = descendantsOf(id, folders) + id
+                writeFolders(folders.filter { it.id !in toRemove })
+                writeLinks(readLinks().filter { it.folderId !in toRemove })
+            }
         }
-    }
 
-    override suspend fun addFile(folderId: String, uri: String) = withContext(Dispatchers.IO) {
+    override suspend fun addFile(
+        folderId: String,
+        uri: String,
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val folders = readFolders()
             if (folders.none { it.id == folderId }) throw FolderNotFoundException(folderId)
@@ -102,13 +112,19 @@ class FolderRepositoryAndroid(
         }
     }
 
-    override suspend fun removeFile(folderId: String, uri: String) = withContext(Dispatchers.IO) {
+    override suspend fun removeFile(
+        folderId: String,
+        uri: String,
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
             writeLinks(readLinks().filter { !(it.folderId == folderId && it.fileUri == uri) })
         }
     }
 
-    override suspend fun rename(id: String, newName: String) = withContext(Dispatchers.IO) {
+    override suspend fun rename(
+        id: String,
+        newName: String,
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
             validateName(newName)
             val folders = readFolders()
@@ -117,21 +133,26 @@ class FolderRepositoryAndroid(
         }
     }
 
-    override suspend fun getAll(): List<Folder> = withContext(Dispatchers.IO) {
-        val folders = readFolders()
-        val links = readLinks()
-        folders.sortedByDescending { folder ->
-            links.filter { it.folderId == folder.id }.maxOfOrNull { it.lastOpenedAt } ?: Long.MIN_VALUE
+    override suspend fun getAll(): List<Folder> =
+        withContext(Dispatchers.IO) {
+            val folders = readFolders()
+            val links = readLinks()
+            folders.sortedByDescending { folder ->
+                links.filter { it.folderId == folder.id }.maxOfOrNull { it.lastOpenedAt } ?: Long.MIN_VALUE
+            }
         }
-    }
 
-    override suspend fun getFilesInFolder(folderId: String): List<String> = withContext(Dispatchers.IO) {
-        if (readFolders().none { it.id == folderId }) throw FolderNotFoundException(folderId)
-        readLinks().filter { it.folderId == folderId }.map { it.fileUri }
-    }
+    override suspend fun getFilesInFolder(folderId: String): List<String> =
+        withContext(Dispatchers.IO) {
+            if (readFolders().none { it.id == folderId }) throw FolderNotFoundException(folderId)
+            readLinks().filter { it.folderId == folderId }.map { it.fileUri }
+        }
 
     /** Все папки-потомки [rootId] на любую глубину (без самого [rootId]). */
-    private fun descendantsOf(rootId: String, folders: List<Folder>): Set<String> {
+    private fun descendantsOf(
+        rootId: String,
+        folders: List<Folder>,
+    ): Set<String> {
         val byParent = folders.groupBy { it.parentId }
         val result = mutableSetOf<String>()
         val queue = ArrayDeque<String>()

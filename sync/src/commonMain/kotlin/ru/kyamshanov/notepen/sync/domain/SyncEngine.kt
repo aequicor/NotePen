@@ -92,10 +92,11 @@ class SyncEngine(
      */
     fun applyLocalBatch(deltas: List<StrokeDelta>) {
         if (deltas.isEmpty()) return
-        val stamped = deltas.map {
-            logicalClock++
-            it.withClock(logicalClock)
-        }
+        val stamped =
+            deltas.map {
+                logicalClock++
+                it.withClock(logicalClock)
+            }
         scope.launch {
             for (d in stamped) {
                 _merged.emit(d)
@@ -119,17 +120,20 @@ class SyncEngine(
         val pending = queue.peek(documentId)
         if (pending.isEmpty()) return
         if (!hasReachablePeer()) {
-            logger.info { "drainAndReplay skipped — no reachable peer for doc=$documentId, " +
-                "${pending.size} delta(s) stay buffered" }
+            logger.info {
+                "drainAndReplay skipped — no reachable peer for doc=$documentId, " +
+                    "${pending.size} delta(s) stay buffered"
+            }
             return
         }
         logger.info { "Replaying ${pending.size} pending delta(s) for doc=$documentId" }
-        val result = runCatching {
-            for (d in pending) {
-                val msg = NetworkMessage.StrokeDeltaMessage(delta = d, documentId = documentId)
-                server?.broadcast(msg) ?: client?.broadcast(msg)
+        val result =
+            runCatching {
+                for (d in pending) {
+                    val msg = NetworkMessage.StrokeDeltaMessage(delta = d, documentId = documentId)
+                    server?.broadcast(msg) ?: client?.broadcast(msg)
+                }
             }
-        }
         if (result.isSuccess) {
             queue.markSent(documentId, pending.last().clock)
         } else {
@@ -142,12 +146,13 @@ class SyncEngine(
         // вернёт success, и `markSent` сотрёт правки, которые на самом деле
         // никуда не ушли. Поэтому сначала проверяем, есть ли с кем синкаться.
         if (!hasReachablePeer()) return
-        val result = runCatching {
-            for (d in stamped) {
-                val msg = NetworkMessage.StrokeDeltaMessage(delta = d, documentId = documentId)
-                server?.broadcast(msg) ?: client?.broadcast(msg)
+        val result =
+            runCatching {
+                for (d in stamped) {
+                    val msg = NetworkMessage.StrokeDeltaMessage(delta = d, documentId = documentId)
+                    server?.broadcast(msg) ?: client?.broadcast(msg)
+                }
             }
-        }
         if (result.isSuccess) {
             pendingQueue?.markSent(documentId, stamped.last().clock)
         }
@@ -192,7 +197,8 @@ class SyncEngine(
     fun newStrokeId(): String = "$deviceId#${++strokeSeq}"
 }
 
-private fun StrokeDelta.withClock(clock: Long): StrokeDelta = when (this) {
-    is StrokeDelta.Added -> copy(clock = clock)
-    is StrokeDelta.Removed -> copy(clock = clock)
-}
+private fun StrokeDelta.withClock(clock: Long): StrokeDelta =
+    when (this) {
+        is StrokeDelta.Added -> copy(clock = clock)
+        is StrokeDelta.Removed -> copy(clock = clock)
+    }

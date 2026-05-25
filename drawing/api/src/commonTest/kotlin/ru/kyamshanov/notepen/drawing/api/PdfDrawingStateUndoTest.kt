@@ -7,7 +7,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class PdfDrawingStateUndoTest {
-
     private fun path(id: Float) = DrawingPath(points = listOf(DrawingPoint(id, id, true), DrawingPoint(id + 1f, id + 1f)))
 
     // -- restoreSnapshot --

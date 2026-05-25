@@ -84,14 +84,16 @@ fun SyncPairingButton(
             Surface(
                 shape = MaterialTheme.shapes.large,
                 tonalElevation = 6.dp,
-                modifier = Modifier
-                    .widthIn(min = 320.dp, max = 480.dp)
-                    .heightIn(min = 200.dp, max = 720.dp),
+                modifier =
+                    Modifier
+                        .widthIn(min = 320.dp, max = 480.dp)
+                        .heightIn(min = 200.dp, max = 720.dp),
             ) {
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(8.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(8.dp),
                 ) {
                     if (hostQrViewModel != null) {
                         DialogHeader(title = "QR-подключение", onClose = { showSyncPanel = false })
@@ -117,11 +119,15 @@ fun SyncPairingButton(
 }
 
 @Composable
-private fun DialogHeader(title: String, onClose: () -> Unit) {
+private fun DialogHeader(
+    title: String,
+    onClose: () -> Unit,
+) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 8.dp, top = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -151,9 +157,10 @@ private fun syncIndicatorTint(
 ): Color {
     val anyConnected = hostPeers.isNotEmpty() || clientHosts.isNotEmpty()
     val hostUnstable = hostLifecycle is ServerLifecycleState.Error
-    val anyClientUnstable = clientStates.values.any {
-        it is PairingState.Reconnecting || it is PairingState.Error
-    }
+    val anyClientUnstable =
+        clientStates.values.any {
+            it is PairingState.Reconnecting || it is PairingState.Error
+        }
     return when {
         anyConnected -> SyncConnectedGreen
         hostUnstable || anyClientUnstable -> SyncUnstableYellow

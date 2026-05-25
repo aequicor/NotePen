@@ -29,15 +29,15 @@ class PeerCatalogComponentImpl(
     val onBack: () -> Unit,
     onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
 ) : PeerCatalogComponent, ComponentContext by componentContext {
-
-    val viewModel = PeerCatalogViewModel(
-        lifecycle = lifecycle,
-        peerId = peerId,
-        fallbackName = displayName,
-        catalogsFlow = catalogsFlow,
-        onlinePeerIdsFlow = onlinePeerIdsFlow,
-        remoteDocumentOpener = remoteDocumentOpener,
-        receivedPdfDir = receivedPdfDir,
-        onDocumentReady = onOpenEditor,
-    )
+    val viewModel =
+        PeerCatalogViewModel(
+            lifecycle = lifecycle,
+            peerId = peerId,
+            fallbackName = displayName,
+            catalogsFlow = catalogsFlow,
+            onlinePeerIdsFlow = onlinePeerIdsFlow,
+            remoteDocumentOpener = remoteDocumentOpener,
+            receivedPdfDir = receivedPdfDir,
+            onDocumentReady = onOpenEditor,
+        )
 }

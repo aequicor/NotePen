@@ -25,53 +25,64 @@ class FileHistoryRepositoryAndroid(
     private val context: Context,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : FileHistoryRepository {
-
     private val historyFile get() = java.io.File(context.filesDir, "history.json")
     private val mutex = Mutex()
 
-    override suspend fun getAll(): List<RecentFile> = withContext(Dispatchers.IO) {
-        try {
-            val text = historyFile.takeIf { it.exists() }?.readText() ?: return@withContext emptyList()
-            json.decodeFromString<List<RecentFileDto>>(text)
-                .map { it.toDomain() }
-                .filterNot { isAnnotationSidecarUri(it.uri) }
-                .sortedByDescending { it.openedAt }
-        } catch (_: Exception) {
-            emptyList()
+    override suspend fun getAll(): List<RecentFile> =
+        withContext(Dispatchers.IO) {
+            try {
+                val text = historyFile.takeIf { it.exists() }?.readText() ?: return@withContext emptyList()
+                json.decodeFromString<List<RecentFileDto>>(text)
+                    .map { it.toDomain() }
+                    .filterNot { isAnnotationSidecarUri(it.uri) }
+                    .sortedByDescending { it.openedAt }
+            } catch (_: Exception) {
+                emptyList()
+            }
         }
-    }
 
-    override suspend fun upsert(file: RecentFile, lastPageIndex: Int) = withContext(Dispatchers.IO) {
+    override suspend fun upsert(
+        file: RecentFile,
+        lastPageIndex: Int,
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val current = getAll().toMutableList()
-            val (newList, _) = FileHistoryManager.applyUpsert(
-                current,
-                file.copy(lastPageIndex = lastPageIndex),
-            )
+            val (newList, _) =
+                FileHistoryManager.applyUpsert(
+                    current,
+                    file.copy(lastPageIndex = lastPageIndex),
+                )
             writeAtomic(newList)
         }
     }
 
-    override suspend fun updateStatus(id: String, status: AvailabilityStatus) = withContext(Dispatchers.IO) {
+    override suspend fun updateStatus(
+        id: String,
+        status: AvailabilityStatus,
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val updated = getAll().map { if (it.id == id) it.copy(availabilityStatus = status) else it }
             writeAtomic(updated)
         }
     }
 
-    override suspend fun updateLastPage(uri: String, pageIndex: Int) = withContext(Dispatchers.IO) {
+    override suspend fun updateLastPage(
+        uri: String,
+        pageIndex: Int,
+    ) = withContext(Dispatchers.IO) {
         mutex.withLock {
             val updated = getAll().map { if (it.uri == uri) it.copy(lastPageIndex = pageIndex) else it }
             writeAtomic(updated)
         }
     }
 
-    override suspend fun rollbackUpsert(uri: String) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val current = getAll().filter { it.uri != uri }
-            writeAtomic(current)
+    override suspend fun rollbackUpsert(uri: String) =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val current = getAll().filter { it.uri != uri }
+                writeAtomic(current)
+            }
         }
-    }
 
     private fun writeAtomic(list: List<RecentFile>) {
         val tmp = java.io.File(context.filesDir, "history.tmp.json")

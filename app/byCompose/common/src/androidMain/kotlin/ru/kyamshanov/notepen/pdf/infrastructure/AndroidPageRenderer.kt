@@ -13,7 +13,6 @@ class AndroidPageRenderer(
     private val pdfRenderer: PdfPageRenderer,
     private val imageRenderer: PdfPageRenderer,
 ) : PdfPageRenderer {
-
     override suspend fun renderPage(
         document: PdfDocument,
         pageIndex: Int,

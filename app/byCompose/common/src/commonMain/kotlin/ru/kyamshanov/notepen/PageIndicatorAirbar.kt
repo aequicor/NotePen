@@ -57,10 +57,11 @@ fun PageIndicatorAirbar(
         shape = RoundedCornerShape(AIRBAR_CORNER_RADIUS),
     ) {
         Row(
-            modifier = Modifier.padding(
-                horizontal = AIRBAR_PADDING_H,
-                vertical = AIRBAR_PADDING_V,
-            ),
+            modifier =
+                Modifier.padding(
+                    horizontal = AIRBAR_PADDING_H,
+                    vertical = AIRBAR_PADDING_V,
+                ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -131,25 +132,36 @@ private fun EditablePageNumber(
                         fieldValue = new
                     }
                 },
-                textStyle = MaterialTheme.typography.labelLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
+                textStyle =
+                    MaterialTheme.typography.labelLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Number,
-                    imeAction = ImeAction.Go,
-                ),
+                keyboardOptions =
+                    KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = ImeAction.Go,
+                    ),
                 keyboardActions = KeyboardActions(onGo = { confirm() }),
-                modifier = Modifier.matchParentSize()
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { state ->
-                        if (state.isFocused) everFocused = true
-                        else if (everFocused) cancel()
-                    }
-                    .onKeyEvent { event ->
-                        if (event.key == Key.Escape) { cancel(); true } else false
-                    },
+                modifier =
+                    Modifier.matchParentSize()
+                        .focusRequester(focusRequester)
+                        .onFocusChanged { state ->
+                            if (state.isFocused) {
+                                everFocused = true
+                            } else if (everFocused) {
+                                cancel()
+                            }
+                        }
+                        .onKeyEvent { event ->
+                            if (event.key == Key.Escape) {
+                                cancel()
+                                true
+                            } else {
+                                false
+                            }
+                        },
             )
         }
     } else {
@@ -157,13 +169,15 @@ private fun EditablePageNumber(
             text = currentPage.toString(),
             style = MaterialTheme.typography.labelLarge,
             color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.clickable {
-                fieldValue = TextFieldValue(
-                    text = currentPage.toString(),
-                    selection = TextRange(0, currentPage.toString().length),
-                )
-                editing = true
-            },
+            modifier =
+                Modifier.clickable {
+                    fieldValue =
+                        TextFieldValue(
+                            text = currentPage.toString(),
+                            selection = TextRange(0, currentPage.toString().length),
+                        )
+                    editing = true
+                },
         )
     }
 }

@@ -24,8 +24,11 @@ private val logger = KotlinLogging.logger {}
 /** Result of [RemoteDocumentOpener.open]. */
 sealed class RemoteDocumentResult {
     data class Success(val documentId: String, val localPath: String) : RemoteDocumentResult()
+
     data class NotFound(val documentId: String, val reason: String) : RemoteDocumentResult()
+
     data class Timeout(val documentId: String) : RemoteDocumentResult()
+
     data class Failure(val documentId: String, val cause: Throwable) : RemoteDocumentResult()
 }
 
@@ -51,9 +54,11 @@ class RemoteDocumentOpener(
     private val documentIdRegistry: LocalDocumentIdRegistry? = null,
     private val requestTimeoutMs: Long = 60_000L,
 ) {
-
     @OptIn(ExperimentalCoroutinesApi::class)
-    suspend fun open(documentId: String, displayName: String? = null): RemoteDocumentResult {
+    suspend fun open(
+        documentId: String,
+        displayName: String? = null,
+    ): RemoteDocumentResult {
         // Phase 5 offline-first: if the file is already in the local cache use it
         // directly. Keeps the Remote section functional without a live peer.
         if (displayName != null) {
@@ -64,52 +69,60 @@ class RemoteDocumentOpener(
                 return RemoteDocumentResult.Success(documentId, cachedPath)
             }
         }
-        val host = pickHost(documentId) ?: return RemoteDocumentResult.NotFound(
-            documentId = documentId,
-            reason = "No connected host has this document",
-        )
+        val host =
+            pickHost(documentId) ?: return RemoteDocumentResult.NotFound(
+                documentId = documentId,
+                reason = "No connected host has this document",
+            )
         logger.info { "Requesting $documentId from host=${host.name}" }
-        val sendResult = runCatching {
-            client.send(host.id, NetworkMessage.DocumentOpenRequest(documentId = documentId))
-        }
+        val sendResult =
+            runCatching {
+                client.send(host.id, NetworkMessage.DocumentOpenRequest(documentId = documentId))
+            }
         if (sendResult.isFailure) {
             return RemoteDocumentResult.Failure(documentId, sendResult.exceptionOrNull()!!)
         }
 
-        val outcome: RemoteDocumentResult? = withTimeoutOrNull(requestTimeoutMs) {
-            coroutineScope {
-                val fromThisHost = client.incomingMessages
-                    .filter { it.host.id == host.id }
-                    .map { it.message }
-                val notFound = async {
-                    fromThisHost
-                        .filter { it is NetworkMessage.DocumentNotFound && it.documentId == documentId }
-                        .first()
+        val outcome: RemoteDocumentResult? =
+            withTimeoutOrNull(requestTimeoutMs) {
+                coroutineScope {
+                    val fromThisHost =
+                        client.incomingMessages
+                            .filter { it.host.id == host.id }
+                            .map { it.message }
+                    val notFound =
+                        async {
+                            fromThisHost
+                                .filter { it is NetworkMessage.DocumentNotFound && it.documentId == documentId }
+                                .first()
+                        }
+                    val received =
+                        async {
+                            val incoming =
+                                merge(
+                                    fromThisHost
+                                        .filter { it is NetworkMessage.FileTransferStart && it.documentId == documentId },
+                                    fromThisHost
+                                        .filter { it is NetworkMessage.FileChunk && it.documentId == documentId },
+                                )
+                            FileTransferReceiver(incoming = incoming, destDir = destDir).awaitFile()
+                        }
+                    val winner: RemoteDocumentResult =
+                        select {
+                            notFound.onAwait { msg ->
+                                val nf = msg as NetworkMessage.DocumentNotFound
+                                RemoteDocumentResult.NotFound(documentId, nf.reason)
+                            }
+                            received.onAwait { file ->
+                                documentIdRegistry?.register(file.destPath, documentId)
+                                RemoteDocumentResult.Success(documentId, file.destPath)
+                            }
+                        }
+                    notFound.cancel()
+                    received.cancel()
+                    winner
                 }
-                val received = async {
-                    val incoming = merge(
-                        fromThisHost
-                            .filter { it is NetworkMessage.FileTransferStart && it.documentId == documentId },
-                        fromThisHost
-                            .filter { it is NetworkMessage.FileChunk && it.documentId == documentId },
-                    )
-                    FileTransferReceiver(incoming = incoming, destDir = destDir).awaitFile()
-                }
-                val winner: RemoteDocumentResult = select {
-                    notFound.onAwait { msg ->
-                        val nf = msg as NetworkMessage.DocumentNotFound
-                        RemoteDocumentResult.NotFound(documentId, nf.reason)
-                    }
-                    received.onAwait { file ->
-                        documentIdRegistry?.register(file.destPath, documentId)
-                        RemoteDocumentResult.Success(documentId, file.destPath)
-                    }
-                }
-                notFound.cancel()
-                received.cancel()
-                winner
             }
-        }
         return outcome ?: RemoteDocumentResult.Timeout(documentId).also {
             logger.warn { "Timed out waiting for $documentId from ${host.id}" }
         }
@@ -123,7 +136,10 @@ class RemoteDocumentOpener(
     }
 }
 
-private fun joinPath(dir: String, name: String): String {
+private fun joinPath(
+    dir: String,
+    name: String,
+): String {
     val sep = if (dir.contains('\\')) "\\" else "/"
     return if (dir.endsWith('/') || dir.endsWith('\\')) "$dir$name" else "$dir$sep$name"
 }

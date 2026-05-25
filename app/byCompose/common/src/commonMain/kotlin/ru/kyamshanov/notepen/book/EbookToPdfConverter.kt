@@ -11,7 +11,6 @@ package ru.kyamshanov.notepen.book
  * `Dispatchers.*` напрямую.
  */
 interface EbookToPdfConverter {
-
     /**
      * Быстрая проверка (без чтения всего файла), поддерживается ли формат
      * источника (см. [detectBookFormat]). Платформенная реализация может

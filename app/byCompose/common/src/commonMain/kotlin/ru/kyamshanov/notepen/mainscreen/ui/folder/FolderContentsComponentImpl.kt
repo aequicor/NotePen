@@ -33,17 +33,17 @@ class FolderContentsComponentImpl(
     onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
     onOpenFolder: (folderId: String, folderName: String) -> Unit,
 ) : FolderComponent, ComponentContext by componentContext {
-
-    val viewModel = FolderContentsViewModel(
-        lifecycle = lifecycle,
-        folderId = folderId,
-        folderName = folderName,
-        historyRepository = historyRepository,
-        folderRepository = folderRepository,
-        addToHistory = addToHistory,
-        thumbnailRepository = thumbnailRepository,
-        thumbnailGenerator = thumbnailGenerator,
-        onOpenEditor = onOpenEditor,
-        onOpenFolder = onOpenFolder,
-    )
+    val viewModel =
+        FolderContentsViewModel(
+            lifecycle = lifecycle,
+            folderId = folderId,
+            folderName = folderName,
+            historyRepository = historyRepository,
+            folderRepository = folderRepository,
+            addToHistory = addToHistory,
+            thumbnailRepository = thumbnailRepository,
+            thumbnailGenerator = thumbnailGenerator,
+            onOpenEditor = onOpenEditor,
+            onOpenFolder = onOpenFolder,
+        )
 }

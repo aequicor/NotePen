@@ -27,13 +27,14 @@ data class MarkerSettings(
         const val MAX_STROKE_WIDTH: Float = 0.060f
 
         /** Preset highlight colours — all at ~50 % (0x80) alpha. */
-        val PRESET_COLORS: List<Long> = listOf(
-            0x80FFEB3BL, // yellow
-            0x8076FF03L, // lime
-            0x8000BCD4L, // cyan
-            0x80FF4081L, // pink
-            0x80FF9800L, // orange
-        )
+        val PRESET_COLORS: List<Long> =
+            listOf(
+                0x80FFEB3BL, // yellow
+                0x8076FF03L, // lime
+                0x8000BCD4L, // cyan
+                0x80FF4081L, // pink
+                0x80FF9800L, // orange
+            )
     }
 }
 
@@ -46,8 +47,7 @@ fun MarkerSettings.applyPreset(presetArgb: Long): MarkerSettings = copy(colorArg
  * Legacy values stored in raw pixels (old range `10f..80f`) are reset to the new
  * default — see the same migration note on `PenSettings.applyStrokeWidth`.
  */
-fun MarkerSettings.applyStrokeWidth(newWidth: Float): MarkerSettings =
-    copy(strokeWidth = sanitizeMarkerStrokeWidth(newWidth))
+fun MarkerSettings.applyStrokeWidth(newWidth: Float): MarkerSettings = copy(strokeWidth = sanitizeMarkerStrokeWidth(newWidth))
 
 /**
  * Migrate / clamp a raw marker stroke-width value read from persistence.
@@ -55,14 +55,14 @@ fun MarkerSettings.applyStrokeWidth(newWidth: Float): MarkerSettings =
  * of page width. Anything an order of magnitude above the new max is reset.
  */
 fun sanitizeMarkerStrokeWidth(width: Float): Float {
-    val migrated = if (width > MarkerSettings.MAX_STROKE_WIDTH * 5f) {
-        MarkerSettings.DEFAULT_STROKE_WIDTH
-    } else {
-        width
-    }
+    val migrated =
+        if (width > MarkerSettings.MAX_STROKE_WIDTH * 5f) {
+            MarkerSettings.DEFAULT_STROKE_WIDTH
+        } else {
+            width
+        }
     return migrated.coerceIn(MarkerSettings.MIN_STROKE_WIDTH, MarkerSettings.MAX_STROKE_WIDTH)
 }
 
 /** Counterpart of [PenSettings.sanitizedForCurrentScheme]. */
-fun MarkerSettings.sanitizedForCurrentScheme(): MarkerSettings =
-    copy(strokeWidth = sanitizeMarkerStrokeWidth(strokeWidth))
+fun MarkerSettings.sanitizedForCurrentScheme(): MarkerSettings = copy(strokeWidth = sanitizeMarkerStrokeWidth(strokeWidth))

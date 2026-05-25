@@ -21,15 +21,16 @@ const val MAX_PANELS: Int = 4
 fun rememberTabSession(
     initialFilePath: String,
     syncDocumentIdFor: (String) -> String,
-): TabSession = remember(initialFilePath, syncDocumentIdFor) {
-    TabSession(
-        idGenerator = SequentialIdGenerator(),
-        fallbackNameCounter = FallbackNameCounter(),
-        syncDocumentIdFor = syncDocumentIdFor,
-        initialFilePath = initialFilePath,
-        initialDisplayName = resolveDocumentDisplayName(initialFilePath),
-    )
-}
+): TabSession =
+    remember(initialFilePath, syncDocumentIdFor) {
+        TabSession(
+            idGenerator = SequentialIdGenerator(),
+            fallbackNameCounter = FallbackNameCounter(),
+            syncDocumentIdFor = syncDocumentIdFor,
+            initialFilePath = initialFilePath,
+            initialDisplayName = resolveDocumentDisplayName(initialFilePath),
+        )
+    }
 
 /**
  * Outcome of [TabSession.closeTab]: tells the host whether the editor still
@@ -61,7 +62,6 @@ class TabSession internal constructor(
     initialFilePath: String,
     initialDisplayName: String?,
 ) {
-
     private val documentStatesMap: SnapshotStateMap<DocumentId, PdfDocumentState> = mutableStateMapOf()
     private var panelCounter: Long = 0L
 
@@ -99,12 +99,17 @@ class TabSession internal constructor(
      * created with a session-unique [DocumentId] — opening the same file twice
      * yields two independent tabs (shared annotation state, independent scroll).
      */
-    fun openTab(panelId: PanelId, filePath: String, displayName: String?): DocumentId {
+    fun openTab(
+        panelId: PanelId,
+        filePath: String,
+        displayName: String?,
+    ): DocumentId {
         val tab = createTab(filePath, displayName)
         val existingState = documentStatesMap.values.firstOrNull { it.filePath == filePath }
-        val next = requireNotNull(
-            layout.withPanelTabs(panelId) { it.addTab(tab) },
-        ) { "addTab cannot produce empty workspace" }
+        val next =
+            requireNotNull(
+                layout.withPanelTabs(panelId) { it.addTab(tab) },
+            ) { "addTab cannot produce empty workspace" }
         layout = next
         documentStatesMap[tab.id] = stateForNewTab(filePath, existingState)
         return tab.id
@@ -115,7 +120,10 @@ class TabSession internal constructor(
      * tab the panel is removed from the grid; when it was the last panel's
      * last tab returns [TabCloseResult.AllClosed] — the host pops the editor.
      */
-    fun closeTab(panelId: PanelId, id: DocumentId): TabCloseResult {
+    fun closeTab(
+        panelId: PanelId,
+        id: DocumentId,
+    ): TabCloseResult {
         val newLayout = layout.withPanelTabs(panelId) { it.closeTab(id) }
         return if (newLayout == null) {
             documentStatesMap.clear()
@@ -132,15 +140,19 @@ class TabSession internal constructor(
      * there, its magnifier is closed first — the magnifier is panel-scoped and
      * shouldn't follow tab switches.
      */
-    fun setActiveTab(panelId: PanelId, id: DocumentId) {
+    fun setActiveTab(
+        panelId: PanelId,
+        id: DocumentId,
+    ) {
         val previouslyActive = layout.panelOf(panelId)?.tabs?.activeId
         if (previouslyActive == id) return
         if (previouslyActive != null) {
             documentStatesMap[previouslyActive]?.magnifierState?.disable()
         }
-        val next = requireNotNull(
-            layout.withPanelTabs(panelId) { it.setActive(id) },
-        ) { "setActive cannot produce empty workspace" }
+        val next =
+            requireNotNull(
+                layout.withPanelTabs(panelId) { it.setActive(id) },
+            ) { "setActive cannot produce empty workspace" }
         layout = next
     }
 
@@ -163,7 +175,11 @@ class TabSession internal constructor(
      * [availableTemplatesForAdd] or when [fromPanelId] holds only this tab
      * (moving it would leave an empty panel).
      */
-    fun moveTabToNewPanel(template: LayoutTemplate, fromPanelId: PanelId, tabId: DocumentId) {
+    fun moveTabToNewPanel(
+        template: LayoutTemplate,
+        fromPanelId: PanelId,
+        tabId: DocumentId,
+    ) {
         if (template !in availableTemplatesForAdd()) return
         val sourcePanel = layout.panelOf(fromPanelId) ?: return
         if (sourcePanel.tabs.tabs.size <= 1) return
@@ -173,13 +189,17 @@ class TabSession internal constructor(
         val afterRemoval = layout.withPanelTabs(fromPanelId) { it.closeTab(tabId) } ?: return
         // Keep focus on the source panel — the user is reorganising tabs, not switching
         // their working context to the newly-created panel.
-        layout = afterRemoval
-            .addPanel(template, Panel(id = nextPanelId(), tabs = OpenDocuments.of(tab)))
-            .focusPanel(fromPanelId)
+        layout =
+            afterRemoval
+                .addPanel(template, Panel(id = nextPanelId(), tabs = OpenDocuments.of(tab)))
+                .focusPanel(fromPanelId)
     }
 
     /** Updates divider [index] to [value] (clamped). See [WorkspaceLayout.setRatio]. */
-    fun setRatio(index: Int, value: Float) {
+    fun setRatio(
+        index: Int,
+        value: Float,
+    ) {
         layout = layout.setRatio(index, value)
     }
 
@@ -196,34 +216,41 @@ class TabSession internal constructor(
         if (panelSnapshots.isEmpty()) return
         documentStatesMap.clear()
         val stateByPath = mutableMapOf<String, PdfDocumentState>()
-        val panels = panelSnapshots.map { ps ->
-            val tabs = ps.tabs.map { ts ->
-                val tab = DocumentTab(id = idGenerator.next(), filePath = ts.filePath, displayName = ts.displayName)
-                val state = stateForNewTab(ts.filePath, stateByPath[ts.filePath])
-                documentStatesMap[tab.id] = state
-                stateByPath.getOrPut(ts.filePath) { state }
-                tab
+        val panels =
+            panelSnapshots.map { ps ->
+                val tabs =
+                    ps.tabs.map { ts ->
+                        val tab = DocumentTab(id = idGenerator.next(), filePath = ts.filePath, displayName = ts.displayName)
+                        val state = stateForNewTab(ts.filePath, stateByPath[ts.filePath])
+                        documentStatesMap[tab.id] = state
+                        stateByPath.getOrPut(ts.filePath) { state }
+                        tab
+                    }
+                val activeIndex = ps.activeTabIndex.coerceIn(0, tabs.lastIndex)
+                Panel(id = nextPanelId(), tabs = OpenDocuments(tabs = tabs, activeId = tabs[activeIndex].id))
             }
-            val activeIndex = ps.activeTabIndex.coerceIn(0, tabs.lastIndex)
-            Panel(id = nextPanelId(), tabs = OpenDocuments(tabs = tabs, activeId = tabs[activeIndex].id))
-        }
         val parsed = LayoutTemplate.entries.firstOrNull { it.name == snapshot.template }
         val template = if (parsed?.capacity == panels.size) parsed else WorkspaceLayout.templateForCount(panels.size)
         val focusIndex = snapshot.focusedPanelIndex.coerceIn(0, panels.lastIndex)
-        val ratios = if (snapshot.ratios.size == WorkspaceLayout.defaultRatios(template).size) {
-            snapshot.ratios
-        } else {
-            WorkspaceLayout.defaultRatios(template)
-        }
-        layout = WorkspaceLayout(
-            panels = panels,
-            template = template,
-            focusedPanelId = panels[focusIndex].id,
-            ratios = ratios,
-        )
+        val ratios =
+            if (snapshot.ratios.size == WorkspaceLayout.defaultRatios(template).size) {
+                snapshot.ratios
+            } else {
+                WorkspaceLayout.defaultRatios(template)
+            }
+        layout =
+            WorkspaceLayout(
+                panels = panels,
+                template = template,
+                focusedPanelId = panels[focusIndex].id,
+                ratios = ratios,
+            )
     }
 
-    private fun stateForNewTab(filePath: String, existingState: PdfDocumentState?): PdfDocumentState =
+    private fun stateForNewTab(
+        filePath: String,
+        existingState: PdfDocumentState?,
+    ): PdfDocumentState =
         if (existingState != null) {
             PdfDocumentState.createSharing(
                 filePath = filePath,
@@ -237,7 +264,10 @@ class TabSession internal constructor(
             )
         }
 
-    private fun createTab(filePath: String, displayName: String?): DocumentTab {
+    private fun createTab(
+        filePath: String,
+        displayName: String?,
+    ): DocumentTab {
         val name = if (displayName.isNullOrBlank()) fallbackNameCounter.next() else displayName
         return DocumentTab(id = idGenerator.next(), filePath = filePath, displayName = name)
     }
@@ -247,12 +277,16 @@ class TabSession internal constructor(
         return PanelId(panelCounter)
     }
 
-    private fun initialTabInternal(filePath: String, displayName: String?): DocumentTab {
+    private fun initialTabInternal(
+        filePath: String,
+        displayName: String?,
+    ): DocumentTab {
         val tab = createTab(filePath, displayName)
-        documentStatesMap[tab.id] = PdfDocumentState.create(
-            filePath = tab.filePath,
-            documentId = syncDocumentIdFor(tab.filePath),
-        )
+        documentStatesMap[tab.id] =
+            PdfDocumentState.create(
+                filePath = tab.filePath,
+                documentId = syncDocumentIdFor(tab.filePath),
+            )
         return tab
     }
 

@@ -7,7 +7,6 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
  * Декларируется в `:shared`. Реализуется в инфраструктурном слое.
  */
 interface FileAvailabilityChecker {
-
     /**
      * Проверяет доступность файла по URI асинхронно.
      *

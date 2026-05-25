@@ -36,7 +36,10 @@ private const val MIN_STYLUS_PRESSURE: Float = 0.001f
  */
 internal interface NotepenTabletBridge : Library {
     fun interface OnSample : Callback {
-        fun invoke(pressure: Float, buttons: Int)
+        fun invoke(
+            pressure: Float,
+            buttons: Int,
+        )
     }
 
     @Suppress("FunctionName")
@@ -82,24 +85,26 @@ class CocoaTabletInputController : TabletInputController {
             return
         }
         addComposeResourcesToJnaPath()
-        val lib = try {
-            Native.load("notepen_tablet", NotepenTabletBridge::class.java)
-        } catch (e: UnsatisfiedLinkError) {
-            logger.info { "TabletInput: libnotepen_tablet.dylib not on jna.library.path (${e.message}); pen pressure disabled" }
-            return
-        } catch (e: NoClassDefFoundError) {
-            logger.warn { "TabletInput: JNA classes missing (${e.message}); pen pressure disabled" }
-            return
-        }
+        val lib =
+            try {
+                Native.load("notepen_tablet", NotepenTabletBridge::class.java)
+            } catch (e: UnsatisfiedLinkError) {
+                logger.info { "TabletInput: libnotepen_tablet.dylib not on jna.library.path (${e.message}); pen pressure disabled" }
+                return
+            } catch (e: NoClassDefFoundError) {
+                logger.warn { "TabletInput: JNA classes missing (${e.message}); pen pressure disabled" }
+                return
+            }
         bridge = lib
 
-        val cb = NotepenTabletBridge.OnSample { pressure, buttons ->
-            val clamped = pressure.coerceIn(0f, 1f)
-            pressureFlow.value = clamped
-            val rightDown = (buttons shr RIGHT_BUTTON_BIT) and 1 == 1
-            val pressed = rightDown && clamped > MIN_STYLUS_PRESSURE
-            if (pressed != buttonFlow.value) buttonFlow.value = pressed
-        }
+        val cb =
+            NotepenTabletBridge.OnSample { pressure, buttons ->
+                val clamped = pressure.coerceIn(0f, 1f)
+                pressureFlow.value = clamped
+                val rightDown = (buttons shr RIGHT_BUTTON_BIT) and 1 == 1
+                val pressed = rightDown && clamped > MIN_STYLUS_PRESSURE
+                if (pressed != buttonFlow.value) buttonFlow.value = pressed
+            }
         callbackRef = cb
         lib.notepen_tablet_start(cb)
         logger.info { "TabletInput: Cocoa NSEvent monitor attached" }

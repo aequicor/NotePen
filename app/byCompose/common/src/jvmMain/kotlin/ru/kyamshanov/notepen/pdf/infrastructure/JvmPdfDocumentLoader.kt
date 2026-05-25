@@ -16,32 +16,34 @@ import java.io.File
  * @param ioDispatcher диспетчер для блокирующего IO; не должен быть Main-диспетчером
  */
 class JvmPdfDocumentLoader(private val ioDispatcher: CoroutineDispatcher) : PdfDocumentLoader {
+    override suspend fun load(path: String): PdfDocument =
+        withContext(ioDispatcher) {
+            val file = File(path)
+            require(file.exists()) { "PDF file not found: $path" }
+            require(file.canRead()) { "PDF file is not readable: $path" }
 
-    override suspend fun load(path: String): PdfDocument = withContext(ioDispatcher) {
-        val file = File(path)
-        require(file.exists()) { "PDF file not found: $path" }
-        require(file.canRead()) { "PDF file is not readable: $path" }
+            val document =
+                try {
+                    Loader.loadPDF(file)
+                } catch (e: Exception) {
+                    throw IllegalArgumentException("Failed to open PDF: $path", e)
+                }
 
-        val document = try {
-            Loader.loadPDF(file)
-        } catch (e: Exception) {
-            throw IllegalArgumentException("Failed to open PDF: $path", e)
-        }
+            val pages =
+                document.pages.mapIndexed { index, page ->
+                    val box = page.mediaBox
+                    PdfPageInfo(
+                        pageIndex = index,
+                        widthPt = box.width,
+                        heightPt = box.height,
+                        rotation = page.rotation,
+                    )
+                }
 
-        val pages = document.pages.mapIndexed { index, page ->
-            val box = page.mediaBox
-            PdfPageInfo(
-                pageIndex = index,
-                widthPt = box.width,
-                heightPt = box.height,
-                rotation = page.rotation,
+            JvmPdfDocument(
+                renderer = PDFRenderer(document),
+                document = document,
+                info = PdfDocumentInfo(pageCount = document.numberOfPages, pages = pages),
             )
         }
-
-        JvmPdfDocument(
-            renderer = PDFRenderer(document),
-            document = document,
-            info = PdfDocumentInfo(pageCount = document.numberOfPages, pages = pages),
-        )
-    }
 }

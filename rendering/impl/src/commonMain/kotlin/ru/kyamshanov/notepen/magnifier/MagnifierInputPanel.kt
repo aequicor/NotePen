@@ -18,8 +18,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,7 +36,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
@@ -59,21 +58,22 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
-import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
-import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
-import ru.kyamshanov.notepen.drawing.api.ToolMode
-import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.detectStylusAwareDrag
 import ru.kyamshanov.notepen.drawLiveStroke
 import ru.kyamshanov.notepen.drawStrokeWithPressure
 import ru.kyamshanov.notepen.drawing.api.EraseGesture
+import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
+import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 
 private const val FRAME_FILL_ALPHA = 0.10f
 
@@ -130,9 +130,10 @@ fun MagnifierInputPanel(
         if (toolMode != ToolMode.ERASER) eraserPos.value = null
     }
 
-    val panelOffsetDp = with(density) {
-        IntOffset(state.panelTopLeft.x.toInt(), state.panelTopLeft.y.toInt())
-    }
+    val panelOffsetDp =
+        with(density) {
+            IntOffset(state.panelTopLeft.x.toInt(), state.panelTopLeft.y.toInt())
+        }
     val panelWidthDp = with(density) { state.panelSize.width.toDp() }
     val panelHeightDp = with(density) { state.panelSize.height.toDp() }
     val titleBarHeight = 32.dp
@@ -151,16 +152,17 @@ fun MagnifierInputPanel(
             Column(Modifier.fillMaxSize()) {
                 // Title bar — drag → перемещение всей панели; кнопки авто-скролла и закрытия.
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(titleBarHeight)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .pointerInput(state) {
-                            detectDragGestures(onDrag = { change, drag ->
-                                state.movePanel(drag)
-                                change.consume()
-                            })
-                        },
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .height(titleBarHeight)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .pointerInput(state) {
+                                detectDragGestures(onDrag = { change, drag ->
+                                    state.movePanel(drag)
+                                    change.consume()
+                                })
+                            },
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Spacer(Modifier.size(8.dp))
@@ -173,36 +175,41 @@ fun MagnifierInputPanel(
                     val pinned = state.attachment == MagnifierAttachment.SCREEN
                     IconButton(onClick = { state.toggleAttachment() }) {
                         Icon(
-                            imageVector = if (pinned) {
-                                Icons.Filled.PushPin
-                            } else {
-                                Icons.Outlined.PushPin
-                            },
-                            contentDescription = if (pinned) {
-                                "Открепить от экрана"
-                            } else {
-                                "Закрепить на экране"
-                            },
-                            tint = if (pinned) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            imageVector =
+                                if (pinned) {
+                                    Icons.Filled.PushPin
+                                } else {
+                                    Icons.Outlined.PushPin
+                                },
+                            contentDescription =
+                                if (pinned) {
+                                    "Открепить от экрана"
+                                } else {
+                                    "Закрепить на экране"
+                                },
+                            tint =
+                                if (pinned) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                         )
                     }
                     IconButton(onClick = { state.toggleAutoScroll() }) {
                         Icon(
                             imageVector = Icons.Default.SwapHoriz,
-                            contentDescription = if (state.autoScrollEnabled) {
-                                "Авто-прокрутка включена"
-                            } else {
-                                "Авто-прокрутка выключена"
-                            },
-                            tint = if (state.autoScrollEnabled) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
+                            contentDescription =
+                                if (state.autoScrollEnabled) {
+                                    "Авто-прокрутка включена"
+                                } else {
+                                    "Авто-прокрутка выключена"
+                                },
+                            tint =
+                                if (state.autoScrollEnabled) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
                         )
                     }
                 }
@@ -223,10 +230,11 @@ fun MagnifierInputPanel(
                     onEraseFinished = onEraseFinished,
                     tablet = tablet,
                     externalInputController = externalInputController,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clipToBounds(),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .clipToBounds(),
                 )
 
                 // Resize-handle (drag → ресайз).
@@ -255,9 +263,10 @@ fun MagnifierInputPanel(
         // вверх от resize-хэндла, чтобы тач-таргеты не пересекались.
         IconButton(
             onClick = onClose,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = (-4).dp, y = -(RESIZE_HANDLE_DP + 4.dp)),
+            modifier =
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = (-4).dp, y = -(RESIZE_HANDLE_DP + 4.dp)),
         ) {
             Icon(
                 imageVector = Icons.Default.Close,
@@ -312,60 +321,65 @@ private fun MagnifierContent(
     val liveLayer = rememberMagnifierLiveLayer(state, pdfDrawingStateProvider)
 
     Canvas(
-        modifier = modifier
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .onGloballyPositioned { coords ->
-                state.updateContentBounds(coords.boundsInWindow())
-            }
-            .then(
-                if (SupportsPanelGestureZoom) {
-                    Modifier.pointerInput(state) {
-                        detectPanelTransformGestures(
-                            state = state,
-                            pencilModeEnabled = { pencilModeState.value },
-                        )
-                    }
-                } else {
-                    Modifier
-                },
-            )
-            .pointerInput(
-                toolMode, penSettings, markerSettings, eraserSettings,
-                state, externalInputController,
-            ) {
-                val panelW = size.width.toFloat()
-                val panelH = size.height.toFloat()
-                val panelSizeF = Size(panelW, panelH)
-                detectStylusAwareDrag(
-                    tablet = tablet,
-                    // Гейт palm-rejection — только pencil mode, без
-                    // защёлки `stylusEverSeen`: иначе после первого касания
-                    // пера палец навсегда переставал писать внутри лупы,
-                    // даже когда pencil mode выключен. См. зеркальную правку
-                    // в DetailsContent.kt.
-                    isPalmRejectionActive = { pencilModeState.value },
-                    // Внутри панели лупы палец допускается к рисованию, когда
-                    // pencil mode выключен. В обычном `DrawablePdfPage` палец
-                    // зарезервирован под scrollable (вертикальный скролл PDF),
-                    // но в magnifier-панели скроллить нечего, и пользователь
-                    // ожидает писать пальцем. При включённом pencil mode
-                    // ветка одноточечного pan'а в `detectPanelTransformGestures`
-                    // поглощает finger-события раньше — сюда они не доходят.
-                    //
-                    // captureGesture ANY pointer type — в панели нет конкурирующего
-                    // scrollable, поэтому PointerType.Unknown захватывается наравне
-                    // с Touch; иначе первое касание (Unknown) уходило бы в никуда.
-                    captureGesture = { !pencilModeState.value },
-                    onDown = { offset, pressure, tilt ->
-                        externalInputController?.onDown(offset, panelSizeF, pressure, tilt)
+        modifier =
+            modifier
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .onGloballyPositioned { coords ->
+                    state.updateContentBounds(coords.boundsInWindow())
+                }
+                .then(
+                    if (SupportsPanelGestureZoom) {
+                        Modifier.pointerInput(state) {
+                            detectPanelTransformGestures(
+                                state = state,
+                                pencilModeEnabled = { pencilModeState.value },
+                            )
+                        }
+                    } else {
+                        Modifier
                     },
-                    onMove = { offset, pressure, tilt ->
-                        externalInputController?.onMove(offset, panelSizeF, pressure, tilt)
-                    },
-                    onUp = { externalInputController?.onUp(panelSizeF) },
-                    onCancel = { externalInputController?.onCancel() },
                 )
-            },
+                .pointerInput(
+                    toolMode,
+                    penSettings,
+                    markerSettings,
+                    eraserSettings,
+                    state,
+                    externalInputController,
+                ) {
+                    val panelW = size.width.toFloat()
+                    val panelH = size.height.toFloat()
+                    val panelSizeF = Size(panelW, panelH)
+                    detectStylusAwareDrag(
+                        tablet = tablet,
+                        // Гейт palm-rejection — только pencil mode, без
+                        // защёлки `stylusEverSeen`: иначе после первого касания
+                        // пера палец навсегда переставал писать внутри лупы,
+                        // даже когда pencil mode выключен. См. зеркальную правку
+                        // в DetailsContent.kt.
+                        isPalmRejectionActive = { pencilModeState.value },
+                        // Внутри панели лупы палец допускается к рисованию, когда
+                        // pencil mode выключен. В обычном `DrawablePdfPage` палец
+                        // зарезервирован под scrollable (вертикальный скролл PDF),
+                        // но в magnifier-панели скроллить нечего, и пользователь
+                        // ожидает писать пальцем. При включённом pencil mode
+                        // ветка одноточечного pan'а в `detectPanelTransformGestures`
+                        // поглощает finger-события раньше — сюда они не доходят.
+                        //
+                        // captureGesture ANY pointer type — в панели нет конкурирующего
+                        // scrollable, поэтому PointerType.Unknown захватывается наравне
+                        // с Touch; иначе первое касание (Unknown) уходило бы в никуда.
+                        captureGesture = { !pencilModeState.value },
+                        onDown = { offset, pressure, tilt ->
+                            externalInputController?.onDown(offset, panelSizeF, pressure, tilt)
+                        },
+                        onMove = { offset, pressure, tilt ->
+                            externalInputController?.onMove(offset, panelSizeF, pressure, tilt)
+                        },
+                        onUp = { externalInputController?.onUp(panelSizeF) },
+                        onCancel = { externalInputController?.onCancel() },
+                    )
+                },
     ) {
         val segments = state.segments
         if (segments.isEmpty()) return@Canvas
@@ -391,10 +405,12 @@ private fun MagnifierContent(
             if (bmp != null) {
                 val srcOffsetX = (target.left * bmp.width).toInt().coerceAtLeast(0)
                 val srcOffsetY = (target.top * bmp.height).toInt().coerceAtLeast(0)
-                val srcW = (tw * bmp.width).toInt()
-                    .coerceAtLeast(1).coerceAtMost(bmp.width - srcOffsetX)
-                val srcH = (th * bmp.height).toInt()
-                    .coerceAtLeast(1).coerceAtMost(bmp.height - srcOffsetY)
+                val srcW =
+                    (tw * bmp.width).toInt()
+                        .coerceAtLeast(1).coerceAtMost(bmp.width - srcOffsetX)
+                val srcH =
+                    (th * bmp.height).toInt()
+                        .coerceAtLeast(1).coerceAtMost(bmp.height - srcOffsetY)
                 drawImage(
                     image = bmp,
                     srcOffset = IntOffset(srcOffsetX, srcOffsetY),
@@ -419,10 +435,12 @@ private fun MagnifierContent(
             if (completed != null) {
                 val srcOffsetX = (target.left * completed.width).toInt().coerceAtLeast(0)
                 val srcOffsetY = (target.top * completed.height).toInt().coerceAtLeast(0)
-                val srcW = (tw * completed.width).toInt()
-                    .coerceAtLeast(1).coerceAtMost(completed.width - srcOffsetX)
-                val srcH = (th * completed.height).toInt()
-                    .coerceAtLeast(1).coerceAtMost(completed.height - srcOffsetY)
+                val srcW =
+                    (tw * completed.width).toInt()
+                        .coerceAtLeast(1).coerceAtMost(completed.width - srcOffsetX)
+                val srcH =
+                    (th * completed.height).toInt()
+                        .coerceAtLeast(1).coerceAtMost(completed.height - srcOffsetY)
                 drawImage(
                     image = completed,
                     srcOffset = IntOffset(srcOffsetX, srcOffsetY),
@@ -635,6 +653,7 @@ private fun magnifierLiveCacheDim(panelSize: Size): IntSize {
  * сведена к одиночному `drawImage` среза вместо итерации `currentPaths`
  * на каждый сэмпл пера.
  */
+
 /**
  * Закэшированный слой завершённых штрихов лупы + число запечённых штрихов
  * (зеркало `CachedInk` в [DrawablePdfPage]): `strokeCount` нужен для
@@ -671,15 +690,16 @@ private fun rememberMagnifierCompletedLayers(
                 // Снимок состояния — на composition-потоке: нельзя итерировать
                 // SnapshotStateList из фонового диспетчера (конкурентная мутация вводом).
                 val paths = pdfDrawingState.currentPaths.toList()
-                val bmp = withContext(rasterDispatcher) {
-                    buildMagnifierCompletedLayer(
-                        paths = paths,
-                        cacheW = cacheDim.width,
-                        cacheH = cacheDim.height,
-                        density = density,
-                        layoutDirection = layoutDirection,
-                    )
-                }
+                val bmp =
+                    withContext(rasterDispatcher) {
+                        buildMagnifierCompletedLayer(
+                            paths = paths,
+                            cacheW = cacheDim.width,
+                            cacheH = cacheDim.height,
+                            density = density,
+                            layoutDirection = layoutDirection,
+                        )
+                    }
                 layerState.value = MagnifierCompletedLayer(paths.size, bmp)
             }
             result[seg.pageIndex] = layerState.value
@@ -744,9 +764,10 @@ private fun rememberMagnifierLiveLayer(
     val holder = remember { MagnifierLiveLayerHolder() }
 
     // Активная для рисования страница (в один момент времени их максимум 1).
-    val activeSeg = state.segments.firstOrNull {
-        pdfDrawingStateProvider(it.pageIndex).isDrawing.value
-    }
+    val activeSeg =
+        state.segments.firstOrNull {
+            pdfDrawingStateProvider(it.pageIndex).isDrawing.value
+        }
     if (activeSeg == null) {
         if (holder.bitmap != null) holder.reset()
         return null
@@ -914,8 +935,9 @@ private suspend fun PointerInputScope.detectPanelTransformGestures(
                 // ездит при каждом штрихе.
                 inTransform = false
                 val p = pressed.first()
-                val isStylus = p.type == PointerType.Stylus ||
-                    p.type == PointerType.Eraser
+                val isStylus =
+                    p.type == PointerType.Stylus ||
+                        p.type == PointerType.Eraser
                 if (!pencilModeEnabled() || isStylus) {
                     inSinglePan = false
                     continue
@@ -943,11 +965,12 @@ private suspend fun PointerInputScope.detectPanelTransformGestures(
             pressed.forEach { distSum += (it.position - centroid).getDistance() }
             val avgDist = distSum / pressed.size
             if (inTransform) {
-                val scale = if (lastDistance > 0f && avgDist > 0f) {
-                    avgDist / lastDistance
-                } else {
-                    1f
-                }
+                val scale =
+                    if (lastDistance > 0f && avgDist > 0f) {
+                        avgDist / lastDistance
+                    } else {
+                        1f
+                    }
                 if (scale != 1f) {
                     state.zoomTargetAroundPanelFocus(scale, centroid, panelSize)
                 }

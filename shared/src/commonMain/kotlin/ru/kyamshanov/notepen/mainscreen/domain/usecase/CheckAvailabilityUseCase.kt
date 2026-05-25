@@ -36,25 +36,27 @@ class CheckAvailabilityUseCase(
      * @param files Список записей истории для проверки.
      * @return Flow с [AvailabilityUpdate] по одному на каждый файл.
      */
-    fun execute(files: List<RecentFile>): Flow<AvailabilityUpdate> = channelFlow {
-        val semaphore = Semaphore(5)
-        files.forEach { file ->
-            launch {
-                semaphore.withPermit {
-                    val status = try {
-                        withTimeout(2_000L) { checker.check(file.uri) }
-                    } catch (_: TimeoutCancellationException) {
-                        AvailabilityStatus.FILE_ERROR
-                    } catch (e: Exception) {
-                        // Boundary catch: platform exceptions from FileAvailabilityChecker.check
-                        // are not enumerable in commonMain contract; FILE_ERROR prevents UI crash (ADR-004).
-                        logger.warn { "Availability check failed for file ${file.id}: ${e::class.simpleName}" }
-                        AvailabilityStatus.FILE_ERROR
+    fun execute(files: List<RecentFile>): Flow<AvailabilityUpdate> =
+        channelFlow {
+            val semaphore = Semaphore(5)
+            files.forEach { file ->
+                launch {
+                    semaphore.withPermit {
+                        val status =
+                            try {
+                                withTimeout(2_000L) { checker.check(file.uri) }
+                            } catch (_: TimeoutCancellationException) {
+                                AvailabilityStatus.FILE_ERROR
+                            } catch (e: Exception) {
+                                // Boundary catch: platform exceptions from FileAvailabilityChecker.check
+                                // are not enumerable in commonMain contract; FILE_ERROR prevents UI crash (ADR-004).
+                                logger.warn { "Availability check failed for file ${file.id}: ${e::class.simpleName}" }
+                                AvailabilityStatus.FILE_ERROR
+                            }
+                        repository.updateStatus(file.id, status)
+                        send(AvailabilityUpdate(file.id, status))
                     }
-                    repository.updateStatus(file.id, status)
-                    send(AvailabilityUpdate(file.id, status))
                 }
             }
         }
-    }
 }

@@ -11,7 +11,6 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.RecentFile
  * Все операции изменения данных атомарны.
  */
 interface FileHistoryRepository {
-
     /**
      * Возвращает все записи истории, отсортированные по openedAt DESC.
      * Никогда не бросает исключение — при ошибке возвращает пустой список.
@@ -30,7 +29,10 @@ interface FileHistoryRepository {
      * @param lastPageIndex Индекс страницы (0-based). При первом добавлении — 0.
      * @throws HistoryFlushException при ошибке персистирования.
      */
-    suspend fun upsert(file: RecentFile, lastPageIndex: Int = 0)
+    suspend fun upsert(
+        file: RecentFile,
+        lastPageIndex: Int = 0,
+    )
 
     /**
      * Обновляет поле availabilityStatus для записи с указанным id.
@@ -38,7 +40,10 @@ interface FileHistoryRepository {
      *
      * @throws HistoryFlushException при ошибке I/O записи.
      */
-    suspend fun updateStatus(id: String, status: AvailabilityStatus)
+    suspend fun updateStatus(
+        id: String,
+        status: AvailabilityStatus,
+    )
 
     /**
      * Обновляет поле lastPageIndex для записи с указанным нормализованным URI.
@@ -48,7 +53,10 @@ interface FileHistoryRepository {
      * @param pageIndex Текущий видимый индекс страницы (0-based).
      * @throws HistoryFlushException при ошибке I/O.
      */
-    suspend fun updateLastPage(uri: String, pageIndex: Int)
+    suspend fun updateLastPage(
+        uri: String,
+        pageIndex: Int,
+    )
 
     /**
      * Откатывает последнюю операцию upsert для указанного URI.

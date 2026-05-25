@@ -13,20 +13,28 @@ class NotifyingFileHistoryRepository(
     private val delegate: FileHistoryRepository,
     private val notifier: CatalogChangeNotifier,
 ) : FileHistoryRepository {
-
     override suspend fun getAll(): List<RecentFile> = delegate.getAll()
 
-    override suspend fun upsert(file: RecentFile, lastPageIndex: Int) {
+    override suspend fun upsert(
+        file: RecentFile,
+        lastPageIndex: Int,
+    ) {
         delegate.upsert(file, lastPageIndex)
         notifier.notifyChanged()
     }
 
-    override suspend fun updateStatus(id: String, status: AvailabilityStatus) {
+    override suspend fun updateStatus(
+        id: String,
+        status: AvailabilityStatus,
+    ) {
         delegate.updateStatus(id, status)
         notifier.notifyChanged()
     }
 
-    override suspend fun updateLastPage(uri: String, pageIndex: Int) {
+    override suspend fun updateLastPage(
+        uri: String,
+        pageIndex: Int,
+    ) {
         // Индекс текущей страницы не входит в RemoteCatalog и зовётся на каждый
         // скролл — сигнал тут привёл бы к лавине broadcast'ов без пользы.
         delegate.updateLastPage(uri, pageIndex)

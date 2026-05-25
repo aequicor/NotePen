@@ -8,7 +8,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class Fb2ParserTest {
-
     @Test
     fun `parses metadata, structure, inline styling and image`() {
         val book = Fb2Parser.parse(sampleFb2().toByteArray(Charsets.UTF_8))
@@ -20,8 +19,9 @@ class Fb2ParserTest {
 
         assertTrue(book.blocks.any { it is ContentBlock.Heading && it.text == "Глава первая" })
 
-        val para = book.blocks.filterIsInstance<ContentBlock.Paragraph>()
-            .first { it.text.plainText().contains("Обычный текст") }
+        val para =
+            book.blocks.filterIsInstance<ContentBlock.Paragraph>()
+                .first { it.text.plainText().contains("Обычный текст") }
         assertTrue(para.text.any { it.italic && it.text.trim() == "курсивом" })
         assertTrue(para.text.any { it.bold && it.text.trim() == "жирным" })
 
@@ -40,9 +40,10 @@ class Fb2ParserTest {
 
     @Test
     fun `decodes declared windows-1251 charset`() {
-        val xml = "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" +
-            "<FictionBook><description><title-info><book-title>Тест</book-title></title-info></description>" +
-            "<body><section><p>Текст главы</p></section></body></FictionBook>"
+        val xml =
+            "<?xml version=\"1.0\" encoding=\"windows-1251\"?>" +
+                "<FictionBook><description><title-info><book-title>Тест</book-title></title-info></description>" +
+                "<body><section><p>Текст главы</p></section></body></FictionBook>"
         val book = Fb2Parser.parse(xml.toByteArray(charset("windows-1251")))
         assertEquals("Тест", book.metadata.title)
         assertTrue(book.blocks.any { it is ContentBlock.Paragraph && it.text.plainText() == "Текст главы" })
@@ -50,13 +51,14 @@ class Fb2ParserTest {
 
     @Test
     fun `unwraps fb2 inside a zip container`() {
-        val zipped = ByteArrayOutputStream().also { bos ->
-            ZipOutputStream(bos).use { zip ->
-                zip.putNextEntry(ZipEntry("book.fb2"))
-                zip.write(sampleFb2().toByteArray(Charsets.UTF_8))
-                zip.closeEntry()
-            }
-        }.toByteArray()
+        val zipped =
+            ByteArrayOutputStream().also { bos ->
+                ZipOutputStream(bos).use { zip ->
+                    zip.putNextEntry(ZipEntry("book.fb2"))
+                    zip.write(sampleFb2().toByteArray(Charsets.UTF_8))
+                    zip.closeEntry()
+                }
+            }.toByteArray()
         assertEquals("Война и мир", Fb2Parser.parse(zipped).metadata.title)
     }
 

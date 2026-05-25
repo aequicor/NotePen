@@ -64,6 +64,7 @@ class WinTabTabletInputController : TabletInputController {
     private val penButtonsFlow = MutableStateFlow<Set<Int>>(emptySet())
 
     @Volatile private var winTabButtonBits: Set<Int> = emptySet()
+
     @Volatile private var hookButtonBits: Set<Int> = emptySet()
 
     private fun mergePenButtons() {
@@ -106,15 +107,16 @@ class WinTabTabletInputController : TabletInputController {
             hookButtonBits = bits
             mergePenButtons()
         }
-        val lib = try {
-            Native.load("Wintab32", WinTab::class.java)
-        } catch (e: UnsatisfiedLinkError) {
-            logger.info { "TabletInput: wintab32.dll not available (${e.message}); pen pressure disabled" }
-            return
-        } catch (e: NoClassDefFoundError) {
-            logger.warn { "TabletInput: JNA classes missing (${e.message}); pen pressure disabled" }
-            return
-        }
+        val lib =
+            try {
+                Native.load("Wintab32", WinTab::class.java)
+            } catch (e: UnsatisfiedLinkError) {
+                logger.info { "TabletInput: wintab32.dll not available (${e.message}); pen pressure disabled" }
+                return
+            } catch (e: NoClassDefFoundError) {
+                logger.warn { "TabletInput: JNA classes missing (${e.message}); pen pressure disabled" }
+                return
+            }
         wintab.set(lib)
         maxPressure = readMaxPressure(lib).coerceAtLeast(1f)
 
@@ -144,32 +146,37 @@ class WinTabTabletInputController : TabletInputController {
 
     private fun readMaxPressure(lib: WinTab): Float {
         val axis = AXIS()
-        val size = lib.WTInfoA(
-            UINT(WinTab.WTI_DEVICES.toLong()),
-            UINT(WinTab.DVC_NPRESSURE.toLong()),
-            axis.pointer,
-        )
+        val size =
+            lib.WTInfoA(
+                UINT(WinTab.WTI_DEVICES.toLong()),
+                UINT(WinTab.DVC_NPRESSURE.toLong()),
+                axis.pointer,
+            )
         if (size.toInt() == 0) return 1f
         axis.read()
         return axis.axMax.toFloat()
     }
 
-    private fun openContext(lib: WinTab, hwnd: HWND): com.sun.jna.Pointer? {
+    private fun openContext(
+        lib: WinTab,
+        hwnd: HWND,
+    ): com.sun.jna.Pointer? {
         // Start from the default system context — driver fills in sensible
         // defaults for the active device — then override only what we need.
         val ctx = LOGCONTEXTA()
-        val size = lib.WTInfoA(
-            UINT(WinTab.WTI_DEFSYSCTX.toLong()),
-            UINT(0),
-            ctx.pointer,
-        )
+        val size =
+            lib.WTInfoA(
+                UINT(WinTab.WTI_DEFSYSCTX.toLong()),
+                UINT(0),
+                ctx.pointer,
+            )
         if (size.toInt() == 0) return null
         ctx.read()
 
         ctx.lcOptions = ctx.lcOptions or WinTab.CXO_SYSTEM
         ctx.lcPktData = WinTab.PK_X or WinTab.PK_Y or WinTab.PK_BUTTONS or
             WinTab.PK_NORMAL_PRESSURE or WinTab.PK_TIME
-        ctx.lcPktMode = 0  // absolute mode for all fields
+        ctx.lcPktMode = 0 // absolute mode for all fields
         ctx.lcMoveMask = WinTab.PK_X or WinTab.PK_Y or WinTab.PK_NORMAL_PRESSURE
         ctx.lcBtnUpMask = ctx.lcBtnDnMask
         ctx.write()
@@ -177,42 +184,48 @@ class WinTabTabletInputController : TabletInputController {
         return lib.WTOpenA(hwnd, ctx, true)
     }
 
-    private fun startPolling(lib: WinTab, ctx: com.sun.jna.Pointer) {
-        val exec = Executors.newSingleThreadScheduledExecutor { r ->
-            Thread(r, "WinTab-poll").apply { isDaemon = true }
-        }
+    private fun startPolling(
+        lib: WinTab,
+        ctx: com.sun.jna.Pointer,
+    ) {
+        val exec =
+            Executors.newSingleThreadScheduledExecutor { r ->
+                Thread(r, "WinTab-poll").apply { isDaemon = true }
+            }
         scheduler = exec
 
         val buffer = Memory((PACKET_BATCH * WINTAB_PACKET_SIZE).toLong())
 
-        val task = Runnable {
-            try {
-                val count = lib.WTPacketsGet(ctx, PACKET_BATCH, buffer)
-                if (count <= 0) return@Runnable
-                // Use only the latest packet for pressure — older samples are
-                // already obsolete by the time we read them.
-                val last = readPacket(buffer, ((count - 1).toLong()) * WINTAB_PACKET_SIZE)
-                pressureFlow.value = (last.pressure / maxPressure).coerceIn(0f, 1f)
-                val pressed = (last.buttons shr BARREL_BUTTON_BIT) and 1 == 1
-                if (pressed != buttonFlow.value) buttonFlow.value = pressed
-                // Биты кнопок пера для биндингов. Бит 0 — это «pen tip down»
-                // (касание тиром, а не физическая кнопка), его в шорткаты
-                // не пропускаем — иначе любое касание во время записи
-                // сохраняется как «Pen0». Сканируем биты [1..MAX_PEN_BUTTON_BITS).
-                val bits = last.buttons
-                val newSet = buildSet {
-                    for (bit in 1 until MAX_PEN_BUTTON_BITS) {
-                        if ((bits shr bit) and 1 == 1) add(bit)
+        val task =
+            Runnable {
+                try {
+                    val count = lib.WTPacketsGet(ctx, PACKET_BATCH, buffer)
+                    if (count <= 0) return@Runnable
+                    // Use only the latest packet for pressure — older samples are
+                    // already obsolete by the time we read them.
+                    val last = readPacket(buffer, ((count - 1).toLong()) * WINTAB_PACKET_SIZE)
+                    pressureFlow.value = (last.pressure / maxPressure).coerceIn(0f, 1f)
+                    val pressed = (last.buttons shr BARREL_BUTTON_BIT) and 1 == 1
+                    if (pressed != buttonFlow.value) buttonFlow.value = pressed
+                    // Биты кнопок пера для биндингов. Бит 0 — это «pen tip down»
+                    // (касание тиром, а не физическая кнопка), его в шорткаты
+                    // не пропускаем — иначе любое касание во время записи
+                    // сохраняется как «Pen0». Сканируем биты [1..MAX_PEN_BUTTON_BITS).
+                    val bits = last.buttons
+                    val newSet =
+                        buildSet {
+                            for (bit in 1 until MAX_PEN_BUTTON_BITS) {
+                                if ((bits shr bit) and 1 == 1) add(bit)
+                            }
+                        }
+                    if (newSet != winTabButtonBits) {
+                        winTabButtonBits = newSet
+                        mergePenButtons()
                     }
+                } catch (t: Throwable) {
+                    logger.warn(t) { "TabletInput: poll failed" }
                 }
-                if (newSet != winTabButtonBits) {
-                    winTabButtonBits = newSet
-                    mergePenButtons()
-                }
-            } catch (t: Throwable) {
-                logger.warn(t) { "TabletInput: poll failed" }
             }
-        }
 
         exec.scheduleWithFixedDelay(task, POLL_INTERVAL_MS, POLL_INTERVAL_MS, TimeUnit.MILLISECONDS)
     }

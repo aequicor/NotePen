@@ -8,7 +8,6 @@ package ru.kyamshanov.notepen.mainscreen.domain.model
  * - Desktop-путь: обрезается trailing slash/backslash, применяется NFC-нормализация Unicode.
  */
 object UriNormalizer {
-
     /**
      * Нормализует URI.
      *

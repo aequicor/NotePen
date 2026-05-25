@@ -40,35 +40,39 @@ internal fun ToolToggleButton(
     showSelectionBackground: Boolean = true,
 ) {
     val indicatorColor by animateColorAsState(
-        targetValue = if (selected && showSelectionBackground) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            Color.Transparent
-        },
+        targetValue =
+            if (selected && showSelectionBackground) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                Color.Transparent
+            },
         label = "toolIndicator",
     )
     val iconTint by animateColorAsState(
-        targetValue = if (selected) {
-            MaterialTheme.colorScheme.onPrimaryContainer
-        } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
-        },
+        targetValue =
+            if (selected) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
         label = "toolIconTint",
     )
     IconButton(
         onClick = onClick,
-        modifier = modifier
-            .size(RAIL_BUTTON_SIZE)
-            .semantics {
-                role = Role.Button
-                this.selected = selected
-            },
+        modifier =
+            modifier
+                .size(RAIL_BUTTON_SIZE)
+                .semantics {
+                    role = Role.Button
+                    this.selected = selected
+                },
     ) {
         Box(
-            modifier = Modifier
-                .size(RAIL_INDICATOR_SIZE)
-                .clip(CircleShape)
-                .background(indicatorColor),
+            modifier =
+                Modifier
+                    .size(RAIL_INDICATOR_SIZE)
+                    .clip(CircleShape)
+                    .background(indicatorColor),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -89,11 +93,15 @@ internal fun ToolToggleButton(
  * Extracted so toggle semantics stay testable without compose-ui-test infra.
  * Verifies AC-2 / AC-3 toggle / mutual-exclusion semantics.
  */
-fun nextToolModeOnToggle(current: ToolMode, requested: ToolMode): ToolMode = when {
-    requested == ToolMode.NONE -> ToolMode.NONE
-    current == requested -> ToolMode.NONE
-    else -> requested
-}
+fun nextToolModeOnToggle(
+    current: ToolMode,
+    requested: ToolMode,
+): ToolMode =
+    when {
+        requested == ToolMode.NONE -> ToolMode.NONE
+        current == requested -> ToolMode.NONE
+        else -> requested
+    }
 
 internal const val MIN_SCALE = 25
 internal const val MAX_SCALE = 800

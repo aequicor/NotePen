@@ -19,16 +19,17 @@ fun Modifier.pdfMultiPageDrawingInput(
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
     captureGesture: (Offset) -> Boolean = { false },
-): Modifier = pdfMultiPageDrawingInput(
-    key = controller,
-    tablet = tablet,
-    palmRejectionActive = palmRejectionActive,
-    captureGesture = captureGesture,
-    onDown = controller::onDown,
-    onMove = controller::onMove,
-    onUp = controller::onUp,
-    onCancel = controller::onCancel,
-)
+): Modifier =
+    pdfMultiPageDrawingInput(
+        key = controller,
+        tablet = tablet,
+        palmRejectionActive = palmRejectionActive,
+        captureGesture = captureGesture,
+        onDown = controller::onDown,
+        onMove = controller::onMove,
+        onUp = controller::onUp,
+        onCancel = controller::onCancel,
+    )
 
 /**
  * Перегрузка с явными колбэками — используется, когда события маршрутизируются
@@ -45,14 +46,15 @@ fun Modifier.pdfMultiPageDrawingInput(
     onMove: (Offset, Float, Float) -> Unit,
     onUp: () -> Unit,
     onCancel: () -> Unit,
-): Modifier = this.pointerInput(key) {
-    detectStylusAwareDrag(
-        tablet = tablet,
-        isPalmRejectionActive = palmRejectionActive,
-        captureGesture = captureGesture,
-        onDown = onDown,
-        onMove = onMove,
-        onUp = onUp,
-        onCancel = onCancel,
-    )
-}
+): Modifier =
+    this.pointerInput(key) {
+        detectStylusAwareDrag(
+            tablet = tablet,
+            isPalmRejectionActive = palmRejectionActive,
+            captureGesture = captureGesture,
+            onDown = onDown,
+            onMove = onMove,
+            onUp = onUp,
+            onCancel = onCancel,
+        )
+    }

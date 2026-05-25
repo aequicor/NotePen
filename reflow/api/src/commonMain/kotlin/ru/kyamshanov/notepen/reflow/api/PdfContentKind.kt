@@ -8,7 +8,6 @@ package ru.kyamshanov.notepen.reflow.api
  * [PdfReflowExtractor.probe].
  */
 public enum class PdfContentKind {
-
     /**
      * На странице есть извлекаемый текстовый слой с координатами глифов —
      * reflow применим напрямую.

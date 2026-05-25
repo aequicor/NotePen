@@ -1,11 +1,10 @@
 package ru.kyamshanov.notepen.mainscreen.ui.model
 
 import kotlin.test.Test
-import kotlin.test.assertIs
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 
 class SuccessEventTest {
-
     // TC-SUCCESS-1: SuccessEvent.FileAddedToFolder carries folderName parameter (CRITICAL #1)
     @Test
     fun `SuccessEvent FileAddedToFolder carries folderName`() {
@@ -24,16 +23,18 @@ class SuccessEventTest {
     // TC-SUCCESS-3: when expression exhaustiveness covers both variants
     @Test
     fun `when expression over SuccessEvent covers both variants`() {
-        val events: List<SuccessEvent> = listOf(
-            SuccessEvent.FileAddedToFolder(folderName = "Работа"),
-            SuccessEvent.FileAlreadyInFolder,
-        )
-        val results = events.map { event ->
-            when (event) {
-                is SuccessEvent.FileAddedToFolder -> "added:${event.folderName}"
-                is SuccessEvent.FileAlreadyInFolder -> "already"
+        val events: List<SuccessEvent> =
+            listOf(
+                SuccessEvent.FileAddedToFolder(folderName = "Работа"),
+                SuccessEvent.FileAlreadyInFolder,
+            )
+        val results =
+            events.map { event ->
+                when (event) {
+                    is SuccessEvent.FileAddedToFolder -> "added:${event.folderName}"
+                    is SuccessEvent.FileAlreadyInFolder -> "already"
+                }
             }
-        }
         assertEquals(listOf("added:Работа", "already"), results)
     }
 }

@@ -64,14 +64,17 @@ fun WorkspaceLayout.toSnapshot(): WorkspaceSnapshot =
         template = template.name,
         focusedPanelIndex = panels.indexOfFirst { it.id == focusedPanelId }.coerceAtLeast(0),
         ratios = ratios,
-        panels = panels.map { panel ->
-            WorkspaceSnapshot.PanelSnapshot(
-                activeTabIndex = panel.tabs.tabs
-                    .indexOfFirst { it.id == panel.tabs.activeId }
-                    .coerceAtLeast(0),
-                tabs = panel.tabs.tabs.map { tab ->
-                    WorkspaceSnapshot.TabSnapshot(filePath = tab.filePath, displayName = tab.displayName)
-                },
-            )
-        },
+        panels =
+            panels.map { panel ->
+                WorkspaceSnapshot.PanelSnapshot(
+                    activeTabIndex =
+                        panel.tabs.tabs
+                            .indexOfFirst { it.id == panel.tabs.activeId }
+                            .coerceAtLeast(0),
+                    tabs =
+                        panel.tabs.tabs.map { tab ->
+                            WorkspaceSnapshot.TabSnapshot(filePath = tab.filePath, displayName = tab.displayName)
+                        },
+                )
+            },
     )

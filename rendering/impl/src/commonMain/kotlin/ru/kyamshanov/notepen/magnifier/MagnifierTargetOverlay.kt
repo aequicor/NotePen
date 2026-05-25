@@ -65,10 +65,11 @@ fun MagnifierTargetOverlay(
             color = frameColor,
             topLeft = Offset(left, top),
             size = Size(w, h),
-            style = Stroke(
-                width = if (solid) FRAME_STROKE_PX_ACTIVE else FRAME_STROKE_PX,
-                pathEffect = if (solid) null else PathEffect.dashPathEffect(DASH_INTERVALS),
-            ),
+            style =
+                Stroke(
+                    width = if (solid) FRAME_STROKE_PX_ACTIVE else FRAME_STROKE_PX,
+                    pathEffect = if (solid) null else PathEffect.dashPathEffect(DASH_INTERVALS),
+                ),
         )
         // Маркер ресайз-хэндла — только для single-page (multi-page рамку
         // в этой версии нельзя интерактивно ресайзить).
@@ -82,7 +83,6 @@ fun MagnifierTargetOverlay(
         }
     }
 }
-
 
 /**
  * Viewport-привязанный оверлей рамки лупы для режима

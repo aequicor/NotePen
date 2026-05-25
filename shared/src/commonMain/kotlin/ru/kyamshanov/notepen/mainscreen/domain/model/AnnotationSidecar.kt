@@ -12,5 +12,4 @@ const val ANNOTATION_SIDECAR_SUFFIX: String = ".notepen.json"
  * Такие файлы не являются документами и не должны попадать в историю недавних
  * файлов: миниатюра для них не генерируется (это JSON, а не PDF/изображение).
  */
-fun isAnnotationSidecarUri(uri: String): Boolean =
-    uri.endsWith(ANNOTATION_SIDECAR_SUFFIX, ignoreCase = true)
+fun isAnnotationSidecarUri(uri: String): Boolean = uri.endsWith(ANNOTATION_SIDECAR_SUFFIX, ignoreCase = true)

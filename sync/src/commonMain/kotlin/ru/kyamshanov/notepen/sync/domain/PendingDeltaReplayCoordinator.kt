@@ -28,7 +28,6 @@ class PendingDeltaReplayCoordinator(
     private val registry: SyncEngineRegistry,
     private val connectionEstablished: Flow<Unit>,
 ) {
-
     /** Subscribes to [connectionEstablished] until [scope] is cancelled. */
     fun start(scope: CoroutineScope) {
         scope.launch {

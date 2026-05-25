@@ -18,20 +18,21 @@ import ru.kyamshanov.notepen.mainscreen.domain.port.FileAvailabilityChecker
 class FileAvailabilityCheckerAndroid(
     private val context: Context,
 ) : FileAvailabilityChecker {
+    override suspend fun check(uri: String): AvailabilityStatus =
+        withContext(Dispatchers.IO) {
+            checkSync(uri)
+        }
 
-    override suspend fun check(uri: String): AvailabilityStatus = withContext(Dispatchers.IO) {
-        checkSync(uri)
-    }
-
-    override fun checkSync(uri: String): AvailabilityStatus = try {
-        context.contentResolver.openInputStream(Uri.parse(uri))?.use {
-            AvailabilityStatus.AVAILABLE
-        } ?: AvailabilityStatus.FILE_ERROR
-    } catch (_: SecurityException) {
-        AvailabilityStatus.FILE_ERROR
-    } catch (_: java.io.FileNotFoundException) {
-        AvailabilityStatus.NOT_FOUND
-    } catch (_: Exception) {
-        AvailabilityStatus.FILE_ERROR
-    }
+    override fun checkSync(uri: String): AvailabilityStatus =
+        try {
+            context.contentResolver.openInputStream(Uri.parse(uri))?.use {
+                AvailabilityStatus.AVAILABLE
+            } ?: AvailabilityStatus.FILE_ERROR
+        } catch (_: SecurityException) {
+            AvailabilityStatus.FILE_ERROR
+        } catch (_: java.io.FileNotFoundException) {
+            AvailabilityStatus.NOT_FOUND
+        } catch (_: Exception) {
+            AvailabilityStatus.FILE_ERROR
+        }
 }

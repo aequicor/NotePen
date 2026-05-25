@@ -7,13 +7,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ShapeResamplerTest {
-
     @Test
     fun lineHasFirstPointMarked() {
-        val line = RecognizedShape.Line(
-            start = DrawingPoint(0.1f, 0.2f),
-            end = DrawingPoint(0.8f, 0.9f),
-        )
+        val line =
+            RecognizedShape.Line(
+                start = DrawingPoint(0.1f, 0.2f),
+                end = DrawingPoint(0.8f, 0.9f),
+            )
         val pts = ShapeResampler.toPoints(line, basePressure = 0.7f, baseTilt = 0.2f)
         assertTrue(pts.size > 8)
         assertTrue(pts.first().isNewPath)

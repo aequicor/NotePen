@@ -18,12 +18,14 @@ import javax.imageio.ImageIO
  * [LosslessFactory]. Нечитаемые изображения пропускаются.
  */
 object JvmComicPdfRenderer {
-
     /**
      * @param images байты изображений страниц в порядке чтения
      * @param output файл назначения PDF (создаётся/перезаписывается)
      */
-    fun render(images: List<ByteArray>, output: File) {
+    fun render(
+        images: List<ByteArray>,
+        output: File,
+    ) {
         PDDocument().use { doc ->
             for (bytes in images) {
                 val image = imageOf(doc, bytes) ?: continue
@@ -39,14 +41,18 @@ object JvmComicPdfRenderer {
         }
     }
 
-    private fun imageOf(doc: PDDocument, bytes: ByteArray): PDImageXObject? = runCatching {
-        if (isJpeg(bytes)) {
-            JPEGFactory.createFromStream(doc, ByteArrayInputStream(bytes))
-        } else {
-            val buffered = ImageIO.read(ByteArrayInputStream(bytes)) ?: return null
-            LosslessFactory.createFromImage(doc, buffered)
-        }
-    }.getOrNull()
+    private fun imageOf(
+        doc: PDDocument,
+        bytes: ByteArray,
+    ): PDImageXObject? =
+        runCatching {
+            if (isJpeg(bytes)) {
+                JPEGFactory.createFromStream(doc, ByteArrayInputStream(bytes))
+            } else {
+                val buffered = ImageIO.read(ByteArrayInputStream(bytes)) ?: return null
+                LosslessFactory.createFromImage(doc, buffered)
+            }
+        }.getOrNull()
 
     private fun isJpeg(bytes: ByteArray): Boolean =
         bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte()

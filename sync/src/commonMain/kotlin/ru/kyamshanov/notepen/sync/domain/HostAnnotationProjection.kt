@@ -68,10 +68,10 @@ class HostAnnotationProjection(
     private val provider: RemoteCatalogProvider,
     private val repository: AnnotationRepository,
 ) {
-
     private val mutex = Mutex()
     private val states = mutableMapOf<String, MutableDocumentState>()
     private val followedEngines = mutableSetOf<String>()
+
     // Per-document debounce job for autonomous disk flush of peer-originated edits.
     private val flushJobs = mutableMapOf<String, Job>()
 
@@ -90,7 +90,10 @@ class HostAnnotationProjection(
      * pipes its `mergedDeltas` into the projection. Safe to call repeatedly;
      * second and later calls are no-ops.
      */
-    fun follow(documentId: String, scope: CoroutineScope) {
+    fun follow(
+        documentId: String,
+        scope: CoroutineScope,
+    ) {
         scope.launch {
             val alreadyFollowed = mutex.withLock { !followedEngines.add(documentId) }
             if (alreadyFollowed) return@launch
@@ -120,7 +123,11 @@ class HostAnnotationProjection(
      * правки с планшета попадали в файл хоста и были видны при следующем
      * открытии на ПК — даже если планшет не пришлёт явный `SaveRequest`.
      */
-    suspend fun ingestPeerDelta(documentId: String, delta: StrokeDelta, scope: CoroutineScope) {
+    suspend fun ingestPeerDelta(
+        documentId: String,
+        delta: StrokeDelta,
+        scope: CoroutineScope,
+    ) {
         ensureLoaded(documentId) ?: return
         apply(documentId, delta)
         scheduleFlush(documentId, scope)
@@ -132,46 +139,55 @@ class HostAnnotationProjection(
      * записи на каждый `SaveRequest` — иначе при активном рисовании хост
      * перезаписывал весь файл десятки раз подряд. No-op для документа вне каталога.
      */
-    suspend fun requestFlush(documentId: String, scope: CoroutineScope) {
+    suspend fun requestFlush(
+        documentId: String,
+        scope: CoroutineScope,
+    ) {
         ensureLoaded(documentId) ?: return
         scheduleFlush(documentId, scope)
     }
 
-    private suspend fun scheduleFlush(documentId: String, scope: CoroutineScope) {
+    private suspend fun scheduleFlush(
+        documentId: String,
+        scope: CoroutineScope,
+    ) {
         mutex.withLock {
             flushJobs[documentId]?.cancel()
-            flushJobs[documentId] = scope.launch {
-                delay(FLUSH_DEBOUNCE_MS)
-                flushToDisk(documentId)
-            }
+            flushJobs[documentId] =
+                scope.launch {
+                    delay(FLUSH_DEBOUNCE_MS)
+                    flushToDisk(documentId)
+                }
         }
     }
 
     private suspend fun flushToDisk(documentId: String) {
         val hostUri = provider.resolveUri(documentId) ?: return
         val state = stateOf(documentId) ?: return
-        val result = repository.save(
-            pdfPath = hostUri,
-            annotations = state.pages,
-            scale = state.scale,
-            pen = state.pen,
-            marker = state.marker,
-            eraser = state.eraser,
-            currentPage = state.currentPage,
-            currentPageOffset = state.currentPageOffset,
-            favoritePageIndices = state.favoritePageIndices,
-            pageExtents = state.pageExtents,
-        )
+        val result =
+            repository.save(
+                pdfPath = hostUri,
+                annotations = state.pages,
+                scale = state.scale,
+                pen = state.pen,
+                marker = state.marker,
+                eraser = state.eraser,
+                currentPage = state.currentPage,
+                currentPageOffset = state.currentPageOffset,
+                favoritePageIndices = state.favoritePageIndices,
+                pageExtents = state.pageExtents,
+            )
         logger.info { "Projection autosave to disk: doc=$documentId success=${result.isSuccess}" }
     }
 
     private suspend fun ensureLoaded(documentId: String): Unit? {
         // Cheap fast path under lock.
         mutex.withLock { if (states.containsKey(documentId)) return Unit }
-        val hostUri = provider.resolveUri(documentId) ?: run {
-            logger.debug { "ensureLoaded($documentId) — not in catalog, projection skipped" }
-            return null
-        }
+        val hostUri =
+            provider.resolveUri(documentId) ?: run {
+                logger.debug { "ensureLoaded($documentId) — not in catalog, projection skipped" }
+                return null
+            }
         val bundle = runCatching { repository.load(hostUri).getOrNull() }.getOrNull()
         mutex.withLock {
             if (states.containsKey(documentId)) return Unit
@@ -199,7 +215,10 @@ class HostAnnotationProjection(
         return Unit
     }
 
-    private suspend fun apply(documentId: String, delta: StrokeDelta) {
+    private suspend fun apply(
+        documentId: String,
+        delta: StrokeDelta,
+    ) {
         mutex.withLock {
             val state = states.getOrPut(documentId) { MutableDocumentState() }
             val page = state.pages.getOrPut(delta.pageIndex) { mutableListOf() }
@@ -228,9 +247,10 @@ class HostAnnotationProjection(
         for ((pageIndex, paths) in s.pages) {
             // Поле extent передаём только в первом штрихе каждой страницы —
             // повторять в каждом нет смысла, получатель всё равно union'ит.
-            val extDto = s.pageExtents[pageIndex]
-                ?.takeIf { it != PageExtent.Pdf }
-                ?.let { RectDto.fromDomain(it) }
+            val extDto =
+                s.pageExtents[pageIndex]
+                    ?.takeIf { it != PageExtent.Pdf }
+                    ?.let { RectDto.fromDomain(it) }
             var attachedExtent = false
             for (path in paths) {
                 val id = path.strokeId.ifEmpty { "$deviceId#legacy-$pageIndex-${out.size}" }
@@ -266,15 +286,16 @@ class HostAnnotationProjection(
         var favoritePageIndices: Set<Int> = emptySet()
     }
 
-    private fun MutableDocumentState.toImmutable() = DocumentAnnotationState(
-        pages = pages.mapValues { it.value.toList() },
-        scale = scale,
-        pen = pen,
-        marker = marker,
-        eraser = eraser,
-        currentPage = currentPage,
-        currentPageOffset = currentPageOffset,
-        pageExtents = pageExtents.toMap(),
-        favoritePageIndices = favoritePageIndices,
-    )
+    private fun MutableDocumentState.toImmutable() =
+        DocumentAnnotationState(
+            pages = pages.mapValues { it.value.toList() },
+            scale = scale,
+            pen = pen,
+            marker = marker,
+            eraser = eraser,
+            currentPage = currentPage,
+            currentPageOffset = currentPageOffset,
+            pageExtents = pageExtents.toMap(),
+            favoritePageIndices = favoritePageIndices,
+        )
 }

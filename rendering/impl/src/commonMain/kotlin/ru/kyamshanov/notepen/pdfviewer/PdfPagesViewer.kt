@@ -77,7 +77,6 @@ enum class ScrollMode {
  * `firstVisibleItemScrollOffset`.
  */
 expect class PdfViewerState {
-
     /** Индекс первой видимой страницы. */
     val firstVisiblePageIndex: Int
 
@@ -93,19 +92,29 @@ expect class PdfViewerState {
      * Используется при восстановлении состояния из аннотационного бандла
      * или sync-сообщения, пришедшего до первого layout.
      */
-    fun applyInitialState(scalePercent: Int, pageIndex: Int, pageOffsetPx: Int)
+    fun applyInitialState(
+        scalePercent: Int,
+        pageIndex: Int,
+        pageOffsetPx: Int,
+    )
 
     /**
      * Прокручивает к началу страницы [pageIndex] + [offsetPx]
      * (эквивалент `LazyListState.scrollToItem`).
      */
-    fun scrollToPage(pageIndex: Int, offsetPx: Int = 0)
+    fun scrollToPage(
+        pageIndex: Int,
+        offsetPx: Int = 0,
+    )
 
     /** Установка зума в процентах (для toolbar / sync). Якорь — центр вьюпорта. */
     fun setScalePercent(percent: Int)
 
     /** Умножает зум на [factor] вокруг [focus] (viewport-координаты). */
-    fun zoomBy(factor: Float, focus: Offset)
+    fun zoomBy(
+        factor: Float,
+        focus: Offset,
+    )
 
     /**
      * Source of truth по [PageExtent] для страницы. Читается viewer'ом при

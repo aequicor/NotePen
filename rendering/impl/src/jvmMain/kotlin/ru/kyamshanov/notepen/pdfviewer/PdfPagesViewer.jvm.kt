@@ -2,11 +2,11 @@ package ru.kyamshanov.notepen.pdfviewer
 
 import androidx.compose.foundation.HorizontalScrollbar
 import androidx.compose.foundation.VerticalScrollbar
-import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -19,6 +19,7 @@ import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -27,10 +28,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.input.pointer.PointerEventPass
-import com.sun.jna.Native
-import com.sun.jna.Platform
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isCtrlPressed
 import androidx.compose.ui.input.pointer.isMetaPressed
@@ -43,8 +41,8 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
-import kotlin.math.pow
-import kotlin.math.roundToInt
+import com.sun.jna.Native
+import com.sun.jna.Platform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
@@ -56,6 +54,8 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
+import kotlin.math.pow
+import kotlin.math.roundToInt
 
 private const val WHEEL_SCROLL_PX_PER_TICK = 60f
 
@@ -175,10 +175,14 @@ private const val STALE_SCALE_RATIO_THRESHOLD = 2f
  */
 private class PendingZoom {
     @Volatile private var factor: Float = 1f
+
     @Volatile private var focus: Offset? = null
 
     @Synchronized
-    fun accumulate(f: Float, p: Offset) {
+    fun accumulate(
+        f: Float,
+        p: Offset,
+    ) {
         factor *= f
         focus = p
     }
@@ -214,11 +218,12 @@ private object MacosPinchGestureRouter {
     private var refCount = 0
     private var bridge: MacosGestureBridge? = null
 
-    private val callback = MacosGestureBridge.OnMagnify { magnification, _, _ ->
-        val factor = 1f + magnification
-        val pending = target.get()
-        if (factor > 0f && pending != null) pending.accumulate(factor, focus.get())
-    }
+    private val callback =
+        MacosGestureBridge.OnMagnify { magnification, _, _ ->
+            val factor = 1f + magnification
+            val pending = target.get()
+            if (factor > 0f && pending != null) pending.accumulate(factor, focus.get())
+        }
 
     @Synchronized
     fun acquire() {
@@ -237,9 +242,10 @@ private object MacosPinchGestureRouter {
                     )
                 }
             }
-            bridge = runCatching {
-                Native.load("notepen_gesture", MacosGestureBridge::class.java)
-            }.getOrNull()
+            bridge =
+                runCatching {
+                    Native.load("notepen_gesture", MacosGestureBridge::class.java)
+                }.getOrNull()
             bridge?.notepen_gesture_start(callback)
         }
         refCount++
@@ -257,7 +263,10 @@ private object MacosPinchGestureRouter {
     }
 
     /** Route subsequent pinch events to [pendingZoom], anchored at panel-local [cursor]. */
-    fun setActive(pendingZoom: PendingZoom, cursor: Offset) {
+    fun setActive(
+        pendingZoom: PendingZoom,
+        cursor: Offset,
+    ) {
         target.set(pendingZoom)
         focus.set(cursor)
     }
@@ -356,12 +365,13 @@ actual fun PdfPagesViewer(
     LaunchedEffect(pdfDocument, state, renderer) {
         val doc = pdfDocument ?: return@LaunchedEffect
         snapshotFlow {
-            val range = PdfViewerMath.visiblePageRange(
-                layout = state.layout,
-                panY = state.pan.y,
-                zoom = state.zoom,
-                viewportHeight = state.viewportSize.height.toFloat(),
-            )
+            val range =
+                PdfViewerMath.visiblePageRange(
+                    layout = state.layout,
+                    panY = state.pan.y,
+                    zoom = state.zoom,
+                    viewportHeight = state.viewportSize.height.toFloat(),
+                )
             VisibleSnapshot(
                 first = (range.first - BUFFER_PAGES).coerceAtLeast(0),
                 last = (range.last + BUFFER_PAGES).coerceAtMost(state.pages.lastIndex),
@@ -391,9 +401,10 @@ actual fun PdfPagesViewer(
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
                     val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
-                    val desiredWidthPx = (basePageWidthPx * snap.scalePercent / 100f * supersample)
-                        .toInt()
-                        .coerceAtLeast(1)
+                    val desiredWidthPx =
+                        (basePageWidthPx * snap.scalePercent / 100f * supersample)
+                            .toInt()
+                            .coerceAtLeast(1)
                     // Clamp обе оси с сохранением aspect: если высота, рассчитанная
                     // от полной ширины, выходит за MAX_RENDER_DIM_PX, уменьшаем
                     // и ширину пропорционально. Иначе битмап получит aspect,
@@ -403,18 +414,20 @@ actual fun PdfPagesViewer(
                     // через FillBounds компенсирует distortion обратно.
                     val widthCapped = desiredWidthPx.coerceAtMost(MAX_RENDER_DIM_PX)
                     val heightFromWidth = (widthCapped / aspect).toInt().coerceAtLeast(1)
-                    val (targetWidthPx, targetHeightPx) = if (heightFromWidth > MAX_RENDER_DIM_PX) {
-                        val cappedH = MAX_RENDER_DIM_PX
-                        val cappedW = (cappedH * aspect).toInt().coerceAtLeast(1)
-                        cappedW to cappedH
-                    } else {
-                        widthCapped to heightFromWidth
-                    }
-                    launch {
-                        val bitmap = withContext(renderDispatcher) {
-                            renderer.renderPage(doc, i, targetWidthPx, targetHeightPx)
-                                .toImageBitmap()
+                    val (targetWidthPx, targetHeightPx) =
+                        if (heightFromWidth > MAX_RENDER_DIM_PX) {
+                            val cappedH = MAX_RENDER_DIM_PX
+                            val cappedW = (cappedH * aspect).toInt().coerceAtLeast(1)
+                            cappedW to cappedH
+                        } else {
+                            widthCapped to heightFromWidth
                         }
+                    launch {
+                        val bitmap =
+                            withContext(renderDispatcher) {
+                                renderer.renderPage(doc, i, targetWidthPx, targetHeightPx)
+                                    .toImageBitmap()
+                            }
                         cache.put(
                             i,
                             RenderedPage(
@@ -432,107 +445,115 @@ actual fun PdfPagesViewer(
     // bypassing the Initial-pass handler on the inner Box — so scrollbar thumb
     // drags are never consumed by drag-to-pan.
     Box(
-        modifier = modifier
-            .onSizeChanged { size ->
-                if (state.viewportSize != size) {
-                    val hadWidth = state.viewportSize.width > 0
-                    state.viewportSize = size
-                    state.applyPendingInitialScrollIfNeeded()
-                    // A genuine resize (panel opened/closed, divider dragged,
-                    // window resized) re-centres the page in the new viewport.
-                    if (hadWidth && size.width > 0) state.reCenterAfterResize()
-                }
-            },
+        modifier =
+            modifier
+                .onSizeChanged { size ->
+                    if (state.viewportSize != size) {
+                        val hadWidth = state.viewportSize.width > 0
+                        state.viewportSize = size
+                        state.applyPendingInitialScrollIfNeeded()
+                        // A genuine resize (panel opened/closed, divider dragged,
+                        // window resized) re-centres the page in the new viewport.
+                        if (hadWidth && size.width > 0) state.reCenterAfterResize()
+                    }
+                },
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clipToBounds()
-                .overscrollGlow(overscrollColor) { state.overscrollOffset }
-                .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
-                .then(gestureModifier),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .clipToBounds()
+                    .overscrollGlow(overscrollColor) { state.overscrollOffset }
+                    .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
+                    .then(gestureModifier),
         ) {
-        SubcomposeLayout(
-            modifier = Modifier
-                .fillMaxSize()
-                // Transient zoom-трансформа: scale + translate через GPU
-                // render node, без layout-pass'а. См. KDoc у
-                // [PdfViewerState.gestureScale]. Lambda-форма читает state
-                // в graphicsLayer-блоке — он переоценивается на DRAW-pass'е,
-                // без рекомпозиции / ремежа SubcomposeLayout'а.
-                .graphicsLayer {
-                    // residualScale — зум сверх layoutCap, не запечённый в размер
-                    // layout'а; домножаем его сюда. Ниже cap residualScale == 1f.
-                    val s = state.gestureScale * state.residualScale
-                    scaleX = s
-                    scaleY = s
-                    transformOrigin = TransformOrigin(0f, 0f)
-                    // overscrollOffset — визуальный «перелёт» за край (пружинит к
-                    // нулю), сам pan жёстко кламплен.
-                    translationX = state.gestureTranslation.x + state.overscrollOffset.x
-                    translationY = state.gestureTranslation.y + state.overscrollOffset.y
-                },
-        ) { constraints ->
-            val layout = state.layout
-            val zoom = state.zoom
-            val pan = state.pan
-            val pageCount = layout.pageHeightsPx.size
-            if (pageCount == 0 || layout.basePageWidthPx <= 0f) {
-                return@SubcomposeLayout layout(constraints.maxWidth, constraints.maxHeight) {}
-            }
-            val visible = PdfViewerMath.visiblePageRange(
-                layout = layout,
-                panY = pan.y,
-                zoom = zoom,
-                viewportHeight = constraints.maxHeight.toFloat(),
-            )
-            if (visible.isEmpty()) {
-                return@SubcomposeLayout layout(constraints.maxWidth, constraints.maxHeight) {}
-            }
-            val first = (visible.first - BUFFER_PAGES).coerceAtLeast(0)
-            val last = (visible.last + BUFFER_PAGES).coerceAtMost(pageCount - 1)
-
-            data class Item(val placeableX: Int, val placeableY: Int, val placeable: androidx.compose.ui.layout.Placeable)
-            val items = mutableListOf<Item>()
-            // Размер/растеризацию ведём в layoutZoom (≤ cap); зум сверх cap даёт
-            // graphicsLayer через residualScale. Размещение — в полном zoom,
-            // пред-делённое на residualScale (layer домножит обратно).
-            val lz = state.layoutZoom
-            val rs = state.residualScale
-            for (i in first..last) {
-                val ext = layout.pageExtents[i]
-                val pdfH = layout.pdfHeightsPx[i]
-                val w = (layout.pageWidthsPx[i] * lz).roundToInt().coerceAtLeast(1)
-                val h = (pdfH * ext.height * lz).roundToInt().coerceAtLeast(1)
-                val visualWidthDp = with(density) { w.toDp() }
-                val visualHeightDp = with(density) { h.toDp() }
-                val pdfWidthDp = with(density) {
-                    (layout.basePageWidthPx * lz).roundToInt().coerceAtLeast(1).toDp()
+            SubcomposeLayout(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        // Transient zoom-трансформа: scale + translate через GPU
+                        // render node, без layout-pass'а. См. KDoc у
+                        // [PdfViewerState.gestureScale]. Lambda-форма читает state
+                        // в graphicsLayer-блоке — он переоценивается на DRAW-pass'е,
+                        // без рекомпозиции / ремежа SubcomposeLayout'а.
+                        .graphicsLayer {
+                            // residualScale — зум сверх layoutCap, не запечённый в размер
+                            // layout'а; домножаем его сюда. Ниже cap residualScale == 1f.
+                            val s = state.gestureScale * state.residualScale
+                            scaleX = s
+                            scaleY = s
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            // overscrollOffset — визуальный «перелёт» за край (пружинит к
+                            // нулю), сам pan жёстко кламплен.
+                            translationX = state.gestureTranslation.x + state.overscrollOffset.x
+                            translationY = state.gestureTranslation.y + state.overscrollOffset.y
+                        },
+            ) { constraints ->
+                val layout = state.layout
+                val zoom = state.zoom
+                val pan = state.pan
+                val pageCount = layout.pageHeightsPx.size
+                if (pageCount == 0 || layout.basePageWidthPx <= 0f) {
+                    return@SubcomposeLayout layout(constraints.maxWidth, constraints.maxHeight) {}
                 }
-                val pdfHeightDp = with(density) {
-                    (pdfH * lz).roundToInt().coerceAtLeast(1).toDp()
-                }
-                val pagePlaceables = subcompose(i) {
-                    val cached = cache.entries[i]?.bitmap
-                    val scope = ImmutablePdfPageScope(
-                        pageIndex = i,
-                        bitmap = cached,
-                        visualWidth = visualWidthDp,
-                        visualHeight = visualHeightDp,
-                        pdfWidth = pdfWidthDp,
-                        pdfHeight = pdfHeightDp,
-                        extent = ext,
+                val visible =
+                    PdfViewerMath.visiblePageRange(
+                        layout = layout,
+                        panY = pan.y,
+                        zoom = zoom,
+                        viewportHeight = constraints.maxHeight.toFloat(),
                     )
-                    with(scope) { pageContent() }
-                }.map { it.measure(Constraints.fixed(w, h)) }
-                val slotX = ((pan.x + ext.left * layout.basePageWidthPx * zoom) / rs).roundToInt()
-                val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
-                pagePlaceables.forEach { items.add(Item(slotX, slotY, it)) }
+                if (visible.isEmpty()) {
+                    return@SubcomposeLayout layout(constraints.maxWidth, constraints.maxHeight) {}
+                }
+                val first = (visible.first - BUFFER_PAGES).coerceAtLeast(0)
+                val last = (visible.last + BUFFER_PAGES).coerceAtMost(pageCount - 1)
+
+                data class Item(val placeableX: Int, val placeableY: Int, val placeable: androidx.compose.ui.layout.Placeable)
+                val items = mutableListOf<Item>()
+                // Размер/растеризацию ведём в layoutZoom (≤ cap); зум сверх cap даёт
+                // graphicsLayer через residualScale. Размещение — в полном zoom,
+                // пред-делённое на residualScale (layer домножит обратно).
+                val lz = state.layoutZoom
+                val rs = state.residualScale
+                for (i in first..last) {
+                    val ext = layout.pageExtents[i]
+                    val pdfH = layout.pdfHeightsPx[i]
+                    val w = (layout.pageWidthsPx[i] * lz).roundToInt().coerceAtLeast(1)
+                    val h = (pdfH * ext.height * lz).roundToInt().coerceAtLeast(1)
+                    val visualWidthDp = with(density) { w.toDp() }
+                    val visualHeightDp = with(density) { h.toDp() }
+                    val pdfWidthDp =
+                        with(density) {
+                            (layout.basePageWidthPx * lz).roundToInt().coerceAtLeast(1).toDp()
+                        }
+                    val pdfHeightDp =
+                        with(density) {
+                            (pdfH * lz).roundToInt().coerceAtLeast(1).toDp()
+                        }
+                    val pagePlaceables =
+                        subcompose(i) {
+                            val cached = cache.entries[i]?.bitmap
+                            val scope =
+                                ImmutablePdfPageScope(
+                                    pageIndex = i,
+                                    bitmap = cached,
+                                    visualWidth = visualWidthDp,
+                                    visualHeight = visualHeightDp,
+                                    pdfWidth = pdfWidthDp,
+                                    pdfHeight = pdfHeightDp,
+                                    extent = ext,
+                                )
+                            with(scope) { pageContent() }
+                        }.map { it.measure(Constraints.fixed(w, h)) }
+                    val slotX = ((pan.x + ext.left * layout.basePageWidthPx * zoom) / rs).roundToInt()
+                    val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
+                    pagePlaceables.forEach { items.add(Item(slotX, slotY, it)) }
+                }
+                layout(constraints.maxWidth, constraints.maxHeight) {
+                    items.forEach { it.placeable.place(it.placeableX, it.placeableY) }
+                }
             }
-            layout(constraints.maxWidth, constraints.maxHeight) {
-                items.forEach { it.placeable.place(it.placeableX, it.placeableY) }
-            }
-        }
         } // inner Box
 
         val hAdapter = remember(state) { PanScrollbarAdapter(state, horizontal = true) }
@@ -599,6 +620,7 @@ private data class ImmutablePdfPageScope(
  * перетаскивать документ (а не рисовать) — передаётся из `DetailsContent`
  * как `{ toolMode == ToolMode.NONE }`.
  */
+
 /**
  * Рисует краевую overscroll-тень поверх контента по текущему [glow]
  * (= `PdfViewerState.overscrollOffset`): тонированный [color] градиент у прижатой
@@ -610,231 +632,258 @@ private data class ImmutablePdfPageScope(
  * (M3 edge-effect). Альфа берётся из самого цвета не полностью — насыщенность
  * управляется [OVERSCROLL_GLOW_MAX_ALPHA].
  */
-private fun Modifier.overscrollGlow(color: Color, glow: () -> Offset): Modifier = this.drawWithContent {
-    drawContent()
-    val g = glow()
-    if (g == Offset.Zero) return@drawWithContent
-    val w = size.width
-    val h = size.height
-    val depth = minOf(w, h) * OVERSCROLL_GLOW_DEPTH_FRACTION
-    if (depth <= 0f) return@drawWithContent
-    fun edge(px: Float): Color =
-        color.copy(
-            alpha = (kotlin.math.abs(px) / OVERSCROLL_GLOW_REF_PX).coerceIn(0f, 1f) *
-                OVERSCROLL_GLOW_MAX_ALPHA,
-        )
-    if (g.y > 0f) {
-        drawRect(
-            brush = Brush.verticalGradient(
-                0f to edge(g.y),
-                1f to Color.Transparent,
-                startY = 0f,
-                endY = depth,
-            ),
-            topLeft = Offset.Zero,
-            size = Size(w, depth),
-        )
-    } else if (g.y < 0f) {
-        drawRect(
-            brush = Brush.verticalGradient(
-                0f to Color.Transparent,
-                1f to edge(g.y),
-                startY = h - depth,
-                endY = h,
-            ),
-            topLeft = Offset(0f, h - depth),
-            size = Size(w, depth),
-        )
+private fun Modifier.overscrollGlow(
+    color: Color,
+    glow: () -> Offset,
+): Modifier =
+    this.drawWithContent {
+        drawContent()
+        val g = glow()
+        if (g == Offset.Zero) return@drawWithContent
+        val w = size.width
+        val h = size.height
+        val depth = minOf(w, h) * OVERSCROLL_GLOW_DEPTH_FRACTION
+        if (depth <= 0f) return@drawWithContent
+
+        fun edge(px: Float): Color =
+            color.copy(
+                alpha =
+                    (kotlin.math.abs(px) / OVERSCROLL_GLOW_REF_PX).coerceIn(0f, 1f) *
+                        OVERSCROLL_GLOW_MAX_ALPHA,
+            )
+        if (g.y > 0f) {
+            drawRect(
+                brush =
+                    Brush.verticalGradient(
+                        0f to edge(g.y),
+                        1f to Color.Transparent,
+                        startY = 0f,
+                        endY = depth,
+                    ),
+                topLeft = Offset.Zero,
+                size = Size(w, depth),
+            )
+        } else if (g.y < 0f) {
+            drawRect(
+                brush =
+                    Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        1f to edge(g.y),
+                        startY = h - depth,
+                        endY = h,
+                    ),
+                topLeft = Offset(0f, h - depth),
+                size = Size(w, depth),
+            )
+        }
+        if (g.x > 0f) {
+            drawRect(
+                brush =
+                    Brush.horizontalGradient(
+                        0f to edge(g.x),
+                        1f to Color.Transparent,
+                        startX = 0f,
+                        endX = depth,
+                    ),
+                topLeft = Offset.Zero,
+                size = Size(depth, h),
+            )
+        } else if (g.x < 0f) {
+            drawRect(
+                brush =
+                    Brush.horizontalGradient(
+                        0f to Color.Transparent,
+                        1f to edge(g.x),
+                        startX = w - depth,
+                        endX = w,
+                    ),
+                topLeft = Offset(w - depth, 0f),
+                size = Size(depth, h),
+            )
+        }
     }
-    if (g.x > 0f) {
-        drawRect(
-            brush = Brush.horizontalGradient(
-                0f to edge(g.x),
-                1f to Color.Transparent,
-                startX = 0f,
-                endX = depth,
-            ),
-            topLeft = Offset.Zero,
-            size = Size(depth, h),
-        )
-    } else if (g.x < 0f) {
-        drawRect(
-            brush = Brush.horizontalGradient(
-                0f to Color.Transparent,
-                1f to edge(g.x),
-                startX = w - depth,
-                endX = w,
-            ),
-            topLeft = Offset(w - depth, 0f),
-            size = Size(depth, h),
-        )
-    }
-}
 
 @OptIn(ExperimentalComposeUiApi::class)
 private fun Modifier.pdfDesktopPointerInput(
     state: PdfViewerState,
     pendingZoom: PendingZoom,
     primaryDragPanEnabled: () -> Boolean,
-): Modifier = this.pointerInput(state) {
-    awaitPointerEventScope {
-        var lastCursor = Offset.Zero
-        var middleDragOrigin: Offset? = null
-        var primaryDragOrigin: Offset? = null
-        var zoomBurstFocus: Offset? = null
-        // EMA of recent |dx| and |dy| across scroll events; used to detect the
-        // dominant scroll axis and suppress the minor axis (see SCROLL_H_SUPPRESS_RATIO).
-        var hScrollEma = 0f
-        var vScrollEma = 0f
-        while (true) {
-            val event = awaitPointerEvent(PointerEventPass.Initial)
-            val change = event.changes.firstOrNull()
-            when (event.type) {
-                PointerEventType.Move, PointerEventType.Enter -> {
-                    val newPos = change?.position
-                    if (newPos != null) {
-                        val burst = zoomBurstFocus
-                        if (burst != null && (newPos - burst).getDistance() > ZOOM_BURST_RESET_PX) {
-                            zoomBurstFocus = null
-                        }
-                        lastCursor = newPos
-                        // The cursor is hovering this panel → route trackpad
-                        // pinch here, anchored at the panel-local position.
-                        MacosPinchGestureRouter.setActive(pendingZoom, newPos)
-                    }
-                    val middleOrigin = middleDragOrigin
-                    if (middleOrigin != null && event.buttons.isTertiaryPressed && change != null) {
-                        // Bake любую pending-gesture transform до пана:
-                        // pan-дельта в viewport-пикселях, и если оставить
-                        // gestureScale != 1, 1px движения мыши даст scale*1
-                        // пикселей визуально — рассинхрон с курсором.
-                        state.commitPinchGesture()
-                        state.panGestureBy(change.position - middleOrigin)
-                        middleDragOrigin = change.position
-                        change.consume()
-                    }
-                    val primOrigin = primaryDragOrigin
-                    if (primOrigin != null && event.buttons.isPrimaryPressed &&
-                        primaryDragPanEnabled() && change != null
-                    ) {
-                        state.commitPinchGesture()
-                        state.panGestureBy(change.position - primOrigin)
-                        primaryDragOrigin = change.position
-                        change.consume()
-                    }
-                }
-                PointerEventType.Press -> {
-                    val dblClick = (event.awtEventOrNull as? java.awt.event.MouseEvent)?.clickCount == 2
-                    if (dblClick && event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
-                        change != null
-                    ) {
-                        // Double-tap-to-zoom: переключает fit-width ↔ приближение,
-                        // точка под курсором остаётся на месте.
-                        state.doubleTapZoom(change.position)
-                        change.consume()
-                    } else if (event.buttons.isTertiaryPressed && change != null) {
-                        state.commitPinchGesture()
-                        state.beginPanGesture()
-                        middleDragOrigin = change.position
-                        change.consume()
-                    } else if (event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
-                        change != null
-                    ) {
-                        state.commitPinchGesture()
-                        state.beginPanGesture()
-                        primaryDragOrigin = change.position
-                        change.consume()
-                    }
-                }
-                PointerEventType.Release -> {
-                    val wasDragging = middleDragOrigin != null || primaryDragOrigin != null
-                    if (!event.buttons.isTertiaryPressed) middleDragOrigin = null
-                    if (!event.buttons.isPrimaryPressed) primaryDragOrigin = null
-                    val stillDragging = middleDragOrigin != null || primaryDragOrigin != null
-                    // Drag завершён — overscroll-смещение пружинит к нулю (per-frame).
-                    if (wasDragging && !stillDragging) state.endPanGesture()
-                }
-                PointerEventType.Scroll -> {
-                    if (change == null) continue
-                    val delta = change.scrollDelta
-                    val awtEvent = event.awtEventOrNull as? java.awt.event.MouseWheelEvent
-                    val ctrl = event.keyboardModifiers.isCtrlPressed ||
-                        event.keyboardModifiers.isMetaPressed ||
-                        awtEvent?.isControlDown == true
-                    val shift = event.keyboardModifiers.isShiftPressed
-                    when {
-                        ctrl -> {
-                            val focus = zoomBurstFocus
-                                ?: change.position.takeIf { it != Offset.Zero }
-                                ?: lastCursor
-                            zoomBurstFocus = focus
-                            // macOS trackpad pinch via JBR: NSEventTypeMagnify →
-                            // Ctrl+Scroll with |delta.y| ≈ 0.01–0.05.
-                            // JBR sign: pinch-out (zoom in) → delta.y > 0,
-                            // so factor = 1 + delta.y > 1 → zoom in ✓.
-                            // Discrete mouse wheel: |delta.y| ≥ 1.0,
-                            // exponential formula gives ~7% per click ✓.
-                            val rawDelta = awtEvent?.preciseWheelRotation?.toFloat() ?: delta.y
-                            val factor = if (kotlin.math.abs(rawDelta) < 0.5f) {
-                                1f + rawDelta
-                            } else {
-                                ZOOM_BASE.pow(-rawDelta)
+): Modifier =
+    this.pointerInput(state) {
+        awaitPointerEventScope {
+            var lastCursor = Offset.Zero
+            var middleDragOrigin: Offset? = null
+            var primaryDragOrigin: Offset? = null
+            var zoomBurstFocus: Offset? = null
+            // EMA of recent |dx| and |dy| across scroll events; used to detect the
+            // dominant scroll axis and suppress the minor axis (see SCROLL_H_SUPPRESS_RATIO).
+            var hScrollEma = 0f
+            var vScrollEma = 0f
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val change = event.changes.firstOrNull()
+                when (event.type) {
+                    PointerEventType.Move, PointerEventType.Enter -> {
+                        val newPos = change?.position
+                        if (newPos != null) {
+                            val burst = zoomBurstFocus
+                            if (burst != null && (newPos - burst).getDistance() > ZOOM_BURST_RESET_PX) {
+                                zoomBurstFocus = null
                             }
-                            pendingZoom.accumulate(factor, focus)
+                            lastCursor = newPos
+                            // The cursor is hovering this panel → route trackpad
+                            // pinch here, anchored at the panel-local position.
+                            MacosPinchGestureRouter.setActive(pendingZoom, newPos)
                         }
-                        shift -> {
+                        val middleOrigin = middleDragOrigin
+                        if (middleOrigin != null && event.buttons.isTertiaryPressed && change != null) {
+                            // Bake любую pending-gesture transform до пана:
+                            // pan-дельта в viewport-пикселях, и если оставить
+                            // gestureScale != 1, 1px движения мыши даст scale*1
+                            // пикселей визуально — рассинхрон с курсором.
                             state.commitPinchGesture()
-                            // On macOS with JBR, trackpad horizontal swipe arrives as
-                            // shift=true + delta.x, dy=0 (synthetic shift — not a keyboard key).
-                            // Update EMA for both axes (dy=0 here → vScrollEma decays).
-                            // Suppress horizontal if vertical EMA dominates.
-                            hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
-                                kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
-                            vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
-                                kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
-                            // When the page fits the viewport width it is auto-centred on
-                            // zoom; trackpad H-scroll is disabled in that mode (the page can
-                            // still be dragged horizontally with the mouse). Otherwise suppress
-                            // only incidental H-drift while the dominant axis is vertical.
-                            val pageColumnFits =
-                                state.layout.basePageWidthPx * state.zoom <= state.viewportSize.width
-                            val suppressH = pageColumnFits ||
-                                vScrollEma > hScrollEma * SCROLL_H_SUPPRESS_RATIO
-                            val absDx = kotlin.math.abs(delta.x)
-                            // Горизонтальный скролл только в режиме BOTH; вертикаль
-                            // подавляется лишь в NONE (см. [PdfViewerState.scrollMode]).
-                            val hPx = if (suppressH || absDx < SCROLL_H_DEAD_ZONE ||
-                                state.scrollMode != ScrollMode.BOTH
-                            ) 0f else -delta.x * WHEEL_SCROLL_PX_PER_TICK
-                            val vPx = if (state.scrollMode == ScrollMode.NONE) 0f
-                            else -delta.y * WHEEL_SCROLL_PX_PER_TICK
-                            state.wheelScrollBy(Offset(hPx, vPx))
+                            state.panGestureBy(change.position - middleOrigin)
+                            middleDragOrigin = change.position
+                            change.consume()
                         }
-                        else -> {
+                        val primOrigin = primaryDragOrigin
+                        if (primOrigin != null && event.buttons.isPrimaryPressed &&
+                            primaryDragPanEnabled() && change != null
+                        ) {
                             state.commitPinchGesture()
-                            // dx=0 here in JBR vertical events → hScrollEma decays.
-                            vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
-                                kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
-                            hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
-                                kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
-                            val vPx = if (state.scrollMode == ScrollMode.NONE) 0f
-                            else -delta.y * WHEEL_SCROLL_PX_PER_TICK
-                            state.wheelScrollBy(Offset(0f, vPx))
+                            state.panGestureBy(change.position - primOrigin)
+                            primaryDragOrigin = change.position
+                            change.consume()
                         }
                     }
-                    change.consume()
+                    PointerEventType.Press -> {
+                        val dblClick = (event.awtEventOrNull as? java.awt.event.MouseEvent)?.clickCount == 2
+                        if (dblClick && event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
+                            change != null
+                        ) {
+                            // Double-tap-to-zoom: переключает fit-width ↔ приближение,
+                            // точка под курсором остаётся на месте.
+                            state.doubleTapZoom(change.position)
+                            change.consume()
+                        } else if (event.buttons.isTertiaryPressed && change != null) {
+                            state.commitPinchGesture()
+                            state.beginPanGesture()
+                            middleDragOrigin = change.position
+                            change.consume()
+                        } else if (event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
+                            change != null
+                        ) {
+                            state.commitPinchGesture()
+                            state.beginPanGesture()
+                            primaryDragOrigin = change.position
+                            change.consume()
+                        }
+                    }
+                    PointerEventType.Release -> {
+                        val wasDragging = middleDragOrigin != null || primaryDragOrigin != null
+                        if (!event.buttons.isTertiaryPressed) middleDragOrigin = null
+                        if (!event.buttons.isPrimaryPressed) primaryDragOrigin = null
+                        val stillDragging = middleDragOrigin != null || primaryDragOrigin != null
+                        // Drag завершён — overscroll-смещение пружинит к нулю (per-frame).
+                        if (wasDragging && !stillDragging) state.endPanGesture()
+                    }
+                    PointerEventType.Scroll -> {
+                        if (change == null) continue
+                        val delta = change.scrollDelta
+                        val awtEvent = event.awtEventOrNull as? java.awt.event.MouseWheelEvent
+                        val ctrl =
+                            event.keyboardModifiers.isCtrlPressed ||
+                                event.keyboardModifiers.isMetaPressed ||
+                                awtEvent?.isControlDown == true
+                        val shift = event.keyboardModifiers.isShiftPressed
+                        when {
+                            ctrl -> {
+                                val focus =
+                                    zoomBurstFocus
+                                        ?: change.position.takeIf { it != Offset.Zero }
+                                        ?: lastCursor
+                                zoomBurstFocus = focus
+                                // macOS trackpad pinch via JBR: NSEventTypeMagnify →
+                                // Ctrl+Scroll with |delta.y| ≈ 0.01–0.05.
+                                // JBR sign: pinch-out (zoom in) → delta.y > 0,
+                                // so factor = 1 + delta.y > 1 → zoom in ✓.
+                                // Discrete mouse wheel: |delta.y| ≥ 1.0,
+                                // exponential formula gives ~7% per click ✓.
+                                val rawDelta = awtEvent?.preciseWheelRotation?.toFloat() ?: delta.y
+                                val factor =
+                                    if (kotlin.math.abs(rawDelta) < 0.5f) {
+                                        1f + rawDelta
+                                    } else {
+                                        ZOOM_BASE.pow(-rawDelta)
+                                    }
+                                pendingZoom.accumulate(factor, focus)
+                            }
+                            shift -> {
+                                state.commitPinchGesture()
+                                // On macOS with JBR, trackpad horizontal swipe arrives as
+                                // shift=true + delta.x, dy=0 (synthetic shift — not a keyboard key).
+                                // Update EMA for both axes (dy=0 here → vScrollEma decays).
+                                // Suppress horizontal if vertical EMA dominates.
+                                hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                    kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
+                                vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                    kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
+                                // When the page fits the viewport width it is auto-centred on
+                                // zoom; trackpad H-scroll is disabled in that mode (the page can
+                                // still be dragged horizontally with the mouse). Otherwise suppress
+                                // only incidental H-drift while the dominant axis is vertical.
+                                val pageColumnFits =
+                                    state.layout.basePageWidthPx * state.zoom <= state.viewportSize.width
+                                val suppressH =
+                                    pageColumnFits ||
+                                        vScrollEma > hScrollEma * SCROLL_H_SUPPRESS_RATIO
+                                val absDx = kotlin.math.abs(delta.x)
+                                // Горизонтальный скролл только в режиме BOTH; вертикаль
+                                // подавляется лишь в NONE (см. [PdfViewerState.scrollMode]).
+                                val hPx =
+                                    if (suppressH || absDx < SCROLL_H_DEAD_ZONE ||
+                                        state.scrollMode != ScrollMode.BOTH
+                                    ) {
+                                        0f
+                                    } else {
+                                        -delta.x * WHEEL_SCROLL_PX_PER_TICK
+                                    }
+                                val vPx =
+                                    if (state.scrollMode == ScrollMode.NONE) {
+                                        0f
+                                    } else {
+                                        -delta.y * WHEEL_SCROLL_PX_PER_TICK
+                                    }
+                                state.wheelScrollBy(Offset(hPx, vPx))
+                            }
+                            else -> {
+                                state.commitPinchGesture()
+                                // dx=0 here in JBR vertical events → hScrollEma decays.
+                                vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                    kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
+                                hScrollEma = hScrollEma * (1f - SCROLL_EMA_ALPHA) +
+                                    kotlin.math.abs(delta.x) * SCROLL_EMA_ALPHA
+                                val vPx =
+                                    if (state.scrollMode == ScrollMode.NONE) {
+                                        0f
+                                    } else {
+                                        -delta.y * WHEEL_SCROLL_PX_PER_TICK
+                                    }
+                                state.wheelScrollBy(Offset(0f, vPx))
+                            }
+                        }
+                        change.consume()
+                    }
+                    else -> Unit
                 }
-                else -> Unit
             }
         }
     }
-}
 
 private class PanScrollbarAdapter(
     private val state: PdfViewerState,
     private val horizontal: Boolean,
 ) : ScrollbarAdapter {
-
     override val scrollOffset: Double
         get() {
             val layout = state.layout
@@ -857,11 +906,12 @@ private class PanScrollbarAdapter(
         }
 
     override val viewportSize: Double
-        get() = if (horizontal) {
-            state.viewportSize.width.toDouble()
-        } else {
-            state.viewportSize.height.toDouble()
-        }
+        get() =
+            if (horizontal) {
+                state.viewportSize.width.toDouble()
+            } else {
+                state.viewportSize.height.toDouble()
+            }
 
     override suspend fun scrollTo(scrollOffset: Double) {
         val layout = state.layout

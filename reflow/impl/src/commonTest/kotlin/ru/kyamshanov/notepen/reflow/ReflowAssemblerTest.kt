@@ -9,7 +9,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertTrue
 
 class ReflowAssemblerTest {
-
     @Test
     fun `classify empty document as image only`() {
         assertEquals(PdfContentKind.IMAGE_ONLY, ReflowAssembler.classify(emptyList()))
@@ -52,8 +51,9 @@ class ReflowAssemblerTest {
 
     @Test
     fun `detect heading by larger font size`() {
-        val glyphs = line("Title", top = 50f, fontSize = 20f) +
-            line("body text follows the heading", top = 100f)
+        val glyphs =
+            line("Title", top = 50f, fontSize = 20f) +
+                line("body text follows the heading", top = 100f)
         val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
         assertEquals(2, blocks.size)
         val heading = assertIs<ReflowBlock.Heading>(blocks[0])
@@ -95,8 +95,9 @@ class ReflowAssemblerTest {
 
     @Test
     fun `bold and monospace styles propagate to source spans`() {
-        val glyphs = line("bold", top = 100f, bold = true) +
-            line("code", top = 100f, startX = 120f, monospace = true)
+        val glyphs =
+            line("bold", top = 100f, bold = true) +
+                line("code", top = 100f, startX = 120f, monospace = true)
         val paragraph = assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
         assertEquals("bold code", paragraph.text)
         assertTrue(paragraph.source.filter { it.charEnd <= 4 }.all { it.bold && !it.monospace })
@@ -229,5 +230,4 @@ class ReflowAssemblerTest {
         val glyphs = line("just some normal prose", top = 100f) + line("second line of the prose", top = 112f)
         assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
     }
-
 }

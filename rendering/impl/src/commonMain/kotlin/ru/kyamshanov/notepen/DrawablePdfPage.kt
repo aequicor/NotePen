@@ -5,6 +5,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -16,8 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.layout.onSizeChanged
@@ -34,27 +35,22 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
-import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
-import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
-import ru.kyamshanov.notepen.drawing.api.EraserPosition
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
-import ru.kyamshanov.notepen.drawing.api.eraseInZone
 import ru.kyamshanov.notepen.lowlatency.LowLatencyStrokeOverlay
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
 import ru.kyamshanov.notepen.magnifier.MagnifierState
@@ -62,6 +58,8 @@ import ru.kyamshanov.notepen.magnifier.MagnifierTargetOverlay
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.effectivePressure
+import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
+import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
@@ -345,9 +343,10 @@ fun DrawablePdfPage(
         // SnapshotStateList из фонового диспетчера (конкурентная мутация вводом).
         val paths = pdfDrawingState.currentPaths.toList()
         val ext = pdfDrawingState.extent.value
-        val bmp = withContext(rasterDispatcher) {
-            buildCompletedInk(bw, bh, paths, ext, density, layoutDirection)
-        }
+        val bmp =
+            withContext(rasterDispatcher) {
+                buildCompletedInk(bw, bh, paths, ext, density, layoutDirection)
+            }
         completedInk.value = CachedInk(paths.size, bmp)
     }
 
@@ -355,8 +354,9 @@ fun DrawablePdfPage(
     // [MultiPageDrawingController]) — страница только рендерит штрихи и
     // индикаторы.
     Box(
-        modifier = modifier
-            .onSizeChanged { canvasSize.value = it },
+        modifier =
+            modifier
+                .onSizeChanged { canvasSize.value = it },
     ) {
         // The PDF bitmap is drawn INSIDE the ink Canvas below (not as a separate
         // composable) so the marker can blend against the PDF pixels with
@@ -389,10 +389,11 @@ fun DrawablePdfPage(
             // Positioned from `pageExtent` (the layout-pass value) — NOT
             // state.extent — so the page doesn't jitter one frame when extent
             // grows mid-stroke (see KDoc on [pdfWidth]).
-            val pdfDstOffset = IntOffset(
-                (-pageExtent.left * pdfWidthPx).toInt(),
-                (-pageExtent.top * pdfHeightPx).toInt(),
-            )
+            val pdfDstOffset =
+                IntOffset(
+                    (-pageExtent.left * pdfWidthPx).toInt(),
+                    (-pageExtent.top * pdfHeightPx).toInt(),
+                )
             val pdfDstSize = IntSize(pdfWidthPx.toInt(), pdfHeightPx.toInt())
             drawImage(
                 image = bitmap,
@@ -551,11 +552,12 @@ fun DrawablePdfPage(
             ) {
                 val cx = (hover.x - ext.left) * pdfW
                 val cy = (hover.y - ext.top) * pdfH
-                val toolStrokePx = when (toolMode) {
-                    ToolMode.PEN -> penSettings.strokeWidth
-                    ToolMode.MARKER -> markerSettings.strokeWidth
-                    else -> 0f
-                } * pdfW
+                val toolStrokePx =
+                    when (toolMode) {
+                        ToolMode.PEN -> penSettings.strokeWidth
+                        ToolMode.MARKER -> markerSettings.strokeWidth
+                        else -> 0f
+                    } * pdfW
                 val radiusPx = kotlin.math.max(HOVER_INDICATOR_MIN_RADIUS_PX, toolStrokePx * 0.5f)
                 drawCircle(
                     color = indicatorColor.copy(alpha = HOVER_INDICATOR_ALPHA),
@@ -586,17 +588,19 @@ fun DrawablePdfPage(
         // области, попадающей в окно лупы.
         if (magnifierState != null) {
             Box(
-                modifier = Modifier
-                    .offset(x = pdfOffsetXDp, y = pdfOffsetYDp)
-                    .size(width = pdfWDp, height = pdfHDp),
+                modifier =
+                    Modifier
+                        .offset(x = pdfOffsetXDp, y = pdfOffsetYDp)
+                        .size(width = pdfWDp, height = pdfHDp),
             ) {
                 MagnifierTargetOverlay(
                     state = magnifierState,
                     pageIndex = pageIndex,
                     frameColor = MaterialTheme.colorScheme.primary,
                     isGrabbing = isMagnifierGrabbing,
-                    isScreenPinned = magnifierState.attachment ==
-                        ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN,
+                    isScreenPinned =
+                        magnifierState.attachment ==
+                            ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN,
                 )
             }
         }
@@ -634,9 +638,10 @@ suspend fun PointerInputScope.detectStylusAwareDrag(
         // первый DOWN приходит с Unknown (TOOL_TYPE_UNKNOWN = 0 — hardware
         // ещё не классифицировал касание); ограничение по типу пропускало
         // такой DOWN в scrollable и начинался скролл вместо выделения лупой.
-        val isDrawingPointer = down.type == PointerType.Stylus ||
-            down.type == PointerType.Eraser ||
-            down.type == PointerType.Mouse
+        val isDrawingPointer =
+            down.type == PointerType.Stylus ||
+                down.type == PointerType.Eraser ||
+                down.type == PointerType.Mouse
         if (!isDrawingPointer && !captureGesture(down.position)) {
             return@awaitEachGesture
         }
@@ -742,12 +747,14 @@ fun DrawScope.drawLiveStroke(
             drawPath(
                 path = scratch,
                 color = color,
-                style = Stroke(
-                    width = (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
-                        .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round,
-                ),
+                style =
+                    Stroke(
+                        width =
+                            (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
+                                .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    ),
             )
             return
         }
@@ -759,27 +766,34 @@ fun DrawScope.drawLiveStroke(
         val p2 = points[i + 1]
         val p3 = if (i + 2 < points.size) points[i + 2] else points[i + 1]
 
-        val x1 = (p1.x + offX) * pdfWidth; val y1 = (p1.y + offY) * pdfHeight
-        val x2 = (p2.x + offX) * pdfWidth; val y2 = (p2.y + offY) * pdfHeight
+        val x1 = (p1.x + offX) * pdfWidth
+        val y1 = (p1.y + offY) * pdfHeight
+        val x2 = (p2.x + offX) * pdfWidth
+        val y2 = (p2.y + offY) * pdfHeight
 
         scratch.reset()
         scratch.moveTo(x1, y1)
         scratch.cubicTo(
-            x1 + (p2.x - p0.x) * pdfWidth / 6f, y1 + (p2.y - p0.y) * pdfHeight / 6f,
-            x2 - (p3.x - p1.x) * pdfWidth / 6f, y2 - (p3.y - p1.y) * pdfHeight / 6f,
-            x2, y2,
+            x1 + (p2.x - p0.x) * pdfWidth / 6f,
+            y1 + (p2.y - p0.y) * pdfHeight / 6f,
+            x2 - (p3.x - p1.x) * pdfWidth / 6f,
+            y2 - (p3.y - p1.y) * pdfHeight / 6f,
+            x2,
+            y2,
         )
         val avgPressure = (p1.pressure + p2.pressure) * 0.5f
         val avgTilt = (p1.tilt + p2.tilt) * 0.5f
         drawPath(
             path = scratch,
             color = color,
-            style = Stroke(
-                width = (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
-                    .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round,
-            ),
+            style =
+                Stroke(
+                    width =
+                        (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
+                            .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
         )
     }
 }
@@ -823,12 +837,14 @@ fun DrawScope.drawStrokeWithPressure(
         drawPath(
             path = scratch,
             color = color,
-            style = Stroke(
-                width = (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
-                    .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round,
-            ),
+            style =
+                Stroke(
+                    width =
+                        (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
+                            .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                    cap = StrokeCap.Round,
+                    join = StrokeJoin.Round,
+                ),
         )
         return
     }
@@ -846,27 +862,34 @@ fun DrawScope.drawStrokeWithPressure(
             val p2 = seg[i + 1]
             val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
 
-            val x1 = (p1.x + offX) * pdfWidth; val y1 = (p1.y + offY) * pdfHeight
-            val x2 = (p2.x + offX) * pdfWidth; val y2 = (p2.y + offY) * pdfHeight
+            val x1 = (p1.x + offX) * pdfWidth
+            val y1 = (p1.y + offY) * pdfHeight
+            val x2 = (p2.x + offX) * pdfWidth
+            val y2 = (p2.y + offY) * pdfHeight
 
             scratch.reset()
             scratch.moveTo(x1, y1)
             scratch.cubicTo(
-                x1 + (p2.x - p0.x) * pdfWidth / 6f, y1 + (p2.y - p0.y) * pdfHeight / 6f,
-                x2 - (p3.x - p1.x) * pdfWidth / 6f, y2 - (p3.y - p1.y) * pdfHeight / 6f,
-                x2, y2,
+                x1 + (p2.x - p0.x) * pdfWidth / 6f,
+                y1 + (p2.y - p0.y) * pdfHeight / 6f,
+                x2 - (p3.x - p1.x) * pdfWidth / 6f,
+                y2 - (p3.y - p1.y) * pdfHeight / 6f,
+                x2,
+                y2,
             )
             val avgPressure = (p1.pressure + p2.pressure) * 0.5f
             val avgTilt = (p1.tilt + p2.tilt) * 0.5f
             drawPath(
                 path = scratch,
                 color = color,
-                style = Stroke(
-                    width = (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
-                        .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round,
-                ),
+                style =
+                    Stroke(
+                        width =
+                            (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
+                                .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    ),
             )
         }
     }
@@ -913,13 +936,18 @@ private fun List<DrawingPoint>.appendCatmullRomTo(
             val p2 = seg[i + 1]
             val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
 
-            val x1 = (p1.x + offX) * pdfW; val y1 = (p1.y + offY) * pdfH
-            val x2 = (p2.x + offX) * pdfW; val y2 = (p2.y + offY) * pdfH
+            val x1 = (p1.x + offX) * pdfW
+            val y1 = (p1.y + offY) * pdfH
+            val x2 = (p2.x + offX) * pdfW
+            val y2 = (p2.y + offY) * pdfH
 
             target.cubicTo(
-                x1 + (p2.x - p0.x) * pdfW / 6f, y1 + (p2.y - p0.y) * pdfH / 6f,
-                x2 - (p3.x - p1.x) * pdfW / 6f, y2 - (p3.y - p1.y) * pdfH / 6f,
-                x2, y2,
+                x1 + (p2.x - p0.x) * pdfW / 6f,
+                y1 + (p2.y - p0.y) * pdfH / 6f,
+                x2 - (p3.x - p1.x) * pdfW / 6f,
+                y2 - (p3.y - p1.y) * pdfH / 6f,
+                x2,
+                y2,
             )
         }
     }

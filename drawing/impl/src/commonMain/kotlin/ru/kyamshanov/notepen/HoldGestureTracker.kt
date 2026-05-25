@@ -30,7 +30,11 @@ class HoldGestureTracker(
     private var anchorAspect: Float = 1f
 
     /** Начало жеста — устанавливает якорь и запускает таймер. */
-    fun onDown(x: Float, y: Float, aspect: Float) {
+    fun onDown(
+        x: Float,
+        y: Float,
+        aspect: Float,
+    ) {
         anchorX = x
         anchorY = y
         anchorAspect = if (aspect > 0f) aspect else 1f
@@ -42,7 +46,10 @@ class HoldGestureTracker(
      * физическом пространстве — таймер перезапускается с этой позиции в роли
      * нового якоря.
      */
-    fun onMove(x: Float, y: Float) {
+    fun onMove(
+        x: Float,
+        y: Float,
+    ) {
         val dx = (x - anchorX) * anchorAspect
         val dy = y - anchorY
         if (sqrt(dx * dx + dy * dy) > toleranceNorm) {
@@ -60,9 +67,10 @@ class HoldGestureTracker(
 
     private fun restart() {
         job?.cancel()
-        job = scope.launch {
-            delay(delayMs)
-            onHold()
-        }
+        job =
+            scope.launch {
+                delay(delayMs)
+                onHold()
+            }
     }
 }

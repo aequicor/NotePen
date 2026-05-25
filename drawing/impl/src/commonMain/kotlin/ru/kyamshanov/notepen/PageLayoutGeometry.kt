@@ -12,7 +12,6 @@ import androidx.compose.ui.geometry.Offset
  * «вживую» на момент вызова (pan/zoom меняются каждый кадр).
  */
 interface PageLayoutGeometry {
-
     /** Количество страниц в раскладке. */
     val pageCount: Int
 

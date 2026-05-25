@@ -17,7 +17,6 @@ internal class JvmPdfDocument(
     private val document: PDDocument,
     override val info: PdfDocumentInfo,
 ) : PdfDocument {
-
     private val lock = Any()
 
     @Volatile
@@ -29,20 +28,22 @@ internal class JvmPdfDocument(
      * Если документ уже закрыт — выбрасывает [CancellationException], чтобы
      * вызывающий корутин-скоуп тихо отменил работу.
      */
-    internal fun <R> useRenderer(block: (PDFRenderer) -> R): R = synchronized(lock) {
-        if (closed) throw CancellationException("PDF document is closed")
-        block(renderer)
-    }
+    internal fun <R> useRenderer(block: (PDFRenderer) -> R): R =
+        synchronized(lock) {
+            if (closed) throw CancellationException("PDF document is closed")
+            block(renderer)
+        }
 
     /**
      * Выполняет [block] над [PDDocument] под тем же монитором, что и [useRenderer].
      *
      * Если документ уже закрыт — выбрасывает [CancellationException].
      */
-    internal fun <R> useDocument(block: (PDDocument) -> R): R = synchronized(lock) {
-        if (closed) throw CancellationException("PDF document is closed")
-        block(document)
-    }
+    internal fun <R> useDocument(block: (PDDocument) -> R): R =
+        synchronized(lock) {
+            if (closed) throw CancellationException("PDF document is closed")
+            block(document)
+        }
 
     override fun close() {
         synchronized(lock) {

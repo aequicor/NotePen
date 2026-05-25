@@ -70,9 +70,10 @@ internal actual fun extractExternalFileUris(event: DragAndDropEvent): List<Strin
     try {
         val transferable = event.awtTransferable
         if (transferable.isDataFlavorSupported(DataFlavor.javaFileListFlavor)) {
-            val files = (transferable.getTransferData(DataFlavor.javaFileListFlavor) as? List<*>)
-                .orEmpty()
-                .filterIsInstance<File>()
+            val files =
+                (transferable.getTransferData(DataFlavor.javaFileListFlavor) as? List<*>)
+                    .orEmpty()
+                    .filterIsInstance<File>()
             files
                 .filter { file -> ALLOWED_EXTERNAL_EXTENSIONS.any { file.name.endsWith(it, ignoreCase = true) } }
                 .map { it.canonicalPath }

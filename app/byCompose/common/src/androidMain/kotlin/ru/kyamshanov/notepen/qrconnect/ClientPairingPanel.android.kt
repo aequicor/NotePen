@@ -77,16 +77,17 @@ actual fun CameraScanSlot(
     var permissionEverAsked by remember { mutableStateOf(false) }
     var lastDeniedPermanently by remember { mutableStateOf(false) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission(),
-    ) { granted ->
-        permissionEverAsked = true
-        hasPermission = granted
-        if (!granted && activity != null) {
-            lastDeniedPermanently =
-                !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
+    val permissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            permissionEverAsked = true
+            hasPermission = granted
+            if (!granted && activity != null) {
+                lastDeniedPermanently =
+                    !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.CAMERA)
+            }
         }
-    }
 
     // Auto-prompt the very first time the slot is shown — onboarding already
     // explained why we need the permission, so launching the system dialog
@@ -131,10 +132,11 @@ actual fun CameraScanSlot(
         var scanner by remember { mutableStateOf<MlKitQrScanner?>(null) }
 
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(320.dp)
-                .background(Color.Black),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .height(320.dp)
+                    .background(Color.Black),
             contentAlignment = Alignment.Center,
         ) {
             AndroidView(
@@ -164,11 +166,12 @@ actual fun CameraScanSlot(
             val lifecycleOwner: LifecycleOwner? = remember(pv) { pv.findViewTreeLifecycleOwner() }
             if (lifecycleOwner != null) {
                 DisposableEffect(pv, lifecycleOwner) {
-                    val sc = MlKitQrScanner(
-                        context = context,
-                        lifecycleOwner = lifecycleOwner,
-                        previewView = pv,
-                    )
+                    val sc =
+                        MlKitQrScanner(
+                            context = context,
+                            lifecycleOwner = lifecycleOwner,
+                            previewView = pv,
+                        )
                     scanner = sc
                     val job = viewModel.start(sc)
                     onDispose { job.cancel() }
@@ -197,22 +200,24 @@ private fun PermissionDeniedBlock(
         tint = MaterialTheme.colorScheme.primary,
     )
     Text(
-        text = if (deniedPermanently) {
-            "Камера запрещена в настройках"
-        } else {
-            "Нужен доступ к камере"
-        },
+        text =
+            if (deniedPermanently) {
+                "Камера запрещена в настройках"
+            } else {
+                "Нужен доступ к камере"
+            },
         style = MaterialTheme.typography.titleLarge,
         textAlign = TextAlign.Center,
     )
     Text(
-        text = if (deniedPermanently) {
-            "Откройте Настройки → Приложения → NotePen → Разрешения и включите Камеру, " +
-                "либо подключитесь к ПК вручную, без сканирования."
-        } else {
-            "NotePen использует камеру только для распознавания QR — кадры обрабатываются на устройстве " +
-                "и никуда не отправляются. Без доступа можно подключиться вручную."
-        },
+        text =
+            if (deniedPermanently) {
+                "Откройте Настройки → Приложения → NotePen → Разрешения и включите Камеру, " +
+                    "либо подключитесь к ПК вручную, без сканирования."
+            } else {
+                "NotePen использует камеру только для распознавания QR — кадры обрабатываются на устройстве " +
+                    "и никуда не отправляются. Без доступа можно подключиться вручную."
+            },
         style = MaterialTheme.typography.bodyMedium,
         textAlign = TextAlign.Center,
     )

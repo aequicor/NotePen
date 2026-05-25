@@ -19,10 +19,11 @@ import kotlinx.coroutines.withContext
 @Composable
 actual fun rememberPdfThumbnailPainter(imageData: ByteArray): Painter? {
     val bitmap by produceState<ImageBitmap?>(null, imageData) {
-        value = withContext(Dispatchers.IO) {
-            android.graphics.BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
-                ?.asImageBitmap()
-        }
+        value =
+            withContext(Dispatchers.IO) {
+                android.graphics.BitmapFactory.decodeByteArray(imageData, 0, imageData.size)
+                    ?.asImageBitmap()
+            }
     }
     return bitmap?.let { BitmapPainter(it) }
 }

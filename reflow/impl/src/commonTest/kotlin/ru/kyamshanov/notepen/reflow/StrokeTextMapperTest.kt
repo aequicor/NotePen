@@ -10,7 +10,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class StrokeTextMapperTest {
-
     @Test
     fun `stroke over one word anchors that word`() {
         val doc = helloWorld()
@@ -89,22 +88,27 @@ class StrokeTextMapperTest {
         assertTrue(spans.all { it.bounds.left in 0f..1f && it.bounds.top in 0f..1f })
     }
 
-    private fun helloWorld(): ReflowDocument =
-        ReflowAssembler.assemble(listOf(page(line("hello world", top = 100f))))
+    private fun helloWorld(): ReflowDocument = ReflowAssembler.assemble(listOf(page(line("hello world", top = 100f))))
 
-    private fun substringOf(doc: ReflowDocument, anchor: TextAnchor): String {
-        val text = when (val block = doc.blocks[anchor.blockIndex]) {
-            is ReflowBlock.Paragraph -> block.text
-            is ReflowBlock.Heading -> block.text
-            is ReflowBlock.ListItem -> block.text
-            is ReflowBlock.Table -> ""
-            is ReflowBlock.Figure -> ""
-        }
+    private fun substringOf(
+        doc: ReflowDocument,
+        anchor: TextAnchor,
+    ): String {
+        val text =
+            when (val block = doc.blocks[anchor.blockIndex]) {
+                is ReflowBlock.Paragraph -> block.text
+                is ReflowBlock.Heading -> block.text
+                is ReflowBlock.ListItem -> block.text
+                is ReflowBlock.Table -> ""
+                is ReflowBlock.Figure -> ""
+            }
         return text.substring(anchor.charStart, anchor.charEnd)
     }
 
-    private fun norm(xPt: Float, yPt: Float): DrawingPoint =
-        DrawingPoint(xPt / PAGE_WIDTH_PT, yPt / PAGE_HEIGHT_PT)
+    private fun norm(
+        xPt: Float,
+        yPt: Float,
+    ): DrawingPoint = DrawingPoint(xPt / PAGE_WIDTH_PT, yPt / PAGE_HEIGHT_PT)
 
     private fun stroke(vararg points: DrawingPoint): DrawingPath = DrawingPath(points = points.toList())
 }

@@ -19,15 +19,19 @@ import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
 class PdfThumbnailGeneratorAndroid(
     private val context: Context,
 ) : PdfThumbnailGenerator {
-
-    override suspend fun generate(uri: String, widthPx: Int, heightPx: Int): Result<ByteArray> =
+    override suspend fun generate(
+        uri: String,
+        widthPx: Int,
+        heightPx: Int,
+    ): Result<ByteArray> =
         withContext(Dispatchers.IO) {
             runCatching {
                 require(widthPx in 1..4096 && heightPx in 1..4096) {
-                    "Thumbnail dimensions out of range: ${widthPx}x${heightPx}"
+                    "Thumbnail dimensions out of range: ${widthPx}x$heightPx"
                 }
-                val descriptor = context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")
-                    ?: throw ThumbnailGenerationException("Cannot open file descriptor for uri")
+                val descriptor =
+                    context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")
+                        ?: throw ThumbnailGenerationException("Cannot open file descriptor for uri")
                 descriptor.use { fd ->
                     PdfRenderer(fd).use { renderer ->
                         if (renderer.pageCount == 0) throw ThumbnailGenerationException("Empty PDF: no pages")

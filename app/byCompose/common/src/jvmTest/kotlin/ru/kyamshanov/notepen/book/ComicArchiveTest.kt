@@ -7,15 +7,15 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class ComicArchiveTest {
-
     @Test
     fun `extracts cbz images in natural page order, skipping non-images`() {
-        val cbz = cbzOf(
-            "page10.jpg" to "J",
-            "page2.jpg" to "B",
-            "page1.jpg" to "A",
-            "notes.txt" to "ignored",
-        )
+        val cbz =
+            cbzOf(
+                "page10.jpg" to "J",
+                "page2.jpg" to "B",
+                "page1.jpg" to "A",
+                "notes.txt" to "ignored",
+            )
         val pages = ComicArchive.extract(cbz, BookFormat.CBZ).map { String(it, Charsets.UTF_8) }
         assertEquals(listOf("A", "B", "J"), pages)
     }

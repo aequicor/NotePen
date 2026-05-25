@@ -39,45 +39,55 @@ class AndroidPdfReflowExtractor(
     private val context: Context,
     private val ioDispatcher: CoroutineDispatcher,
 ) : PdfReflowExtractor {
-
-    override suspend fun probe(path: String): PdfContentKind = withContext(ioDispatcher) {
-        openDocument(path).use { document ->
-            val limit = minOf(PROBE_PAGE_LIMIT, document.numberOfPages)
-            ReflowAssembler.classify((0 until limit).map { extractPage(document, it) })
+    override suspend fun probe(path: String): PdfContentKind =
+        withContext(ioDispatcher) {
+            openDocument(path).use { document ->
+                val limit = minOf(PROBE_PAGE_LIMIT, document.numberOfPages)
+                ReflowAssembler.classify((0 until limit).map { extractPage(document, it) })
+            }
         }
-    }
 
-    override suspend fun extract(path: String): ReflowDocument = withContext(ioDispatcher) {
-        openDocument(path).use { document ->
-            ReflowAssembler.assemble((0 until document.numberOfPages).map { extractPage(document, it) })
+    override suspend fun extract(path: String): ReflowDocument =
+        withContext(ioDispatcher) {
+            openDocument(path).use { document ->
+                ReflowAssembler.assemble((0 until document.numberOfPages).map { extractPage(document, it) })
+            }
         }
-    }
 
     private fun openDocument(path: String): PDDocument {
         PDFBoxResourceLoader.init(context.applicationContext)
         val uri = Uri.parse(path)
-        val stream = when (uri.scheme) {
-            null, "file" -> {
-                val file = File(uri.path ?: path)
-                require(file.exists() && file.canRead()) { "PDF file not found or not readable: $path" }
-                file.inputStream()
-            }
+        val stream =
+            when (uri.scheme) {
+                null, "file" -> {
+                    val file = File(uri.path ?: path)
+                    require(file.exists() && file.canRead()) { "PDF file not found or not readable: $path" }
+                    file.inputStream()
+                }
 
-            else -> context.contentResolver.openInputStream(uri)
-                ?: throw IllegalArgumentException("Cannot open stream for: $path")
-        }
+                else ->
+                    context.contentResolver.openInputStream(uri)
+                        ?: throw IllegalArgumentException("Cannot open stream for: $path")
+            }
         return stream.use { PDDocument.load(it) }
     }
 
-    private fun extractPage(document: PDDocument, pageIndex: Int): RawPage {
+    private fun extractPage(
+        document: PDDocument,
+        pageIndex: Int,
+    ): RawPage {
         val page = document.getPage(pageIndex)
         val box = page.mediaBox
         val glyphs = mutableListOf<RawGlyph>()
-        val stripper = object : PDFTextStripper() {
-            override fun writeString(text: String, textPositions: List<TextPosition>) {
-                textPositions.forEach { position -> position.toGlyph()?.let(glyphs::add) }
+        val stripper =
+            object : PDFTextStripper() {
+                override fun writeString(
+                    text: String,
+                    textPositions: List<TextPosition>,
+                ) {
+                    textPositions.forEach { position -> position.toGlyph()?.let(glyphs::add) }
+                }
             }
-        }
         stripper.sortByPosition = true
         stripper.startPage = pageIndex + 1
         stripper.endPage = pageIndex + 1
@@ -101,12 +111,13 @@ class AndroidPdfReflowExtractor(
         val fontName = font?.name
         return RawGlyph(
             text = text,
-            rect = ReflowRect(
-                left = xDirAdj,
-                top = yDirAdj - heightDir,
-                right = xDirAdj + widthDirAdj,
-                bottom = yDirAdj,
-            ),
+            rect =
+                ReflowRect(
+                    left = xDirAdj,
+                    top = yDirAdj - heightDir,
+                    right = xDirAdj + widthDirAdj,
+                    bottom = yDirAdj,
+                ),
             fontSizePt = fontSizeInPt,
             spaceWidthPt = widthOfSpace,
             bold = FontStyles.isBold(fontName),
@@ -124,28 +135,58 @@ class AndroidPdfReflowExtractor(
 
         override fun drawImage(pdImage: PDImage) {
             val m = graphicsState.currentTransformationMatrix
-            regions += FigureGeometry.imageRectFromCtm(
-                scaleX = m.scaleX,
-                shearY = m.shearY,
-                shearX = m.shearX,
-                scaleY = m.scaleY,
-                translateX = m.translateX,
-                translateY = m.translateY,
-                pageHeightPt = pageHeight,
-            )
+            regions +=
+                FigureGeometry.imageRectFromCtm(
+                    scaleX = m.scaleX,
+                    shearY = m.shearY,
+                    shearX = m.shearX,
+                    scaleY = m.scaleY,
+                    translateX = m.translateX,
+                    translateY = m.translateY,
+                    pageHeightPt = pageHeight,
+                )
         }
 
-        override fun appendRectangle(p0: PointF, p1: PointF, p2: PointF, p3: PointF) {}
+        override fun appendRectangle(
+            p0: PointF,
+            p1: PointF,
+            p2: PointF,
+            p3: PointF,
+        ) {}
+
         override fun clip(windingRule: Path.FillType) {}
-        override fun moveTo(x: Float, y: Float) {}
-        override fun lineTo(x: Float, y: Float) {}
-        override fun curveTo(x1: Float, y1: Float, x2: Float, y2: Float, x3: Float, y3: Float) {}
+
+        override fun moveTo(
+            x: Float,
+            y: Float,
+        ) {}
+
+        override fun lineTo(
+            x: Float,
+            y: Float,
+        ) {}
+
+        override fun curveTo(
+            x1: Float,
+            y1: Float,
+            x2: Float,
+            y2: Float,
+            x3: Float,
+            y3: Float,
+        ) {}
+
         override fun getCurrentPoint(): PointF = PointF(0f, 0f)
+
         override fun closePath() {}
+
         override fun endPath() {}
+
         override fun strokePath() {}
+
         override fun fillPath(windingRule: Path.FillType) {}
+
         override fun fillAndStrokePath(windingRule: Path.FillType) {}
+
         override fun shadingFill(shadingName: COSName) {}
     }
 

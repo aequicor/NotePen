@@ -60,12 +60,12 @@ class MultiPageDrawingController(
      */
     private val scope: CoroutineScope,
 ) {
-
     private enum class Mode { NONE, DRAW, ERASE }
 
     private var activePageIndex: Int = -1
     private var activeMode: Mode = Mode.NONE
     private var activeErase: EraseGesture? = null
+
     /**
      * Tool, выбранный на момент `onDown` — фиксируем, чтобы смена инструмента
      * посреди жеста не размазала штрих между пайплайнами.
@@ -80,14 +80,19 @@ class MultiPageDrawingController(
      */
     private var lastViewportPos: Offset = Offset.Zero
 
-    private val holdTracker = HoldGestureTracker(
-        scope = scope,
-        delayMs = SHAPE_SNAP_HOLD_MS,
-        toleranceNorm = SHAPE_SNAP_TOLERANCE_NORM,
-        onHold = ::triggerShapeSnap,
-    )
+    private val holdTracker =
+        HoldGestureTracker(
+            scope = scope,
+            delayMs = SHAPE_SNAP_HOLD_MS,
+            toleranceNorm = SHAPE_SNAP_TOLERANCE_NORM,
+            onHold = ::triggerShapeSnap,
+        )
 
-    fun onDown(viewportPos: Offset, pressure: Float, tilt: Float) {
+    fun onDown(
+        viewportPos: Offset,
+        pressure: Float,
+        tilt: Float,
+    ) {
         cancelActive()
         val hit = hitTest(viewportPos) ?: return
         val (pageIndex, nx, ny) = hit
@@ -103,7 +108,11 @@ class MultiPageDrawingController(
         }
     }
 
-    fun onMove(viewportPos: Offset, pressure: Float, tilt: Float) {
+    fun onMove(
+        viewportPos: Offset,
+        pressure: Float,
+        tilt: Float,
+    ) {
         if (activeMode == Mode.NONE) return
         val hit = hitTest(viewportPos) ?: return
         val (pageIndex, nx, ny) = hit
@@ -161,18 +170,20 @@ class MultiPageDrawingController(
         val goingDown = newPageIndex > activePageIndex
         val oldBoundaryNy = if (goingDown) 1f else 0f
         val newBoundaryNy = if (goingDown) 0f else 1f
-        val boundaryDocY = if (goingDown) {
-            geometry.pageTopPx(activePageIndex) + geometry.pdfHeightPx(activePageIndex)
-        } else {
-            geometry.pageTopPx(activePageIndex)
-        }
+        val boundaryDocY =
+            if (goingDown) {
+                geometry.pageTopPx(activePageIndex) + geometry.pdfHeightPx(activePageIndex)
+            } else {
+                geometry.pageTopPx(activePageIndex)
+            }
         val boundaryViewportY = geometry.pan.y + boundaryDocY * geometry.zoom
         val prev = lastViewportPos
         val dy = viewportPos.y - prev.y
         val t = if (dy != 0f) ((boundaryViewportY - prev.y) / dy).coerceIn(0f, 1f) else 0.5f
         val boundaryViewportX = prev.x + t * (viewportPos.x - prev.x)
-        val boundaryNx = ((boundaryViewportX - geometry.pan.x) / geometry.zoom) /
-            geometry.basePageWidthPx
+        val boundaryNx =
+            ((boundaryViewportX - geometry.pan.x) / geometry.zoom) /
+                geometry.basePageWidthPx
         // Бесшовная стыковка: оба штриха ПРОДЛЕВАЮТСЯ через границу в зону
         // extent соседней страницы, чтобы их «настоящие» конечные/стартовые
         // cap'ы оказались СКРЫТЫ под bitmap'ом другой страницы. В видимой
@@ -197,11 +208,12 @@ class MultiPageDrawingController(
         val newExtrapolatedNy =
             (prevDocY - geometry.pageTopPx(newPageIndex)) / geometry.pdfHeightPx(newPageIndex)
         // Текущий sample в координатах СТАРОЙ страницы (для goingDown ny > 1).
-        val oldExtrapolatedNy = if (goingDown) {
-            1f + ny * geometry.pdfHeightPx(newPageIndex) / geometry.pdfHeightPx(activePageIndex)
-        } else {
-            0f - (1f - ny) * geometry.pdfHeightPx(newPageIndex) / geometry.pdfHeightPx(activePageIndex)
-        }
+        val oldExtrapolatedNy =
+            if (goingDown) {
+                1f + ny * geometry.pdfHeightPx(newPageIndex) / geometry.pdfHeightPx(activePageIndex)
+            } else {
+                0f - (1f - ny) * geometry.pdfHeightPx(newPageIndex) / geometry.pdfHeightPx(activePageIndex)
+            }
         when (activeMode) {
             Mode.DRAW -> {
                 // Без явной boundary-точки: верхний штрих заканчивается в
@@ -242,16 +254,18 @@ class MultiPageDrawingController(
         if (pdfWidthPx <= 0f) return
         // strokeWidth is already a fraction of page width (DPI-independent),
         // so it can be fed straight into normalizedStrokeWidth without /pdfWidthPx.
-        val settingsStrokeWidth = when (gestureTool) {
-            ToolMode.PEN -> penSettings().strokeWidth
-            ToolMode.MARKER -> markerSettings().strokeWidth
-            else -> return
-        }
-        val settingsColorArgb = when (gestureTool) {
-            ToolMode.PEN -> penSettings().colorArgb
-            ToolMode.MARKER -> markerSettings().colorArgb
-            else -> return
-        }
+        val settingsStrokeWidth =
+            when (gestureTool) {
+                ToolMode.PEN -> penSettings().strokeWidth
+                ToolMode.MARKER -> markerSettings().strokeWidth
+                else -> return
+            }
+        val settingsColorArgb =
+            when (gestureTool) {
+                ToolMode.PEN -> penSettings().colorArgb
+                ToolMode.MARKER -> markerSettings().colorArgb
+                else -> return
+            }
         onGestureStart(pageIndex, state.currentPaths.toList())
         state.strokeColorArgb.value = settingsColorArgb
         state.strokeWidth.value = settingsStrokeWidth
@@ -291,14 +305,20 @@ class MultiPageDrawingController(
         return if (h > 0f) w / h else 1f
     }
 
-    private fun startErase(pageIndex: Int, state: PdfDrawingState, nx: Float, ny: Float) {
-        val gesture = EraseGesture(
-            pdfDrawingState = state,
-            eraserSettings = eraserSettings(),
-            eraserPos = state.eraserPos,
-            onGestureStart = { snapshot -> onGestureStart(pageIndex, snapshot) },
-            onEraseFinished = { before, after -> onEraseFinished(pageIndex, before, after) },
-        )
+    private fun startErase(
+        pageIndex: Int,
+        state: PdfDrawingState,
+        nx: Float,
+        ny: Float,
+    ) {
+        val gesture =
+            EraseGesture(
+                pdfDrawingState = state,
+                eraserSettings = eraserSettings(),
+                eraserPos = state.eraserPos,
+                onGestureStart = { snapshot -> onGestureStart(pageIndex, snapshot) },
+                onEraseFinished = { before, after -> onEraseFinished(pageIndex, before, after) },
+            )
         gesture.start(nx, ny)
         activeErase = gesture
         activePageIndex = pageIndex
@@ -358,18 +378,19 @@ class MultiPageDrawingController(
         // клампим в [0, n-1] для случая, когда палец ушёл выше первой
         // страницы или ниже последней (extent одной из крайних страниц
         // может покрывать эту зону).
-        val pageIndex = when {
-            docY <= geometry.pageTopPx(0) -> 0
-            else -> {
-                var lo = 0
-                var hi = n - 1
-                while (lo < hi) {
-                    val mid = (lo + hi + 1) ushr 1
-                    if (geometry.pageTopPx(mid) <= docY) lo = mid else hi = mid - 1
+        val pageIndex =
+            when {
+                docY <= geometry.pageTopPx(0) -> 0
+                else -> {
+                    var lo = 0
+                    var hi = n - 1
+                    while (lo < hi) {
+                        val mid = (lo + hi + 1) ushr 1
+                        if (geometry.pageTopPx(mid) <= docY) lo = mid else hi = mid - 1
+                    }
+                    lo
                 }
-                lo
             }
-        }
         val pdfH = geometry.pdfHeightPx(pageIndex)
         val nx = docX / geometry.basePageWidthPx
         val ny = (docY - geometry.pageTopPx(pageIndex)) / pdfH

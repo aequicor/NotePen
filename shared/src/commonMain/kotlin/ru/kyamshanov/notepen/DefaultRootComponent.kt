@@ -55,7 +55,6 @@ class DefaultRootComponent(
         onOpenFolder: (folderId: String, folderName: String) -> Unit,
     ) -> FolderComponent,
 ) : RootComponent, ComponentContext by componentContext {
-
     private val navigation = StackNavigation<Config>()
 
     override val stack: Value<ChildStack<*, RootComponent.Child>> =
@@ -93,7 +92,10 @@ class DefaultRootComponent(
      * pushed as before.
      */
     @OptIn(DelicateDecomposeApi::class)
-    private fun openEditorOrAddTab(uri: String, lastPageIndex: Int) {
+    private fun openEditorOrAddTab(
+        uri: String,
+        lastPageIndex: Int,
+    ) {
         val items = stack.value.items
         val libraryIndex = items.indexOfLast { it.configuration is Config.Library }
         val editorIndex = libraryIndex - 1
@@ -113,13 +115,17 @@ class DefaultRootComponent(
      */
     private val pendingTabUri = MutableValue("")
 
-    private fun child(config: Config, ctx: ComponentContext): RootComponent.Child = when (config) {
-        is Config.Main -> MainChild(mainComponent(ctx))
-        is Config.Library -> MainChild(libraryComponent(ctx))
-        is Config.Details -> DetailsChild(detailsComponent(ctx, config))
-        is Config.PeerCatalog -> PeerCatalogChild(peerCatalogComponent(ctx, config))
-        is Config.FolderContents -> FolderContentsChild(folderContentsComponent(ctx, config))
-    }
+    private fun child(
+        config: Config,
+        ctx: ComponentContext,
+    ): RootComponent.Child =
+        when (config) {
+            is Config.Main -> MainChild(mainComponent(ctx))
+            is Config.Library -> MainChild(libraryComponent(ctx))
+            is Config.Details -> DetailsChild(detailsComponent(ctx, config))
+            is Config.PeerCatalog -> PeerCatalogChild(peerCatalogComponent(ctx, config))
+            is Config.FolderContents -> FolderContentsChild(folderContentsComponent(ctx, config))
+        }
 
     @OptIn(DelicateDecomposeApi::class)
     private fun mainComponent(ctx: ComponentContext): MainComponent =
@@ -143,7 +149,10 @@ class DefaultRootComponent(
         )
 
     @OptIn(DelicateDecomposeApi::class)
-    private fun detailsComponent(ctx: ComponentContext, config: Config.Details): DetailsComponent =
+    private fun detailsComponent(
+        ctx: ComponentContext,
+        config: Config.Details,
+    ): DetailsComponent =
         DefaultDetailsComponent(
             componentContext = ctx,
             title = config.uri,
@@ -155,7 +164,10 @@ class DefaultRootComponent(
         )
 
     @OptIn(DelicateDecomposeApi::class)
-    private fun peerCatalogComponent(ctx: ComponentContext, config: Config.PeerCatalog): PeerCatalogComponent =
+    private fun peerCatalogComponent(
+        ctx: ComponentContext,
+        config: Config.PeerCatalog,
+    ): PeerCatalogComponent =
         peerCatalogComponentFactory(
             ctx,
             config.peerId,
@@ -166,7 +178,10 @@ class DefaultRootComponent(
         }
 
     @OptIn(DelicateDecomposeApi::class)
-    private fun folderContentsComponent(ctx: ComponentContext, config: Config.FolderContents): FolderComponent =
+    private fun folderContentsComponent(
+        ctx: ComponentContext,
+        config: Config.FolderContents,
+    ): FolderComponent =
         folderComponentFactory(
             ctx,
             config.folderId,

@@ -17,14 +17,17 @@ import java.util.zip.ZipInputStream
  * выполняет её на IO-диспетчере.
  */
 internal object ComicArchive {
-
     private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "webp", "bmp")
 
-    fun extract(bytes: ByteArray, format: BookFormat): List<ByteArray> = when (format) {
-        BookFormat.CBZ -> extractZip(bytes)
-        BookFormat.CBR -> extractRar(bytes)
-        else -> emptyList()
-    }
+    fun extract(
+        bytes: ByteArray,
+        format: BookFormat,
+    ): List<ByteArray> =
+        when (format) {
+            BookFormat.CBZ -> extractZip(bytes)
+            BookFormat.CBR -> extractRar(bytes)
+            else -> emptyList()
+        }
 
     private fun extractZip(bytes: ByteArray): List<ByteArray> {
         val pages = mutableListOf<Pair<String, ByteArray>>()
@@ -58,14 +61,16 @@ internal object ComicArchive {
     private fun List<Pair<String, ByteArray>>.sortedByPageName(): List<ByteArray> =
         sortedWith(compareBy(NATURAL_ORDER) { it.first }).map { it.second }
 
-    private fun isImage(name: String): Boolean =
-        name.substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS
+    private fun isImage(name: String): Boolean = name.substringAfterLast('.', "").lowercase() in IMAGE_EXTENSIONS
 }
 
 /** Натуральная сортировка имён: `page2` идёт перед `page10` (числа сравниваются как числа). */
 private val NATURAL_ORDER: Comparator<String> = Comparator { a, b -> naturalCompare(a, b) }
 
-private fun naturalCompare(a: String, b: String): Int {
+private fun naturalCompare(
+    a: String,
+    b: String,
+): Int {
     var i = 0
     var j = 0
     while (i < a.length && j < b.length) {

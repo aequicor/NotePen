@@ -48,7 +48,6 @@ class HostQrPairingCoordinator(
      */
     private val approvalResolutions: Flow<String> = emptyFlow(),
 ) {
-
     /** UI-facing state machine for the QR pairing flow. */
     sealed class State {
         /** Server is starting; QR not ready yet. */
@@ -80,70 +79,72 @@ class HostQrPairingCoordinator(
      * responsible for calling [PeerServer.stop] if it wants the server stopped).
      */
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun run(): Flow<State> = channelFlow {
-        send(State.Preparing)
+    fun run(): Flow<State> =
+        channelFlow {
+            send(State.Preparing)
 
-        val startResult = peerServer.start()
-        if (startResult.isFailure) {
-            val msg = startResult.exceptionOrNull()?.message ?: "unknown"
-            logger.warn { "PeerServer failed to start: $msg" }
-            send(State.Failed(QrConnectError.ServerStartFailed(msg)))
-            close()
-            return@channelFlow
-        }
-        val running = startResult.getOrThrow()
-        val uri = PairingUri(
-            host = running.host,
-            port = running.port,
-            code = running.code,
-            deviceName = hostDeviceName,
-        )
-        val matrix = encoder.encode(uri.encode(), qrSize)
-        logger.info { "QR ready: $uri" }
+            val startResult = peerServer.start()
+            if (startResult.isFailure) {
+                val msg = startResult.exceptionOrNull()?.message ?: "unknown"
+                logger.warn { "PeerServer failed to start: $msg" }
+                send(State.Failed(QrConnectError.ServerStartFailed(msg)))
+                close()
+                return@channelFlow
+            }
+            val running = startResult.getOrThrow()
+            val uri =
+                PairingUri(
+                    host = running.host,
+                    port = running.port,
+                    code = running.code,
+                    deviceName = hostDeviceName,
+                )
+            val matrix = encoder.encode(uri.encode(), qrSize)
+            logger.info { "QR ready: $uri" }
 
-        val pending = MutableStateFlow<DeviceInfo?>(null)
+            val pending = MutableStateFlow<DeviceInfo?>(null)
 
-        // Track incoming pending-approval events.
-        launch {
-            peerServer.pendingApprovals.collect { peer -> pending.value = peer }
-        }
-        // Auto-clear pending once the peer is approved (appears in connectedPeers)
-        // or replaced by a different pending peer.
-        launch {
-            peerServer.connectedPeers.distinctUntilChanged().collect { connected ->
-                val cur = pending.value
-                if (cur != null && connected.any { it.id == cur.id }) {
-                    pending.value = null
+            // Track incoming pending-approval events.
+            launch {
+                peerServer.pendingApprovals.collect { peer -> pending.value = peer }
+            }
+            // Auto-clear pending once the peer is approved (appears in connectedPeers)
+            // or replaced by a different pending peer.
+            launch {
+                peerServer.connectedPeers.distinctUntilChanged().collect { connected ->
+                    val cur = pending.value
+                    if (cur != null && connected.any { it.id == cur.id }) {
+                        pending.value = null
+                    }
                 }
             }
-        }
-        // Clear pending when the user resolves it (reject) — see [approvalResolutions].
-        launch {
-            approvalResolutions.collect { resolvedId ->
-                if (pending.value?.id == resolvedId) pending.value = null
-            }
-        }
-        // Watch lifecycle for terminal Stopped (Idle = server hasn't started yet
-        // or has fully torn down — emit Stopped either way and close the flow).
-        launch {
-            peerServer.lifecycle.collect { ls ->
-                if (ls is ServerLifecycleState.Stopped) {
-                    pending.value = null
-                    send(State.Stopped)
-                    close()
+            // Clear pending when the user resolves it (reject) — see [approvalResolutions].
+            launch {
+                approvalResolutions.collect { resolvedId ->
+                    if (pending.value?.id == resolvedId) pending.value = null
                 }
             }
-        }
+            // Watch lifecycle for terminal Stopped (Idle = server hasn't started yet
+            // or has fully torn down — emit Stopped either way and close the flow).
+            launch {
+                peerServer.lifecycle.collect { ls ->
+                    if (ls is ServerLifecycleState.Stopped) {
+                        pending.value = null
+                        send(State.Stopped)
+                        close()
+                    }
+                }
+            }
 
-        combine(peerServer.connectedPeers, pending) { peers, p ->
-            State.ShowingQr(
-                uri = uri,
-                matrix = matrix,
-                peers = peers.toList(),
-                pendingApproval = p,
-            )
-        }.collect { snapshot -> trySend(snapshot) }
-    }
+            combine(peerServer.connectedPeers, pending) { peers, p ->
+                State.ShowingQr(
+                    uri = uri,
+                    matrix = matrix,
+                    peers = peers.toList(),
+                    pendingApproval = p,
+                )
+            }.collect { snapshot -> trySend(snapshot) }
+        }
 
     companion object {
         const val DEFAULT_QR_SIZE: Int = 512

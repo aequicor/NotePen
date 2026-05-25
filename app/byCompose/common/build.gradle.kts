@@ -36,7 +36,7 @@ kotlin {
         }
 
         commonMain.dependencies {
-            //module with logic
+            // module with logic
             implementation(projects.shared)
             implementation(projects.drawing.api)
             implementation(projects.drawing.impl)
@@ -48,12 +48,12 @@ kotlin {
             implementation(projects.reflow.api)
             implementation(projects.reflow.impl)
 
-            //decompose
+            // decompose
             implementation(libs.decompose)
             implementation(libs.decompose.compose)
             implementation(libs.lifecycle.coroutines)
 
-            //compose
+            // compose
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.material3)

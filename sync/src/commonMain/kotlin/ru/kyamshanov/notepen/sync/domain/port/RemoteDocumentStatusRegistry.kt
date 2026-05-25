@@ -13,10 +13,12 @@ import ru.kyamshanov.notepen.sync.domain.model.SyncStatus
  * absence implies healthy.
  */
 interface RemoteDocumentStatusRegistry {
-
     /** Hot stream of `documentId → status`. */
     val statuses: StateFlow<Map<String, SyncStatus>>
 
     /** Marks [documentId] with [status]; passing [SyncStatus.Synced] clears the entry. */
-    suspend fun set(documentId: String, status: SyncStatus)
+    suspend fun set(
+        documentId: String,
+        status: SyncStatus,
+    )
 }

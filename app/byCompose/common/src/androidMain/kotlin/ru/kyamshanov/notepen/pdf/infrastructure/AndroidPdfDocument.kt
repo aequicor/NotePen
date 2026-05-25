@@ -15,7 +15,6 @@ internal class AndroidPdfDocument(
     private val pfd: ParcelFileDescriptor,
     override val info: PdfDocumentInfo,
 ) : PdfDocument {
-
     override fun close() {
         renderer.close()
         pfd.close()

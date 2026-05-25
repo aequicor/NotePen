@@ -15,8 +15,11 @@ class AndroidThumbnailGenerator(
     private val pdfGenerator: PdfThumbnailGenerator,
     private val imageGenerator: PdfThumbnailGenerator,
 ) : PdfThumbnailGenerator {
-
-    override suspend fun generate(uri: String, widthPx: Int, heightPx: Int): Result<ByteArray> =
+    override suspend fun generate(
+        uri: String,
+        widthPx: Int,
+        heightPx: Int,
+    ): Result<ByteArray> =
         if (isImage(uri)) {
             imageGenerator.generate(uri, widthPx, heightPx)
         } else {

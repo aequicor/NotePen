@@ -17,5 +17,6 @@ public fun computeSegmentWidth(
     pressure: Float,
     tilt: Float,
     tiltWidthGain: Float = RenderingConstants.TILT_WIDTH_GAIN,
-): Float = (baseWidthPx * pressure * (1f + tiltWidthGain * tilt))
-    .coerceAtLeast(RenderingConstants.MIN_RENDERED_STROKE_PX)
+): Float =
+    (baseWidthPx * pressure * (1f + tiltWidthGain * tilt))
+        .coerceAtLeast(RenderingConstants.MIN_RENDERED_STROKE_PX)

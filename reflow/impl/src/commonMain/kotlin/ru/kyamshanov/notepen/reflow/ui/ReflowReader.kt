@@ -91,10 +91,13 @@ import ru.kyamshanov.notepen.reflow.api.TextAnchor
  * кропом исходной страницы через [renderPage], иначе — плейсхолдер.
  *
  * @param document документ для отображения
- * @param stored настройки + пресеты + личный пресет «Моё»
+ * @param stored настройки + пользовательские пресеты
  * @param onStoredChange применить новое состояние настроек
  * @param barVisible показывать ли нижний airbar
  * @param onBarVisibleChange запрос смены видимости airbar (тап/автоскрытие)
+ * @param newPresetIdProvider источник стабильного id для нового кастомного пресета
+ *   (форк при первой правке встроенного) — поднят наружу, т.к. reflow/impl не
+ *   генерирует UUID; редьюсер остаётся детерминированным
  * @param modifier модификатор корневого контейнера
  * @param highlights диапазоны-выделения по блокам
  * @param listState состояние прокрутки (скролл-режим)
@@ -107,6 +110,7 @@ public fun ReflowReader(
     onStoredChange: (StoredReaderSettings) -> Unit,
     barVisible: Boolean,
     onBarVisibleChange: (Boolean) -> Unit,
+    newPresetIdProvider: () -> String,
     modifier: Modifier = Modifier,
     highlights: List<TextAnchor> = emptyList(),
     listState: LazyListState = rememberLazyListState(),
@@ -218,6 +222,7 @@ public fun ReflowReader(
             ReaderAirbar(
                 stored = stored,
                 onStoredChange = onStoredChange,
+                newPresetIdProvider = newPresetIdProvider,
                 background = effectiveBackground,
                 textColor = settings.textColor,
                 progressLabel = progressLabel,

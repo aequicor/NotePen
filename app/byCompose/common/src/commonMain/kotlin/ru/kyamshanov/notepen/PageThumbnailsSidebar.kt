@@ -1,15 +1,13 @@
 package ru.kyamshanov.notepen
 
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -48,9 +46,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
@@ -61,6 +56,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
@@ -115,11 +113,12 @@ fun PageThumbnailsSidebar(
     // подождать максимум один рендер (~50-150 мс), а не очередь из 5+.
     val thumbRenderMutex = remember { kotlinx.coroutines.sync.Mutex() }
 
-    val visiblePages = when (filterMode) {
-        PageFilterMode.ALL -> pages
-        PageFilterMode.FAVORITES -> pages.filter { it.pageIndex in favoritePageIndices }
-        PageFilterMode.ANNOTATED -> pages.filter { it.pageIndex in annotatedPageIndices }
-    }
+    val visiblePages =
+        when (filterMode) {
+            PageFilterMode.ALL -> pages
+            PageFilterMode.FAVORITES -> pages.filter { it.pageIndex in favoritePageIndices }
+            PageFilterMode.ANNOTATED -> pages.filter { it.pageIndex in annotatedPageIndices }
+        }
 
     // Сайдбар работает как скользящее окно: пока текущая страница в нём
     // полностью видна — не двигаемся (клик по миниатюре только меняет
@@ -165,14 +164,16 @@ fun PageThumbnailsSidebar(
             pdfIdle.value = true
             val currentVisiblePages = visiblePagesState.value
             if (currentVisiblePages.isEmpty()) return@collectLatest
-            val targetIndex = currentVisiblePages.indexOfFirst { it.pageIndex == page }
-                .coerceAtLeast(0)
-                .coerceAtMost(currentVisiblePages.size - 1)
+            val targetIndex =
+                currentVisiblePages.indexOfFirst { it.pageIndex == page }
+                    .coerceAtLeast(0)
+                    .coerceAtMost(currentVisiblePages.size - 1)
             val info = listState.layoutInfo
-            val fullyVisible = info.visibleItemsInfo.filter { item ->
-                item.offset >= info.viewportStartOffset &&
-                    item.offset + item.size <= info.viewportEndOffset
-            }
+            val fullyVisible =
+                info.visibleItemsInfo.filter { item ->
+                    item.offset >= info.viewportStartOffset &&
+                        item.offset + item.size <= info.viewportEndOffset
+                }
             val firstFull = fullyVisible.firstOrNull()?.index
             val lastFull = fullyVisible.lastOrNull()?.index
             when {
@@ -182,15 +183,17 @@ fun PageThumbnailsSidebar(
                     // Выравнивание по нижнему краю одним scrollToItem с
                     // отрицательным scrollOffset — без промежуточного снапа.
                     val viewportHeight = info.viewportEndOffset - info.viewportStartOffset
-                    val targetVisible = info.visibleItemsInfo
-                        .firstOrNull { it.index == targetIndex }
+                    val targetVisible =
+                        info.visibleItemsInfo
+                            .firstOrNull { it.index == targetIndex }
                     if (targetVisible != null && targetVisible.size < viewportHeight) {
                         listState.scrollToItem(targetIndex, targetVisible.size - viewportHeight)
                     } else {
                         listState.scrollToItem(targetIndex)
                         val info2 = listState.layoutInfo
-                        val targetItem = info2.visibleItemsInfo
-                            .firstOrNull { it.index == targetIndex }
+                        val targetItem =
+                            info2.visibleItemsInfo
+                                .firstOrNull { it.index == targetIndex }
                         val viewportHeight2 = info2.viewportEndOffset - info2.viewportStartOffset
                         if (targetItem != null && targetItem.size < viewportHeight2) {
                             listState.scrollToItem(targetIndex, targetItem.size - viewportHeight2)
@@ -203,9 +206,10 @@ fun PageThumbnailsSidebar(
     }
 
     Surface(
-        modifier = modifier
-            .fillMaxHeight()
-            .width(SIDEBAR_WIDTH),
+        modifier =
+            modifier
+                .fillMaxHeight()
+                .width(SIDEBAR_WIDTH),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = SIDEBAR_ALPHA),
         shape = RoundedCornerShape(topEnd = SIDEBAR_CORNER, bottomEnd = SIDEBAR_CORNER),
         tonalElevation = 2.dp,
@@ -217,15 +221,17 @@ fun PageThumbnailsSidebar(
                 favoriteCount = favoritePageIndices.size,
                 annotatedCount = annotatedPageIndices.size,
                 onModeChange = { filterMode = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 6.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 6.dp),
             )
             if (visiblePages.isEmpty() && filterMode != PageFilterMode.ALL) {
                 Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp, vertical = 24.dp),
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 8.dp, vertical = 24.dp),
                     contentAlignment = Alignment.TopCenter,
                 ) {
                     Text(
@@ -278,21 +284,24 @@ private fun FilterModeChip(
 ) {
     val active = mode != PageFilterMode.ALL
 
-    val targetBackground = if (active) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant
-    }
-    val targetContent = if (active) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    val targetBorder = if (active) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outlineVariant
-    }
+    val targetBackground =
+        if (active) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        }
+    val targetContent =
+        if (active) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
+    val targetBorder =
+        if (active) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outlineVariant
+        }
     val background by animateColorAsState(targetBackground, label = "filter-chip-bg")
     val contentColor by animateColorAsState(targetContent, label = "filter-chip-fg")
     val borderColor by animateColorAsState(targetBorder, label = "filter-chip-border")
@@ -302,9 +311,10 @@ private fun FilterModeChip(
 
     Box(modifier = modifier) {
         Surface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable { expanded = true },
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = true },
             color = background,
             contentColor = contentColor,
             shape = RoundedCornerShape(FILTER_CHIP_CORNER),
@@ -312,9 +322,10 @@ private fun FilterModeChip(
             tonalElevation = if (active) 2.dp else 0.dp,
         ) {
             Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
             ) {
                 Text(
                     text = currentChip.label,
@@ -327,9 +338,10 @@ private fun FilterModeChip(
                 Icon(
                     imageVector = currentChip.icon,
                     contentDescription = "Фильтр: ${currentChip.label}",
-                    modifier = Modifier
-                        .align(Alignment.CenterStart)
-                        .size(16.dp),
+                    modifier =
+                        Modifier
+                            .align(Alignment.CenterStart)
+                            .size(16.dp),
                 )
             }
         }
@@ -365,11 +377,12 @@ private fun chipContentFor(
     totalCount: Int,
     favoriteCount: Int,
     annotatedCount: Int,
-): ChipContent = when (mode) {
-    PageFilterMode.ALL -> ChipContent(Icons.Filled.FilterList, "Все", totalCount)
-    PageFilterMode.FAVORITES -> ChipContent(Icons.Filled.Star, "Избр.", favoriteCount)
-    PageFilterMode.ANNOTATED -> ChipContent(Icons.Filled.Edit, "Надписи", annotatedCount)
-}
+): ChipContent =
+    when (mode) {
+        PageFilterMode.ALL -> ChipContent(Icons.Filled.FilterList, "Все", totalCount)
+        PageFilterMode.FAVORITES -> ChipContent(Icons.Filled.Star, "Избр.", favoriteCount)
+        PageFilterMode.ANNOTATED -> ChipContent(Icons.Filled.Edit, "Надписи", annotatedCount)
+    }
 
 @Composable
 private fun ThumbnailItem(
@@ -402,19 +415,23 @@ private fun ThumbnailItem(
         // лок Android PdfRenderer'а у основного viewer'а на скролле.
         while (true) {
             snapshotFlow { pdfIdle.value }.first { it }
-            val rendered: ImageBitmap? = renderMutex.lock().let {
-                try {
-                    if (!pdfIdle.value) null
-                    else renderer.renderPage(
-                        document = doc,
-                        pageIndex = page.pageIndex,
-                        widthPx = thumbWidthPx,
-                        heightPx = thumbHeightPx,
-                    ).toImageBitmap()
-                } finally {
-                    renderMutex.unlock()
+            val rendered: ImageBitmap? =
+                renderMutex.lock().let {
+                    try {
+                        if (!pdfIdle.value) {
+                            null
+                        } else {
+                            renderer.renderPage(
+                                document = doc,
+                                pageIndex = page.pageIndex,
+                                widthPx = thumbWidthPx,
+                                heightPx = thumbHeightPx,
+                            ).toImageBitmap()
+                        }
+                    } finally {
+                        renderMutex.unlock()
+                    }
                 }
-            }
             if (rendered != null) {
                 onBitmapRendered(rendered)
                 return@LaunchedEffect
@@ -422,11 +439,12 @@ private fun ThumbnailItem(
         }
     }
 
-    val borderColor = if (isCurrentPage) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outlineVariant
-    }
+    val borderColor =
+        if (isCurrentPage) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outlineVariant
+        }
     val borderWidth: Dp = if (isCurrentPage) 2.dp else 1.dp
     val strokeScratch = remember { Path() }
 
@@ -435,12 +453,13 @@ private fun ThumbnailItem(
         modifier = Modifier.padding(horizontal = 8.dp),
     ) {
         Box(
-            modifier = Modifier
-                .width(THUMBNAIL_WIDTH)
-                .height(with(LocalDensity.current) { thumbHeightPx.toDp() })
-                .background(MaterialTheme.colorScheme.surface)
-                .border(borderWidth, borderColor, RoundedCornerShape(4.dp))
-                .clickable(onClick = onClick),
+            modifier =
+                Modifier
+                    .width(THUMBNAIL_WIDTH)
+                    .height(with(LocalDensity.current) { thumbHeightPx.toDp() })
+                    .background(MaterialTheme.colorScheme.surface)
+                    .border(borderWidth, borderColor, RoundedCornerShape(4.dp))
+                    .clickable(onClick = onClick),
         ) {
             val bm = cachedBitmap
             if (bm != null) {
@@ -467,19 +486,21 @@ private fun ThumbnailItem(
             FavoriteStar(
                 isFavorite = isFavorite,
                 onToggle = onToggleFavorite,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(2.dp),
+                modifier =
+                    Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(2.dp),
             )
         }
         Text(
             text = "$pageNumber",
             style = MaterialTheme.typography.labelSmall,
-            color = if (isCurrentPage) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
+            color =
+                if (isCurrentPage) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
             modifier = Modifier.padding(top = 2.dp),
         )
     }
@@ -491,19 +512,21 @@ private fun FavoriteStar(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val tint = if (isFavorite) {
-        MaterialTheme.colorScheme.tertiary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
-    }
+    val tint =
+        if (isFavorite) {
+            MaterialTheme.colorScheme.tertiary
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+        }
     Box(
-        modifier = modifier
-            .size(22.dp)
-            .background(
-                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
-                shape = CircleShape,
-            )
-            .clickable(onClick = onToggle),
+        modifier =
+            modifier
+                .size(22.dp)
+                .background(
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.65f),
+                    shape = CircleShape,
+                )
+                .clickable(onClick = onToggle),
         contentAlignment = Alignment.Center,
     ) {
         Icon(

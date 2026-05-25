@@ -12,7 +12,6 @@ import kotlinx.coroutines.channels.Channel
  * Интеграция с `rememberLauncherForActivityResult` будет добавлена в Stage 07.
  */
 actual class FilePicker {
-
     private var launcher: ActivityResultLauncher<Array<String>>? = null
     private val resultChannel = Channel<String?>(1)
 

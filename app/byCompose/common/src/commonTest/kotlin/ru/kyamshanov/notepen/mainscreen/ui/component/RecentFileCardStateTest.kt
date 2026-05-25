@@ -16,17 +16,17 @@ import kotlin.test.assertTrue
  * (Stage 3 — TC-23 visual feedback) and drag lifecycle callbacks (HIGH #1).
  */
 class RecentFileCardStateTest {
-
     // TC-3 / Stage-3: isBeingDragged is true when dragState.Active.fileId matches model.id
     @Test
     fun `isBeingDragged is true when Active fileId matches model id`() {
         // TC-3
         val model = buildModel(id = "file-abc")
-        val dragState = DragState.Active(
-            fileId = "file-abc",
-            fileUri = "content://test/abc",
-            displayName = "doc.pdf",
-        )
+        val dragState =
+            DragState.Active(
+                fileId = "file-abc",
+                fileUri = "content://test/abc",
+                displayName = "doc.pdf",
+            )
         val isBeingDragged = computeIsBeingDragged(model.id, dragState)
         assertTrue(isBeingDragged, "isBeingDragged must be true when fileId matches")
     }
@@ -36,11 +36,12 @@ class RecentFileCardStateTest {
     fun `isBeingDragged is false when Active fileId does not match model id`() {
         // TC-3
         val model = buildModel(id = "file-abc")
-        val dragState = DragState.Active(
-            fileId = "file-xyz",
-            fileUri = "content://test/xyz",
-            displayName = "other.pdf",
-        )
+        val dragState =
+            DragState.Active(
+                fileId = "file-xyz",
+                fileUri = "content://test/xyz",
+                displayName = "other.pdf",
+            )
         val isBeingDragged = computeIsBeingDragged(model.id, dragState)
         assertFalse(isBeingDragged, "isBeingDragged must be false when fileId does not match")
     }
@@ -75,15 +76,16 @@ class RecentFileCardStateTest {
     @Test
     fun `RecentFileUiModel has uri field for drag-and-drop source`() {
         // TC-1
-        val model = RecentFileUiModel(
-            id = "id-1",
-            uri = "content://test/1",
-            displayName = "file.pdf",
-            openedAt = 1000L,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-            thumbnailState = ThumbnailState.Loading,
-            lastPageIndex = 0,
-        )
+        val model =
+            RecentFileUiModel(
+                id = "id-1",
+                uri = "content://test/1",
+                displayName = "file.pdf",
+                openedAt = 1000L,
+                availabilityStatus = AvailabilityStatus.AVAILABLE,
+                thumbnailState = ThumbnailState.Loading,
+                lastPageIndex = 0,
+            )
         assertEquals("content://test/1", model.uri, "RecentFileUiModel.uri must hold the file URI")
     }
 
@@ -120,14 +122,15 @@ class RecentFileCardStateTest {
      * Mirrors the `isBeingDragged` computation in MainContent.
      * Extracted here so it can be unit-tested without a Compose runtime.
      */
-    private fun computeIsBeingDragged(fileId: String, dragState: DragState): Boolean =
-        (dragState as? DragState.Active)?.fileId == fileId
+    private fun computeIsBeingDragged(
+        fileId: String,
+        dragState: DragState,
+    ): Boolean = (dragState as? DragState.Active)?.fileId == fileId
 
     /**
      * Mirrors the alpha computation in RecentFileCard.
      */
-    private fun computeAlpha(isBeingDragged: Boolean): Float =
-        if (isBeingDragged) 0.5f else 1.0f
+    private fun computeAlpha(isBeingDragged: Boolean): Float = if (isBeingDragged) 0.5f else 1.0f
 
     /**
      * Simulates the monitoring DragAndDropTarget's onEnded callback in RecentFileCard,
@@ -146,13 +149,14 @@ class RecentFileCardStateTest {
         onDragStarted()
     }
 
-    private fun buildModel(id: String): RecentFileUiModel = RecentFileUiModel(
-        id = id,
-        uri = "content://test/$id",
-        displayName = "$id.pdf",
-        openedAt = 0L,
-        availabilityStatus = AvailabilityStatus.AVAILABLE,
-        thumbnailState = ThumbnailState.Loading,
-        lastPageIndex = 0,
-    )
+    private fun buildModel(id: String): RecentFileUiModel =
+        RecentFileUiModel(
+            id = id,
+            uri = "content://test/$id",
+            displayName = "$id.pdf",
+            openedAt = 0L,
+            availabilityStatus = AvailabilityStatus.AVAILABLE,
+            thumbnailState = ThumbnailState.Loading,
+            lastPageIndex = 0,
+        )
 }

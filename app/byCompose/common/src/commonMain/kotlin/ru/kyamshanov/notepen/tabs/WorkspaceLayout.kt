@@ -74,7 +74,6 @@ data class WorkspaceLayout(
     val focusedPanelId: PanelId,
     val ratios: List<Float> = defaultRatios(template),
 ) {
-
     init {
         require(panels.size == template.capacity) {
             "panels.size ${panels.size} != template.capacity ${template.capacity} ($template)"
@@ -106,7 +105,10 @@ data class WorkspaceLayout(
      * - otherwise the template downgrades to the canonical template for the
      *   new panel count and focus moves to a surviving panel.
      */
-    fun withPanelTabs(id: PanelId, transform: (OpenDocuments) -> OpenDocuments?): WorkspaceLayout? {
+    fun withPanelTabs(
+        id: PanelId,
+        transform: (OpenDocuments) -> OpenDocuments?,
+    ): WorkspaceLayout? {
         val target = panelOf(id) ?: return this
         val newTabs = transform(target.tabs)
         if (newTabs != null) {
@@ -131,7 +133,10 @@ data class WorkspaceLayout(
      * `template.capacity == panels.size + 1` — i.e. exactly one more slot than
      * currently open (see [TabSession.availableTemplatesForAdd]).
      */
-    fun addPanel(template: LayoutTemplate, panel: Panel): WorkspaceLayout {
+    fun addPanel(
+        template: LayoutTemplate,
+        panel: Panel,
+    ): WorkspaceLayout {
         require(template.capacity == panels.size + 1) {
             "template $template capacity ${template.capacity} != panels.size+1 ${panels.size + 1}"
         }
@@ -144,14 +149,16 @@ data class WorkspaceLayout(
     }
 
     /** Returns a copy with [id] focused (no-op if [id] is already focused or absent). */
-    fun focusPanel(id: PanelId): WorkspaceLayout =
-        if (id == focusedPanelId || panelOf(id) == null) this else copy(focusedPanelId = id)
+    fun focusPanel(id: PanelId): WorkspaceLayout = if (id == focusedPanelId || panelOf(id) == null) this else copy(focusedPanelId = id)
 
     /**
      * Returns a copy with divider [index] set to [value] (clamped to
      * [MIN_RATIO]..[MAX_RATIO]). Out-of-range [index] returns the receiver.
      */
-    fun setRatio(index: Int, value: Float): WorkspaceLayout {
+    fun setRatio(
+        index: Int,
+        value: Float,
+    ): WorkspaceLayout {
         if (index !in ratios.indices) return this
         val clamped = value.coerceIn(MIN_RATIO, MAX_RATIO)
         return copy(ratios = ratios.toMutableList().apply { this[index] = clamped })
@@ -173,22 +180,24 @@ data class WorkspaceLayout(
             )
 
         /** Canonical template for [count] panels (used when removing a panel). */
-        fun templateForCount(count: Int): LayoutTemplate = when (count) {
-            1 -> LayoutTemplate.FULL
-            2 -> LayoutTemplate.COLUMNS_2
-            3 -> LayoutTemplate.COLUMNS_3
-            4 -> LayoutTemplate.GRID_2X2
-            else -> error("unsupported panel count $count")
-        }
+        fun templateForCount(count: Int): LayoutTemplate =
+            when (count) {
+                1 -> LayoutTemplate.FULL
+                2 -> LayoutTemplate.COLUMNS_2
+                3 -> LayoutTemplate.COLUMNS_3
+                4 -> LayoutTemplate.GRID_2X2
+                else -> error("unsupported panel count $count")
+            }
 
         /** Default divider positions for [template]. See [WorkspaceLayout] for semantics. */
-        fun defaultRatios(template: LayoutTemplate): List<Float> = when (template) {
-            LayoutTemplate.FULL -> emptyList()
-            LayoutTemplate.COLUMNS_2 -> listOf(0.5f)
-            LayoutTemplate.ROWS_2 -> listOf(0.5f)
-            LayoutTemplate.COLUMNS_3 -> listOf(1f / 3f, 2f / 3f)
-            LayoutTemplate.LEFT_PLUS_STACK -> listOf(0.5f, 0.5f)
-            LayoutTemplate.GRID_2X2 -> listOf(0.5f, 0.5f)
-        }
+        fun defaultRatios(template: LayoutTemplate): List<Float> =
+            when (template) {
+                LayoutTemplate.FULL -> emptyList()
+                LayoutTemplate.COLUMNS_2 -> listOf(0.5f)
+                LayoutTemplate.ROWS_2 -> listOf(0.5f)
+                LayoutTemplate.COLUMNS_3 -> listOf(1f / 3f, 2f / 3f)
+                LayoutTemplate.LEFT_PLUS_STACK -> listOf(0.5f, 0.5f)
+                LayoutTemplate.GRID_2X2 -> listOf(0.5f, 0.5f)
+            }
     }
 }

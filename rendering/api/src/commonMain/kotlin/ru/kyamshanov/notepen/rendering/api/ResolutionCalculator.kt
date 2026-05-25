@@ -5,7 +5,6 @@ package ru.kyamshanov.notepen.rendering.api
  * для трёх контекстов: вьюер, лупа (high-res) и ink-cache.
  */
 public object ResolutionCalculator {
-
     /**
      * Разрешение для основного вьюера.
      *
@@ -25,8 +24,9 @@ public object ResolutionCalculator {
         maxDimPx: Int,
         aspectRatio: Float,
     ): RenderResolution {
-        val desiredWidth = (baseWidthPx * scalePercent / 100f * densityScale).toInt()
-            .coerceAtLeast(1)
+        val desiredWidth =
+            (baseWidthPx * scalePercent / 100f * densityScale).toInt()
+                .coerceAtLeast(1)
         val widthCapped = desiredWidth.coerceAtMost(maxDimPx)
         val heightFromWidth = (widthCapped / aspectRatio).toInt().coerceAtLeast(1)
         return if (heightFromWidth > maxDimPx) {

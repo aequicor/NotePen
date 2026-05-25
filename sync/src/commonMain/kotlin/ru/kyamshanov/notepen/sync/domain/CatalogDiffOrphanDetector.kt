@@ -33,7 +33,6 @@ class CatalogDiffOrphanDetector(
     private val queue: PendingDeltaQueue,
     private val registry: RemoteDocumentStatusRegistry,
 ) {
-
     fun start(scope: CoroutineScope) {
         scope.launch {
             combine(
@@ -47,13 +46,15 @@ class CatalogDiffOrphanDetector(
                     // это не доказательство, что документ «осиротел». Иначе host
                     // помечал бы СВОИ же открытые документы OrphanedOnHost, видя
                     // пустой каталог планшета (двунаправленный обмен каталогами).
-                    val judgingCatalogs = snapshot.values.filter {
-                        it.recent.isNotEmpty() || it.folders.isNotEmpty()
-                    }
+                    val judgingCatalogs =
+                        snapshot.values.filter {
+                            it.recent.isNotEmpty() || it.folders.isNotEmpty()
+                        }
                     if (judgingCatalogs.isEmpty()) return@collect
-                    val presentIds = judgingCatalogs
-                        .flatMap { catalog -> catalog.recent.map { it.documentId } }
-                        .toHashSet()
+                    val presentIds =
+                        judgingCatalogs
+                            .flatMap { catalog -> catalog.recent.map { it.documentId } }
+                            .toHashSet()
                     for (documentId in counts.keys) {
                         if (documentId !in presentIds) {
                             logger.info {

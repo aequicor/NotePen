@@ -16,7 +16,6 @@ import ru.kyamshanov.notepen.sync.domain.model.PairingState
  * originating host via [incomingMessages].
  */
 interface SyncClient {
-
     /**
      * Map of `hostId → PairingState` for every host the client has ever tried
      * to connect to during this session — including hosts that are currently
@@ -45,7 +44,10 @@ interface SyncClient {
     ): Result<DeviceInfo>
 
     /** Sends [message] to the host identified by [hostId]. No-op if unknown. */
-    suspend fun send(hostId: String, message: NetworkMessage)
+    suspend fun send(
+        hostId: String,
+        message: NetworkMessage,
+    )
 
     /** Sends [message] to every currently connected host. */
     suspend fun broadcast(message: NetworkMessage)

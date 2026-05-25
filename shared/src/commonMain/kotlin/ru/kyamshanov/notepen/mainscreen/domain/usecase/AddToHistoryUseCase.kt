@@ -48,35 +48,38 @@ class AddToHistoryUseCase(
         fileSize: Long?,
         openedAt: Long,
         lastPageIndex: Int = 0,
-    ): Result<AddHistoryResult> = runCatching {
-        val normalizedUri = UriNormalizer.normalize(uri)
-        val existing = repository.getAll()
+    ): Result<AddHistoryResult> =
+        runCatching {
+            val normalizedUri = UriNormalizer.normalize(uri)
+            val existing = repository.getAll()
 
-        // Android SAF fuzzy-match: одинаковое имя + размер, разные URI (AC-5b, CC-1, CC-2)
-        if (normalizedUri.startsWith("content://")) {
-            val candidate = existing.firstOrNull { rec ->
-                rec.uri != normalizedUri &&
-                    rec.displayName == displayName &&
-                    fileSize != null && rec.fileSize != null && rec.fileSize == fileSize
+            // Android SAF fuzzy-match: одинаковое имя + размер, разные URI (AC-5b, CC-1, CC-2)
+            if (normalizedUri.startsWith("content://")) {
+                val candidate =
+                    existing.firstOrNull { rec ->
+                        rec.uri != normalizedUri &&
+                            rec.displayName == displayName &&
+                            fileSize != null && rec.fileSize != null && rec.fileSize == fileSize
+                    }
+                if (candidate != null) {
+                    return@runCatching AddHistoryResult.SafFuzzyMatchDetected(candidate, normalizedUri)
+                }
             }
-            if (candidate != null) {
-                return@runCatching AddHistoryResult.SafFuzzyMatchDetected(candidate, normalizedUri)
-            }
+
+            val existingRecord = existing.firstOrNull { it.uri == normalizedUri }
+            val newRecord =
+                RecentFile(
+                    id = existingRecord?.id ?: generateUuid(),
+                    uri = normalizedUri,
+                    displayName = displayName,
+                    fileSize = fileSize,
+                    openedAt = openedAt,
+                    availabilityStatus = AvailabilityStatus.AVAILABLE,
+                    lastPageIndex = lastPageIndex,
+                )
+
+            repository.upsert(newRecord, lastPageIndex)
+
+            if (existingRecord != null) AddHistoryResult.Moved(newRecord) else AddHistoryResult.Added(newRecord)
         }
-
-        val existingRecord = existing.firstOrNull { it.uri == normalizedUri }
-        val newRecord = RecentFile(
-            id = existingRecord?.id ?: generateUuid(),
-            uri = normalizedUri,
-            displayName = displayName,
-            fileSize = fileSize,
-            openedAt = openedAt,
-            availabilityStatus = AvailabilityStatus.AVAILABLE,
-            lastPageIndex = lastPageIndex,
-        )
-
-        repository.upsert(newRecord, lastPageIndex)
-
-        if (existingRecord != null) AddHistoryResult.Moved(newRecord) else AddHistoryResult.Added(newRecord)
-    }
 }

@@ -16,7 +16,6 @@ import kotlinx.coroutines.flow.Flow
  * каталог целиком.
  */
 interface CatalogChangeNotifier {
-
     /** Поток сигналов «каталог изменился». Подписка горячая. */
     val changes: Flow<Unit>
 

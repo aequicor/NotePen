@@ -7,7 +7,6 @@ package ru.kyamshanov.notepen.mainscreen.domain.model
  * Персистирование выполняется вызывающим кодом через [ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository].
  */
 object FileHistoryManager {
-
     /** Максимальный размер истории (AC-2). */
     const val MAX_HISTORY_SIZE = 20
 
@@ -26,16 +25,20 @@ object FileHistoryManager {
      * @param newFile Новая запись для добавления/обновления.
      * @return Пара (обновлённый список, URI вытесненной записи или null).
      */
-    fun applyUpsert(entries: List<RecentFile>, newFile: RecentFile): Pair<List<RecentFile>, String?> {
+    fun applyUpsert(
+        entries: List<RecentFile>,
+        newFile: RecentFile,
+    ): Pair<List<RecentFile>, String?> {
         val normalizedUri = UriNormalizer.normalize(newFile.uri)
         val existingIndex = entries.indexOfFirst { UriNormalizer.normalize(it.uri) == normalizedUri }
 
         if (existingIndex >= 0) {
             val updated = entries[existingIndex].copy(openedAt = newFile.openedAt)
-            val newList = buildList {
-                add(updated)
-                entries.forEachIndexed { index, file -> if (index != existingIndex) add(file) }
-            }
+            val newList =
+                buildList {
+                    add(updated)
+                    entries.forEachIndexed { index, file -> if (index != existingIndex) add(file) }
+                }
             return Pair(newList, null)
         }
 
@@ -45,10 +48,11 @@ object FileHistoryManager {
 
         val evictIndex = findEvictIndex(entries)
         val evictedUri = entries[evictIndex].uri
-        val newList = buildList {
-            add(newFile)
-            entries.forEachIndexed { index, file -> if (index != evictIndex) add(file) }
-        }
+        val newList =
+            buildList {
+                add(newFile)
+                entries.forEachIndexed { index, file -> if (index != evictIndex) add(file) }
+            }
         return Pair(newList, evictedUri)
     }
 
@@ -64,22 +68,24 @@ object FileHistoryManager {
      * @return Индекс записи для вытеснения.
      */
     fun findEvictIndex(entries: List<RecentFile>): Int {
-        val notFoundIndex = entries
-            .withIndex()
-            .filter { (_, f) ->
-                f.availabilityStatus == AvailabilityStatus.NOT_FOUND ||
-                    f.availabilityStatus == AvailabilityStatus.FILE_ERROR
-            }
-            .minByOrNull { (_, f) -> f.openedAt }
-            ?.index
+        val notFoundIndex =
+            entries
+                .withIndex()
+                .filter { (_, f) ->
+                    f.availabilityStatus == AvailabilityStatus.NOT_FOUND ||
+                        f.availabilityStatus == AvailabilityStatus.FILE_ERROR
+                }
+                .minByOrNull { (_, f) -> f.openedAt }
+                ?.index
 
         if (notFoundIndex != null) return notFoundIndex
 
-        val unknownIndex = entries
-            .withIndex()
-            .filter { (_, f) -> f.availabilityStatus == AvailabilityStatus.UNKNOWN }
-            .minByOrNull { (_, f) -> f.openedAt }
-            ?.index
+        val unknownIndex =
+            entries
+                .withIndex()
+                .filter { (_, f) -> f.availabilityStatus == AvailabilityStatus.UNKNOWN }
+                .minByOrNull { (_, f) -> f.openedAt }
+                ?.index
 
         if (unknownIndex != null) return unknownIndex
 

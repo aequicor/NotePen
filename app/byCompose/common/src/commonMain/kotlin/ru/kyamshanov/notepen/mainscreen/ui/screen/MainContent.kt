@@ -6,10 +6,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -47,21 +49,17 @@ import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.union
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
+import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
 import ru.kyamshanov.notepen.mainscreen.ui.component.FolderCard
-import ru.kyamshanov.notepen.mainscreen.ui.component.extractExternalFileUris
-import ru.kyamshanov.notepen.mainscreen.ui.component.isExternalFileDrop
 import ru.kyamshanov.notepen.mainscreen.ui.component.PeerCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RecentFileCard
+import ru.kyamshanov.notepen.mainscreen.ui.component.extractExternalFileUris
+import ru.kyamshanov.notepen.mainscreen.ui.component.isExternalFileDrop
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.CreateFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.DeleteFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.SafMergeDialog
@@ -69,13 +67,15 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
-import androidx.compose.ui.platform.LocalWindowInfo
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.qrconnect.SyncPairingButton
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 private val RECENT_CARD_WIDTH: Dp = 132.dp
@@ -115,20 +115,21 @@ fun MainContent(
 
     LaunchedEffect(Unit) { onIntent(MainScreenIntent.ScreenVisible) }
 
-    val errorMessage = when (state.errorEvent) {
-        ErrorEvent.FileNotFound -> "Файл не найден"
-        ErrorEvent.FileError -> "Ошибка доступа к файлу"
-        ErrorEvent.HistoryFlushFailed -> "Не удалось обновить историю"
-        ErrorEvent.ThumbnailGenerationFailed -> "Не удалось создать миниатюру"
-        ErrorEvent.FolderLimitExceeded -> "Достигнут лимит папок"
-        ErrorEvent.FolderNameCharsInvalid -> "Недопустимые символы в имени папки"
-        ErrorEvent.FolderOperationFailed -> "Ошибка операции с папкой"
-        ErrorEvent.FileNotInHistory -> "Файл не найден в истории"
-        ErrorEvent.RemoteDocumentNotFound -> "Документ удалён на хосте"
-        ErrorEvent.RemoteDocumentTimeout -> "Хост не отвечает — попробуйте ещё раз"
-        ErrorEvent.RemoteDocumentFailed -> "Не удалось получить файл с хоста"
-        null -> null
-    }
+    val errorMessage =
+        when (state.errorEvent) {
+            ErrorEvent.FileNotFound -> "Файл не найден"
+            ErrorEvent.FileError -> "Ошибка доступа к файлу"
+            ErrorEvent.HistoryFlushFailed -> "Не удалось обновить историю"
+            ErrorEvent.ThumbnailGenerationFailed -> "Не удалось создать миниатюру"
+            ErrorEvent.FolderLimitExceeded -> "Достигнут лимит папок"
+            ErrorEvent.FolderNameCharsInvalid -> "Недопустимые символы в имени папки"
+            ErrorEvent.FolderOperationFailed -> "Ошибка операции с папкой"
+            ErrorEvent.FileNotInHistory -> "Файл не найден в истории"
+            ErrorEvent.RemoteDocumentNotFound -> "Документ удалён на хосте"
+            ErrorEvent.RemoteDocumentTimeout -> "Хост не отвечает — попробуйте ещё раз"
+            ErrorEvent.RemoteDocumentFailed -> "Не удалось получить файл с хоста"
+            null -> null
+        }
 
     LaunchedEffect(state.errorEvent) {
         if (errorMessage != null) {
@@ -138,10 +139,11 @@ fun MainContent(
 
     LaunchedEffect(state.successEvent) {
         val successEvent = state.successEvent ?: return@LaunchedEffect
-        val message = when (successEvent) {
-            is SuccessEvent.FileAddedToFolder -> "Файл добавлен в «${successEvent.folderName}»"
-            SuccessEvent.FileAlreadyInFolder -> "Файл уже есть в этой папке"
-        }
+        val message =
+            when (successEvent) {
+                is SuccessEvent.FileAddedToFolder -> "Файл добавлен в «${successEvent.folderName}»"
+                SuccessEvent.FileAlreadyInFolder -> "Файл уже есть в этой папке"
+            }
         snackbarHostState.showSnackbar(message)
         onIntent(MainScreenIntent.OnSuccessEventHandled)
     }
@@ -155,8 +157,9 @@ fun MainContent(
             TopAppBar(
                 modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
                 title = { Text("NotePen") },
-                windowInsets = WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
-                    .union(TopAppBarDefaults.windowInsets),
+                windowInsets =
+                    WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
+                        .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
                     if (onBack != null) {
                         IconButton(
@@ -208,32 +211,33 @@ fun MainContent(
         modifier = modifier,
     ) { padding ->
         var isExternalDropHovered by remember { mutableStateOf(false) }
-        val libraryDropTarget = remember(onIntent) {
-            object : DragAndDropTarget {
-                override fun onDrop(event: DragAndDropEvent): Boolean {
-                    isExternalDropHovered = false
-                    val uris = extractExternalFileUris(event)
-                    return if (uris.isNotEmpty()) {
-                        onIntent(MainScreenIntent.ExternalFilesDroppedOnLibrary(uris))
-                        true
-                    } else {
-                        false
+        val libraryDropTarget =
+            remember(onIntent) {
+                object : DragAndDropTarget {
+                    override fun onDrop(event: DragAndDropEvent): Boolean {
+                        isExternalDropHovered = false
+                        val uris = extractExternalFileUris(event)
+                        return if (uris.isNotEmpty()) {
+                            onIntent(MainScreenIntent.ExternalFilesDroppedOnLibrary(uris))
+                            true
+                        } else {
+                            false
+                        }
+                    }
+
+                    override fun onEntered(event: DragAndDropEvent) {
+                        isExternalDropHovered = true
+                    }
+
+                    override fun onExited(event: DragAndDropEvent) {
+                        isExternalDropHovered = false
+                    }
+
+                    override fun onEnded(event: DragAndDropEvent) {
+                        isExternalDropHovered = false
                     }
                 }
-
-                override fun onEntered(event: DragAndDropEvent) {
-                    isExternalDropHovered = true
-                }
-
-                override fun onExited(event: DragAndDropEvent) {
-                    isExternalDropHovered = false
-                }
-
-                override fun onEnded(event: DragAndDropEvent) {
-                    isExternalDropHovered = false
-                }
             }
-        }
 
         Box(
             Modifier
@@ -251,11 +255,12 @@ fun MainContent(
                 )
                 .border(
                     width = if (isExternalDropHovered) 2.dp else 0.dp,
-                    color = if (isExternalDropHovered) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        Color.Transparent
-                    },
+                    color =
+                        if (isExternalDropHovered) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.Transparent
+                        },
                 ),
         ) {
             when {
@@ -368,9 +373,10 @@ private fun RecentFilesAndFoldersList(
                         onClick = {
                             onIntent(MainScreenIntent.OpenPeer(peer.peerId, peer.displayName))
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
                     )
                 }
                 item { Spacer(Modifier.height(8.dp)) }
@@ -391,9 +397,10 @@ private fun RecentFilesAndFoldersList(
                         onDropExternalFiles = { uris ->
                             onIntent(MainScreenIntent.ExternalFilesDroppedOnFolder(folder.id, uris))
                         },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
                     )
                 }
             }

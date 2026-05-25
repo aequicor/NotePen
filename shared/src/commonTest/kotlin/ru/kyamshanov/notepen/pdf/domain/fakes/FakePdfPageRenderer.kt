@@ -5,7 +5,6 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfPageData
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 
 internal class FakePdfPageRenderer : PdfPageRenderer {
-
     override suspend fun renderPage(
         document: PdfDocument,
         pageIndex: Int,

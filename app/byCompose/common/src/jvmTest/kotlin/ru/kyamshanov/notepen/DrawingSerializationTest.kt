@@ -8,7 +8,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class DrawingSerializationTest {
-
     private val json = Json { ignoreUnknownKeys = true }
 
     @Test
@@ -21,11 +20,12 @@ class DrawingSerializationTest {
 
     @Test
     fun drawingPath_roundTrip_preservesColorAndStroke() {
-        val original = DrawingPath(
-            points = listOf(DrawingPoint(1f, 2f, true), DrawingPoint(3f, 4f)),
-            colorArgb = 0xFFE53935L,
-            strokeWidth = 5f,
-        )
+        val original =
+            DrawingPath(
+                points = listOf(DrawingPoint(1f, 2f, true), DrawingPoint(3f, 4f)),
+                colorArgb = 0xFFE53935L,
+                strokeWidth = 5f,
+            )
         val encoded = json.encodeToString(DrawingPath.serializer(), original)
         val decoded = json.decodeFromString(DrawingPath.serializer(), encoded)
         assertEquals(original, decoded)

@@ -33,15 +33,16 @@ class OpenRecentFileUseCase(
      * @return [OpenFileResult.Success] если файл доступен, иначе [OpenFileResult.NotAvailable].
      */
     suspend fun execute(uri: String): OpenFileResult {
-        val status = try {
-            withContext(ioDispatcher) { checker.checkSync(uri) }
-        } catch (_: SecurityException) {
-            AvailabilityStatus.FILE_ERROR
-        } catch (e: Exception) {
-            // Platform exceptions from checkSync are not enumerable in commonMain contract.
-            // Boundary catch prevents UI crash — returns FILE_ERROR instead (ADR-004).
-            AvailabilityStatus.FILE_ERROR
-        }
+        val status =
+            try {
+                withContext(ioDispatcher) { checker.checkSync(uri) }
+            } catch (_: SecurityException) {
+                AvailabilityStatus.FILE_ERROR
+            } catch (e: Exception) {
+                // Platform exceptions from checkSync are not enumerable in commonMain contract.
+                // Boundary catch prevents UI crash — returns FILE_ERROR instead (ADR-004).
+                AvailabilityStatus.FILE_ERROR
+            }
         return when (status) {
             AvailabilityStatus.AVAILABLE -> OpenFileResult.Success(uri)
             else -> OpenFileResult.NotAvailable(status)

@@ -9,7 +9,6 @@ package ru.kyamshanov.notepen.reflow
  * чистой логикой, покрытой unit-тестами и общей для PDFBox и PdfBox-Android.
  */
 internal object FontStyles {
-
     /** Маркеры полужирного начертания в имени шрифта. */
     private val BOLD_MARKERS = listOf("bold", "black", "heavy")
 
@@ -22,6 +21,5 @@ internal object FontStyles {
     /** Моноширинный ли шрифт [fontName] (`null`/неизвестно → `false`). */
     fun isMonospace(fontName: String?): Boolean = fontName.matchesAny(MONOSPACE_MARKERS)
 
-    private fun String?.matchesAny(markers: List<String>): Boolean =
-        this != null && markers.any { contains(it, ignoreCase = true) }
+    private fun String?.matchesAny(markers: List<String>): Boolean = this != null && markers.any { contains(it, ignoreCase = true) }
 }

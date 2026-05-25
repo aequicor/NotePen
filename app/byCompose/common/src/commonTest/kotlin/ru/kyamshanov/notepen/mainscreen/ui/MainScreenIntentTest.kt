@@ -5,15 +5,15 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 
 class MainScreenIntentTest {
-
     // TC-INTENT-1: DragStarted holds fileId, fileUri, displayName
     @Test
     fun `DragStarted stores fileId, fileUri, displayName`() {
-        val intent = MainScreenIntent.DragStarted(
-            fileId = "file-abc",
-            fileUri = "content://example/abc",
-            displayName = "file.pdf",
-        )
+        val intent =
+            MainScreenIntent.DragStarted(
+                fileId = "file-abc",
+                fileUri = "content://example/abc",
+                displayName = "file.pdf",
+            )
         assertEquals("file-abc", intent.fileId)
         assertEquals("content://example/abc", intent.fileUri)
         assertEquals("file.pdf", intent.displayName)
@@ -22,11 +22,12 @@ class MainScreenIntentTest {
     // TC-INTENT-2: DragStarted supports copy()
     @Test
     fun `DragStarted copy changes specified fields`() {
-        val original = MainScreenIntent.DragStarted(
-            fileId = "f1",
-            fileUri = "uri1",
-            displayName = "original.pdf",
-        )
+        val original =
+            MainScreenIntent.DragStarted(
+                fileId = "f1",
+                fileUri = "uri1",
+                displayName = "original.pdf",
+            )
         val copied = original.copy(displayName = "updated.pdf")
         assertEquals("f1", copied.fileId)
         assertEquals("uri1", copied.fileUri)

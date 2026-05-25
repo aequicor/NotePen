@@ -141,6 +141,7 @@ object NoOpTabletInputController : TabletInputController {
  * `CompositionLocalProvider` supplying the WinTab-backed implementation,
  * and Android `MainActivity` does the same with an Android implementation.
  */
-val LocalTabletInputController = staticCompositionLocalOf<TabletInputController> {
-    NoOpTabletInputController
-}
+val LocalTabletInputController =
+    staticCompositionLocalOf<TabletInputController> {
+        NoOpTabletInputController
+    }

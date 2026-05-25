@@ -20,9 +20,13 @@ internal sealed interface BookSource {
  * @param bytes полное содержимое файла книги
  * @param format формат, определённый через [detectBookFormat]
  */
-internal fun readBookSource(bytes: ByteArray, format: BookFormat): BookSource = when (format) {
-    BookFormat.EPUB -> BookSource.Text(EpubParser.parse(bytes))
-    BookFormat.FB2 -> BookSource.Text(Fb2Parser.parse(bytes))
-    BookFormat.CBZ -> BookSource.Comic(ComicArchive.extract(bytes, BookFormat.CBZ))
-    BookFormat.CBR -> BookSource.Comic(ComicArchive.extract(bytes, BookFormat.CBR))
-}
+internal fun readBookSource(
+    bytes: ByteArray,
+    format: BookFormat,
+): BookSource =
+    when (format) {
+        BookFormat.EPUB -> BookSource.Text(EpubParser.parse(bytes))
+        BookFormat.FB2 -> BookSource.Text(Fb2Parser.parse(bytes))
+        BookFormat.CBZ -> BookSource.Comic(ComicArchive.extract(bytes, BookFormat.CBZ))
+        BookFormat.CBR -> BookSource.Comic(ComicArchive.extract(bytes, BookFormat.CBR))
+    }

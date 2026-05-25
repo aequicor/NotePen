@@ -38,7 +38,6 @@ class FileTransferReceiver(
     private val destDir: String,
     private val onProgress: (TransferProgress) -> Unit = {},
 ) {
-
     /**
      * Suspends until a full transfer is received. Returns the absolute path of the
      * written file. Throws if the underlying flow terminates before completion.
@@ -68,23 +67,25 @@ class FileTransferReceiver(
                         val received = buffers.values.sumOf { it.size }.toLong()
                         onProgress(TransferProgress(transferred = received, total = h.totalSize))
                         if (buffers.size == h.totalChunks) {
-                            val assembled = ByteArray(h.totalSize.toInt()).also { out ->
-                                var offset = 0
-                                for (i in 0 until h.totalChunks) {
-                                    val chunk = buffers.getValue(i)
-                                    chunk.copyInto(out, offset)
-                                    offset += chunk.size
+                            val assembled =
+                                ByteArray(h.totalSize.toInt()).also { out ->
+                                    var offset = 0
+                                    for (i in 0 until h.totalChunks) {
+                                        val chunk = buffers.getValue(i)
+                                        chunk.copyInto(out, offset)
+                                        offset += chunk.size
+                                    }
                                 }
-                            }
                             // Имя кеш-файла включает hash(documentId) — два файла
                             // с одинаковым `fileName`, но разными documentId
                             // (`book.pdf#a` и `book.pdf#b`) больше не затирают друг друга.
                             // Для legacy-вызовов (пустой documentId) поведение не меняется.
-                            val cacheName = if (h.documentId.isNotEmpty()) {
-                                documentIdToCacheFileName(h.documentId, h.fileName)
-                            } else {
-                                h.fileName
-                            }
+                            val cacheName =
+                                if (h.documentId.isNotEmpty()) {
+                                    documentIdToCacheFileName(h.documentId, h.fileName)
+                                } else {
+                                    h.fileName
+                                }
                             val dest = joinPath(destDir, cacheName)
                             okio_writeBytes(dest, assembled)
                             logger.info { "FileTransferReceiver: completed → $dest" }
@@ -105,7 +106,10 @@ class FileTransferReceiver(
     }
 }
 
-private fun joinPath(dir: String, name: String): String {
+private fun joinPath(
+    dir: String,
+    name: String,
+): String {
     val sep = if (dir.contains('\\')) "\\" else "/"
     return if (dir.endsWith('/') || dir.endsWith('\\')) "$dir$name" else "$dir$sep$name"
 }

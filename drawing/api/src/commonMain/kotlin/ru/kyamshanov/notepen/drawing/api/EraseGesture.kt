@@ -27,19 +27,23 @@ class EraseGesture(
     private var lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
     private var pendingBump = false
 
-    fun start(nx: Float, ny: Float) {
+    fun start(
+        nx: Float,
+        ny: Float,
+    ) {
         preEraseSnapshot = pdfDrawingState.currentPaths.toList()
         onGestureStart(preEraseSnapshot)
         eraserPos.value = EraserPosition(nx, ny)
         lastEraseX = nx
         lastEraseY = ny
-        val changed = pdfDrawingState.eraseInZone(
-            centerX = nx,
-            centerY = ny,
-            halfSizeNormalized = halfSize,
-            settings = eraserSettings,
-            bumpHistory = false,
-        )
+        val changed =
+            pdfDrawingState.eraseInZone(
+                centerX = nx,
+                centerY = ny,
+                halfSizeNormalized = halfSize,
+                settings = eraserSettings,
+                bumpHistory = false,
+            )
         if (changed) {
             pdfDrawingState.markHistoryChanged()
             lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
@@ -47,20 +51,24 @@ class EraseGesture(
         }
     }
 
-    fun move(nx: Float, ny: Float) {
+    fun move(
+        nx: Float,
+        ny: Float,
+    ) {
         eraserPos.value = EraserPosition(nx, ny)
         val dx = nx - lastEraseX
         val dy = ny - lastEraseY
         if (dx * dx + dy * dy < moveThresholdSq) return
         lastEraseX = nx
         lastEraseY = ny
-        val changed = pdfDrawingState.eraseInZone(
-            centerX = nx,
-            centerY = ny,
-            halfSizeNormalized = halfSize,
-            settings = eraserSettings,
-            bumpHistory = false,
-        )
+        val changed =
+            pdfDrawingState.eraseInZone(
+                centerX = nx,
+                centerY = ny,
+                halfSizeNormalized = halfSize,
+                settings = eraserSettings,
+                bumpHistory = false,
+            )
         if (changed) {
             pendingBump = true
             if (lastHistoryBump.elapsedNow().inWholeMilliseconds >= 80L) {

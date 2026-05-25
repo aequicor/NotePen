@@ -45,8 +45,18 @@ private const val PEN_MASK_PRESSURE: Int = 0x00000001
 /** Custom JNA-биндинг (JNA's стандартный User32 не имеет нужных GetPointer*-функций). */
 @Suppress("FunctionName")
 private interface User32WndProc : StdCallLibrary {
-    fun SetWindowLongPtrA(hWnd: HWND, nIndex: Int, dwNewLong: PenWndProc): Pointer?
-    fun SetWindowLongPtrA(hWnd: HWND, nIndex: Int, dwNewLong: Pointer): Pointer?
+    fun SetWindowLongPtrA(
+        hWnd: HWND,
+        nIndex: Int,
+        dwNewLong: PenWndProc,
+    ): Pointer?
+
+    fun SetWindowLongPtrA(
+        hWnd: HWND,
+        nIndex: Int,
+        dwNewLong: Pointer,
+    ): Pointer?
+
     fun CallWindowProcA(
         lpPrevWndFunc: Pointer,
         hWnd: HWND,
@@ -55,8 +65,15 @@ private interface User32WndProc : StdCallLibrary {
         lParam: LPARAM,
     ): LRESULT
 
-    fun GetPointerType(pointerId: Int, pointerType: IntByReference): Boolean
-    fun GetPointerPenInfo(pointerId: Int, penInfo: PointerPenInfo): Boolean
+    fun GetPointerType(
+        pointerId: Int,
+        pointerType: IntByReference,
+    ): Boolean
+
+    fun GetPointerPenInfo(
+        pointerId: Int,
+        penInfo: PointerPenInfo,
+    ): Boolean
 
     /**
      * Возвращает массив POINTER_PEN_INFO с историческими сэмплами для
@@ -71,7 +88,10 @@ private interface User32WndProc : StdCallLibrary {
         penInfo: Array<PointerPenInfo>,
     ): Boolean
 
-    fun ScreenToClient(hWnd: HWND, lpPoint: POINT): Boolean
+    fun ScreenToClient(
+        hWnd: HWND,
+        lpPoint: POINT,
+    ): Boolean
 }
 
 /**
@@ -83,7 +103,12 @@ private const val MAX_PEN_HISTORY: Int = 64
 
 /** WNDPROC, который JNA marshall'ит в нативный __stdcall function pointer. */
 internal interface PenWndProc : StdCallLibrary.StdCallCallback {
-    fun callback(hwnd: HWND, uMsg: Int, wParam: WPARAM, lParam: LPARAM): LRESULT
+    fun callback(
+        hwnd: HWND,
+        uMsg: Int,
+        wParam: WPARAM,
+        lParam: LPARAM,
+    ): LRESULT
 }
 
 /**
@@ -103,24 +128,43 @@ internal interface PenWndProc : StdCallLibrary.StdCallCallback {
 )
 internal open class PointerInfo : Structure() {
     @JvmField var pointerType: Int = 0
+
     @JvmField var pointerId: Int = 0
+
     @JvmField var frameId: Int = 0
+
     @JvmField var pointerFlags: Int = 0
+
     @JvmField var sourceDevice: Pointer? = null
+
     @JvmField var hwndTarget: Pointer? = null
+
     @JvmField var ptPixelLocationX: Int = 0
+
     @JvmField var ptPixelLocationY: Int = 0
+
     @JvmField var ptHimetricLocationX: Int = 0
+
     @JvmField var ptHimetricLocationY: Int = 0
+
     @JvmField var ptPixelLocationRawX: Int = 0
+
     @JvmField var ptPixelLocationRawY: Int = 0
+
     @JvmField var ptHimetricLocationRawX: Int = 0
+
     @JvmField var ptHimetricLocationRawY: Int = 0
+
     @JvmField var dwTime: Int = 0
+
     @JvmField var historyCount: Int = 0
+
     @JvmField var inputData: Int = 0
+
     @JvmField var dwKeyStates: Int = 0
+
     @JvmField var performanceCount: Long = 0
+
     @JvmField var buttonChangeType: Int = 0
 }
 
@@ -131,12 +175,18 @@ internal open class PointerInfo : Structure() {
 @Structure.FieldOrder("pointerInfo", "penFlags", "penMask", "pressure", "rotation", "tiltX", "tiltY")
 internal open class PointerPenInfo : Structure() {
     @JvmField var pointerInfo: PointerInfo = PointerInfo()
+
     @JvmField var penFlags: Int = 0
+
     @JvmField var penMask: Int = 0
-    @JvmField var pressure: Int = 0   // 0..1024 (нормированное native API)
-    @JvmField var rotation: Int = 0   // 0..359 (degrees)
-    @JvmField var tiltX: Int = 0      // -90..+90
-    @JvmField var tiltY: Int = 0      // -90..+90
+
+    @JvmField var pressure: Int = 0 // 0..1024 (нормированное native API)
+
+    @JvmField var rotation: Int = 0 // 0..359 (degrees)
+
+    @JvmField var tiltX: Int = 0 // -90..+90
+
+    @JvmField var tiltY: Int = 0 // -90..+90
 }
 
 /**
@@ -164,7 +214,6 @@ private const val PEN_PRESSURE_MAX: Float = 1024f
  * получать обычные mouse-события.
  */
 object WindowsPointerHook {
-
     private val user32: User32WndProc? by lazy {
         if (!Platform.isWindows()) {
             null
@@ -176,18 +225,20 @@ object WindowsPointerHook {
     }
 
     private data class Hook(val hwnd: HWND, val original: Pointer, val callback: PenWndProc)
+
     private val hooks = mutableMapOf<HWND, Hook>()
 
-    private val penEventsFlow = MutableSharedFlow<PenPointerEvent>(
-        replay = 0,
-        // 1024 ≈ 4 кадра при 250Гц native sample-rate. С DROP_OLDEST tryEmit
-        // никогда не блокирует AWT EDT (где живёт WndProc) и не дропает
-        // самые свежие сэмплы; теоретически возможны крошечные пропуски
-        // в середине жеста при затыке drawing-pipeline'а — Catmull-Rom
-        // в renderer'е сгладит.
-        extraBufferCapacity = 1024,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    private val penEventsFlow =
+        MutableSharedFlow<PenPointerEvent>(
+            replay = 0,
+            // 1024 ≈ 4 кадра при 250Гц native sample-rate. С DROP_OLDEST tryEmit
+            // никогда не блокирует AWT EDT (где живёт WndProc) и не дропает
+            // самые свежие сэмплы; теоретически возможны крошечные пропуски
+            // в середине жеста при затыке drawing-pipeline'а — Catmull-Rom
+            // в renderer'е сгладит.
+            extraBufferCapacity = 1024,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
 
     private val penButtonsFlow = MutableStateFlow<Set<Int>>(emptySet())
 
@@ -246,36 +297,49 @@ object WindowsPointerHook {
         }
     }
 
-    private fun installOn(lib: User32WndProc, hwnd: HWND) {
+    private fun installOn(
+        lib: User32WndProc,
+        hwnd: HWND,
+    ) {
         if (hooks.containsKey(hwnd)) return
-        val callback = object : PenWndProc {
-            override fun callback(hwnd: HWND, uMsg: Int, wParam: WPARAM, lParam: LPARAM): LRESULT {
-                // Forward по умолчанию через локальную lambda, чтобы каждый
-                // ранний return в обработке мог однострочно делегировать.
-                val forward: () -> LRESULT = {
-                    val h = hooks[hwnd]
-                    if (h != null) lib.CallWindowProcA(h.original, hwnd, uMsg, wParam, lParam)
-                    else LRESULT(0)
+        val callback =
+            object : PenWndProc {
+                override fun callback(
+                    hwnd: HWND,
+                    uMsg: Int,
+                    wParam: WPARAM,
+                    lParam: LPARAM,
+                ): LRESULT {
+                    // Forward по умолчанию через локальную lambda, чтобы каждый
+                    // ранний return в обработке мог однострочно делегировать.
+                    val forward: () -> LRESULT = {
+                        val h = hooks[hwnd]
+                        if (h != null) {
+                            lib.CallWindowProcA(h.original, hwnd, uMsg, wParam, lParam)
+                        } else {
+                            LRESULT(0)
+                        }
+                    }
+                    if (uMsg !in WM_POINTERUPDATE..WM_POINTERCAPTURECHANGED) return forward()
+
+                    val pointerId = (wParam.toLong() and 0xFFFF).toInt()
+                    val typeRef = IntByReference()
+                    if (!lib.GetPointerType(pointerId, typeRef)) return forward()
+                    if (typeRef.value != PT_PEN) return forward() // touch/mouse — пусть AWT обрабатывает
+
+                    // Pen-сообщение: парсим, публикуем, **консумим** (return 0)
+                    // чтобы Windows не синтезировал legacy WM_MOUSE с задержкой.
+                    handlePenMessage(lib, hwnd, uMsg, pointerId)
+                    return LRESULT(0)
                 }
-                if (uMsg !in WM_POINTERUPDATE..WM_POINTERCAPTURECHANGED) return forward()
-
-                val pointerId = (wParam.toLong() and 0xFFFF).toInt()
-                val typeRef = IntByReference()
-                if (!lib.GetPointerType(pointerId, typeRef)) return forward()
-                if (typeRef.value != PT_PEN) return forward()  // touch/mouse — пусть AWT обрабатывает
-
-                // Pen-сообщение: парсим, публикуем, **консумим** (return 0)
-                // чтобы Windows не синтезировал legacy WM_MOUSE с задержкой.
-                handlePenMessage(lib, hwnd, uMsg, pointerId)
-                return LRESULT(0)
             }
-        }
-        val original = try {
-            lib.SetWindowLongPtrA(hwnd, GWLP_WNDPROC, callback)
-        } catch (t: Throwable) {
-            logger.warn(t) { "WindowsPointerHook: SetWindowLongPtrA threw for $hwnd" }
-            return
-        }
+        val original =
+            try {
+                lib.SetWindowLongPtrA(hwnd, GWLP_WNDPROC, callback)
+            } catch (t: Throwable) {
+                logger.warn(t) { "WindowsPointerHook: SetWindowLongPtrA threw for $hwnd" }
+                return
+            }
         if (original == null || original == Pointer.NULL) {
             logger.warn { "WindowsPointerHook: SetWindowLongPtrA returned null for $hwnd" }
             return
@@ -307,18 +371,23 @@ object WindowsPointerHook {
      * ~200-300Гц; без `GetPointerPenInfoHistory` мы бы дропали ~12 сэмплов
      * на каждый видимый UPDATE → штрих смотрится ступенчатым.
      */
-    private fun emitHistoryAsUpdates(lib: User32WndProc, hwnd: HWND, pointerId: Int) {
+    private fun emitHistoryAsUpdates(
+        lib: User32WndProc,
+        hwnd: HWND,
+        pointerId: Int,
+    ) {
         @Suppress("UNCHECKED_CAST")
         val historyArr = PointerPenInfo().toArray(MAX_PEN_HISTORY) as Array<PointerPenInfo>
         val countRef = IntByReference(MAX_PEN_HISTORY)
-        val ok = try {
-            lib.GetPointerPenInfoHistory(pointerId, countRef, historyArr)
-        } catch (t: Throwable) {
-            logger.warn(t) { "WindowsPointerHook: GetPointerPenInfoHistory threw" }
-            // Fallback: одиночный сэмпл.
-            emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UPDATE)
-            return
-        }
+        val ok =
+            try {
+                lib.GetPointerPenInfoHistory(pointerId, countRef, historyArr)
+            } catch (t: Throwable) {
+                logger.warn(t) { "WindowsPointerHook: GetPointerPenInfoHistory threw" }
+                // Fallback: одиночный сэмпл.
+                emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UPDATE)
+                return
+            }
         if (!ok || countRef.value <= 0) {
             emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UPDATE)
             return
@@ -376,15 +445,17 @@ object WindowsPointerHook {
         val pt = POINT(info.pointerInfo.ptPixelLocationX, info.pointerInfo.ptPixelLocationY)
         if (!lib.ScreenToClient(hwnd, pt)) return
 
-        val pressure = if ((info.penMask and PEN_MASK_PRESSURE) != 0) {
-            (info.pressure.toFloat() / PEN_PRESSURE_MAX).coerceIn(0f, 1f)
-        } else {
-            1f
-        }
-        val tilt = run {
-            val maxAbs = maxOf(kotlin.math.abs(info.tiltX), kotlin.math.abs(info.tiltY))
-            (maxAbs.toFloat() / 90f).coerceIn(0f, 1f)
-        }
+        val pressure =
+            if ((info.penMask and PEN_MASK_PRESSURE) != 0) {
+                (info.pressure.toFloat() / PEN_PRESSURE_MAX).coerceIn(0f, 1f)
+            } else {
+                1f
+            }
+        val tilt =
+            run {
+                val maxAbs = maxOf(kotlin.math.abs(info.tiltX), kotlin.math.abs(info.tiltY))
+                (maxAbs.toFloat() / 90f).coerceIn(0f, 1f)
+            }
 
         penEventsFlow.tryEmit(
             PenPointerEvent(
@@ -406,14 +477,16 @@ object WindowsPointerHook {
      */
     private fun updatePenButtons(info: PointerPenInfo) {
         val pf = info.pointerInfo.pointerFlags
-        val barrel = (pf and POINTER_FLAG_SECONDBUTTON) != 0 ||
-            (info.penFlags and PEN_FLAG_BARREL) != 0
-        val newSet = buildSet {
-            if (barrel) add(1)
-            if ((pf and POINTER_FLAG_THIRDBUTTON) != 0) add(2)
-            if ((pf and POINTER_FLAG_FOURTHBUTTON) != 0) add(3)
-            if ((pf and POINTER_FLAG_FIFTHBUTTON) != 0) add(4)
-        }
+        val barrel =
+            (pf and POINTER_FLAG_SECONDBUTTON) != 0 ||
+                (info.penFlags and PEN_FLAG_BARREL) != 0
+        val newSet =
+            buildSet {
+                if (barrel) add(1)
+                if ((pf and POINTER_FLAG_THIRDBUTTON) != 0) add(2)
+                if ((pf and POINTER_FLAG_FOURTHBUTTON) != 0) add(3)
+                if ((pf and POINTER_FLAG_FIFTHBUTTON) != 0) add(4)
+            }
         if (newSet != penButtonsFlow.value) {
             penButtonsFlow.value = newSet
             penButtonsListener?.invoke(newSet)

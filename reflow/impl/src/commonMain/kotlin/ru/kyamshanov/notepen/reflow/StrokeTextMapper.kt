@@ -18,7 +18,6 @@ import ru.kyamshanov.notepen.reflow.api.TextAnchor
  * координат не нужен.
  */
 public object StrokeTextMapper {
-
     /**
      * Прямое сопоставление: какие диапазоны текста перекрывает штрих [path],
      * нарисованный на странице [pageIndex].
@@ -34,13 +33,18 @@ public object StrokeTextMapper {
      * @param path рукописный штрих в нормализованных координатах страницы
      * @return перекрытые диапазоны текста; пусто, если штрих пуст или ничего не задел
      */
-    public fun anchorsFor(document: ReflowDocument, pageIndex: Int, path: DrawingPath): List<TextAnchor> {
+    public fun anchorsFor(
+        document: ReflowDocument,
+        pageIndex: Int,
+        path: DrawingPath,
+    ): List<TextAnchor> {
         val box = boundingBox(path.points) ?: return emptyList()
         val anchors = mutableListOf<TextAnchor>()
         document.blocks.forEachIndexed { blockIndex, block ->
-            val covered = block.sourceSpans()
-                .filter { it.pageIndex == pageIndex && intersects(box, it.bounds) }
-                .map { it.charStart to it.charEnd }
+            val covered =
+                block.sourceSpans()
+                    .filter { it.pageIndex == pageIndex && intersects(box, it.bounds) }
+                    .map { it.charStart to it.charEnd }
             mergeRanges(covered).forEach { (start, end) ->
                 anchors += TextAnchor(blockIndex, start, end)
             }
@@ -55,20 +59,24 @@ public object StrokeTextMapper {
      * @return [SourceSpan]-ы блока [TextAnchor.blockIndex], пересекающиеся с
      *   диапазоном анкера (каждый несёт `pageIndex` + нормализованные `bounds`)
      */
-    public fun spansFor(document: ReflowDocument, anchor: TextAnchor): List<SourceSpan> {
+    public fun spansFor(
+        document: ReflowDocument,
+        anchor: TextAnchor,
+    ): List<SourceSpan> {
         val block = document.blocks.getOrNull(anchor.blockIndex) ?: return emptyList()
         return block.sourceSpans().filter { it.charStart < anchor.charEnd && it.charEnd > anchor.charStart }
     }
 
-    private fun ReflowBlock.sourceSpans(): List<SourceSpan> = when (this) {
-        is ReflowBlock.Paragraph -> source
-        is ReflowBlock.Heading -> source
-        is ReflowBlock.ListItem -> source
-        // Ячейки таблицы индексируют каждая свой текст, не единый .text блока —
-        // ре-анкоринг штрихов в таблицы пока не поддержан.
-        is ReflowBlock.Table -> emptyList()
-        is ReflowBlock.Figure -> emptyList()
-    }
+    private fun ReflowBlock.sourceSpans(): List<SourceSpan> =
+        when (this) {
+            is ReflowBlock.Paragraph -> source
+            is ReflowBlock.Heading -> source
+            is ReflowBlock.ListItem -> source
+            // Ячейки таблицы индексируют каждая свой текст, не единый .text блока —
+            // ре-анкоринг штрихов в таблицы пока не поддержан.
+            is ReflowBlock.Table -> emptyList()
+            is ReflowBlock.Figure -> emptyList()
+        }
 
     private fun boundingBox(points: List<DrawingPoint>): ReflowRect? {
         val first = points.firstOrNull() ?: return null
@@ -86,8 +94,10 @@ public object StrokeTextMapper {
     }
 
     /** Пересечение прямоугольников; касание рёбер не считается (строгие сравнения). */
-    private fun intersects(a: ReflowRect, b: ReflowRect): Boolean =
-        a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
+    private fun intersects(
+        a: ReflowRect,
+        b: ReflowRect,
+    ): Boolean = a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
 
     /** Сливает перекрывающиеся и смежные (зазор ≤ 1 символ-разделитель) диапазоны. */
     private fun mergeRanges(ranges: List<Pair<Int, Int>>): List<Pair<Int, Int>> {

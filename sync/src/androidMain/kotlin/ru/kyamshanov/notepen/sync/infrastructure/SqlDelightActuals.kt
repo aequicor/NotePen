@@ -16,10 +16,11 @@ fun createSyncDatabaseAndroid(
     context: Context,
     databaseName: String = "notepen-sync.db",
 ): NotePenSyncDatabase {
-    val driver = AndroidSqliteDriver(
-        schema = NotePenSyncDatabase.Schema,
-        context = context,
-        name = databaseName,
-    )
+    val driver =
+        AndroidSqliteDriver(
+            schema = NotePenSyncDatabase.Schema,
+            context = context,
+            name = databaseName,
+        )
     return NotePenSyncDatabase(driver)
 }

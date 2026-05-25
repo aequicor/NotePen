@@ -5,7 +5,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class BookFileTypesTest {
-
     @Test
     fun detects_epub_by_extension_case_insensitively() {
         assertEquals(BookFormat.EPUB, detectBookFormat("/books/book.epub"))

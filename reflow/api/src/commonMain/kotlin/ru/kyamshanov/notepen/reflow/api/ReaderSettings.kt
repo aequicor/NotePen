@@ -311,15 +311,16 @@ public object BuiltinReaderPresets {
  * Персистентное состояние ридера (глобальное, на все документы).
  *
  * @property current последние применённые настройки — восстанавливаются при старте
- * @property my личный пресет «Моё»: снимок ручных правок пользователя, к которому
- *   всегда можно вернуться, даже после переключения на встроенный пресет; `null`,
- *   пока пользователь ничего не подкручивал руками
- * @property activePresetId id выбранного пресета для подсветки в панели; `null` —
- *   активны ручные настройки («Моё»)
+ * @property userPresets пользовательские пресеты (показываются первыми в колесе);
+ *   встроенные пресеты живут в коде ([BuiltinReaderPresets]) и не сериализуются,
+ *   поэтому могут эволюционировать между версиями
+ * @property activePresetId id выбранного пресета для подсветки в панели — может
+ *   указывать как на встроенный, так и на кастомный пресет из [userPresets]; `null` —
+ *   активного пресета нет (например, после удаления активного кастома)
  */
 @Serializable
 public data class StoredReaderSettings(
     public val current: ReaderSettings = ReaderSettings(),
-    public val my: ReaderSettings? = null,
+    public val userPresets: List<ReaderPreset> = emptyList(),
     public val activePresetId: String? = null,
 )

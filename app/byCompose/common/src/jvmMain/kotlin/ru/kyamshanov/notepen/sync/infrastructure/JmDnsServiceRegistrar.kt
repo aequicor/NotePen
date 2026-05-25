@@ -16,7 +16,6 @@ private val logger = KotlinLogging.logger {}
  * Intended to be created once the [KtorPeerServer] has started and a port is known.
  */
 class JmDnsServiceRegistrar {
-
     private var jmdns: JmDNS? = null
     private var registered: ServiceInfo? = null
 
@@ -29,13 +28,15 @@ class JmDnsServiceRegistrar {
      */
     fun register(device: DeviceInfo) {
         val props = mapOf("id" to device.id, "name" to device.name)
-        val serviceInfo = ServiceInfo.create(
-            SERVICE_TYPE,
-            device.name,
-            device.port,
-            0, 0,
-            props,
-        )
+        val serviceInfo =
+            ServiceInfo.create(
+                SERVICE_TYPE,
+                device.name,
+                device.port,
+                0,
+                0,
+                props,
+            )
         val bindAddress = runCatching { InetAddress.getByName(device.host) }.getOrNull()
         val jm = if (bindAddress != null) JmDNS.create(bindAddress, device.name) else JmDNS.create()
         jmdns = jm

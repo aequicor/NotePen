@@ -60,6 +60,7 @@ import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
 import ru.kyamshanov.notepen.magnifier.MagnifierInputPanel
 import ru.kyamshanov.notepen.magnifier.asMagnifierGeometry
+import ru.kyamshanov.notepen.mainscreen.domain.model.generateUuid
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
@@ -126,6 +127,8 @@ class PanelControls(
     val showThumbnails: Boolean,
     val showToc: Boolean,
     val readingModeEnabled: Boolean,
+    /** `true` в режиме чтения, когда airbar скрыт тапом — родитель прячет весь хром. */
+    val chromeHidden: Boolean,
     val quickLoupeArmed: Boolean,
     val scrollMode: ScrollMode,
     val zoomIn: () -> Unit,
@@ -940,6 +943,10 @@ fun EditorPanel(
         val thumbnailsVisible = showThumbnails
         val tocVisible = showToc
         val readingModeVisible = pdfState.readingMode
+        // Read readerBarVisible in composition too: tapping the text to hide the
+        // bar then republishes PanelControls so the parent hides the rest of the
+        // chrome (toolbar, quick actions) in lockstep — and shows it again on tap.
+        val readerBarVisible = pdfState.readerBarVisible
         // Read scrollMode in composition (not only inside SideEffect) so the
         // composition subscribes to it — toggling it republishes PanelControls.
         val currentScrollMode = pdfViewerState.scrollMode
@@ -955,6 +962,7 @@ fun EditorPanel(
                     showThumbnails = thumbnailsVisible,
                     showToc = tocVisible,
                     readingModeEnabled = readingModeVisible,
+                    chromeHidden = readingModeVisible && !readerBarVisible,
                     quickLoupeArmed = quickLoupeArmed.value,
                     scrollMode = currentScrollMode,
                     zoomIn = onZoomIn,
@@ -1208,6 +1216,7 @@ fun EditorPanel(
                         document = reading.document,
                         stored = readerStored,
                         onStoredChange = onReaderStoredChange,
+                        newPresetIdProvider = { generateUuid() },
                         barVisible = isFocused && pdfState.readerBarVisible,
                         onBarVisibleChange = { visible ->
                             if (isFocused) pdfState.readerBarVisible = visible

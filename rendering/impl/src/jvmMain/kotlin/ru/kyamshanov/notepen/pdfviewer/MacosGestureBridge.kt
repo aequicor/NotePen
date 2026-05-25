@@ -14,7 +14,6 @@ import com.sun.jna.Library
  * `PointerInputScope`. This shim bypasses that layer entirely.
  */
 internal interface MacosGestureBridge : Library {
-
     /**
      * Called on the AppKit main thread for every `NSEventTypeMagnify` event.
      *
@@ -24,7 +23,11 @@ internal interface MacosGestureBridge : Library {
      * @param y centroid Y in window coordinates (macOS bottom-left origin, points).
      */
     fun interface OnMagnify : Callback {
-        fun invoke(magnification: Float, x: Float, y: Float)
+        fun invoke(
+            magnification: Float,
+            x: Float,
+            y: Float,
+        )
     }
 
     /** Install the NSEvent local monitor. Idempotent (replaces any previous monitor). */

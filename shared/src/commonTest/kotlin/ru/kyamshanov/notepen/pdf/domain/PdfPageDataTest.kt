@@ -6,7 +6,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 
 class PdfPageDataTest {
-
     @Test
     fun equalsIsStructuralOverPixels() {
         val a = PdfPageData(2, 2, intArrayOf(1, 2, 3, 4))

@@ -33,47 +33,49 @@ class JvmShortcutsRepository(
     private val configDir: Path = defaultConfigDir(),
     private val ioContext: CoroutineContext = Dispatchers.IO,
 ) : ShortcutsRepository {
-
     private val mutex = Mutex()
-    private val json = Json {
-        prettyPrint = true
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-    }
+    private val json =
+        Json {
+            prettyPrint = true
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+        }
 
     private val file: Path
         get() = configDir.resolve(FILE_NAME)
 
-    override suspend fun load(): ShortcutsSettings = withContext(ioContext) {
-        mutex.withLock {
-            val path = file
-            if (!Files.exists(path)) {
-                return@withLock ShortcutsSettings()
-            }
-            runCatching {
-                val text = Files.readString(path)
-                json.decodeFromString(ShortcutsSettings.serializer(), text)
-            }.getOrElse { t ->
-                logger.warn(t) { "ShortcutsRepository: cannot read $path, falling back to defaults" }
-                ShortcutsSettings()
+    override suspend fun load(): ShortcutsSettings =
+        withContext(ioContext) {
+            mutex.withLock {
+                val path = file
+                if (!Files.exists(path)) {
+                    return@withLock ShortcutsSettings()
+                }
+                runCatching {
+                    val text = Files.readString(path)
+                    json.decodeFromString(ShortcutsSettings.serializer(), text)
+                }.getOrElse { t ->
+                    logger.warn(t) { "ShortcutsRepository: cannot read $path, falling back to defaults" }
+                    ShortcutsSettings()
+                }
             }
         }
-    }
 
-    override suspend fun save(settings: ShortcutsSettings): Unit = withContext(ioContext) {
-        mutex.withLock {
-            runCatching {
-                Files.createDirectories(configDir)
-                val tmp = configDir.resolve("$FILE_NAME.tmp")
-                val text = json.encodeToString(ShortcutsSettings.serializer(), settings)
-                Files.writeString(tmp, text)
-                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
-            }.onFailure { t ->
-                logger.warn(t) { "ShortcutsRepository: cannot save settings to ${file}" }
-                runCatching { configDir.resolve("$FILE_NAME.tmp").deleteIfExists() }
+    override suspend fun save(settings: ShortcutsSettings): Unit =
+        withContext(ioContext) {
+            mutex.withLock {
+                runCatching {
+                    Files.createDirectories(configDir)
+                    val tmp = configDir.resolve("$FILE_NAME.tmp")
+                    val text = json.encodeToString(ShortcutsSettings.serializer(), settings)
+                    Files.writeString(tmp, text)
+                    Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+                }.onFailure { t ->
+                    logger.warn(t) { "ShortcutsRepository: cannot save settings to $file" }
+                    runCatching { configDir.resolve("$FILE_NAME.tmp").deleteIfExists() }
+                }
             }
         }
-    }
 
     private companion object {
         const val FILE_NAME = "shortcuts.json"

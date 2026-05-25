@@ -15,7 +15,6 @@ data class TransferProgress(val transferred: Long, val total: Long) {
  * output file.
  */
 interface FileTransfer {
-
     /**
      * Sends the file at [sourcePath] to the connected peer.
      *
@@ -23,7 +22,10 @@ interface FileTransfer {
      * @param transferId unique identifier for this transfer (UUID)
      * @return [Flow] of [TransferProgress] until the transfer completes
      */
-    fun send(sourcePath: String, transferId: String): Flow<TransferProgress>
+    fun send(
+        sourcePath: String,
+        transferId: String,
+    ): Flow<TransferProgress>
 
     /**
      * Receives a file being sent by the peer and writes it to [destPath].
@@ -33,5 +35,8 @@ interface FileTransfer {
      * @param transferId must match the sender's [transferId]
      * @param destPath absolute path to write the received file
      */
-    suspend fun receive(transferId: String, destPath: String)
+    suspend fun receive(
+        transferId: String,
+        destPath: String,
+    )
 }

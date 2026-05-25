@@ -6,7 +6,6 @@ package ru.kyamshanov.notepen.rendering.api
  * Реализация управляет эвикцией по числу записей и суммарному объёму в пикселях.
  */
 public interface PageBitmapCache {
-
     /**
      * Возвращает кэшированную страницу или `null`, если не найдена.
      *
@@ -19,7 +18,10 @@ public interface PageBitmapCache {
      *
      * При превышении лимитов вытесняет наименее используемые записи.
      */
-    public fun put(pageIndex: Int, page: CachedPage)
+    public fun put(
+        pageIndex: Int,
+        page: CachedPage,
+    )
 
     /**
      * Проактивно вытесняет off-screen записи с устаревшим масштабом.

@@ -36,10 +36,11 @@ fun getAppDataDir(): File =
  * Каталог данных рядом с лаунчером, если активен portable-режим, иначе `null`.
  */
 private fun portableDataDir(): File? {
-    val launcherDir = System.getProperty("jpackage.app-path")
-        ?.let(::File)
-        ?.parentFile
-        ?: return null
+    val launcherDir =
+        System.getProperty("jpackage.app-path")
+            ?.let(::File)
+            ?.parentFile
+            ?: return null
     val portable = File(launcherDir, PORTABLE_MARKER_FILE).isFile
     return if (portable) File(launcherDir, PORTABLE_DATA_DIR) else null
 }

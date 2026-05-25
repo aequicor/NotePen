@@ -13,15 +13,18 @@ import ru.kyamshanov.notepen.qrconnect.domain.port.QrMatrix
  * dark theme background.
  */
 class ZxingQrEncoder : QrEncoder {
-
     private val writer = QRCodeWriter()
-    private val hints = mapOf(
-        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-        EncodeHintType.CHARACTER_SET to "UTF-8",
-        EncodeHintType.MARGIN to 1,
-    )
+    private val hints =
+        mapOf(
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+            EncodeHintType.CHARACTER_SET to "UTF-8",
+            EncodeHintType.MARGIN to 1,
+        )
 
-    override fun encode(text: String, size: Int): QrMatrix {
+    override fun encode(
+        text: String,
+        size: Int,
+    ): QrMatrix {
         val bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, size, size, hints)
         val width = bitMatrix.width
         val height = bitMatrix.height

@@ -9,7 +9,6 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
  * списке страниц).
  */
 public object ReflowPageLocator {
-
     /**
      * Индекс блока [ReflowDocument.blocks], с которого начинается страница
      * [pageIndex]. Если на самой странице блоков нет (например, скан без текста),
@@ -19,7 +18,10 @@ public object ReflowPageLocator {
      * Блоки идут в порядке чтения, а страницы конкатенируются по возрастанию,
      * поэтому исходные страницы блоков не убывают — хватает одного прохода.
      */
-    public fun blockIndexForPage(document: ReflowDocument, pageIndex: Int): Int? {
+    public fun blockIndexForPage(
+        document: ReflowDocument,
+        pageIndex: Int,
+    ): Int? {
         var fallback: Int? = null
         document.blocks.forEachIndexed { index, block ->
             val page = block.sourcePage() ?: return@forEachIndexed
@@ -37,7 +39,10 @@ public object ReflowPageLocator {
      * текущей страницы при прокрутке ридера. `null`, если [blockIndex] вне
      * диапазона блоков.
      */
-    public fun pageForBlock(document: ReflowDocument, blockIndex: Int): Int? {
+    public fun pageForBlock(
+        document: ReflowDocument,
+        blockIndex: Int,
+    ): Int? {
         val blocks = document.blocks
         if (blockIndex !in blocks.indices) return null
         for (i in blockIndex downTo 0) {
@@ -49,11 +54,12 @@ public object ReflowPageLocator {
         return null
     }
 
-    private fun ReflowBlock.sourcePage(): Int? = when (this) {
-        is ReflowBlock.Paragraph -> source.minOfOrNull { it.pageIndex }
-        is ReflowBlock.Heading -> source.minOfOrNull { it.pageIndex }
-        is ReflowBlock.ListItem -> source.minOfOrNull { it.pageIndex }
-        is ReflowBlock.Table -> rows.asSequence().flatMap { it.cells }.flatMap { it.source }.minOfOrNull { it.pageIndex }
-        is ReflowBlock.Figure -> pageIndex
-    }
+    private fun ReflowBlock.sourcePage(): Int? =
+        when (this) {
+            is ReflowBlock.Paragraph -> source.minOfOrNull { it.pageIndex }
+            is ReflowBlock.Heading -> source.minOfOrNull { it.pageIndex }
+            is ReflowBlock.ListItem -> source.minOfOrNull { it.pageIndex }
+            is ReflowBlock.Table -> rows.asSequence().flatMap { it.cells }.flatMap { it.source }.minOfOrNull { it.pageIndex }
+            is ReflowBlock.Figure -> pageIndex
+        }
 }

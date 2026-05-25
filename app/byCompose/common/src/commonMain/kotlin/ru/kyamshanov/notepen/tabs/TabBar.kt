@@ -4,9 +4,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,12 +36,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -109,24 +107,27 @@ fun TabBar(
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = startInset, end = endInset)) {
             BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
+                modifier =
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight(),
             ) {
                 val tabCount = openDocs.tabs.size
                 val scrollState = rememberScrollState()
                 val needsScroll = tabCount > 0 && maxWidth / tabCount < TAB_MIN_WIDTH
-                val tabWidth: Dp = when {
-                    tabCount == 0 -> TAB_MIN_WIDTH
-                    needsScroll -> TAB_MIN_WIDTH
-                    else -> maxWidth / tabCount
-                }
+                val tabWidth: Dp =
+                    when {
+                        tabCount == 0 -> TAB_MIN_WIDTH
+                        needsScroll -> TAB_MIN_WIDTH
+                        else -> maxWidth / tabCount
+                    }
                 Row(
-                    modifier = if (needsScroll) {
-                        Modifier.horizontalScroll(scrollState).fillMaxHeight()
-                    } else {
-                        Modifier.fillMaxWidth().fillMaxHeight()
-                    },
+                    modifier =
+                        if (needsScroll) {
+                            Modifier.horizontalScroll(scrollState).fillMaxHeight()
+                        } else {
+                            Modifier.fillMaxWidth().fillMaxHeight()
+                        },
                     verticalAlignment = Alignment.Bottom,
                 ) {
                     openDocs.tabs.forEachIndexed { index, tab ->
@@ -135,16 +136,18 @@ fun TabBar(
                             val showDivider = prevTab.id != openDocs.activeId && tab.id != openDocs.activeId
                             Box(
                                 contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .width(1.dp)
-                                    .height(TAB_BAR_HEIGHT),
+                                modifier =
+                                    Modifier
+                                        .width(1.dp)
+                                        .height(TAB_BAR_HEIGHT),
                             ) {
                                 if (showDivider) {
                                     Box(
-                                        modifier = Modifier
-                                            .width(1.dp)
-                                            .fillMaxHeight(0.6f)
-                                            .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                                        modifier =
+                                            Modifier
+                                                .width(1.dp)
+                                                .fillMaxHeight(0.6f)
+                                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                                     )
                                 }
                             }
@@ -195,16 +198,18 @@ private fun TabChip(
     val hasMenu = true
     // Active tab: subtle highlight that lets the outer glass bar show through.
     // Inactive tab: fully transparent — the glass bar background is the visual context.
-    val chipBackground: Color = if (isActive) {
-        MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
-    } else {
-        Color.Transparent
-    }
-    val contentColor: Color = if (isActive) {
-        MaterialTheme.colorScheme.onSecondaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val chipBackground: Color =
+        if (isActive) {
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+        } else {
+            Color.Transparent
+        }
+    val contentColor: Color =
+        if (isActive) {
+            MaterialTheme.colorScheme.onSecondaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
     var menuExpanded by remember { mutableStateOf(false) }
     // Position the context menu at the press / cursor point rather than the
     // chip's corner. Updated on every press (long-press on touch, right-click
@@ -214,45 +219,47 @@ private fun TabChip(
     val titleBarInteraction = LocalTitleBarInteraction.current
     val chipBaseModifier = modifier.height(TAB_BAR_HEIGHT).background(color = chipBackground, shape = TAB_SHAPE)
     Box(
-        modifier = (titleBarInteraction?.interactive(chipBaseModifier) ?: chipBaseModifier)
-            .pointerInput(Unit) {
-                // Non-consuming press tracker (initial pass) so long-press can
-                // open the menu where the finger went down.
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        event.changes.firstOrNull { it.pressed }?.let { menuOffset = it.position }
+        modifier =
+            (titleBarInteraction?.interactive(chipBaseModifier) ?: chipBaseModifier)
+                .pointerInput(Unit) {
+                    // Non-consuming press tracker (initial pass) so long-press can
+                    // open the menu where the finger went down.
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            event.changes.firstOrNull { it.pressed }?.let { menuOffset = it.position }
+                        }
                     }
                 }
-            }
-            .then(
-                if (hasMenu && !SupportsLongPressMenu) {
-                    Modifier.pointerInput(Unit) {
-                        // Desktop: open on secondary (right) click at the cursor.
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
-                                    menuOffset = event.changes.first().position
-                                    event.changes.forEach { it.consume() }
-                                    menuExpanded = true
+                .then(
+                    if (hasMenu && !SupportsLongPressMenu) {
+                        Modifier.pointerInput(Unit) {
+                            // Desktop: open on secondary (right) click at the cursor.
+                            awaitPointerEventScope {
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                        menuOffset = event.changes.first().position
+                                        event.changes.forEach { it.consume() }
+                                        menuExpanded = true
+                                    }
                                 }
                             }
                         }
-                    }
-                } else {
-                    Modifier
-                },
-            )
-            .combinedClickable(
-                enabled = true,
-                onClick = { if (!isActive) onSelect() },
-                onLongClick = if (hasMenu && SupportsLongPressMenu) {
-                    { menuExpanded = true }
-                } else {
-                    null
-                },
-            ),
+                    } else {
+                        Modifier
+                    },
+                )
+                .combinedClickable(
+                    enabled = true,
+                    onClick = { if (!isActive) onSelect() },
+                    onLongClick =
+                        if (hasMenu && SupportsLongPressMenu) {
+                            { menuExpanded = true }
+                        } else {
+                            null
+                        },
+                ),
     ) {
         // Left spacer mirrors the close-button slot so the label stays centred
         // regardless of whether the button is shown.

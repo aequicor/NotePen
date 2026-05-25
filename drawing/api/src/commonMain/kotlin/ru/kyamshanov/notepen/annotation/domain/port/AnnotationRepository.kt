@@ -40,5 +40,8 @@ interface AnnotationRepository {
      * навигации (зум/скролл) — запись большого файла аннотаций на каждый
      * скролл была бы лишним I/O.
      */
-    suspend fun saveViewState(pdfPath: String, viewState: AnnotationViewState): Result<Unit>
+    suspend fun saveViewState(
+        pdfPath: String,
+        viewState: AnnotationViewState,
+    ): Result<Unit>
 }

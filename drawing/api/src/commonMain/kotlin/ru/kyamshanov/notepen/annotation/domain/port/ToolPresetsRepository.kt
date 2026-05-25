@@ -9,7 +9,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
  * Implementations are platform adapters in the infrastructure layer.
  */
 interface ToolPresetsRepository {
-
     /**
      * Reads the stored user presets.
      * Never throws — on any I/O or parse error it returns an empty [StoredToolPresets].

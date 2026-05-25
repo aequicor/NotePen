@@ -6,7 +6,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 
 class DragStateTest {
-
     // TC-DRAG-1: DragState.None is the inactive drag state
     @Test
     fun `DragState None is singleton object`() {
@@ -17,11 +16,12 @@ class DragStateTest {
     // TC-DRAG-2: DragState.Active holds fileId, fileUri, displayName
     @Test
     fun `DragState Active stores fileId, fileUri, displayName`() {
-        val state = DragState.Active(
-            fileId = "file-123",
-            fileUri = "content://example/123",
-            displayName = "document.pdf",
-        )
+        val state =
+            DragState.Active(
+                fileId = "file-123",
+                fileUri = "content://example/123",
+                displayName = "document.pdf",
+            )
         assertEquals("file-123", state.fileId)
         assertEquals("content://example/123", state.fileUri)
         assertEquals("document.pdf", state.displayName)
@@ -30,11 +30,12 @@ class DragStateTest {
     // TC-DRAG-3: DragState.Active supports copy()
     @Test
     fun `DragState Active copy changes specified fields`() {
-        val original = DragState.Active(
-            fileId = "file-001",
-            fileUri = "content://original/001",
-            displayName = "original.pdf",
-        )
+        val original =
+            DragState.Active(
+                fileId = "file-001",
+                fileUri = "content://original/001",
+                displayName = "original.pdf",
+            )
         val copied = original.copy(displayName = "renamed.pdf")
         assertEquals("file-001", copied.fileId)
         assertEquals("content://original/001", copied.fileUri)

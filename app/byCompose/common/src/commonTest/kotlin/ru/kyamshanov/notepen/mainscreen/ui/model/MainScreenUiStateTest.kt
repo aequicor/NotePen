@@ -6,7 +6,6 @@ import kotlin.test.assertIs
 import kotlin.test.assertNull
 
 class MainScreenUiStateTest {
-
     // TC-STATE-1: default value for dragState is DragState.None
     @Test
     fun `MainScreenUiState dragState defaults to DragState None`() {
@@ -25,11 +24,12 @@ class MainScreenUiStateTest {
     @Test
     fun `MainScreenUiState copy updates dragState to Active`() {
         val state = MainScreenUiState()
-        val active = DragState.Active(
-            fileId = "file-99",
-            fileUri = "content://test/99",
-            displayName = "test.pdf",
-        )
+        val active =
+            DragState.Active(
+                fileId = "file-99",
+                fileUri = "content://test/99",
+                displayName = "test.pdf",
+            )
         val updated = state.copy(dragState = active)
         assertIs<DragState.Active>(updated.dragState)
         assertEquals("file-99", (updated.dragState as DragState.Active).fileId)
@@ -54,10 +54,11 @@ class MainScreenUiStateTest {
     // TC-STATE-6: dragState and successEvent coexist correctly
     @Test
     fun `MainScreenUiState dragState None and successEvent FileAddedToFolder coexist`() {
-        val state = MainScreenUiState(
-            dragState = DragState.None,
-            successEvent = SuccessEvent.FileAddedToFolder(folderName = "TestFolder"),
-        )
+        val state =
+            MainScreenUiState(
+                dragState = DragState.None,
+                successEvent = SuccessEvent.FileAddedToFolder(folderName = "TestFolder"),
+            )
         assertIs<DragState.None>(state.dragState)
         assertIs<SuccessEvent.FileAddedToFolder>(state.successEvent)
     }

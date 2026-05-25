@@ -5,7 +5,10 @@ import java.util.Base64
 
 actual fun okio_readBytes(path: String): ByteArray = File(path).readBytes()
 
-actual fun okio_writeBytes(path: String, bytes: ByteArray) {
+actual fun okio_writeBytes(
+    path: String,
+    bytes: ByteArray,
+) {
     val f = File(path)
     f.parentFile?.mkdirs()
     f.writeBytes(bytes)

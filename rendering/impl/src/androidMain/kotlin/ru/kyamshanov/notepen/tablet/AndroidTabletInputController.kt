@@ -48,7 +48,11 @@ class AndroidTabletInputController : TabletInputController {
      * Returns immediately for non-stylus events to keep the cost of a finger
      * tap negligible.
      */
-    fun feed(event: MotionEvent, viewWidth: Int, viewHeight: Int) {
+    fun feed(
+        event: MotionEvent,
+        viewWidth: Int,
+        viewHeight: Int,
+    ) {
         val index = event.actionIndex.coerceAtLeast(0)
         val toolType = event.getToolType(index)
         val isStylus =
@@ -105,16 +109,18 @@ class AndroidTabletInputController : TabletInputController {
         when (action) {
             MotionEvent.ACTION_HOVER_ENTER, MotionEvent.ACTION_HOVER_MOVE -> {
                 if (viewWidth > 0 && viewHeight > 0) {
-                    hoverFlow.value = Offset(
-                        x = (event.getX(index) / viewWidth).coerceIn(0f, 1f),
-                        y = (event.getY(index) / viewHeight).coerceIn(0f, 1f),
-                    )
+                    hoverFlow.value =
+                        Offset(
+                            x = (event.getX(index) / viewWidth).coerceIn(0f, 1f),
+                            y = (event.getY(index) / viewHeight).coerceIn(0f, 1f),
+                        )
                 }
             }
             MotionEvent.ACTION_HOVER_EXIT,
             MotionEvent.ACTION_CANCEL,
             MotionEvent.ACTION_DOWN,
-            MotionEvent.ACTION_POINTER_DOWN -> hoverFlow.value = null
+            MotionEvent.ACTION_POINTER_DOWN,
+            -> hoverFlow.value = null
             MotionEvent.ACTION_UP, MotionEvent.ACTION_POINTER_UP -> {
                 // After lift-off the pen often re-enters hover state via
                 // ACTION_HOVER_MOVE within a frame; clear here so a stale

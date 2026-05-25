@@ -11,7 +11,6 @@ import androidx.compose.ui.geometry.Rect
  * `:rendering:impl`. Значения читаются «вживую» на момент вызова.
  */
 interface MagnifierGeometry {
-
     /** Ширина PDF-области страницы в пикселях viewport'а. */
     val pageCanvasWidthPx: Float
 
@@ -22,5 +21,8 @@ interface MagnifierGeometry {
     val autoScrollEnabled: Boolean
 
     /** Устанавливает однополосную рамку выделения для страницы [pageIndex]. */
-    fun setSingleSegmentTarget(pageIndex: Int, targetOnPage: Rect)
+    fun setSingleSegmentTarget(
+        pageIndex: Int,
+        targetOnPage: Rect,
+    )
 }

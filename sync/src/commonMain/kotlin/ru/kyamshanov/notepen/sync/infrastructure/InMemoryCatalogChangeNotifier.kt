@@ -12,12 +12,12 @@ import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
  * поскольку семантика «каталог изменился» идемпотентна.
  */
 class InMemoryCatalogChangeNotifier : CatalogChangeNotifier {
-
-    private val _changes = MutableSharedFlow<Unit>(
-        replay = 0,
-        extraBufferCapacity = 1,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    private val _changes =
+        MutableSharedFlow<Unit>(
+            replay = 0,
+            extraBufferCapacity = 1,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
 
     override val changes: Flow<Unit> = _changes.asSharedFlow()
 

@@ -28,7 +28,6 @@ class RemoteCatalogClientCoordinator(
     private val client: SyncClient,
     private val cache: RemoteCatalogCache,
 ) {
-
     /** Starts the request/response loop. Cancelling [scope] stops it. */
     fun start(scope: CoroutineScope) {
         scope.launch {
@@ -85,7 +84,6 @@ class RemoteCatalogHostCoordinator(
     private val server: PeerServer,
     private val cache: RemoteCatalogCache,
 ) {
-
     /** Starts the request/response loop. Cancelling [scope] stops it. */
     fun start(scope: CoroutineScope) {
         scope.launch {

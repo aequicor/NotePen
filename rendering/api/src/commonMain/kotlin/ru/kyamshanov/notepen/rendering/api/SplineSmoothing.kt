@@ -33,9 +33,10 @@ public fun catmullRomControlPoints(
     p2y: Float,
     p3x: Float,
     p3y: Float,
-): CubicControlPoints = CubicControlPoints(
-    cp1x = p1x + (p2x - p0x) / 6f,
-    cp1y = p1y + (p2y - p0y) / 6f,
-    cp2x = p2x - (p3x - p1x) / 6f,
-    cp2y = p2y - (p3y - p1y) / 6f,
-)
+): CubicControlPoints =
+    CubicControlPoints(
+        cp1x = p1x + (p2x - p0x) / 6f,
+        cp1y = p1y + (p2y - p0y) / 6f,
+        cp2x = p2x - (p3x - p1x) / 6f,
+        cp2y = p2y - (p3y - p1y) / 6f,
+    )

@@ -23,13 +23,13 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlin.time.Duration.Companion.milliseconds
-import kotlin.time.TimeSource
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.HostMessage
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.TimeSource
 
 private val logger = KotlinLogging.logger {}
 
@@ -49,19 +49,19 @@ private const val RECONNECT_RETRY_INTERVAL_MS = 1_000L
  * [PairingState.LostConnection]; other hosts are unaffected.
  */
 class KtorSyncClient(private val client: HttpClient) : SyncClient {
-
     private val mutex = Mutex()
     private val sessions = mutableMapOf<String, HostSession>()
 
     private val _pairingStates = MutableStateFlow<Map<String, PairingState>>(emptyMap())
     override val pairingStates: Flow<Map<String, PairingState>> = _pairingStates.asStateFlow()
 
-    override val connectedHosts: Flow<Set<DeviceInfo>> = _pairingStates.map { snapshot ->
-        snapshot.values
-            .filterIsInstance<PairingState.Connected>()
-            .map { it.peer }
-            .toSet()
-    }
+    override val connectedHosts: Flow<Set<DeviceInfo>> =
+        _pairingStates.map { snapshot ->
+            snapshot.values
+                .filterIsInstance<PairingState.Connected>()
+                .map { it.peer }
+                .toSet()
+        }
 
     private val _incoming = MutableSharedFlow<HostMessage>(extraBufferCapacity = 64)
     override val incomingMessages: Flow<HostMessage> = _incoming.asSharedFlow()
@@ -85,21 +85,25 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
             }
         }
 
-        val session = HostSession(
-            server = server,
-            pairingCode = pairingCode,
-            selfInfo = selfInfo,
-            incomingFlow = _incoming,
-            httpClient = client,
-            onStateChange = { hostId, st -> updateState(hostId, st) },
-            onTerminated = { id -> removeSession(id) },
-        )
+        val session =
+            HostSession(
+                server = server,
+                pairingCode = pairingCode,
+                selfInfo = selfInfo,
+                incomingFlow = _incoming,
+                httpClient = client,
+                onStateChange = { hostId, st -> updateState(hostId, st) },
+                onTerminated = { id -> removeSession(id) },
+            )
         mutex.withLock { sessions[hostId] = session }
         updateState(hostId, PairingState.Idle)
         return session.start()
     }
 
-    override suspend fun send(hostId: String, message: NetworkMessage) {
+    override suspend fun send(
+        hostId: String,
+        message: NetworkMessage,
+    ) {
         val session = mutex.withLock { findSessionByHostId(hostId) } ?: return
         session.send(message)
     }
@@ -124,11 +128,12 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
     }
 
     override suspend fun disconnect(hostId: String) {
-        val (keyHostId, session) = mutex.withLock {
-            sessions[hostId]?.let { return@withLock hostId to it }
-            val entry = sessions.entries.firstOrNull { it.value.peer?.id == hostId }
-            entry?.key to entry?.value
-        }
+        val (keyHostId, session) =
+            mutex.withLock {
+                sessions[hostId]?.let { return@withLock hostId to it }
+                val entry = sessions.entries.firstOrNull { it.value.peer?.id == hostId }
+                entry?.key to entry?.value
+            }
         if (session == null || keyHostId == null) return
         mutex.withLock { sessions.remove(keyHostId) }
         session.cancel()
@@ -136,16 +141,21 @@ class KtorSyncClient(private val client: HttpClient) : SyncClient {
     }
 
     override suspend fun disconnectAll() {
-        val snapshot = mutex.withLock {
-            val copy = sessions.toMap()
-            sessions.clear()
-            copy
-        }
+        val snapshot =
+            mutex.withLock {
+                val copy = sessions.toMap()
+                sessions.clear()
+                copy
+            }
         for ((_, s) in snapshot) s.cancel()
         _pairingStates.value = emptyMap()
     }
 
-    private suspend fun updateState(hostId: String, state: PairingState, remove: Boolean = false) {
+    private suspend fun updateState(
+        hostId: String,
+        state: PairingState,
+        remove: Boolean = false,
+    ) {
         val updated = _pairingStates.value.toMutableMap()
         if (remove) updated.remove(hostId) else updated[hostId] = state
         _pairingStates.value = updated
@@ -177,7 +187,6 @@ private class HostSession(
     private val onStateChange: suspend (hostId: String, PairingState) -> Unit,
     private val onTerminated: suspend (hostId: String) -> Unit,
 ) {
-
     private val scope = CoroutineScope(Job())
     private val outgoingChannel = Channel<NetworkMessage>(Channel.BUFFERED)
     private val firstPairingResult = CompletableDeferred<Result<DeviceInfo>>()
@@ -264,11 +273,12 @@ private class HostSession(
                     is NetworkMessage.PairRejected -> {
                         onStateChange(server.id, PairingState.Error("Pairing rejected: ${reply.reason}"))
                         return@webSocket Unit.also {
-                            outcome = if (firstAttempt) {
-                                SessionOutcome.PairingFailed(reply.reason)
-                            } else {
-                                SessionOutcome.Disconnected
-                            }
+                            outcome =
+                                if (firstAttempt) {
+                                    SessionOutcome.PairingFailed(reply.reason)
+                                } else {
+                                    SessionOutcome.Disconnected
+                                }
                         }
                     }
                     else -> {
@@ -279,16 +289,17 @@ private class HostSession(
                 }
 
                 val session = this
-                val forwarder = launch {
-                    try {
-                        while (true) {
-                            val msg = outgoingChannel.receive()
-                            session.sendSerialized<NetworkMessage>(msg)
+                val forwarder =
+                    launch {
+                        try {
+                            while (true) {
+                                val msg = outgoingChannel.receive()
+                                session.sendSerialized<NetworkMessage>(msg)
+                            }
+                        } catch (_: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
+                            // Channel closed by [HostSession.cancel] — normal shutdown path.
                         }
-                    } catch (_: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
-                        // Channel closed by [HostSession.cancel] — normal shutdown path.
                     }
-                }
                 try {
                     val hostPeer = peer ?: server
                     while (true) {
@@ -345,6 +356,8 @@ private sealed class SessionOutcome {
      * torn down from the host (it would auto-reconnect immediately).
      */
     data object RemoteClosed : SessionOutcome()
+
     data class PairingFailed(val reason: String) : SessionOutcome()
+
     data object Disconnected : SessionOutcome()
 }

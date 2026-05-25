@@ -49,17 +49,19 @@ fun PenSettingsPanel(
             color = MaterialTheme.colorScheme.onSurface,
         )
         Slider(
-            value = strokeWidthToSliderPosition(
-                settings.strokeWidth,
-                PenSettings.MIN_STROKE_WIDTH,
-                PenSettings.MAX_STROKE_WIDTH,
-            ),
-            onValueChange = {
-                val width = sliderPositionToStrokeWidth(
-                    it,
+            value =
+                strokeWidthToSliderPosition(
+                    settings.strokeWidth,
                     PenSettings.MIN_STROKE_WIDTH,
                     PenSettings.MAX_STROKE_WIDTH,
-                )
+                ),
+            onValueChange = {
+                val width =
+                    sliderPositionToStrokeWidth(
+                        it,
+                        PenSettings.MIN_STROKE_WIDTH,
+                        PenSettings.MAX_STROKE_WIDTH,
+                    )
                 onChange(settings.applyStrokeWidth(width))
             },
             valueRange = 0f..1f,
@@ -92,22 +94,24 @@ fun PenSettingsPanel(
             items(PenSettings.PRESET_COLORS) { presetArgb ->
                 val presetColor = Color(presetArgb.toInt())
                 val isSelected = (presetArgb and 0x00FFFFFFL) == (settings.colorArgb and 0x00FFFFFFL)
-                val borderColor = if (isSelected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.outlineVariant
-                }
+                val borderColor =
+                    if (isSelected) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.outlineVariant
+                    }
                 Spacer(
-                    modifier = Modifier
-                        .size(PEN_PRESET_SIZE)
-                        .clip(CircleShape)
-                        .background(presetColor)
-                        .border(
-                            width = if (isSelected) PEN_PRESET_BORDER_SELECTED else PEN_PRESET_BORDER_DEFAULT,
-                            color = borderColor,
-                            shape = CircleShape,
-                        )
-                        .clickable { onChange(settings.applyPreset(presetArgb)) },
+                    modifier =
+                        Modifier
+                            .size(PEN_PRESET_SIZE)
+                            .clip(CircleShape)
+                            .background(presetColor)
+                            .border(
+                                width = if (isSelected) PEN_PRESET_BORDER_SELECTED else PEN_PRESET_BORDER_DEFAULT,
+                                color = borderColor,
+                                shape = CircleShape,
+                            )
+                            .clickable { onChange(settings.applyPreset(presetArgb)) },
                 )
             }
         }

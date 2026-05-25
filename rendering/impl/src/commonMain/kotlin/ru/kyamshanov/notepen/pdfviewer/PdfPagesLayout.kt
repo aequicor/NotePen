@@ -62,7 +62,6 @@ data class PdfPagesLayout(
     val contentBottomPx: Float,
 ) {
     companion object {
-
         /**
          * Строит layout для [pages] при базовой ширине [basePageWidthPx].
          * [extents] — extent каждой страницы (отсутствующие → [PageExtent.Pdf]).
@@ -129,7 +128,6 @@ data class PdfPagesLayout(
  * без Compose.
  */
 object PdfViewerMath {
-
     /** Минимальный визуальный зум (25%). */
     const val MIN_ZOOM: Float = 0.25f
 
@@ -187,13 +185,19 @@ object PdfViewerMath {
     }
 
     /** Зум, применяемый к размеру/растеризации (capped). */
-    fun layoutZoom(zoom: Float, cap: Float): Float = zoom.coerceAtMost(cap)
+    fun layoutZoom(
+        zoom: Float,
+        cap: Float,
+    ): Float = zoom.coerceAtMost(cap)
 
     /**
      * Остаточный множитель зума сверх [layoutZoom], применяемый GPU-трансформой.
      * `1f`, пока `zoom <= cap`; иначе `zoom / cap`.
      */
-    fun residualScale(zoom: Float, cap: Float): Float {
+    fun residualScale(
+        zoom: Float,
+        cap: Float,
+    ): Float {
         val lz = layoutZoom(zoom, cap)
         return if (lz <= 0f) 1f else zoom / lz
     }
@@ -220,10 +224,11 @@ object PdfViewerMath {
         if (zoomNew == zoomOld || zoomOld <= 0f) return panOld to zoomOld
         val docX = (focus.x - panOld.x) / zoomOld
         val docY = (focus.y - panOld.y) / zoomOld
-        val panNew = Offset(
-            x = focus.x - docX * zoomNew,
-            y = focus.y - docY * zoomNew,
-        )
+        val panNew =
+            Offset(
+                x = focus.x - docX * zoomNew,
+                y = focus.y - docY * zoomNew,
+            )
         return panNew to zoomNew
     }
 
@@ -332,9 +337,12 @@ object PdfViewerMath {
         viewportWidth: Float,
     ): Offset {
         val centeringX = (viewportWidth - layout.basePageWidthPx * zoom) / 2f
-        val panY = if (pageIndex in layout.pageHeightsPx.indices) {
-            -layout.pageTopsPx[pageIndex] * zoom
-        } else 0f
+        val panY =
+            if (pageIndex in layout.pageHeightsPx.indices) {
+                -layout.pageTopsPx[pageIndex] * zoom
+            } else {
+                0f
+            }
         return Offset(centeringX, panY)
     }
 
@@ -369,22 +377,24 @@ object PdfViewerMath {
     ): Offset {
         val contentW = (layout.contentRightPx - layout.contentLeftPx) * zoom
         val contentH = (layout.contentBottomPx - layout.contentTopPx) * zoom
-        val x = clampAxis(
-            value = pan.x,
-            edgeA = viewportSize.width - layout.contentRightPx * zoom,
-            // `0f - x` вместо `-x`, чтобы для contentLeftPx == 0 получить +0f,
-            // а не -0f (различимы Float.equals и ассертами в тестах).
-            edgeB = 0f - layout.contentLeftPx * zoom,
-            overflow = contentW > viewportSize.width,
-            buffer = horizontalBuffer,
-        )
-        val y = clampAxis(
-            value = pan.y,
-            edgeA = viewportSize.height - layout.contentBottomPx * zoom,
-            edgeB = 0f - layout.contentTopPx * zoom,
-            overflow = contentH > viewportSize.height,
-            buffer = verticalBuffer,
-        )
+        val x =
+            clampAxis(
+                value = pan.x,
+                edgeA = viewportSize.width - layout.contentRightPx * zoom,
+                // `0f - x` вместо `-x`, чтобы для contentLeftPx == 0 получить +0f,
+                // а не -0f (различимы Float.equals и ассертами в тестах).
+                edgeB = 0f - layout.contentLeftPx * zoom,
+                overflow = contentW > viewportSize.width,
+                buffer = horizontalBuffer,
+            )
+        val y =
+            clampAxis(
+                value = pan.y,
+                edgeA = viewportSize.height - layout.contentBottomPx * zoom,
+                edgeB = 0f - layout.contentTopPx * zoom,
+                overflow = contentH > viewportSize.height,
+                buffer = verticalBuffer,
+            )
         return Offset(x, y)
     }
 
@@ -473,9 +483,13 @@ object PdfViewerMath {
     ): Offset {
         val availableWidth = (viewportWidth - insetStartPx - insetEndPx).coerceAtLeast(1f)
         val centeringX = insetStartPx + (availableWidth - layout.basePageWidthPx * zoom) / 2f
-        val panY = insetTopPx + if (pageIndex in layout.pageHeightsPx.indices) {
-            -layout.pageTopsPx[pageIndex] * zoom
-        } else 0f
+        val panY =
+            insetTopPx +
+                if (pageIndex in layout.pageHeightsPx.indices) {
+                    -layout.pageTopsPx[pageIndex] * zoom
+                } else {
+                    0f
+                }
         return Offset(centeringX, panY)
     }
 

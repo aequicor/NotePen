@@ -14,7 +14,11 @@ fun MagnifierState.asMagnifierGeometry(): MagnifierGeometry {
         override val pageCanvasWidthPx: Float get() = state.pageCanvasWidthPx
         override val segments: List<MagnifierPageSegment> get() = state.segments
         override val autoScrollEnabled: Boolean get() = state.autoScrollEnabled
-        override fun setSingleSegmentTarget(pageIndex: Int, targetOnPage: Rect) {
+
+        override fun setSingleSegmentTarget(
+            pageIndex: Int,
+            targetOnPage: Rect,
+        ) {
             state.setSingleSegmentTarget(pageIndex, targetOnPage)
         }
     }

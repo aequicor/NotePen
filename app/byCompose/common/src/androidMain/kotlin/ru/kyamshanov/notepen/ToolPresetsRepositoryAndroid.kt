@@ -19,29 +19,30 @@ class ToolPresetsRepositoryAndroid(
     private val context: Context,
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : ToolPresetsRepository {
-
     private val presetsFile get() = java.io.File(context.filesDir, "tool_presets.json")
     private val mutex = Mutex()
 
-    override suspend fun load(): StoredToolPresets = withContext(Dispatchers.IO) {
-        try {
-            val text = presetsFile.takeIf { it.exists() }?.readText()
-                ?: return@withContext StoredToolPresets()
-            json.decodeFromString<StoredToolPresets>(text)
-        } catch (_: Exception) {
-            StoredToolPresets()
+    override suspend fun load(): StoredToolPresets =
+        withContext(Dispatchers.IO) {
+            try {
+                val text =
+                    presetsFile.takeIf { it.exists() }?.readText()
+                        ?: return@withContext StoredToolPresets()
+                json.decodeFromString<StoredToolPresets>(text)
+            } catch (_: Exception) {
+                StoredToolPresets()
+            }
         }
-    }
 
-    override suspend fun save(presets: StoredToolPresets) = withContext(Dispatchers.IO) {
-        mutex.withLock {
-            val tmp = java.io.File(context.filesDir, "tool_presets.tmp.json")
-            tmp.writeText(json.encodeToString(StoredToolPresets.serializer(), presets))
-            tmp.renameTo(presetsFile)
-            Unit
+    override suspend fun save(presets: StoredToolPresets) =
+        withContext(Dispatchers.IO) {
+            mutex.withLock {
+                val tmp = java.io.File(context.filesDir, "tool_presets.tmp.json")
+                tmp.writeText(json.encodeToString(StoredToolPresets.serializer(), presets))
+                tmp.renameTo(presetsFile)
+                Unit
+            }
         }
-    }
 }
 
-actual fun createToolPresetsRepository(): ToolPresetsRepository =
-    ToolPresetsRepositoryAndroid(AppContextHolder.context)
+actual fun createToolPresetsRepository(): ToolPresetsRepository = ToolPresetsRepositoryAndroid(AppContextHolder.context)

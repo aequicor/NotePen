@@ -3,10 +3,10 @@ package ru.kyamshanov.notepen.sync.domain
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
-import kotlin.random.Random
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.infrastructure.WebSocketFileTransfer
+import kotlin.random.Random
 
 private val logger = KotlinLogging.logger {}
 
@@ -30,7 +30,6 @@ class DocumentTransferRequestHandler(
     private val server: PeerServer,
     private val provider: RemoteCatalogProvider,
 ) {
-
     /** Start listening for requests; runs until [scope] is cancelled. */
     fun start(scope: CoroutineScope) {
         scope.launch {
@@ -42,7 +41,10 @@ class DocumentTransferRequestHandler(
         }
     }
 
-    private suspend fun handle(peerId: String, request: NetworkMessage.DocumentOpenRequest) {
+    private suspend fun handle(
+        peerId: String,
+        request: NetworkMessage.DocumentOpenRequest,
+    ) {
         val uri = provider.resolveUri(peerId, request.documentId)
         if (uri == null || !provider.isAllowed(peerId, request.documentId)) {
             logger.warn { "DocumentOpenRequest denied for $peerId: ${request.documentId}" }

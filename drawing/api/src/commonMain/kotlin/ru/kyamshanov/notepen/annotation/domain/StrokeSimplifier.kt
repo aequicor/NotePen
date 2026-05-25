@@ -22,7 +22,6 @@ import kotlin.math.sqrt
  * pressure/tilt, поэтому пороги заданы в тех же единицах.
  */
 public object StrokeSimplifier {
-
     /**
      * Геометрический порог по умолчанию в нормализованных координатах `[0..1]`.
      *
@@ -61,7 +60,10 @@ public object StrokeSimplifier {
         keep[0] = true
         keep[points.size - 1] = true
 
-        fun rdp(startIndex: Int, endIndex: Int) {
+        fun rdp(
+            startIndex: Int,
+            endIndex: Int,
+        ) {
             if (endIndex <= startIndex + 1) return
             val start = points[startIndex]
             val end = points[endIndex]
@@ -92,13 +94,22 @@ public object StrokeSimplifier {
         return points.filterIndexed { index, _ -> keep[index] }
     }
 
-    private fun attrDeviation(point: DrawingPoint, start: DrawingPoint, end: DrawingPoint, t: Float): Float {
+    private fun attrDeviation(
+        point: DrawingPoint,
+        start: DrawingPoint,
+        end: DrawingPoint,
+        t: Float,
+    ): Float {
         val pressureDev = abs(point.pressure - (start.pressure + (end.pressure - start.pressure) * t))
         val tiltDev = abs(point.tilt - (start.tilt + (end.tilt - start.tilt) * t))
         return maxOf(pressureDev, tiltDev)
     }
 
-    private fun perpendicularDistance(point: DrawingPoint, lineStart: DrawingPoint, lineEnd: DrawingPoint): Float {
+    private fun perpendicularDistance(
+        point: DrawingPoint,
+        lineStart: DrawingPoint,
+        lineEnd: DrawingPoint,
+    ): Float {
         val dx = lineEnd.x - lineStart.x
         val dy = lineEnd.y - lineStart.y
         val lengthSquared = dx * dx + dy * dy

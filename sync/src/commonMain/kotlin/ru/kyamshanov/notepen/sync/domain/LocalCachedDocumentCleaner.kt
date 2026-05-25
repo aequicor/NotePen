@@ -43,7 +43,6 @@ class LocalCachedDocumentCleaner(
     private val openDocuments: OpenDocumentRegistry,
     private val documentIdRegistry: LocalDocumentIdRegistry? = null,
 ) {
-
     fun start(scope: CoroutineScope) {
         scope.launch {
             var previousCounts = emptyMap<String, Int>()
@@ -62,11 +61,12 @@ class LocalCachedDocumentCleaner(
                     bootstrapped = true
                     return@collect
                 }
-                val flushed = previousCounts.keys.filter { docId ->
-                    val before = previousCounts[docId] ?: 0
-                    val after = counts[docId] ?: 0
-                    before > 0 && after == 0
-                }
+                val flushed =
+                    previousCounts.keys.filter { docId ->
+                        val before = previousCounts[docId] ?: 0
+                        val after = counts[docId] ?: 0
+                        before > 0 && after == 0
+                    }
                 previousCounts = counts
                 if (flushed.isEmpty()) return@collect
                 val displayNames = displayNamesByDocumentId(catalogs)
@@ -78,10 +78,11 @@ class LocalCachedDocumentCleaner(
                     val name = displayNames[docId] ?: continue
                     val path = joinPath(receivedPdfDir, documentIdToCacheFileName(docId, name))
                     if (!okio_exists(path)) continue
-                    val ok = runCatching { okio_delete(path) }.getOrElse {
-                        logger.warn { "Failed to delete cached $path: ${it::class.simpleName}" }
-                        false
-                    }
+                    val ok =
+                        runCatching { okio_delete(path) }.getOrElse {
+                            logger.warn { "Failed to delete cached $path: ${it::class.simpleName}" }
+                            false
+                        }
                     if (ok) {
                         logger.info { "Deleted local cache for synced document $docId at $path" }
                         documentIdRegistry?.forget(path)
@@ -91,9 +92,7 @@ class LocalCachedDocumentCleaner(
         }
     }
 
-    private fun displayNamesByDocumentId(
-        catalogs: Map<DeviceInfo, RemoteCatalog>,
-    ): Map<String, String> {
+    private fun displayNamesByDocumentId(catalogs: Map<DeviceInfo, RemoteCatalog>): Map<String, String> {
         val out = mutableMapOf<String, String>()
         for (catalog in catalogs.values) {
             for (entry in catalog.recent) {
@@ -106,7 +105,10 @@ class LocalCachedDocumentCleaner(
     }
 }
 
-private fun joinPath(dir: String, name: String): String {
+private fun joinPath(
+    dir: String,
+    name: String,
+): String {
     val sep = if (dir.contains('\\')) "\\" else "/"
     return if (dir.endsWith('/') || dir.endsWith('\\')) "$dir$name" else "$dir$sep$name"
 }

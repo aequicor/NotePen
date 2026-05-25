@@ -56,28 +56,30 @@ internal const val BUILTIN_PRESET_PREFIX = "builtin:"
  * settings type); colours are packed ARGB.
  */
 object BuiltinToolPresets {
-
     /** Default pen presets (max two): a blue and a red ballpoint. */
-    val pen: List<PenPreset> = listOf(
-        PenPreset("${BUILTIN_PRESET_PREFIX}pen:blue", PenSettings(colorArgb = 0xFF1E88E5L, strokeWidth = 0.0020f)),
-        PenPreset("${BUILTIN_PRESET_PREFIX}pen:red", PenSettings(colorArgb = 0xFFE53935L, strokeWidth = 0.0020f)),
-    )
+    val pen: List<PenPreset> =
+        listOf(
+            PenPreset("${BUILTIN_PRESET_PREFIX}pen:blue", PenSettings(colorArgb = 0xFF1E88E5L, strokeWidth = 0.0020f)),
+            PenPreset("${BUILTIN_PRESET_PREFIX}pen:red", PenSettings(colorArgb = 0xFFE53935L, strokeWidth = 0.0020f)),
+        )
 
     /** Default highlighter presets (max two) — translucent so text stays readable. */
-    val marker: List<MarkerPreset> = listOf(
-        MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:yellow", MarkerSettings(colorArgb = 0x80FFEB3BL, strokeWidth = 0.025f)),
-        MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:green", MarkerSettings(colorArgb = 0x8076FF03L, strokeWidth = 0.025f)),
-    )
+    val marker: List<MarkerPreset> =
+        listOf(
+            MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:yellow", MarkerSettings(colorArgb = 0x80FFEB3BL, strokeWidth = 0.025f)),
+            MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:green", MarkerSettings(colorArgb = 0x8076FF03L, strokeWidth = 0.025f)),
+        )
 
     /** Default eraser presets (max two): a small point eraser and a whole-stroke eraser. */
-    val eraser: List<EraserPreset> = listOf(
-        EraserPreset(
-            "${BUILTIN_PRESET_PREFIX}eraser:small",
-            EraserSettings(shape = EraserShape.CIRCLE, sizeNormalized = 0.02f, mode = EraserMode.POINT),
-        ),
-        EraserPreset(
-            "${BUILTIN_PRESET_PREFIX}eraser:object",
-            EraserSettings(shape = EraserShape.CIRCLE, sizeNormalized = 0.04f, mode = EraserMode.OBJECT),
-        ),
-    )
+    val eraser: List<EraserPreset> =
+        listOf(
+            EraserPreset(
+                "${BUILTIN_PRESET_PREFIX}eraser:small",
+                EraserSettings(shape = EraserShape.CIRCLE, sizeNormalized = 0.02f, mode = EraserMode.POINT),
+            ),
+            EraserPreset(
+                "${BUILTIN_PRESET_PREFIX}eraser:object",
+                EraserSettings(shape = EraserShape.CIRCLE, sizeNormalized = 0.04f, mode = EraserMode.OBJECT),
+            ),
+        )
 }

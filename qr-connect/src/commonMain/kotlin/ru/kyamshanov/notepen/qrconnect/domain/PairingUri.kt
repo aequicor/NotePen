@@ -29,8 +29,7 @@ data class PairingUri(
      * the host:port composite as a placeholder is fine: the real id arrives in
      * [ru.kyamshanov.notepen.sync.domain.model.NetworkMessage.PairAccepted].
      */
-    fun toServerDeviceInfo(): DeviceInfo =
-        DeviceInfo(id = "$host:$port", name = deviceName, host = host, port = port)
+    fun toServerDeviceInfo(): DeviceInfo = DeviceInfo(id = "$host:$port", name = deviceName, host = host, port = port)
 
     companion object {
         const val SCHEME: String = "notepen"
@@ -45,13 +44,14 @@ data class PairingUri(
         fun parse(raw: String): PairingUri? {
             val prefix = "$SCHEME://$HOST?"
             if (!raw.startsWith(prefix)) return null
-            val params = raw.substring(prefix.length)
-                .split('&')
-                .mapNotNull { pair ->
-                    val eq = pair.indexOf('=')
-                    if (eq <= 0) null else pair.substring(0, eq) to pair.substring(eq + 1)
-                }
-                .toMap()
+            val params =
+                raw.substring(prefix.length)
+                    .split('&')
+                    .mapNotNull { pair ->
+                        val eq = pair.indexOf('=')
+                        if (eq <= 0) null else pair.substring(0, eq) to pair.substring(eq + 1)
+                    }
+                    .toMap()
             val host = params["h"]?.let(::decodeComponent) ?: return null
             val port = params["p"]?.toIntOrNull() ?: return null
             val code = params["c"]?.let(::decodeComponent) ?: return null
@@ -68,10 +68,11 @@ private fun encodeComponent(value: String): String {
     val out = StringBuilder(value.length)
     for (byte in value.encodeToByteArray()) {
         val b = byte.toInt() and 0xFF
-        val safe = (b in 'A'.code..'Z'.code) ||
-            (b in 'a'.code..'z'.code) ||
-            (b in '0'.code..'9'.code) ||
-            b == '-'.code || b == '_'.code || b == '.'.code || b == '~'.code
+        val safe =
+            (b in 'A'.code..'Z'.code) ||
+                (b in 'a'.code..'z'.code) ||
+                (b in '0'.code..'9'.code) ||
+                b == '-'.code || b == '_'.code || b == '.'.code || b == '~'.code
         if (safe) {
             out.append(b.toChar())
         } else {
@@ -110,14 +111,16 @@ private fun decodeComponent(value: String): String {
     return bytes.copyOf(size).decodeToString()
 }
 
-private fun hexDigit(c: Char): Int = when (c) {
-    in '0'..'9' -> c - '0'
-    in 'a'..'f' -> 10 + (c - 'a')
-    in 'A'..'F' -> 10 + (c - 'A')
-    else -> -1
-}
+private fun hexDigit(c: Char): Int =
+    when (c) {
+        in '0'..'9' -> c - '0'
+        in 'a'..'f' -> 10 + (c - 'a')
+        in 'A'..'F' -> 10 + (c - 'A')
+        else -> -1
+    }
 
-private val HEX = charArrayOf(
-    '0', '1', '2', '3', '4', '5', '6', '7',
-    '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
-)
+private val HEX =
+    charArrayOf(
+        '0', '1', '2', '3', '4', '5', '6', '7',
+        '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
+    )

@@ -5,7 +5,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class FontStylesTest {
-
     @Test
     fun `bold is detected from subset-prefixed font name`() {
         assertTrue(FontStyles.isBold("DAAAAA+HelveticaNeue-Bold"))

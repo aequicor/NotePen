@@ -24,7 +24,11 @@ import androidx.compose.ui.geometry.Size
  * @param panel размер панели в пикселях
  * @param target область страницы, отображаемая в панели (page-normalized)
  */
-fun panelLocalToPageNormalized(local: Offset, panel: Size, target: Rect): Offset {
+fun panelLocalToPageNormalized(
+    local: Offset,
+    panel: Size,
+    target: Rect,
+): Offset {
     if (panel.width <= 0f || panel.height <= 0f) return Offset.Zero
     val nx = target.left + (local.x / panel.width) * (target.right - target.left)
     val ny = target.top + (local.y / panel.height) * (target.bottom - target.top)
@@ -39,7 +43,11 @@ fun panelLocalToPageNormalized(local: Offset, panel: Size, target: Rect): Offset
  * на панели). Это даёт корректную отрисовку «выходящих» штрихов без
  * специальной обработки.
  */
-fun pageNormalizedToPanelLocal(page: Offset, panel: Size, target: Rect): Offset {
+fun pageNormalizedToPanelLocal(
+    page: Offset,
+    panel: Size,
+    target: Rect,
+): Offset {
     val tw = target.right - target.left
     val th = target.bottom - target.top
     if (tw <= 0f || th <= 0f) return Offset.Zero
@@ -54,7 +62,11 @@ fun pageNormalizedToPanelLocal(page: Offset, panel: Size, target: Rect): Offset 
  *
  * Возвращает 0, если данные недостаточны для расчёта.
  */
-fun zoomFactor(panel: Size, target: Rect, pageCanvasWidthPx: Float): Float {
+fun zoomFactor(
+    panel: Size,
+    target: Rect,
+    pageCanvasWidthPx: Float,
+): Float {
     val tw = target.right - target.left
     if (tw <= 0f || pageCanvasWidthPx <= 0f || panel.width <= 0f) return 0f
     return panel.width / (tw * pageCanvasWidthPx)
@@ -83,7 +95,10 @@ const val MIN_TARGET_DIM = 0.02f
  *
  * Использует бинарный поиск по `pageTopsPx`, который монотонно возрастает.
  */
-fun resolvePageForDocY(pageTopsPx: FloatArray, docY: Float): Int {
+fun resolvePageForDocY(
+    pageTopsPx: FloatArray,
+    docY: Float,
+): Int {
     val n = pageTopsPx.size
     if (n == 0) return 0
     if (docY < pageTopsPx[0]) return 0

@@ -13,11 +13,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.input.pointer.util.addPointerInputChange
-import kotlin.math.sqrt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.sqrt
 
 /**
  * Pointer-input Android-вьювера: два-пальцевый pinch с anchor в centroid.
@@ -110,11 +110,12 @@ internal class PdfFlingJobHolder {
 }
 
 /** Обнуляет запрещённые текущим [ScrollMode] оси одно-пальцевого скролла. */
-private fun Offset.maskByScrollMode(mode: ScrollMode): Offset = when (mode) {
-    ScrollMode.BOTH -> this
-    ScrollMode.VERTICAL -> Offset(0f, y)
-    ScrollMode.NONE -> Offset.Zero
-}
+private fun Offset.maskByScrollMode(mode: ScrollMode): Offset =
+    when (mode) {
+        ScrollMode.BOTH -> this
+        ScrollMode.VERTICAL -> Offset(0f, y)
+        ScrollMode.NONE -> Offset.Zero
+    }
 
 /**
  * Одно-пальцевый pan по ОБЕИМ осям (диагональ) + инерционный fling.
@@ -215,8 +216,9 @@ internal fun Modifier.pdfSingleFingerPanInput(
             if (!movedBeyondSlop) {
                 val now = lastChange.uptimeMillis
                 val pos = lastChange.position
-                val isDoubleTap = now - lastTapUptime <= doubleTapTimeoutMs &&
-                    (pos - lastTapPos).getDistance() <= slop * 2f
+                val isDoubleTap =
+                    now - lastTapUptime <= doubleTapTimeoutMs &&
+                        (pos - lastTapPos).getDistance() <= slop * 2f
                 if (isDoubleTap) {
                     state.doubleTapZoom(pos)
                     lastTapUptime = 0L
@@ -229,26 +231,29 @@ internal fun Modifier.pdfSingleFingerPanInput(
             if (!panning) return@awaitEachGesture
             val velocity = tracker.calculateVelocity()
             val horizontalFling = mode == ScrollMode.BOTH
-            flingHolder.job = flingScope.launch {
-                coroutineScope {
-                    if (horizontalFling) launch {
-                        var last = 0f
-                        Animatable(0f).animateDecay(velocity.x, decaySpec) {
-                            val d = value - last
-                            last = value
-                            // На краю листа panBy — no-op; decay быстро затухает.
-                            state.panBy(Offset(d, 0f))
+            flingHolder.job =
+                flingScope.launch {
+                    coroutineScope {
+                        if (horizontalFling) {
+                            launch {
+                                var last = 0f
+                                Animatable(0f).animateDecay(velocity.x, decaySpec) {
+                                    val d = value - last
+                                    last = value
+                                    // На краю листа panBy — no-op; decay быстро затухает.
+                                    state.panBy(Offset(d, 0f))
+                                }
+                            }
                         }
-                    }
-                    launch {
-                        var last = 0f
-                        Animatable(0f).animateDecay(velocity.y, decaySpec) {
-                            val d = value - last
-                            last = value
-                            state.panBy(Offset(0f, d))
+                        launch {
+                            var last = 0f
+                            Animatable(0f).animateDecay(velocity.y, decaySpec) {
+                                val d = value - last
+                                last = value
+                                state.panBy(Offset(0f, d))
+                            }
                         }
                     }
                 }
-            }
         }
     }

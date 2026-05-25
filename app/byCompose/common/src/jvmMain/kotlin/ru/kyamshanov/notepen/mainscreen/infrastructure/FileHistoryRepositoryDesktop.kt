@@ -28,43 +28,54 @@ class FileHistoryRepositoryDesktop(
     private val dataDir: java.io.File = getAppDataDir(),
     private val json: Json = Json { ignoreUnknownKeys = true },
 ) : FileHistoryRepository {
-
     private val historyFile get() = java.io.File(dataDir, "history.json")
     private val lockFile get() = java.io.File(dataDir, "history.lock")
     private val inProcessMutex = Mutex()
 
-    override suspend fun getAll(): List<RecentFile> = withContext(Dispatchers.IO) {
-        try {
-            val text = historyFile.takeIf { it.exists() }?.readText()
-                ?: return@withContext emptyList()
-            json.decodeFromString<List<RecentFileDto>>(text)
-                .map { it.toDomain() }
-                .filterNot { isAnnotationSidecarUri(it.uri) }
-                .sortedByDescending { it.openedAt }
-        } catch (_: Exception) {
-            emptyList()
+    override suspend fun getAll(): List<RecentFile> =
+        withContext(Dispatchers.IO) {
+            try {
+                val text =
+                    historyFile.takeIf { it.exists() }?.readText()
+                        ?: return@withContext emptyList()
+                json.decodeFromString<List<RecentFileDto>>(text)
+                    .map { it.toDomain() }
+                    .filterNot { isAnnotationSidecarUri(it.uri) }
+                    .sortedByDescending { it.openedAt }
+            } catch (_: Exception) {
+                emptyList()
+            }
         }
-    }
 
-    override suspend fun upsert(file: RecentFile, lastPageIndex: Int) {
+    override suspend fun upsert(
+        file: RecentFile,
+        lastPageIndex: Int,
+    ) {
         withLockedIO {
             val current = readUnsafe()
-            val (newList, _) = FileHistoryManager.applyUpsert(
-                current,
-                file.copy(lastPageIndex = lastPageIndex),
-            )
+            val (newList, _) =
+                FileHistoryManager.applyUpsert(
+                    current,
+                    file.copy(lastPageIndex = lastPageIndex),
+                )
             writeAtomicUnsafe(newList)
         }
     }
 
-    override suspend fun updateStatus(id: String, status: AvailabilityStatus) {
+    override suspend fun updateStatus(
+        id: String,
+        status: AvailabilityStatus,
+    ) {
         withLockedIO {
             val updated = readUnsafe().map { if (it.id == id) it.copy(availabilityStatus = status) else it }
             writeAtomicUnsafe(updated)
         }
     }
 
-    override suspend fun updateLastPage(uri: String, pageIndex: Int) {
+    override suspend fun updateLastPage(
+        uri: String,
+        pageIndex: Int,
+    ) {
         withLockedIO {
             val updated = readUnsafe().map { if (it.uri == uri) it.copy(lastPageIndex = pageIndex) else it }
             writeAtomicUnsafe(updated)
@@ -97,13 +108,14 @@ class FileHistoryRepositoryDesktop(
             }
         }
 
-    private fun readUnsafe(): List<RecentFile> = try {
-        historyFile.takeIf { it.exists() }?.let {
-            json.decodeFromString<List<RecentFileDto>>(it.readText()).map { dto -> dto.toDomain() }
-        } ?: emptyList()
-    } catch (_: Exception) {
-        emptyList()
-    }
+    private fun readUnsafe(): List<RecentFile> =
+        try {
+            historyFile.takeIf { it.exists() }?.let {
+                json.decodeFromString<List<RecentFileDto>>(it.readText()).map { dto -> dto.toDomain() }
+            } ?: emptyList()
+        } catch (_: Exception) {
+            emptyList()
+        }
 
     private fun writeAtomicUnsafe(list: List<RecentFile>) {
         val tmp = java.io.File(dataDir, "history.tmp.json")

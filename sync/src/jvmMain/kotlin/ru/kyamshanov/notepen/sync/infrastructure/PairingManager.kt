@@ -11,7 +11,6 @@ import kotlin.random.Random
  * the caller explicitly calls [invalidate] (typically at server stop).
  */
 internal class PairingManager {
-
     @Volatile
     private var activeCode: String? = null
 

@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.mainscreen.ui.model
 
 /** Состояние операции перетаскивания файла на главном экране. */
 sealed class DragState {
-
     /**
      * Файл активно перетаскивается.
      *

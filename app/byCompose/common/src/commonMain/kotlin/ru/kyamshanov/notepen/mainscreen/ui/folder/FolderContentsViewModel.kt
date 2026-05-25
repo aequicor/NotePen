@@ -100,7 +100,10 @@ class FolderContentsViewModel(
     }
 
     /** Открыть вложенную папку (рекурсивная навигация). */
-    fun openSubfolder(id: String, name: String) {
+    fun openSubfolder(
+        id: String,
+        name: String,
+    ) {
         onOpenFolder(id, name)
     }
 
@@ -119,10 +122,11 @@ class FolderContentsViewModel(
         val filtered = name.replace(Regex("[^\\p{L}\\p{N}\\-_]"), "").take(255)
         _state.update { s ->
             s.copy(
-                createFolderDialog = s.createFolderDialog?.copy(
-                    currentName = filtered,
-                    isConfirmEnabled = filtered.isNotEmpty(),
-                ),
+                createFolderDialog =
+                    s.createFolderDialog?.copy(
+                        currentName = filtered,
+                        isConfirmEnabled = filtered.isNotEmpty(),
+                    ),
             )
         }
     }
@@ -175,7 +179,10 @@ class FolderContentsViewModel(
     }
 
     /** Открыть файл из папки в редакторе. */
-    fun openFile(uri: String, lastPageIndex: Int) {
+    fun openFile(
+        uri: String,
+        lastPageIndex: Int,
+    ) {
         if (isOpening) return
         isOpening = true
         onOpenEditor(uri, lastPageIndex)
@@ -192,9 +199,10 @@ class FolderContentsViewModel(
         scope.launch {
             try {
                 val inFolder = folderRepository.getFilesInFolder(folderId).toSet()
-                val candidates = historyRepository.getAll()
-                    .filter { it.uri !in inFolder }
-                    .map { it.toUiModel() }
+                val candidates =
+                    historyRepository.getAll()
+                        .filter { it.uri !in inFolder }
+                        .map { it.toUiModel() }
                 _state.update { it.copy(addExistingCandidates = candidates) }
             } catch (e: CancellationException) {
                 throw e
@@ -239,16 +247,20 @@ class FolderContentsViewModel(
      * Результат выбора файла: добавляет в историю, авто-привязывает к открытой папке и
      * открывает в редакторе. [uri] = null означает отмену.
      */
-    fun onFilePicked(uri: String?, displayName: String) {
+    fun onFilePicked(
+        uri: String?,
+        displayName: String,
+    ) {
         if (uri == null) return
         scope.launch {
-            val result = addToHistory.execute(
-                uri = uri,
-                displayName = displayName,
-                fileSize = null,
-                openedAt = nowMillis(),
-                lastPageIndex = 0,
-            )
+            val result =
+                addToHistory.execute(
+                    uri = uri,
+                    displayName = displayName,
+                    fileSize = null,
+                    openedAt = nowMillis(),
+                    lastPageIndex = 0,
+                )
             if (result.isFailure) {
                 _state.update { it.copy(errorMessage = "Не удалось добавить файл") }
                 return@launch
@@ -281,13 +293,14 @@ class FolderContentsViewModel(
         scope.launch {
             sanitized.forEach { uri ->
                 val displayName = resolveDocumentDisplayName(uri) ?: uri.substringAfterLast('/').ifBlank { uri }
-                val result = addToHistory.execute(
-                    uri = uri,
-                    displayName = displayName,
-                    fileSize = null,
-                    openedAt = nowMillis(),
-                    lastPageIndex = 0,
-                )
+                val result =
+                    addToHistory.execute(
+                        uri = uri,
+                        displayName = displayName,
+                        fileSize = null,
+                        openedAt = nowMillis(),
+                        lastPageIndex = 0,
+                    )
                 if (result.isFailure) {
                     _state.update { it.copy(errorMessage = "Не удалось добавить файл") }
                     return@forEach
@@ -353,27 +366,32 @@ class FolderContentsViewModel(
         }
     }
 
-    private fun updateThumbnail(id: String, thumbnailState: ThumbnailState) {
+    private fun updateThumbnail(
+        id: String,
+        thumbnailState: ThumbnailState,
+    ) {
         _state.update { s ->
             s.copy(files = s.files.map { m -> if (m.id == id) m.copy(thumbnailState = thumbnailState) else m })
         }
     }
 }
 
-private fun Folder.toUiModel() = FolderUiModel(
-    id = id,
-    name = name,
-    fileCount = 0,
-    createdAt = createdAt,
-    lastFileOpenedAt = null,
-)
+private fun Folder.toUiModel() =
+    FolderUiModel(
+        id = id,
+        name = name,
+        fileCount = 0,
+        createdAt = createdAt,
+        lastFileOpenedAt = null,
+    )
 
-private fun RecentFile.toUiModel() = RecentFileUiModel(
-    id = id,
-    uri = uri,
-    displayName = displayName,
-    openedAt = openedAt,
-    availabilityStatus = availabilityStatus,
-    thumbnailState = ThumbnailState.Loading,
-    lastPageIndex = lastPageIndex,
-)
+private fun RecentFile.toUiModel() =
+    RecentFileUiModel(
+        id = id,
+        uri = uri,
+        displayName = displayName,
+        openedAt = openedAt,
+        availabilityStatus = availabilityStatus,
+        thumbnailState = ThumbnailState.Loading,
+        lastPageIndex = lastPageIndex,
+    )

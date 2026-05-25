@@ -8,7 +8,6 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
  * Реализации обязаны быть main-safe.
  */
 public interface PageRasterizer {
-
     /**
      * Растеризует страницу под текущий zoom вьюера.
      *

@@ -8,9 +8,11 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OpenDocumentsTest {
-
-    private fun tab(id: Long, path: String = "/p/$id.pdf", name: String = "doc-$id") =
-        DocumentTab(id = DocumentId(id), filePath = path, displayName = name)
+    private fun tab(
+        id: Long,
+        path: String = "/p/$id.pdf",
+        name: String = "doc-$id",
+    ) = DocumentTab(id = DocumentId(id), filePath = path, displayName = name)
 
     // -- addTab --
 
@@ -158,7 +160,6 @@ class OpenDocumentsTest {
 }
 
 class FallbackNameCounterTest {
-
     @Test
     fun `next returns Document 1 first then increments`() {
         val counter = FallbackNameCounter()
@@ -182,7 +183,6 @@ class FallbackNameCounterTest {
 }
 
 class SequentialIdGeneratorTest {
-
     @Test
     fun `next produces strictly increasing ids`() {
         val gen = SequentialIdGenerator()

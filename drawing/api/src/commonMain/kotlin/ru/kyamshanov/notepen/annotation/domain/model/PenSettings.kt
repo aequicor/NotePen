@@ -45,14 +45,15 @@ data class PenSettings(
          * Preset colours as packed ARGB Longs (fully opaque).
          * Alpha is applied separately via [applyAlpha].
          */
-        val PRESET_COLORS: List<Long> = listOf(
-            0xFF000000L, // black
-            0xFFE53935L, // red
-            0xFF1E88E5L, // blue
-            0xFF43A047L, // green
-            0xFFFB8C00L, // orange
-            0xFF8E24AAL, // purple
-        )
+        val PRESET_COLORS: List<Long> =
+            listOf(
+                0xFF000000L, // black
+                0xFFE53935L, // red
+                0xFF1E88E5L, // blue
+                0xFF43A047L, // green
+                0xFFFB8C00L, // orange
+                0xFF8E24AAL, // purple
+            )
     }
 }
 
@@ -83,8 +84,7 @@ fun PenSettings.applyAlpha(newAlpha: Float): PenSettings {
  * (range `1f..60f`). Anything above [MAX_STROKE_WIDTH] is reset to the new default —
  * dropping a 10× over-thick line is preferable to silently mis-scaling user input.
  */
-fun PenSettings.applyStrokeWidth(newWidth: Float): PenSettings =
-    copy(strokeWidth = sanitizePenStrokeWidth(newWidth))
+fun PenSettings.applyStrokeWidth(newWidth: Float): PenSettings = copy(strokeWidth = sanitizePenStrokeWidth(newWidth))
 
 /**
  * Migrate / clamp a raw stroke-width value read from persistence or user input.
@@ -93,11 +93,12 @@ fun PenSettings.applyStrokeWidth(newWidth: Float): PenSettings =
  * [PenSettings.MAX_STROKE_WIDTH] as legacy and reset to the default.
  */
 fun sanitizePenStrokeWidth(width: Float): Float {
-    val migrated = if (width > PenSettings.MAX_STROKE_WIDTH * 5f) {
-        PenSettings.DEFAULT_STROKE_WIDTH
-    } else {
-        width
-    }
+    val migrated =
+        if (width > PenSettings.MAX_STROKE_WIDTH * 5f) {
+            PenSettings.DEFAULT_STROKE_WIDTH
+        } else {
+            width
+        }
     return migrated.coerceIn(PenSettings.MIN_STROKE_WIDTH, PenSettings.MAX_STROKE_WIDTH)
 }
 
@@ -106,14 +107,17 @@ fun sanitizePenStrokeWidth(width: Float): Float {
  * Call this on settings restored from disk so legacy pixel-range values don't
  * blow up into page-wide blobs.
  */
-fun PenSettings.sanitizedForCurrentScheme(): PenSettings =
-    copy(strokeWidth = sanitizePenStrokeWidth(strokeWidth))
+fun PenSettings.sanitizedForCurrentScheme(): PenSettings = copy(strokeWidth = sanitizePenStrokeWidth(strokeWidth))
 
 /**
  * Perceptually-uniform slider position `[0..1]` for a stroke width.
  * Log-mapped so each ~10 % of slider travel multiplies width by the same factor.
  */
-fun strokeWidthToSliderPosition(width: Float, min: Float, max: Float): Float {
+fun strokeWidthToSliderPosition(
+    width: Float,
+    min: Float,
+    max: Float,
+): Float {
     val w = width.coerceIn(min, max)
     return (ln(w / min) / ln(max / min)).coerceIn(0f, 1f)
 }
@@ -121,7 +125,11 @@ fun strokeWidthToSliderPosition(width: Float, min: Float, max: Float): Float {
 /**
  * Inverse of [strokeWidthToSliderPosition]: `t∈[0..1] → width∈min..max` on a log scale.
  */
-fun sliderPositionToStrokeWidth(t: Float, min: Float, max: Float): Float {
+fun sliderPositionToStrokeWidth(
+    t: Float,
+    min: Float,
+    max: Float,
+): Float {
     val clamped = t.coerceIn(0f, 1f)
     return min * (max / min).pow(clamped)
 }

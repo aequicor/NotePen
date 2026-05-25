@@ -37,15 +37,17 @@ class HostQrPairingViewModel(
     fun start() {
         if (runJob?.isActive == true) return
         _state.value = null
-        runJob = scope.launch {
-            val coordinator = HostQrPairingCoordinator(
-                peerServer = peerServer,
-                encoder = qrEncoder,
-                hostDeviceName = hostDeviceName,
-                approvalResolutions = approvalResolutions,
-            )
-            coordinator.run().collect { s -> _state.value = s }
-        }
+        runJob =
+            scope.launch {
+                val coordinator =
+                    HostQrPairingCoordinator(
+                        peerServer = peerServer,
+                        encoder = qrEncoder,
+                        hostDeviceName = hostDeviceName,
+                        approvalResolutions = approvalResolutions,
+                    )
+                coordinator.run().collect { s -> _state.value = s }
+            }
     }
 
     /**

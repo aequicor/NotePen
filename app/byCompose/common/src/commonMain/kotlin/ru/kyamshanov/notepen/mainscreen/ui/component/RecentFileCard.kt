@@ -64,37 +64,39 @@ fun RecentFileCard(
 ) {
     // Monitoring target: does not accept drops (onDrop returns false), but participates in
     // the drag session to detect when it ends via onEnded → calls onDragCancelled (AC-3, AC-4).
-    val dragEndMonitor = remember(onDragCancelled) {
-        object : DragAndDropTarget {
-            override fun onDrop(event: DragAndDropEvent): Boolean = false
+    val dragEndMonitor =
+        remember(onDragCancelled) {
+            object : DragAndDropTarget {
+                override fun onDrop(event: DragAndDropEvent): Boolean = false
 
-            override fun onEnded(event: DragAndDropEvent) {
-                onDragCancelled()
+                override fun onEnded(event: DragAndDropEvent) {
+                    onDragCancelled()
+                }
             }
         }
-    }
 
     Card(
         onClick = onClick,
-        modifier = modifier
-            .fillMaxWidth()
-            .then(
-                if (isDragAndDropSupported) {
-                    Modifier
-                        .dragAndDropSource(
-                            transferData = { _ ->
-                                onDragStarted()
-                                createFileUriTransferData(model.uri)
-                            },
-                        )
-                        .dragAndDropTarget(
-                            shouldStartDragAndDrop = { true },
-                            target = dragEndMonitor,
-                        )
-                } else {
-                    Modifier
-                },
-            ),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .then(
+                    if (isDragAndDropSupported) {
+                        Modifier
+                            .dragAndDropSource(
+                                transferData = { _ ->
+                                    onDragStarted()
+                                    createFileUriTransferData(model.uri)
+                                },
+                            )
+                            .dragAndDropTarget(
+                                shouldStartDragAndDrop = { true },
+                                target = dragEndMonitor,
+                            )
+                    } else {
+                        Modifier
+                    },
+                ),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Column(

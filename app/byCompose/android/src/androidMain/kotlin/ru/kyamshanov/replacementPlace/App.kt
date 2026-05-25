@@ -6,6 +6,6 @@ class App : Application() {
     override fun onCreate() {
         super.onCreate()
         AppContextHolder.context = applicationContext
-        //init DI
+        // init DI
     }
 }

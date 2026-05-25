@@ -11,7 +11,6 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 sealed class NetworkMessage {
-
     /** Sent by a client immediately after WebSocket upgrade to initiate pairing. */
     @Serializable
     @SerialName("pair_request")

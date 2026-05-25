@@ -23,7 +23,6 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FolderContentsViewModelTest {
-
     private val testDispatcher = UnconfinedTestDispatcher()
 
     private lateinit var lifecycle: LifecycleRegistry
@@ -42,19 +41,20 @@ class FolderContentsViewModelTest {
         openEditorCalls = 0
         openFolderCalls = 0
 
-        viewModel = FolderContentsViewModel(
-            lifecycle = lifecycle,
-            folderId = "folder-1",
-            folderName = "Папка",
-            historyRepository = historyRepo,
-            folderRepository = folderRepo,
-            addToHistory = AddToHistoryUseCase(historyRepo),
-            thumbnailRepository = FakeThumbnailRepository(),
-            thumbnailGenerator = FakeThumbnailGenerator(),
-            onOpenEditor = { _, _ -> openEditorCalls++ },
-            onOpenFolder = { _, _ -> openFolderCalls++ },
-            nowMillis = { 1_000L },
-        )
+        viewModel =
+            FolderContentsViewModel(
+                lifecycle = lifecycle,
+                folderId = "folder-1",
+                folderName = "Папка",
+                historyRepository = historyRepo,
+                folderRepository = folderRepo,
+                addToHistory = AddToHistoryUseCase(historyRepo),
+                thumbnailRepository = FakeThumbnailRepository(),
+                thumbnailGenerator = FakeThumbnailGenerator(),
+                onOpenEditor = { _, _ -> openEditorCalls++ },
+                onOpenFolder = { _, _ -> openFolderCalls++ },
+                nowMillis = { 1_000L },
+            )
         lifecycle.resume()
     }
 
@@ -94,16 +94,30 @@ private class FakeHistoryRepository : FileHistoryRepository {
     var files: List<RecentFile> = emptyList()
 
     override suspend fun getAll(): List<RecentFile> = files
-    override suspend fun upsert(file: RecentFile, lastPageIndex: Int) {
+
+    override suspend fun upsert(
+        file: RecentFile,
+        lastPageIndex: Int,
+    ) {
         val existing = files.indexOfFirst { it.id == file.id }
-        files = if (existing >= 0) {
-            files.toMutableList().also { it[existing] = file }
-        } else {
-            files + file
-        }
+        files =
+            if (existing >= 0) {
+                files.toMutableList().also { it[existing] = file }
+            } else {
+                files + file
+            }
     }
-    override suspend fun updateStatus(id: String, status: AvailabilityStatus) {}
-    override suspend fun updateLastPage(uri: String, pageIndex: Int) {}
+
+    override suspend fun updateStatus(
+        id: String,
+        status: AvailabilityStatus,
+    ) {}
+
+    override suspend fun updateLastPage(
+        uri: String,
+        pageIndex: Int,
+    ) {}
+
     override suspend fun rollbackUpsert(uri: String) {}
 }
 
@@ -112,28 +126,59 @@ private class FakeFolderRepository : FolderRepository {
     val addFileCalls: MutableList<Pair<String, String>> = mutableListOf()
     val filesInFolder: MutableMap<String, List<String>> = mutableMapOf()
 
-    override suspend fun create(name: String, parentId: String?): Folder =
+    override suspend fun create(
+        name: String,
+        parentId: String?,
+    ): Folder =
         Folder(id = "folder-${name.hashCode()}", name = name, createdAt = 0L, parentId = parentId)
             .also { folders.add(it) }
-    override suspend fun delete(id: String) { folders.removeAll { it.id == id } }
-    override suspend fun addFile(folderId: String, uri: String) {
+
+    override suspend fun delete(id: String) {
+        folders.removeAll { it.id == id }
+    }
+
+    override suspend fun addFile(
+        folderId: String,
+        uri: String,
+    ) {
         addFileCalls.add(folderId to uri)
         filesInFolder[folderId] = (filesInFolder[folderId] ?: emptyList()) + uri
     }
-    override suspend fun removeFile(folderId: String, uri: String) {}
-    override suspend fun rename(id: String, newName: String) {}
+
+    override suspend fun removeFile(
+        folderId: String,
+        uri: String,
+    ) {}
+
+    override suspend fun rename(
+        id: String,
+        newName: String,
+    ) {}
+
     override suspend fun getAll(): List<Folder> = folders
-    override suspend fun getFilesInFolder(folderId: String): List<String> =
-        filesInFolder[folderId] ?: emptyList()
+
+    override suspend fun getFilesInFolder(folderId: String): List<String> = filesInFolder[folderId] ?: emptyList()
 }
 
 private class FakeThumbnailRepository : ThumbnailRepository {
-    override suspend fun get(uri: String, currentFileMtime: Long?): ByteArray? = null
-    override suspend fun put(uri: String, imageData: ByteArray, fileMtime: Long?) {}
+    override suspend fun get(
+        uri: String,
+        currentFileMtime: Long?,
+    ): ByteArray? = null
+
+    override suspend fun put(
+        uri: String,
+        imageData: ByteArray,
+        fileMtime: Long?,
+    ) {}
+
     override suspend fun totalSizeBytes(): Long = 0L
 }
 
 private class FakeThumbnailGenerator : PdfThumbnailGenerator {
-    override suspend fun generate(uri: String, widthPx: Int, heightPx: Int): Result<ByteArray> =
-        Result.success(byteArrayOf())
+    override suspend fun generate(
+        uri: String,
+        widthPx: Int,
+        heightPx: Int,
+    ): Result<ByteArray> = Result.success(byteArrayOf())
 }

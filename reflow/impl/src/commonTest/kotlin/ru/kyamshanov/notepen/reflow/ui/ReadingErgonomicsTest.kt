@@ -7,7 +7,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class ReadingErgonomicsTest {
-
     @Test
     fun `dim is zero before threshold and ramps to max`() {
         assertEquals(0f, ReadingErgonomics.dimAlpha(0L, 1000L, 1000L, 0.12f))

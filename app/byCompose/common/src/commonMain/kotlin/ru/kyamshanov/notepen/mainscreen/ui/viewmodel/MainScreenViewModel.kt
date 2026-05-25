@@ -2,6 +2,8 @@ package ru.kyamshanov.notepen.mainscreen.ui.viewmodel
 
 import com.arkivanov.essenty.lifecycle.Lifecycle
 import com.arkivanov.essenty.lifecycle.coroutines.withLifecycle
+import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -15,39 +17,37 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
-import io.github.oshai.kotlinlogging.KotlinLogging
-import kotlinx.coroutines.CancellationException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileDuplicateInFolderException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileNotInHistoryException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderLimitExceededException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNameCharsInvalidException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderNotFoundException
+import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
 import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
 import ru.kyamshanov.notepen.mainscreen.domain.model.RecentFile
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
 import ru.kyamshanov.notepen.mainscreen.domain.port.ThumbnailRepository
+import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenFileResult
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
-import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
-import ru.kyamshanov.notepen.resolveDocumentDisplayName
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.model.CreateFolderDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.DeleteFolderDialogState
+import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.FolderUiModel
-import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
-import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
-import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.PeerSummaryUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.SafMergeDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState
+import ru.kyamshanov.notepen.resolveDocumentDisplayName
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
 
@@ -178,7 +178,10 @@ class MainScreenViewModel(
         }
     }
 
-    private fun openPeer(peerId: String, displayName: String) {
+    private fun openPeer(
+        peerId: String,
+        displayName: String,
+    ) {
         if (isNavigating) return
         isNavigating = true
         _state.update {
@@ -186,7 +189,10 @@ class MainScreenViewModel(
         }
     }
 
-    private fun openFolder(folderId: String, folderName: String) {
+    private fun openFolder(
+        folderId: String,
+        folderName: String,
+    ) {
         if (isNavigating) return
         isNavigating = true
         _state.update {
@@ -197,11 +203,12 @@ class MainScreenViewModel(
     private fun handleDragStarted(intent: MainScreenIntent.DragStarted) {
         _state.update {
             it.copy(
-                dragState = DragState.Active(
-                    fileId = intent.fileId,
-                    fileUri = intent.fileUri,
-                    displayName = intent.displayName,
-                ),
+                dragState =
+                    DragState.Active(
+                        fileId = intent.fileId,
+                        fileUri = intent.fileUri,
+                        displayName = intent.displayName,
+                    ),
             )
         }
     }
@@ -233,7 +240,10 @@ class MainScreenViewModel(
     /**
      * Внешний drop на карточку папки: добавить каждый файл в историю, затем в папку.
      */
-    private suspend fun handleExternalDropOnFolder(folderId: String, uris: List<String>) {
+    private suspend fun handleExternalDropOnFolder(
+        folderId: String,
+        uris: List<String>,
+    ) {
         if (_state.value.isLoading) return
         val sanitized = uris.filter { it.isNotBlank() }
         if (sanitized.isEmpty()) return
@@ -250,13 +260,14 @@ class MainScreenViewModel(
      */
     private suspend fun addExternalFileToHistory(uri: String) {
         val displayName = resolveDocumentDisplayName(uri) ?: uri.substringAfterLast('/').ifBlank { uri }
-        val result = addToHistory.execute(
-            uri = uri,
-            displayName = displayName,
-            fileSize = null,
-            openedAt = nowMillis(),
-            lastPageIndex = 0,
-        )
+        val result =
+            addToHistory.execute(
+                uri = uri,
+                displayName = displayName,
+                fileSize = null,
+                openedAt = nowMillis(),
+                lastPageIndex = 0,
+            )
         result.fold(
             onSuccess = { addResult ->
                 when (addResult) {
@@ -306,13 +317,19 @@ class MainScreenViewModel(
             checkAvailability.execute(files).collect { update ->
                 _state.update { state ->
                     state.copy(
-                        recentFiles = state.recentFiles.map { model ->
-                            if (model.id == update.id) {
-                                // CC-23: preserve ARCHIVED_UNAVAILABLE — live check cannot downgrade it
-                                if (model.availabilityStatus == AvailabilityStatus.ARCHIVED_UNAVAILABLE) model
-                                else model.copy(availabilityStatus = update.status)
-                            } else model
-                        },
+                        recentFiles =
+                            state.recentFiles.map { model ->
+                                if (model.id == update.id) {
+                                    // CC-23: preserve ARCHIVED_UNAVAILABLE — live check cannot downgrade it
+                                    if (model.availabilityStatus == AvailabilityStatus.ARCHIVED_UNAVAILABLE) {
+                                        model
+                                    } else {
+                                        model.copy(availabilityStatus = update.status)
+                                    }
+                                } else {
+                                    model
+                                }
+                            },
                     )
                 }
             }
@@ -345,12 +362,16 @@ class MainScreenViewModel(
         }
     }
 
-    private fun updateThumbnail(id: String, thumbnailState: ThumbnailState) {
+    private fun updateThumbnail(
+        id: String,
+        thumbnailState: ThumbnailState,
+    ) {
         _state.update { s ->
             s.copy(
-                recentFiles = s.recentFiles.map { m ->
-                    if (m.id == id) m.copy(thumbnailState = thumbnailState) else m
-                },
+                recentFiles =
+                    s.recentFiles.map { m ->
+                        if (m.id == id) m.copy(thumbnailState = thumbnailState) else m
+                    },
             )
         }
     }
@@ -366,17 +387,19 @@ class MainScreenViewModel(
      * Если [AddHistoryResult.Added] или [AddHistoryResult.Moved] — открывает редактор.
      */
     private suspend fun handleFilePickerResult(intent: MainScreenIntent.FilePickerResult) {
-        val uri = intent.uri ?: run {
-            _state.update { it.copy(navigationTarget = null) }
-            return
-        }
-        val result = addToHistory.execute(
-            uri = uri,
-            displayName = intent.displayName,
-            fileSize = intent.fileSize,
-            openedAt = nowMillis(),
-            lastPageIndex = 0,
-        )
+        val uri =
+            intent.uri ?: run {
+                _state.update { it.copy(navigationTarget = null) }
+                return
+            }
+        val result =
+            addToHistory.execute(
+                uri = uri,
+                displayName = intent.displayName,
+                fileSize = intent.fileSize,
+                openedAt = nowMillis(),
+                lastPageIndex = 0,
+            )
         result.fold(
             onSuccess = { addResult ->
                 when (addResult) {
@@ -393,15 +416,17 @@ class MainScreenViewModel(
                         _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, 0)) }
                     }
                     is AddHistoryResult.SafFuzzyMatchDetected -> {
-                        val existingUiRecord = _state.value.recentFiles
-                            .firstOrNull { it.id == addResult.existing.id }
-                            ?: addResult.existing.toUiModel()
+                        val existingUiRecord =
+                            _state.value.recentFiles
+                                .firstOrNull { it.id == addResult.existing.id }
+                                ?: addResult.existing.toUiModel()
                         _state.update { s ->
                             s.copy(
-                                safMergeDialog = SafMergeDialogState(
-                                    existingRecord = existingUiRecord,
-                                    newUri = addResult.newUri,
-                                ),
+                                safMergeDialog =
+                                    SafMergeDialogState(
+                                        existingRecord = existingUiRecord,
+                                        newUri = addResult.newUri,
+                                    ),
                             )
                         }
                     }
@@ -418,21 +443,23 @@ class MainScreenViewModel(
         val record = _state.value.recentFiles.firstOrNull { it.id == id } ?: return
         isNavigating = true
         val allFiles = historyRepository.getAll()
-        val domainRecord = allFiles.firstOrNull { it.id == id } ?: run {
-            isNavigating = false
-            return
-        }
+        val domainRecord =
+            allFiles.firstOrNull { it.id == id } ?: run {
+                isNavigating = false
+                return
+            }
         val uri = domainRecord.uri
         when (val result = openRecentFile.execute(uri)) {
             is OpenFileResult.Success -> {
                 try {
-                    val upsertResult = addToHistory.execute(
-                        uri = uri,
-                        displayName = domainRecord.displayName,
-                        fileSize = domainRecord.fileSize,
-                        openedAt = nowMillis(),
-                        lastPageIndex = domainRecord.lastPageIndex,
-                    )
+                    val upsertResult =
+                        addToHistory.execute(
+                            uri = uri,
+                            displayName = domainRecord.displayName,
+                            fileSize = domainRecord.fileSize,
+                            openedAt = nowMillis(),
+                            lastPageIndex = domainRecord.lastPageIndex,
+                        )
                     if (upsertResult.isFailure) {
                         _state.update { it.copy(errorEvent = ErrorEvent.HistoryFlushFailed) }
                     }
@@ -444,23 +471,28 @@ class MainScreenViewModel(
             }
             is OpenFileResult.NotAvailable -> {
                 isNavigating = false
-                val errorEvent = when (result.status) {
-                    AvailabilityStatus.NOT_FOUND -> ErrorEvent.FileNotFound
-                    else -> ErrorEvent.FileError
-                }
+                val errorEvent =
+                    when (result.status) {
+                        AvailabilityStatus.NOT_FOUND -> ErrorEvent.FileNotFound
+                        else -> ErrorEvent.FileError
+                    }
                 _state.update { s ->
                     s.copy(
-                        recentFiles = s.recentFiles.map { m ->
-                            if (m.id == id) {
-                                // CC-23: preserve ARCHIVED_UNAVAILABLE — a live check cannot downgrade it
-                                val newStatus = if (m.availabilityStatus == AvailabilityStatus.ARCHIVED_UNAVAILABLE) {
-                                    AvailabilityStatus.ARCHIVED_UNAVAILABLE
+                        recentFiles =
+                            s.recentFiles.map { m ->
+                                if (m.id == id) {
+                                    // CC-23: preserve ARCHIVED_UNAVAILABLE — a live check cannot downgrade it
+                                    val newStatus =
+                                        if (m.availabilityStatus == AvailabilityStatus.ARCHIVED_UNAVAILABLE) {
+                                            AvailabilityStatus.ARCHIVED_UNAVAILABLE
+                                        } else {
+                                            result.status
+                                        }
+                                    m.copy(availabilityStatus = newStatus)
                                 } else {
-                                    result.status
+                                    m
                                 }
-                                m.copy(availabilityStatus = newStatus)
-                            } else m
-                        },
+                            },
                         errorEvent = errorEvent,
                     )
                 }
@@ -501,9 +533,10 @@ class MainScreenViewModel(
             historyRepository.updateStatus(intent.existingId, AvailabilityStatus.FILE_ERROR)
             _state.update { s ->
                 s.copy(
-                    recentFiles = s.recentFiles.map { m ->
-                        if (m.id == intent.existingId) m.copy(availabilityStatus = AvailabilityStatus.FILE_ERROR) else m
-                    },
+                    recentFiles =
+                        s.recentFiles.map { m ->
+                            if (m.id == intent.existingId) m.copy(availabilityStatus = AvailabilityStatus.FILE_ERROR) else m
+                        },
                 )
             }
         } catch (e: CancellationException) {
@@ -513,24 +546,29 @@ class MainScreenViewModel(
         }
         // CC-1 (new-URI branch): upsert the new URI as a fresh history entry and reflect it in state.
         val newDisplayName = intent.newUri.substringAfterLast('/').ifBlank { intent.newUri }
-        val addResult = addToHistory.execute(
-            uri = intent.newUri,
-            displayName = newDisplayName,
-            fileSize = null,
-            openedAt = nowMillis(),
-        )
+        val addResult =
+            addToHistory.execute(
+                uri = intent.newUri,
+                displayName = newDisplayName,
+                fileSize = null,
+                openedAt = nowMillis(),
+            )
         addResult.fold(
             onSuccess = { result ->
-                val newRecord = when (result) {
-                    is AddHistoryResult.Added -> result.record
-                    is AddHistoryResult.Moved -> result.record
-                    is AddHistoryResult.SafFuzzyMatchDetected -> null
-                }
+                val newRecord =
+                    when (result) {
+                        is AddHistoryResult.Added -> result.record
+                        is AddHistoryResult.Moved -> result.record
+                        is AddHistoryResult.SafFuzzyMatchDetected -> null
+                    }
                 if (newRecord != null) {
                     _state.update { s ->
                         val alreadyPresent = s.recentFiles.any { it.id == newRecord.id }
-                        if (alreadyPresent) s
-                        else s.copy(recentFiles = (listOf(newRecord.toUiModel()) + s.recentFiles))
+                        if (alreadyPresent) {
+                            s
+                        } else {
+                            s.copy(recentFiles = (listOf(newRecord.toUiModel()) + s.recentFiles))
+                        }
                     }
                 }
             },
@@ -548,8 +586,9 @@ class MainScreenViewModel(
             val folder = folderRepository.create(name)
             _state.update { s ->
                 s.copy(
-                    folders = (s.folders + folder.toUiModel(0))
-                        .sortedByDescending { it.lastFileOpenedAt ?: 0L },
+                    folders =
+                        (s.folders + folder.toUiModel(0))
+                            .sortedByDescending { it.lastFileOpenedAt ?: 0L },
                 )
             }
         } catch (_: FolderLimitExceededException) {
@@ -578,7 +617,11 @@ class MainScreenViewModel(
         _state.update { it.copy(deleteFolderDialog = DeleteFolderDialogState(id, folder.name)) }
     }
 
-    private suspend fun addFileToFolder(folderId: String, fileUri: String, folderName: String? = null) {
+    private suspend fun addFileToFolder(
+        folderId: String,
+        fileUri: String,
+        folderName: String? = null,
+    ) {
         try {
             folderRepository.addFile(folderId, fileUri)
             val rawName = folderName ?: _state.value.folders.firstOrNull { it.id == folderId }?.name ?: folderId
@@ -602,7 +645,10 @@ class MainScreenViewModel(
         }
     }
 
-    private suspend fun removeFileFromFolder(folderId: String, uri: String) {
+    private suspend fun removeFileFromFolder(
+        folderId: String,
+        uri: String,
+    ) {
         try {
             folderRepository.removeFile(folderId, uri)
             refreshFolderFileCount(folderId)
@@ -611,7 +657,10 @@ class MainScreenViewModel(
         }
     }
 
-    private suspend fun renameFolder(id: String, newName: String) {
+    private suspend fun renameFolder(
+        id: String,
+        newName: String,
+    ) {
         try {
             folderRepository.rename(id, newName)
             _state.update { s ->
@@ -630,31 +679,38 @@ class MainScreenViewModel(
         val filtered = name.replace(Regex("[^\\p{L}\\p{N}\\-_]"), "").take(255)
         _state.update { s ->
             s.copy(
-                createFolderDialog = s.createFolderDialog?.copy(
-                    currentName = filtered,
-                    isConfirmEnabled = filtered.isNotEmpty(),
-                ),
+                createFolderDialog =
+                    s.createFolderDialog?.copy(
+                        currentName = filtered,
+                        isConfirmEnabled = filtered.isNotEmpty(),
+                    ),
             )
         }
     }
 
     private suspend fun refreshFolderFileCount(folderId: String) {
-        val count = try {
-            folderRepository.getFilesInFolder(folderId).size
-        } catch (_: Exception) {
-            return
-        }
+        val count =
+            try {
+                folderRepository.getFilesInFolder(folderId).size
+            } catch (_: Exception) {
+                return
+            }
         _state.update { s ->
             s.copy(
-                folders = s.folders.map { f ->
-                    if (f.id == folderId) f.copy(fileCount = count) else f
-                },
+                folders =
+                    s.folders.map { f ->
+                        if (f.id == folderId) f.copy(fileCount = count) else f
+                    },
             )
         }
     }
 
     private suspend fun getFolderFileCount(folderId: String): Int =
-        try { folderRepository.getFilesInFolder(folderId).size } catch (_: Exception) { 0 }
+        try {
+            folderRepository.getFilesInFolder(folderId).size
+        } catch (_: Exception) {
+            0
+        }
 
     /** Вызывается UI после обработки навигационного события. */
     fun onNavigationHandled() {
@@ -675,23 +731,25 @@ class MainScreenViewModel(
 
 // --- Mapper extensions ---
 
-private fun RecentFile.toUiModel() = RecentFileUiModel(
-    id = id,
-    uri = uri,
-    displayName = displayName,
-    openedAt = openedAt,
-    availabilityStatus = availabilityStatus,
-    thumbnailState = ThumbnailState.Loading,
-    lastPageIndex = lastPageIndex,
-)
+private fun RecentFile.toUiModel() =
+    RecentFileUiModel(
+        id = id,
+        uri = uri,
+        displayName = displayName,
+        openedAt = openedAt,
+        availabilityStatus = availabilityStatus,
+        thumbnailState = ThumbnailState.Loading,
+        lastPageIndex = lastPageIndex,
+    )
 
-private fun Folder.toUiModel(fileCount: Int) = FolderUiModel(
-    id = id,
-    name = name,
-    fileCount = fileCount,
-    createdAt = createdAt,
-    lastFileOpenedAt = null,
-)
+private fun Folder.toUiModel(fileCount: Int) =
+    FolderUiModel(
+        id = id,
+        name = name,
+        fileCount = fileCount,
+        createdAt = createdAt,
+        lastFileOpenedAt = null,
+    )
 
 /** Platform-provided current time in milliseconds since Unix epoch. */
 internal expect fun currentTimeMillis(): Long

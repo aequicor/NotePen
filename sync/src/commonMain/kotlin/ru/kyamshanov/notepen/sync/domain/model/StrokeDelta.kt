@@ -16,7 +16,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
  */
 @Serializable
 sealed class StrokeDelta {
-
     abstract val strokeId: String
     abstract val pageIndex: Int
     abstract val authorDeviceId: String
@@ -55,6 +54,7 @@ sealed class StrokeDelta {
 @Serializable
 data class RectDto(val l: Float, val t: Float, val r: Float, val b: Float) {
     fun toDomain(): PageExtent = PageExtent(l, t, r, b)
+
     companion object {
         fun fromDomain(e: PageExtent): RectDto = RectDto(e.left, e.top, e.right, e.bottom)
     }
@@ -103,15 +103,16 @@ fun DrawingPath.toDto(strokeId: String): DrawingPathDto =
 
 fun DrawingPathDto.toDomain(): DrawingPath =
     DrawingPath(
-        points = points.map {
-            ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint(
-                x = it.x,
-                y = it.y,
-                isNewPath = it.isNewPath,
-                pressure = it.pressure,
-                tilt = it.tilt,
-            )
-        },
+        points =
+            points.map {
+                ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint(
+                    x = it.x,
+                    y = it.y,
+                    isNewPath = it.isNewPath,
+                    pressure = it.pressure,
+                    tilt = it.tilt,
+                )
+            },
         colorArgb = colorArgb,
         strokeWidth = strokeWidth,
         strokeId = strokeId,

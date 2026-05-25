@@ -43,19 +43,24 @@ internal fun line(
             x += charWidth
             continue
         }
-        glyphs += RawGlyph(
-            text = ch.toString(),
-            rect = ReflowRect(left = x, top = top, right = x + charWidth, bottom = top + fontSize),
-            fontSizePt = fontSize,
-            bold = bold,
-            monospace = monospace,
-        )
+        glyphs +=
+            RawGlyph(
+                text = ch.toString(),
+                rect = ReflowRect(left = x, top = top, right = x + charWidth, bottom = top + fontSize),
+                fontSizePt = fontSize,
+                bold = bold,
+                monospace = monospace,
+            )
         x += charWidth
     }
     return glyphs
 }
 
 /** Сравнение Float с допуском (нормализация координат не должна быть бит-в-бит). */
-internal fun assertAlmostEquals(expected: Float, actual: Float, tolerance: Float = 1e-4f) {
+internal fun assertAlmostEquals(
+    expected: Float,
+    actual: Float,
+    tolerance: Float = 1e-4f,
+) {
     assertTrue(abs(expected - actual) <= tolerance, "expected ~$expected but was $actual")
 }

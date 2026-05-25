@@ -45,19 +45,21 @@ fun PeerCard(
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(model.displayName, style = MaterialTheme.typography.bodyLarge)
-                val subtitle = if (model.isOnline) {
-                    "${model.itemCount} элементов"
-                } else {
-                    "не в сети — ${model.itemCount} элементов"
-                }
+                val subtitle =
+                    if (model.isOnline) {
+                        "${model.itemCount} элементов"
+                    } else {
+                        "не в сети — ${model.itemCount} элементов"
+                    }
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (model.isOnline) {
-                        MaterialTheme.colorScheme.outline
-                    } else {
-                        MaterialTheme.colorScheme.error
-                    },
+                    color =
+                        if (model.isOnline) {
+                            MaterialTheme.colorScheme.outline
+                        } else {
+                            MaterialTheme.colorScheme.error
+                        },
                 )
             }
         }

@@ -5,27 +5,28 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class PairingUriTest {
-
     @Test
     fun roundTripPreservesAllFields() {
-        val original = PairingUri(
-            host = "192.168.1.5",
-            port = 43211,
-            code = "482193",
-            deviceName = "Konstantin's MacBook Pro",
-        )
+        val original =
+            PairingUri(
+                host = "192.168.1.5",
+                port = 43211,
+                code = "482193",
+                deviceName = "Konstantin's MacBook Pro",
+            )
         val parsed = PairingUri.parse(original.encode())
         assertEquals(original, parsed)
     }
 
     @Test
     fun roundTripWithCyrillicDeviceName() {
-        val original = PairingUri(
-            host = "10.0.0.42",
-            port = 8080,
-            code = "100200",
-            deviceName = "Ноутбук Кости",
-        )
+        val original =
+            PairingUri(
+                host = "10.0.0.42",
+                port = 8080,
+                code = "100200",
+                deviceName = "Ноутбук Кости",
+            )
         val parsed = PairingUri.parse(original.encode())
         assertEquals(original, parsed)
     }

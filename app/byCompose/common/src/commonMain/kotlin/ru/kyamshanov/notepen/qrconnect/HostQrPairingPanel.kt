@@ -58,35 +58,38 @@ fun HostQrPairingPanel(
     val state by viewModel.state.collectAsState()
 
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .verticalScroll(rememberScrollState()),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         when (val s = state) {
-            null -> Button(
-                onClick = viewModel::start,
-                modifier = Modifier.widthIn(min = 180.dp),
-            ) { Text("Разрешить подключение по QR") }
+            null ->
+                Button(
+                    onClick = viewModel::start,
+                    modifier = Modifier.widthIn(min = 180.dp),
+                ) { Text("Разрешить подключение по QR") }
 
             HostQrPairingCoordinator.State.Preparing -> {
                 CircularProgressIndicator()
                 Text("Запуск сервера…")
             }
 
-            is HostQrPairingCoordinator.State.ShowingQr -> ShowingQrContent(
-                state = s,
-                onApprove = { peerId -> viewModel.approve(peerId) },
-                onReject = { peerId -> viewModel.reject(peerId) },
-                onDisconnect = { peerId -> viewModel.disconnect(peerId) },
-                onDisconnectAll = viewModel::disconnectAll,
-                onStopServer = {
-                    viewModel.stopServer()
-                    onCloseDialog()
-                },
-            )
+            is HostQrPairingCoordinator.State.ShowingQr ->
+                ShowingQrContent(
+                    state = s,
+                    onApprove = { peerId -> viewModel.approve(peerId) },
+                    onReject = { peerId -> viewModel.reject(peerId) },
+                    onDisconnect = { peerId -> viewModel.disconnect(peerId) },
+                    onDisconnectAll = viewModel::disconnectAll,
+                    onStopServer = {
+                        viewModel.stopServer()
+                        onCloseDialog()
+                    },
+                )
 
             HostQrPairingCoordinator.State.Stopped -> {
                 Text("Подключения остановлены")
@@ -178,9 +181,10 @@ private fun ManualConnectionDetails(payload: String) {
         }
         if (expanded) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
@@ -254,4 +258,3 @@ private fun ClientApprovalDialog(
         dismissButton = { TextButton(onClick = onReject) { Text("Отклонить") } },
     )
 }
-

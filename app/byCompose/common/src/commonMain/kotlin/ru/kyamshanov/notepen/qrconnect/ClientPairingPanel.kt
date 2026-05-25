@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -85,8 +84,11 @@ fun ClientPairingPanel(
 
     var screen by remember {
         mutableStateOf(
-            if (connectedHosts.isNotEmpty()) ClientPairingScreen.Connections
-            else ClientPairingScreen.Onboarding,
+            if (connectedHosts.isNotEmpty()) {
+                ClientPairingScreen.Connections
+            } else {
+                ClientPairingScreen.Onboarding
+            },
         )
     }
     // When a new host appears mid-flow, the pairing succeeded — close the dialog.
@@ -99,41 +101,46 @@ fun ClientPairingPanel(
     }
 
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
-            .verticalScroll(rememberScrollState()),
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         when (screen) {
-            ClientPairingScreen.Onboarding -> OnboardingScreen(
-                onContinueWithCamera = { screen = ClientPairingScreen.Camera },
-                onConnectManually = { screen = ClientPairingScreen.Manual },
-                onClose = onClose,
-            )
-            ClientPairingScreen.Camera -> CameraScanSlot(
-                viewModel = scanViewModel,
-                onConnected = { screen = ClientPairingScreen.Connections },
-                onConnectManually = { screen = ClientPairingScreen.Manual },
-                onPermissionDenied = { screen = ClientPairingScreen.Onboarding },
-            )
-            ClientPairingScreen.Manual -> ManualScreen(
-                viewModel = manualViewModel,
-                onBackToScan = { screen = ClientPairingScreen.Camera },
-                onConnected = { screen = ClientPairingScreen.Connections },
-            )
-            ClientPairingScreen.Connections -> ConnectionsScreen(
-                hosts = connectedHosts.toList(),
-                onDisconnect = { hostId ->
-                    coroutineScope.launch { peerClient.disconnect(hostId) }
-                },
-                onDisconnectAll = {
-                    coroutineScope.launch { peerClient.disconnectAll() }
-                },
-                onAddViaQr = { screen = ClientPairingScreen.Camera },
-                onAddManually = { screen = ClientPairingScreen.Manual },
-            )
+            ClientPairingScreen.Onboarding ->
+                OnboardingScreen(
+                    onContinueWithCamera = { screen = ClientPairingScreen.Camera },
+                    onConnectManually = { screen = ClientPairingScreen.Manual },
+                    onClose = onClose,
+                )
+            ClientPairingScreen.Camera ->
+                CameraScanSlot(
+                    viewModel = scanViewModel,
+                    onConnected = { screen = ClientPairingScreen.Connections },
+                    onConnectManually = { screen = ClientPairingScreen.Manual },
+                    onPermissionDenied = { screen = ClientPairingScreen.Onboarding },
+                )
+            ClientPairingScreen.Manual ->
+                ManualScreen(
+                    viewModel = manualViewModel,
+                    onBackToScan = { screen = ClientPairingScreen.Camera },
+                    onConnected = { screen = ClientPairingScreen.Connections },
+                )
+            ClientPairingScreen.Connections ->
+                ConnectionsScreen(
+                    hosts = connectedHosts.toList(),
+                    onDisconnect = { hostId ->
+                        coroutineScope.launch { peerClient.disconnect(hostId) }
+                    },
+                    onDisconnectAll = {
+                        coroutineScope.launch { peerClient.disconnectAll() }
+                    },
+                    onAddViaQr = { screen = ClientPairingScreen.Camera },
+                    onAddManually = { screen = ClientPairingScreen.Manual },
+                )
         }
     }
 }
@@ -156,9 +163,10 @@ private fun OnboardingScreen(
         textAlign = TextAlign.Center,
     )
     Text(
-        text = "Чтобы подключиться к компьютеру, наведите камеру на QR-код. " +
-            "Камера используется только для распознавания QR — ничего не записывается, " +
-            "ничего не отправляется наружу.",
+        text =
+            "Чтобы подключиться к компьютеру, наведите камеру на QR-код. " +
+                "Камера используется только для распознавания QR — ничего не записывается, " +
+                "ничего не отправляется наружу.",
         style = MaterialTheme.typography.bodyMedium,
         textAlign = TextAlign.Center,
     )
@@ -211,15 +219,17 @@ private fun ManualScreen(
         modifier = Modifier.fillMaxWidth(),
     )
     when (val s = status) {
-        is ManualConnectViewModel.Status.Connecting -> Text(
-            text = "Подключаемся…",
-            style = MaterialTheme.typography.bodySmall,
-        )
-        is ManualConnectViewModel.Status.Failed -> Text(
-            text = "Ошибка: ${s.message}",
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall,
-        )
+        is ManualConnectViewModel.Status.Connecting ->
+            Text(
+                text = "Подключаемся…",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        is ManualConnectViewModel.Status.Failed ->
+            Text(
+                text = "Ошибка: ${s.message}",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
         else -> Unit
     }
     Button(
@@ -324,4 +334,3 @@ expect fun CameraScanSlot(
     onConnectManually: () -> Unit,
     onPermissionDenied: () -> Unit,
 )
-

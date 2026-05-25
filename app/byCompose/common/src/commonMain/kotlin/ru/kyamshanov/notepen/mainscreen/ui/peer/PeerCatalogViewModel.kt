@@ -86,42 +86,46 @@ class PeerCatalogViewModel(
                     return@collect
                 }
                 val currentFolderId = validPath.lastOrNull()
-                val rawEntries = catalog.recent.map { e ->
-                    RemoteEntryUiModel(
-                        documentId = e.documentId,
-                        displayName = e.displayName,
-                        fileSize = e.fileSize,
-                        lastOpenedAt = e.lastOpenedAt,
-                    )
-                }
-                val entries = when {
-                    // Внутри папки показываем только её файлы (folderLinks ⊆ recent).
-                    currentFolderId != null -> {
-                        val ids = catalog.folderLinks
-                            .filter { it.folderId == currentFolderId }
-                            .map { it.documentId }
-                            .toSet()
-                        rawEntries.filter { it.documentId in ids }
+                val rawEntries =
+                    catalog.recent.map { e ->
+                        RemoteEntryUiModel(
+                            documentId = e.documentId,
+                            displayName = e.displayName,
+                            fileSize = e.fileSize,
+                            lastOpenedAt = e.lastOpenedAt,
+                        )
                     }
-                    isOffline -> rawEntries.filter { hasCachedCopy(it.documentId, it.displayName) }
-                    else -> rawEntries
-                }
+                val entries =
+                    when {
+                        // Внутри папки показываем только её файлы (folderLinks ⊆ recent).
+                        currentFolderId != null -> {
+                            val ids =
+                                catalog.folderLinks
+                                    .filter { it.folderId == currentFolderId }
+                                    .map { it.documentId }
+                                    .toSet()
+                            rawEntries.filter { it.documentId in ids }
+                        }
+                        isOffline -> rawEntries.filter { hasCachedCopy(it.documentId, it.displayName) }
+                        else -> rawEntries
+                    }
                 // Подпапки текущего уровня (parentFolderId == текущая папка / null в корне).
                 // Когда пир офлайн — папки скрываем: их содержимое недоступно (не качаем наперёд).
-                val folders = if (isOffline) {
-                    emptyList()
-                } else {
-                    val countsByFolder = catalog.folderLinks.groupingBy { it.folderId }.eachCount()
-                    catalog.folders
-                        .filter { it.parentFolderId == currentFolderId }
-                        .map { f ->
-                            RemoteFolderUiModel(
-                                folderId = f.folderId,
-                                name = f.name,
-                                fileCount = countsByFolder[f.folderId] ?: 0,
-                            )
-                        }
-                }
+                val folders =
+                    if (isOffline) {
+                        emptyList()
+                    } else {
+                        val countsByFolder = catalog.folderLinks.groupingBy { it.folderId }.eachCount()
+                        catalog.folders
+                            .filter { it.parentFolderId == currentFolderId }
+                            .map { f ->
+                                RemoteFolderUiModel(
+                                    folderId = f.folderId,
+                                    name = f.name,
+                                    fileCount = countsByFolder[f.folderId] ?: 0,
+                                )
+                            }
+                    }
                 val currentName = currentFolderId?.let { id -> catalog.folders.firstOrNull { it.folderId == id }?.name }
                 _state.update {
                     it.copy(
@@ -174,14 +178,20 @@ class PeerCatalogViewModel(
         return result
     }
 
-    private fun hasCachedCopy(documentId: String, displayName: String): Boolean {
+    private fun hasCachedCopy(
+        documentId: String,
+        displayName: String,
+    ): Boolean {
         val dir = receivedPdfDir ?: return false
         if (displayName.isBlank()) return false
         return okio_exists(joinPath(dir, documentIdToCacheFileName(documentId, displayName)))
     }
 
     /** Открыть документ из каталога пира. */
-    fun openEntry(documentId: String, displayName: String) {
+    fun openEntry(
+        documentId: String,
+        displayName: String,
+    ) {
         val opener = remoteDocumentOpener
         if (opener == null) {
             _state.update {
@@ -192,18 +202,19 @@ class PeerCatalogViewModel(
         if (isOpening) return
         isOpening = true
         scope.launch {
-            val message: String? = when (val result = opener.open(documentId, displayName)) {
-                is RemoteDocumentResult.Success -> {
-                    onDocumentReady(result.localPath, 0)
-                    null
+            val message: String? =
+                when (val result = opener.open(documentId, displayName)) {
+                    is RemoteDocumentResult.Success -> {
+                        onDocumentReady(result.localPath, 0)
+                        null
+                    }
+                    is RemoteDocumentResult.NotFound -> "Документ удалён на хосте"
+                    is RemoteDocumentResult.Timeout -> "Хост не отвечает — попробуйте ещё раз"
+                    is RemoteDocumentResult.Failure -> {
+                        logger.warn { "Remote open failed for $documentId: ${result.cause::class.simpleName}" }
+                        "Не удалось получить файл с хоста"
+                    }
                 }
-                is RemoteDocumentResult.NotFound -> "Документ удалён на хосте"
-                is RemoteDocumentResult.Timeout -> "Хост не отвечает — попробуйте ещё раз"
-                is RemoteDocumentResult.Failure -> {
-                    logger.warn { "Remote open failed for $documentId: ${result.cause::class.simpleName}" }
-                    "Не удалось получить файл с хоста"
-                }
-            }
             isOpening = false
             if (message != null) {
                 _state.update { it.copy(errorMessage = message) }
@@ -217,7 +228,10 @@ class PeerCatalogViewModel(
     }
 }
 
-private fun joinPath(dir: String, name: String): String {
+private fun joinPath(
+    dir: String,
+    name: String,
+): String {
     val sep = if (dir.contains('\\')) "\\" else "/"
     return if (dir.endsWith('/') || dir.endsWith('\\')) "$dir$name" else "$dir$sep$name"
 }

@@ -22,19 +22,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 
 /** Human-readable title for [template], shown under its thumbnail in the picker. */
-private fun LayoutTemplate.title(): String = when (this) {
-    LayoutTemplate.FULL -> "Одна панель"
-    LayoutTemplate.COLUMNS_2 -> "Две колонки"
-    LayoutTemplate.ROWS_2 -> "Две строки"
-    LayoutTemplate.COLUMNS_3 -> "Три колонки"
-    LayoutTemplate.LEFT_PLUS_STACK -> "Большая + две"
-    LayoutTemplate.GRID_2X2 -> "Сетка 2×2"
-}
+private fun LayoutTemplate.title(): String =
+    when (this) {
+        LayoutTemplate.FULL -> "Одна панель"
+        LayoutTemplate.COLUMNS_2 -> "Две колонки"
+        LayoutTemplate.ROWS_2 -> "Две строки"
+        LayoutTemplate.COLUMNS_3 -> "Три колонки"
+        LayoutTemplate.LEFT_PLUS_STACK -> "Большая + две"
+        LayoutTemplate.GRID_2X2 -> "Сетка 2×2"
+    }
 
 /**
  * Preset picker overlay (à la Windows Snap Layouts): shows a thumbnail per
@@ -72,13 +72,17 @@ fun LayoutPickerOverlay(
 }
 
 @Composable
-private fun TemplateOption(template: LayoutTemplate, onPick: (LayoutTemplate) -> Unit) {
+private fun TemplateOption(
+    template: LayoutTemplate,
+    onPick: (LayoutTemplate) -> Unit,
+) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(10.dp))
-            .clickable { onPick(template) }
-            .padding(8.dp),
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onPick(template) }
+                .padding(8.dp),
     ) {
         TemplateThumb(template)
         Spacer(Modifier.height(8.dp))
@@ -103,42 +107,50 @@ private fun TemplateThumb(template: LayoutTemplate) {
     ) {
         when (template) {
             LayoutTemplate.FULL -> Slot(true, Modifier.fillMaxSize())
-            LayoutTemplate.COLUMNS_2 -> Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                Slot(false, Modifier.fillMaxHeight().weight(1f))
-                Slot(true, Modifier.fillMaxHeight().weight(1f))
-            }
-            LayoutTemplate.ROWS_2 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                Slot(false, Modifier.fillMaxWidth().weight(1f))
-                Slot(true, Modifier.fillMaxWidth().weight(1f))
-            }
-            LayoutTemplate.COLUMNS_3 -> Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                Slot(false, Modifier.fillMaxHeight().weight(1f))
-                Slot(false, Modifier.fillMaxHeight().weight(1f))
-                Slot(true, Modifier.fillMaxHeight().weight(1f))
-            }
-            LayoutTemplate.LEFT_PLUS_STACK -> Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                Slot(false, Modifier.fillMaxHeight().weight(1f))
-                Column(Modifier.fillMaxHeight().weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
-                    Slot(false, Modifier.fillMaxWidth().weight(1f))
-                    Slot(true, Modifier.fillMaxWidth().weight(1f))
-                }
-            }
-            LayoutTemplate.GRID_2X2 -> Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
-                Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
-                    Slot(false, Modifier.fillMaxHeight().weight(1f))
-                    Slot(false, Modifier.fillMaxHeight().weight(1f))
-                }
-                Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+            LayoutTemplate.COLUMNS_2 ->
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
                     Slot(false, Modifier.fillMaxHeight().weight(1f))
                     Slot(true, Modifier.fillMaxHeight().weight(1f))
                 }
-            }
+            LayoutTemplate.ROWS_2 ->
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    Slot(false, Modifier.fillMaxWidth().weight(1f))
+                    Slot(true, Modifier.fillMaxWidth().weight(1f))
+                }
+            LayoutTemplate.COLUMNS_3 ->
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    Slot(false, Modifier.fillMaxHeight().weight(1f))
+                    Slot(false, Modifier.fillMaxHeight().weight(1f))
+                    Slot(true, Modifier.fillMaxHeight().weight(1f))
+                }
+            LayoutTemplate.LEFT_PLUS_STACK ->
+                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    Slot(false, Modifier.fillMaxHeight().weight(1f))
+                    Column(Modifier.fillMaxHeight().weight(1f), verticalArrangement = Arrangement.spacedBy(gap)) {
+                        Slot(false, Modifier.fillMaxWidth().weight(1f))
+                        Slot(true, Modifier.fillMaxWidth().weight(1f))
+                    }
+                }
+            LayoutTemplate.GRID_2X2 ->
+                Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(gap)) {
+                    Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        Slot(false, Modifier.fillMaxHeight().weight(1f))
+                        Slot(false, Modifier.fillMaxHeight().weight(1f))
+                    }
+                    Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                        Slot(false, Modifier.fillMaxHeight().weight(1f))
+                        Slot(true, Modifier.fillMaxHeight().weight(1f))
+                    }
+                }
         }
     }
 }
 
 @Composable
-private fun Slot(highlighted: Boolean, modifier: Modifier) {
+private fun Slot(
+    highlighted: Boolean,
+    modifier: Modifier,
+) {
     val color = if (highlighted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
     Box(modifier.clip(RoundedCornerShape(2.dp)).background(color))
 }

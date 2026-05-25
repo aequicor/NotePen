@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.sync.domain.model
 
 /** UI-facing state of the pairing / server lifecycle. */
 sealed class PairingState {
-
     /** Server has not been started yet. */
     data object Idle : PairingState()
 

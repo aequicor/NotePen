@@ -20,22 +20,27 @@ import java.io.File
 class ImageThumbnailGeneratorAndroid(
     private val context: Context,
 ) : PdfThumbnailGenerator {
-
-    override suspend fun generate(uri: String, widthPx: Int, heightPx: Int): Result<ByteArray> =
+    override suspend fun generate(
+        uri: String,
+        widthPx: Int,
+        heightPx: Int,
+    ): Result<ByteArray> =
         withContext(Dispatchers.IO) {
             runCatching {
                 require(widthPx in 1..4096 && heightPx in 1..4096) {
-                    "Thumbnail dimensions out of range: ${widthPx}x${heightPx}"
+                    "Thumbnail dimensions out of range: ${widthPx}x$heightPx"
                 }
-                val source = openStream(uri).use { stream ->
-                    BitmapFactory.decodeStream(stream)
-                        ?: throw ThumbnailGenerationException("Unsupported or corrupt image: $uri")
-                }
+                val source =
+                    openStream(uri).use { stream ->
+                        BitmapFactory.decodeStream(stream)
+                            ?: throw ThumbnailGenerationException("Unsupported or corrupt image: $uri")
+                    }
 
-                val scale = minOf(
-                    widthPx.toFloat() / source.width,
-                    heightPx.toFloat() / source.height,
-                )
+                val scale =
+                    minOf(
+                        widthPx.toFloat() / source.width,
+                        heightPx.toFloat() / source.height,
+                    )
                 val targetW = (source.width * scale).toInt().coerceAtLeast(1)
                 val targetH = (source.height * scale).toInt().coerceAtLeast(1)
                 val scaled = Bitmap.createScaledBitmap(source, targetW, targetH, true)
@@ -57,8 +62,9 @@ class ImageThumbnailGeneratorAndroid(
         val parsed = Uri.parse(uri)
         return when (parsed.scheme) {
             null, "file" -> File(parsed.path ?: uri).inputStream()
-            else -> context.contentResolver.openInputStream(parsed)
-                ?: throw ThumbnailGenerationException("Cannot open input stream for: $uri")
+            else ->
+                context.contentResolver.openInputStream(parsed)
+                    ?: throw ThumbnailGenerationException("Cannot open input stream for: $uri")
         }
     }
 }

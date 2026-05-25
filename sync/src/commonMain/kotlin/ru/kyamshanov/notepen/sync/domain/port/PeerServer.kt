@@ -23,7 +23,6 @@ import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
  * fan-out (stroke deltas, projection frames).
  */
 interface PeerServer {
-
     /** Server lifecycle — starts as [ServerLifecycleState.Idle]. */
     val lifecycle: Flow<ServerLifecycleState>
 
@@ -49,7 +48,10 @@ interface PeerServer {
     suspend fun start(): Result<ServerLifecycleState.Running>
 
     /** Sends [message] to the peer identified by [peerId]. No-op if unknown. */
-    suspend fun send(peerId: String, message: NetworkMessage)
+    suspend fun send(
+        peerId: String,
+        message: NetworkMessage,
+    )
 
     /** Sends [message] to every currently connected peer. */
     suspend fun broadcast(message: NetworkMessage)

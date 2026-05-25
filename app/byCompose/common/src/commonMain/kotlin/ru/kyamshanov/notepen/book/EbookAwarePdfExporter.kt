@@ -16,7 +16,6 @@ class EbookAwarePdfExporter(
     private val delegate: PdfExporter,
     private val converter: EbookToPdfConverter,
 ) : PdfExporter {
-
     override suspend fun export(
         sourcePdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,

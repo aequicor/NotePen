@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.qrconnect.domain
 
 /** Errors surfaced by the QR pairing coordinators. */
 sealed class QrConnectError(open val message: String) {
-
     /** The user denied the camera permission. */
     data object CameraDenied : QrConnectError("Camera permission denied")
 

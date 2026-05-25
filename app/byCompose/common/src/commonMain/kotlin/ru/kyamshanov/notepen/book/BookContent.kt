@@ -68,7 +68,6 @@ fun RichText.plainText(): String = joinToString(separator = "") { it.text }
  * новыми типами блоков, а не флагами.
  */
 sealed interface ContentBlock {
-
     /**
      * Заголовок раздела (`h1`…`h6`).
      *

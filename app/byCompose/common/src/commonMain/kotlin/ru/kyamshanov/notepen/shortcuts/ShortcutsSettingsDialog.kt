@@ -118,13 +118,14 @@ private fun BindingField(
     LaunchedEffect(recording, extra.isEmpty(), peakState.value.isNotEmpty()) {
         if (!recording) return@LaunchedEffect
         if (extra.isEmpty() && peakState.value.isNotEmpty()) {
-            val updated = ShortcutBinding(
-                ctrl = recCtrl,
-                shift = recShift,
-                alt = recAlt,
-                meta = recMeta,
-                penButtons = peakState.value,
-            )
+            val updated =
+                ShortcutBinding(
+                    ctrl = recCtrl,
+                    shift = recShift,
+                    alt = recAlt,
+                    meta = recMeta,
+                    penButtons = peakState.value,
+                )
             onChange(updated)
             recording = false
         }
@@ -136,57 +137,61 @@ private fun BindingField(
             style = MaterialTheme.typography.titleSmall,
             modifier = Modifier.padding(bottom = 4.dp),
         )
-        val display = when {
-            recording -> {
-                val preview = ShortcutBinding(
-                    ctrl = recCtrl,
-                    shift = recShift,
-                    alt = recAlt,
-                    meta = recMeta,
-                    penButtons = peakState.value.ifEmpty { extra },
-                )
-                if (preview.isEmpty) {
-                    "Нажмите сочетание клавиш или кнопку пера…"
-                } else {
-                    "Запись: ${formatBinding(preview)}"
+        val display =
+            when {
+                recording -> {
+                    val preview =
+                        ShortcutBinding(
+                            ctrl = recCtrl,
+                            shift = recShift,
+                            alt = recAlt,
+                            meta = recMeta,
+                            penButtons = peakState.value.ifEmpty { extra },
+                        )
+                    if (preview.isEmpty) {
+                        "Нажмите сочетание клавиш или кнопку пера…"
+                    } else {
+                        "Запись: ${formatBinding(preview)}"
+                    }
                 }
+                binding.isEmpty -> "Не задано"
+                else -> formatBinding(binding)
             }
-            binding.isEmpty -> "Не задано"
-            else -> formatBinding(binding)
-        }
         OutlinedTextField(
             value = TextFieldValue(display),
             onValueChange = {},
             readOnly = true,
             label = { Text("Сочетание") },
-            modifier = Modifier
-                .fillMaxWidth()
-                .focusRequester(focusRequester)
-                .onPreviewKeyEvent { e ->
-                    if (!recording) return@onPreviewKeyEvent false
-                    // Обновляем снимок модификаторов на любом событии —
-                    // полезно для пен-кнопочного captures.
-                    recCtrl = e.isCtrlPressed
-                    recShift = e.isShiftPressed
-                    recAlt = e.isAltPressed
-                    recMeta = e.isMetaPressed
-                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
-                    // Игнорируем «голые» нажатия модификаторов как основной
-                    // клавиши сочетания.
-                    if (isModifierKey(e.key.keyCode)) return@onPreviewKeyEvent true
-                    val updated = ShortcutBinding(
-                        ctrl = e.isCtrlPressed,
-                        shift = e.isShiftPressed,
-                        alt = e.isAltPressed,
-                        meta = e.isMetaPressed,
-                        penButtons = penButtons.value,
-                        keyCode = e.key.keyCode,
-                        keyName = keyDisplayName(e.key.keyCode),
-                    )
-                    onChange(updated)
-                    recording = false
-                    true
-                },
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester)
+                    .onPreviewKeyEvent { e ->
+                        if (!recording) return@onPreviewKeyEvent false
+                        // Обновляем снимок модификаторов на любом событии —
+                        // полезно для пен-кнопочного captures.
+                        recCtrl = e.isCtrlPressed
+                        recShift = e.isShiftPressed
+                        recAlt = e.isAltPressed
+                        recMeta = e.isMetaPressed
+                        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
+                        // Игнорируем «голые» нажатия модификаторов как основной
+                        // клавиши сочетания.
+                        if (isModifierKey(e.key.keyCode)) return@onPreviewKeyEvent true
+                        val updated =
+                            ShortcutBinding(
+                                ctrl = e.isCtrlPressed,
+                                shift = e.isShiftPressed,
+                                alt = e.isAltPressed,
+                                meta = e.isMetaPressed,
+                                penButtons = penButtons.value,
+                                keyCode = e.key.keyCode,
+                                keyName = keyDisplayName(e.key.keyCode),
+                            )
+                        onChange(updated)
+                        recording = false
+                        true
+                    },
         )
 
         Spacer(Modifier.height(6.dp))
@@ -198,7 +203,10 @@ private fun BindingField(
                 if (recording) {
                     recording = false
                 } else {
-                    recCtrl = false; recShift = false; recAlt = false; recMeta = false
+                    recCtrl = false
+                    recShift = false
+                    recAlt = false
+                    recMeta = false
                     recording = true
                     focusRequester.requestFocus()
                 }

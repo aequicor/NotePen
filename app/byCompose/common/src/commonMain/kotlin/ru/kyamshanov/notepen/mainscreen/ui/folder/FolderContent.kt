@@ -7,8 +7,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.union
@@ -99,8 +99,9 @@ fun FolderContent(
             TopAppBar(
                 modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
                 title = { Text(state.folderName) },
-                windowInsets = WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
-                    .union(TopAppBarDefaults.windowInsets),
+                windowInsets =
+                    WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
+                        .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
                     IconButton(
                         onClick = component.onBack,
@@ -134,32 +135,33 @@ fun FolderContent(
         modifier = modifier,
     ) { padding ->
         var isExternalDropHovered by remember { mutableStateOf(false) }
-        val dropTarget = remember(component) {
-            object : DragAndDropTarget {
-                override fun onDrop(event: DragAndDropEvent): Boolean {
-                    isExternalDropHovered = false
-                    val uris = extractExternalFileUris(event)
-                    return if (uris.isNotEmpty()) {
-                        component.viewModel.addExternalFiles(uris)
-                        true
-                    } else {
-                        false
+        val dropTarget =
+            remember(component) {
+                object : DragAndDropTarget {
+                    override fun onDrop(event: DragAndDropEvent): Boolean {
+                        isExternalDropHovered = false
+                        val uris = extractExternalFileUris(event)
+                        return if (uris.isNotEmpty()) {
+                            component.viewModel.addExternalFiles(uris)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+
+                    override fun onEntered(event: DragAndDropEvent) {
+                        isExternalDropHovered = true
+                    }
+
+                    override fun onExited(event: DragAndDropEvent) {
+                        isExternalDropHovered = false
+                    }
+
+                    override fun onEnded(event: DragAndDropEvent) {
+                        isExternalDropHovered = false
                     }
                 }
-
-                override fun onEntered(event: DragAndDropEvent) {
-                    isExternalDropHovered = true
-                }
-
-                override fun onExited(event: DragAndDropEvent) {
-                    isExternalDropHovered = false
-                }
-
-                override fun onEnded(event: DragAndDropEvent) {
-                    isExternalDropHovered = false
-                }
             }
-        }
 
         Box(
             Modifier
@@ -176,11 +178,12 @@ fun FolderContent(
                 )
                 .border(
                     width = if (isExternalDropHovered) 2.dp else 0.dp,
-                    color = if (isExternalDropHovered) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        Color.Transparent
-                    },
+                    color =
+                        if (isExternalDropHovered) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.Transparent
+                        },
                 ),
         ) {
             if (state.subfolders.isEmpty() && state.files.isEmpty()) {
@@ -271,12 +274,13 @@ private fun AddExistingFilesDialog(
                         val checked = file.uri in selected
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (checked) selected.remove(file.uri) else selected.add(file.uri)
-                                }
-                                .padding(vertical = 4.dp),
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (checked) selected.remove(file.uri) else selected.add(file.uri)
+                                    }
+                                    .padding(vertical = 4.dp),
                         ) {
                             Checkbox(
                                 checked = checked,

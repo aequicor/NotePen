@@ -10,7 +10,10 @@ import kotlinx.serialization.encoding.Encoder
 object ColorAsLongSerializer : KSerializer<Color> {
     override val descriptor = PrimitiveSerialDescriptor("ColorArgb", PrimitiveKind.LONG)
 
-    override fun serialize(encoder: Encoder, value: Color) {
+    override fun serialize(
+        encoder: Encoder,
+        value: Color,
+    ) {
         encoder.encodeLong(value.value.toLong())
     }
 

@@ -9,7 +9,6 @@ import kotlin.test.assertTrue
 // covers TC-2, TC-7, TC-9, TC-10
 
 class DetailsContentTest {
-
     // TC-2: нажатие кнопки вызывает onBack() ровно один раз
     // Контрактная проверка: FakeDetailsComponent корректно регистрирует один вызов onBack().
     // UI-часть (нажатие SmallFloatingActionButton) верифицируется вручную (см. Known limitations).
@@ -49,7 +48,7 @@ class DetailsContentTest {
         // Тест гарантирует что значение не пустое и не null, обеспечивая поддержку экранных чтецов.
         assertTrue(
             BACK_CONTENT_DESCRIPTION.isNotEmpty(),
-            "contentDescription кнопки «Назад» не должен быть пустым"
+            "contentDescription кнопки «Назад» не должен быть пустым",
         )
     }
 
@@ -67,7 +66,6 @@ class DetailsContentTest {
 }
 
 private class FakeDetailsComponent(title: String = "test-title") : DetailsComponent {
-
     var onBackCallCount: Int = 0
         private set
 

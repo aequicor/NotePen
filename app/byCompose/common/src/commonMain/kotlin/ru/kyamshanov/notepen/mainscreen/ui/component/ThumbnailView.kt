@@ -31,16 +31,18 @@ fun ThumbnailView(
     state: ThumbnailState,
     modifier: Modifier = Modifier,
 ) {
-    val bgColor = when (state) {
-        is ThumbnailState.Error -> MaterialTheme.colorScheme.errorContainer
-        else -> MaterialTheme.colorScheme.surfaceVariant
-    }
+    val bgColor =
+        when (state) {
+            is ThumbnailState.Error -> MaterialTheme.colorScheme.errorContainer
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        }
     Box(
         contentAlignment = Alignment.Center,
-        modifier = modifier
-            .aspectRatio(0.707f)
-            .clip(MaterialTheme.shapes.medium)
-            .background(bgColor),
+        modifier =
+            modifier
+                .aspectRatio(0.707f)
+                .clip(MaterialTheme.shapes.medium)
+                .background(bgColor),
     ) {
         when (state) {
             is ThumbnailState.Loading -> Unit

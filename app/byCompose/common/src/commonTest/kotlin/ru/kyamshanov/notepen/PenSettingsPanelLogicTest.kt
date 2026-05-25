@@ -10,7 +10,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 import kotlin.math.roundToInt
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 
 /**
  * Unit-tests for the pure state-mapping helpers used by [PenSettingsPanel]
@@ -19,7 +18,6 @@ import kotlin.test.assertTrue
  * in vault/tech-debt/common/compose-ui-test-infra.md.
  */
 class PenSettingsPanelLogicTest {
-
     @Test
     fun `applyPreset replaces RGB but preserves current alpha`() {
         // Verifies AC-8 + EC-9: switching a preset must keep the alpha slider value.
@@ -108,7 +106,9 @@ class PenSettingsPanelLogicTest {
             assertEquals(
                 0xFFL,
                 alphaByte,
-                "Preset 0x${presetArgb.toString(16)} must be fully opaque so the alpha slider stays the single source of truth for transparency",
+                "Preset 0x${presetArgb.toString(
+                    16,
+                )} must be fully opaque so the alpha slider stays the single source of truth for transparency",
             )
         }
     }

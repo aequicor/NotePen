@@ -7,7 +7,10 @@ package ru.kyamshanov.notepen.qrconnect.domain.port
  * abstraction keeps the domain free of `BufferedImage` / `Bitmap` types.
  */
 fun interface QrEncoder {
-    fun encode(text: String, size: Int): QrMatrix
+    fun encode(
+        text: String,
+        size: Int,
+    ): QrMatrix
 }
 
 /**
@@ -19,5 +22,8 @@ class QrMatrix(val size: Int, private val data: BooleanArray) {
         require(data.size == size * size) { "data length must equal size*size" }
     }
 
-    operator fun get(x: Int, y: Int): Boolean = data[y * size + x]
+    operator fun get(
+        x: Int,
+        y: Int,
+    ): Boolean = data[y * size + x]
 }

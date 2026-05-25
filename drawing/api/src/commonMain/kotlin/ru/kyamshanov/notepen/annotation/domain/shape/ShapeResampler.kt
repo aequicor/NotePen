@@ -11,7 +11,6 @@ import kotlin.math.sin
  * (как среднее), чтобы snapped-штрих визуально совпадал с обычным росчерком.
  */
 public object ShapeResampler {
-
     private const val LINE_SAMPLES: Int = 32
     private const val ELLIPSE_SAMPLES: Int = 128
     private const val RECT_SAMPLES_PER_SIDE: Int = 32
@@ -24,11 +23,12 @@ public object ShapeResampler {
         shape: RecognizedShape,
         basePressure: Float,
         baseTilt: Float,
-    ): List<DrawingPoint> = when (shape) {
-        is RecognizedShape.Line -> sampleLine(shape, basePressure, baseTilt)
-        is RecognizedShape.Ellipse -> sampleEllipse(shape, basePressure, baseTilt)
-        is RecognizedShape.Rectangle -> sampleRectangle(shape, basePressure, baseTilt)
-    }
+    ): List<DrawingPoint> =
+        when (shape) {
+            is RecognizedShape.Line -> sampleLine(shape, basePressure, baseTilt)
+            is RecognizedShape.Ellipse -> sampleEllipse(shape, basePressure, baseTilt)
+            is RecognizedShape.Rectangle -> sampleRectangle(shape, basePressure, baseTilt)
+        }
 
     private fun sampleLine(
         line: RecognizedShape.Line,
@@ -83,13 +83,14 @@ public object ShapeResampler {
         pressure: Float,
         tilt: Float,
     ): List<DrawingPoint> {
-        val corners = listOf(
-            r.left to r.top,
-            r.right to r.top,
-            r.right to r.bottom,
-            r.left to r.bottom,
-            r.left to r.top,
-        )
+        val corners =
+            listOf(
+                r.left to r.top,
+                r.right to r.top,
+                r.right to r.bottom,
+                r.left to r.bottom,
+                r.left to r.top,
+            )
         val n = RECT_SAMPLES_PER_SIDE
         val out = ArrayList<DrawingPoint>(4 * n + 1)
         var index = 0

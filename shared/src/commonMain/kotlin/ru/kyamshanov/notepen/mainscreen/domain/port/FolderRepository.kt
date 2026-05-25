@@ -14,7 +14,6 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
  * Декларируется в `:shared`. Реализуется в инфраструктурном слое.
  */
 interface FolderRepository {
-
     /**
      * Создаёт новую папку с указанным именем.
      *
@@ -27,7 +26,10 @@ interface FolderRepository {
      * @throws FolderNameTooLongException если name.length > 255 (AC-34).
      * @throws FolderNotFoundException если [parentId] != null и родитель не существует.
      */
-    suspend fun create(name: String, parentId: String? = null): Folder
+    suspend fun create(
+        name: String,
+        parentId: String? = null,
+    ): Folder
 
     /**
      * Удаляет папку по идентификатору.
@@ -46,7 +48,10 @@ interface FolderRepository {
      * @throws FileNotInHistoryException если RecentFile с указанным uri не существует (AC-37).
      * @throws FileDuplicateInFolderException если файл уже добавлен в эту папку.
      */
-    suspend fun addFile(folderId: String, uri: String)
+    suspend fun addFile(
+        folderId: String,
+        uri: String,
+    )
 
     /**
      * Удаляет ссылку файла из папки (FolderFileLink). RecentFile-запись не удаляется.
@@ -55,7 +60,10 @@ interface FolderRepository {
      * @param folderId UUID папки.
      * @param uri Нормализованный URI файла.
      */
-    suspend fun removeFile(folderId: String, uri: String)
+    suspend fun removeFile(
+        folderId: String,
+        uri: String,
+    )
 
     /**
      * Переименовывает папку.
@@ -67,7 +75,10 @@ interface FolderRepository {
      * @throws FolderNameTooLongException если newName.length > 255.
      * @throws FolderNameCharsInvalidException если newName содержит недопустимые символы.
      */
-    suspend fun rename(id: String, newName: String)
+    suspend fun rename(
+        id: String,
+        newName: String,
+    )
 
     /**
      * Возвращает все папки, отсортированные по max(lastOpenedAt) файлов внутри DESC.

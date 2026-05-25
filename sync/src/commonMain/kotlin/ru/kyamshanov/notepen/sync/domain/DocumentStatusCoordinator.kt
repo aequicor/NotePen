@@ -29,7 +29,6 @@ class DocumentStatusCoordinator(
     private val client: SyncClient,
     private val registry: RemoteDocumentStatusRegistry,
 ) {
-
     fun start(scope: CoroutineScope) {
         scope.launch {
             client.incomingMessages.collect { hostMessage ->
@@ -42,8 +41,9 @@ class DocumentStatusCoordinator(
                     }
                     is NetworkMessage.SaveResult -> {
                         if (msg.documentId.isEmpty()) return@collect
-                        val isOrphan = !msg.success &&
-                            msg.errorMessage?.contains(ORPHAN_ERROR_MARKER, ignoreCase = true) == true
+                        val isOrphan =
+                            !msg.success &&
+                                msg.errorMessage?.contains(ORPHAN_ERROR_MARKER, ignoreCase = true) == true
                         if (isOrphan) {
                             logger.info { "Marking ${msg.documentId} as OrphanedOnHost (via SaveResult)" }
                             registry.set(msg.documentId, SyncStatus.OrphanedOnHost)

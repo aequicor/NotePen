@@ -9,7 +9,6 @@ import kotlin.test.assertTrue
 
 /** Юнит-тесты авто-прокрутки рамки magnifier'а (Scribble-like). */
 class MagnifierStateAutoScrollTest {
-
     @Test
     fun `shift right moves target by ~85 percent of width with overlap`() {
         val state = enabledState(initialLeft = 0.1f, width = 0.2f)
@@ -70,21 +69,26 @@ class MagnifierStateAutoScrollTest {
         width: Float,
         top: Float = 0.4f,
         height: Float = 0.05f,
-    ): MagnifierState = MagnifierState().also { s ->
-        s.enable(onPage = 0, viewportSize = Size(1000f, 800f))
-        // Resize before moving: moveTarget clamps top against the *current*
-        // frame height, so a tall default frame would cap top well above the
-        // requested value. Shrink first, then position.
-        s.resizeTarget(newWidth = width, newHeight = height)
-        s.moveTarget(
-            androidx.compose.ui.geometry.Offset(
-                x = initialLeft - s.targetRect.left,
-                y = top - s.targetRect.top,
-            ),
-        )
-    }
+    ): MagnifierState =
+        MagnifierState().also { s ->
+            s.enable(onPage = 0, viewportSize = Size(1000f, 800f))
+            // Resize before moving: moveTarget clamps top against the *current*
+            // frame height, so a tall default frame would cap top well above the
+            // requested value. Shrink first, then position.
+            s.resizeTarget(newWidth = width, newHeight = height)
+            s.moveTarget(
+                androidx.compose.ui.geometry.Offset(
+                    x = initialLeft - s.targetRect.left,
+                    y = top - s.targetRect.top,
+                ),
+            )
+        }
 
-    private fun assertNear(expected: Float, actual: Float, eps: Float = 1e-3f) {
+    private fun assertNear(
+        expected: Float,
+        actual: Float,
+        eps: Float = 1e-3f,
+    ) {
         assertTrue(
             abs(expected - actual) <= eps,
             "Expected $expected, got $actual (diff > $eps)",

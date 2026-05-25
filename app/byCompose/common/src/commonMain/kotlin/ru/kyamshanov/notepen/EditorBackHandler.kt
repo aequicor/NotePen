@@ -8,4 +8,7 @@ import androidx.compose.runtime.Composable
  * away. Desktop has no system back — the actual is a no-op there.
  */
 @Composable
-expect fun EditorBackHandler(enabled: Boolean, onBack: () -> Unit)
+expect fun EditorBackHandler(
+    enabled: Boolean,
+    onBack: () -> Unit,
+)

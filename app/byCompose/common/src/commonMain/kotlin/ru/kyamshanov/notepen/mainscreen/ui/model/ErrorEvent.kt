@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.mainscreen.ui.model
 
 /** Одноразовое событие ошибки, передаваемое из ViewModel в UI. */
 sealed class ErrorEvent {
-
     /** Файл не найден на диске (удалён или перемещён). */
     object FileNotFound : ErrorEvent()
 

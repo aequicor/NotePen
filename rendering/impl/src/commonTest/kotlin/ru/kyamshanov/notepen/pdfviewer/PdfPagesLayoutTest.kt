@@ -1,19 +1,18 @@
 package ru.kyamshanov.notepen.pdfviewer
 
 import androidx.compose.ui.geometry.Offset
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
-import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 
 /**
  * Чистые тесты математики viewer'а: layout страничной стопки,
  * cursor-anchored zoom, derived "first visible" и conversion'ы для sync.
  */
 class PdfPagesLayoutTest {
-
     private fun pages(vararg aspectRatios: Float): List<PdfPageInfo> =
         aspectRatios.mapIndexed { i, ar ->
             PdfPageInfo(pageIndex = i, widthPt = 100f, heightPt = 100f / ar)
@@ -34,12 +33,13 @@ class PdfPagesLayoutTest {
         val focus = Offset(640f, 480f)
         val pan = Offset(40f, -20f)
         val zoomOld = 1.3f
-        val (panNew, zoomNew) = PdfViewerMath.zoomAroundFocus(
-            focus = focus,
-            panOld = pan,
-            zoomOld = zoomOld,
-            zoomTarget = zoomOld * 0.9f,
-        )
+        val (panNew, zoomNew) =
+            PdfViewerMath.zoomAroundFocus(
+                focus = focus,
+                panOld = pan,
+                zoomOld = zoomOld,
+                zoomTarget = zoomOld * 0.9f,
+            )
         val docBefore = (focus - pan) / zoomOld
         val docAfter = (focus - panNew) / zoomNew
         assertTrue(abs(docBefore.x - docAfter.x) < 1e-3f)
@@ -48,12 +48,13 @@ class PdfPagesLayoutTest {
 
     @Test
     fun `zoom clamps to bounds`() {
-        val (_, z) = PdfViewerMath.zoomAroundFocus(
-            focus = Offset(100f, 100f),
-            panOld = Offset.Zero,
-            zoomOld = 7f,
-            zoomTarget = 100f, // > MAX_ZOOM
-        )
+        val (_, z) =
+            PdfViewerMath.zoomAroundFocus(
+                focus = Offset(100f, 100f),
+                panOld = Offset.Zero,
+                zoomOld = 7f,
+                zoomTarget = 100f, // > MAX_ZOOM
+            )
         assertEquals(PdfViewerMath.MAX_ZOOM, z)
     }
 
@@ -91,13 +92,14 @@ class PdfPagesLayoutTest {
     @Test
     fun `panForPageScroll places page top at -offsetPx`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f)
-        val pan = PdfViewerMath.panForPageScroll(
-            layout = layout,
-            pageIndex = 2,
-            offsetPx = 50,
-            zoom = 1f,
-            currentPanX = 0f,
-        )
+        val pan =
+            PdfViewerMath.panForPageScroll(
+                layout = layout,
+                pageIndex = 2,
+                offsetPx = 50,
+                zoom = 1f,
+                currentPanX = 0f,
+            )
         // Хотим: страница 2 (docTop = 200) → её визуальный top = -50.
         assertEquals(-50f - 200f, pan.y)
     }
@@ -107,12 +109,13 @@ class PdfPagesLayoutTest {
         val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 100f)
         // Контент 100×100 в 400×400 — обе оси помещаются. pan в пределах
         // [0, 300] по обеим осям, значит (40, 70) полностью внутри → не трогаем.
-        val clamped = PdfViewerMath.clampPan(
-            pan = Offset(40f, 70f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = FloatSize(400f, 400f),
-        )
+        val clamped =
+            PdfViewerMath.clampPan(
+                pan = Offset(40f, 70f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = FloatSize(400f, 400f),
+            )
         assertEquals(40f, clamped.x)
         assertEquals(70f, clamped.y)
     }
@@ -122,12 +125,13 @@ class PdfPagesLayoutTest {
         val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 100f)
         // Контент 100×100 в 400×400 → pan.x ∈ [0, 300]. 999 → 300 (страница
         // прижата к правому краю, но целиком в экране). -50 по Y → 0.
-        val clamped = PdfViewerMath.clampPan(
-            pan = Offset(999f, -50f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = FloatSize(400f, 400f),
-        )
+        val clamped =
+            PdfViewerMath.clampPan(
+                pan = Offset(999f, -50f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = FloatSize(400f, 400f),
+            )
         assertEquals(300f, clamped.x)
         assertEquals(0f, clamped.y)
     }
@@ -138,12 +142,13 @@ class PdfPagesLayoutTest {
         // Контент 100×300 при viewport 400×200 — X помещается → pan.x ∈ [0, 300],
         // 40 не трогаем; Y overflow → края [-100, 0]; буфер = 100*0.25 = 25 →
         // диапазон [-125, 25], 999 → 25.
-        val clamped = PdfViewerMath.clampPan(
-            pan = Offset(40f, 999f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = FloatSize(400f, 200f),
-        )
+        val clamped =
+            PdfViewerMath.clampPan(
+                pan = Offset(40f, 999f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = FloatSize(400f, 200f),
+            )
         assertEquals(40f, clamped.x)
         assertEquals(25f, clamped.y)
     }
@@ -154,27 +159,30 @@ class PdfPagesLayoutTest {
         // Viewport 100×400: X overflow → края [100-200, 0] = [-100, 0];
         // буфер = 200 * 0.25 = 50 → допустимо [-150, 50]. Y помещается → [0, 200].
         val viewportSize = FloatSize(100f, 400f)
-        val maxed = PdfViewerMath.clampPan(
-            pan = Offset(999f, 0f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = viewportSize,
-        )
+        val maxed =
+            PdfViewerMath.clampPan(
+                pan = Offset(999f, 0f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = viewportSize,
+            )
         assertEquals(50f, maxed.x) // hi + buffer
         assertEquals(0f, maxed.y)
-        val minned = PdfViewerMath.clampPan(
-            pan = Offset(-999f, 0f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = viewportSize,
-        )
+        val minned =
+            PdfViewerMath.clampPan(
+                pan = Offset(-999f, 0f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = viewportSize,
+            )
         assertEquals(-150f, minned.x) // lo - buffer
-        val within = PdfViewerMath.clampPan(
-            pan = Offset(-50f, 0f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = viewportSize,
-        )
+        val within =
+            PdfViewerMath.clampPan(
+                pan = Offset(-50f, 0f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = viewportSize,
+            )
         assertEquals(-50f, within.x) // already inside the buffered range
     }
 
@@ -193,15 +201,16 @@ class PdfPagesLayoutTest {
         // inset → available width = 140, fit zoom = 1.4. PDF column (100×1.4=140)
         // exactly fills the free band → centeringX == insetStart == 60.
         val zoom = 1.4f
-        val pan = PdfViewerMath.panForFitWidth(
-            layout = layout,
-            pageIndex = 1,
-            zoom = zoom,
-            viewportWidth = 200f,
-            insetStartPx = 60f,
-            insetTopPx = 50f,
-            insetEndPx = 0f,
-        )
+        val pan =
+            PdfViewerMath.panForFitWidth(
+                layout = layout,
+                pageIndex = 1,
+                zoom = zoom,
+                viewportWidth = 200f,
+                insetStartPx = 60f,
+                insetTopPx = 50f,
+                insetEndPx = 0f,
+            )
         assertEquals(60f, pan.x)
         // Page 1 top (docTop = 100) lands at the counter inset: 50 - 100*1.4.
         assertEquals(50f - 100f * zoom, pan.y)
@@ -210,33 +219,36 @@ class PdfPagesLayoutTest {
     @Test
     fun `doubleTapTargetZoom zooms in from fit-width`() {
         // base 100, available 200 → fit = 2.0; зум на fit → приближаем ×FACTOR.
-        val target = PdfViewerMath.doubleTapTargetZoom(
-            currentZoom = 2f,
-            basePageWidthPx = 100f,
-            availableWidthPx = 200f,
-        )
+        val target =
+            PdfViewerMath.doubleTapTargetZoom(
+                currentZoom = 2f,
+                basePageWidthPx = 100f,
+                availableWidthPx = 200f,
+            )
         assertEquals((2f * PdfViewerMath.DOUBLE_TAP_ZOOM_FACTOR), target)
     }
 
     @Test
     fun `doubleTapTargetZoom returns to fit-width when already zoomed in`() {
         // fit = 2.0, текущий 5.0 (> fit×epsilon) → возвращаем к fit-width.
-        val target = PdfViewerMath.doubleTapTargetZoom(
-            currentZoom = 5f,
-            basePageWidthPx = 100f,
-            availableWidthPx = 200f,
-        )
+        val target =
+            PdfViewerMath.doubleTapTargetZoom(
+                currentZoom = 5f,
+                basePageWidthPx = 100f,
+                availableWidthPx = 200f,
+            )
         assertEquals(2f, target)
     }
 
     @Test
     fun `doubleTapTargetZoom clamps zoom-in to MAX_ZOOM`() {
         // fit = 4.0, ×2.5 = 10 → клампится к MAX_ZOOM.
-        val target = PdfViewerMath.doubleTapTargetZoom(
-            currentZoom = 4f,
-            basePageWidthPx = 100f,
-            availableWidthPx = 400f,
-        )
+        val target =
+            PdfViewerMath.doubleTapTargetZoom(
+                currentZoom = 4f,
+                basePageWidthPx = 100f,
+                availableWidthPx = 400f,
+            )
         assertEquals(PdfViewerMath.MAX_ZOOM, target)
     }
 
@@ -244,12 +256,13 @@ class PdfPagesLayoutTest {
     fun `centeringClamp leaves pan free when content overflows axis`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f) // 100×300
         // Контент 100×300, вьюпорт 50×100 — оба overflow → pan не трогаем.
-        val p = PdfViewerMath.centeringClamp(
-            pan = Offset(-200f, -150f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = FloatSize(50f, 100f),
-        )
+        val p =
+            PdfViewerMath.centeringClamp(
+                pan = Offset(-200f, -150f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = FloatSize(50f, 100f),
+            )
         assertEquals(Offset(-200f, -150f), p)
     }
 
@@ -257,12 +270,13 @@ class PdfPagesLayoutTest {
     fun `centeringClamp centres fitted axes only`() {
         val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 100f) // 100×100
         // Вьюпорт 300×50 — X помещается (центрируем), Y overflow (не трогаем).
-        val p = PdfViewerMath.centeringClamp(
-            pan = Offset(999f, -50f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = FloatSize(300f, 50f),
-        )
+        val p =
+            PdfViewerMath.centeringClamp(
+                pan = Offset(999f, -50f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = FloatSize(300f, 50f),
+            )
         assertEquals(100f, p.x) // (300 - 100) / 2
         assertEquals(-50f, p.y) // не тронули
     }
@@ -271,19 +285,21 @@ class PdfPagesLayoutTest {
     fun `centeringClamp centres PDF sheet, not the extent-expanded slot`() {
         // Лист 100×100, надпись вылезла далеко вправо/вниз за границы PDF.
         val extent = PageExtent(left = 0f, top = 0f, right = 3f, bottom = 3f)
-        val layout = PdfPagesLayout.build(
-            pages(1f),
-            basePageWidthPx = 100f,
-            extents = listOf(extent),
-        )
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f),
+                basePageWidthPx = 100f,
+                extents = listOf(extent),
+            )
         // Вьюпорт 300×300: PDF-лист (100×100) помещается по обеим осям,
         // слот со штрихом (300×300) — нет. Центрируем сам лист.
-        val p = PdfViewerMath.centeringClamp(
-            pan = Offset(999f, 999f),
-            layout = layout,
-            zoom = 1f,
-            viewportSize = FloatSize(300f, 300f),
-        )
+        val p =
+            PdfViewerMath.centeringClamp(
+                pan = Offset(999f, 999f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = FloatSize(300f, 300f),
+            )
         assertEquals(100f, p.x) // (300 - 100) / 2 — лист по центру
         assertEquals(100f, p.y) // (300 - 100) / 2
     }

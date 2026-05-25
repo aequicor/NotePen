@@ -2,7 +2,6 @@ package ru.kyamshanov.notepen.mainscreen.ui.model
 
 /** Одноразовое событие успеха, передаваемое из ViewModel в UI. */
 sealed class SuccessEvent {
-
     /**
      * Файл успешно добавлен в папку.
      *

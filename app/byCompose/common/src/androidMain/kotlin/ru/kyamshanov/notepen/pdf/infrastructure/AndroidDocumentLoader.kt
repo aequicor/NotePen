@@ -16,9 +16,7 @@ class AndroidDocumentLoader(
     private val pdfLoader: PdfDocumentLoader,
     private val imageLoader: PdfDocumentLoader,
 ) : PdfDocumentLoader {
-
-    override suspend fun load(path: String): PdfDocument =
-        if (isImage(path)) imageLoader.load(path) else pdfLoader.load(path)
+    override suspend fun load(path: String): PdfDocument = if (isImage(path)) imageLoader.load(path) else pdfLoader.load(path)
 
     private fun isImage(path: String): Boolean {
         val uri = Uri.parse(path)

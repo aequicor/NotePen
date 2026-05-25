@@ -8,12 +8,17 @@ import androidx.compose.ui.input.key.Key
  * модификатора не должно становиться «основной» клавишей сочетания.
  */
 internal fun isModifierKey(keyCode: Long): Boolean {
-    val keys = listOf(
-        Key.CtrlLeft, Key.CtrlRight,
-        Key.ShiftLeft, Key.ShiftRight,
-        Key.AltLeft, Key.AltRight,
-        Key.MetaLeft, Key.MetaRight,
-    )
+    val keys =
+        listOf(
+            Key.CtrlLeft,
+            Key.CtrlRight,
+            Key.ShiftLeft,
+            Key.ShiftRight,
+            Key.AltLeft,
+            Key.AltRight,
+            Key.MetaLeft,
+            Key.MetaRight,
+        )
     return keys.any { it.keyCode == keyCode }
 }
 

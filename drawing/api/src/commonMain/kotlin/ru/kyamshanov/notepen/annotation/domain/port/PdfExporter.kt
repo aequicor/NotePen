@@ -9,7 +9,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
  * injected [kotlinx.coroutines.CoroutineDispatcher].
  */
 interface PdfExporter {
-
     /**
      * Renders [annotations] on top of the source PDF and writes the result to [outputPath].
      *

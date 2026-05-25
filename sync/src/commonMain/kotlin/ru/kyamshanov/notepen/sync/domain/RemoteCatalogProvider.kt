@@ -46,14 +46,15 @@ class RemoteCatalogProvider(
     private val historyRepository: FileHistoryRepository,
     private val folderRepository: FolderRepository,
 ) {
-
     private val mutex = Mutex()
     private val allowedByPeer = mutableMapOf<String, Set<String>>()
     private val uriByPeer = mutableMapOf<String, Map<String, String>>()
 
     /** Resolves [documentId] for [peerId] back to the local URI, or `null` if not allowed. */
-    suspend fun resolveUri(peerId: String, documentId: String): String? =
-        mutex.withLock { uriByPeer[peerId]?.get(documentId) }
+    suspend fun resolveUri(
+        peerId: String,
+        documentId: String,
+    ): String? = mutex.withLock { uriByPeer[peerId]?.get(documentId) }
 
     /**
      * Resolves [documentId] back to the local URI using **any** peer's map.
@@ -68,23 +69,29 @@ class RemoteCatalogProvider(
         }
 
     /** True if [peerId] has been served a catalog containing [documentId]. */
-    suspend fun isAllowed(peerId: String, documentId: String): Boolean =
-        mutex.withLock { allowedByPeer[peerId]?.contains(documentId) == true }
+    suspend fun isAllowed(
+        peerId: String,
+        documentId: String,
+    ): Boolean = mutex.withLock { allowedByPeer[peerId]?.contains(documentId) == true }
 
     /**
      * Subscribes [server] to incoming [NetworkMessage.RemoteCatalogRequest]s
      * and replies to the requesting peer with a freshly built snapshot.
      * Runs until [scope] is cancelled.
      */
-    fun serve(server: PeerServer, scope: CoroutineScope) {
+    fun serve(
+        server: PeerServer,
+        scope: CoroutineScope,
+    ) {
         scope.launch {
             server.incomingMessages.collect { peerMessage ->
                 val msg = peerMessage.message
                 if (msg !is NetworkMessage.RemoteCatalogRequest) return@collect
                 val peerId = peerMessage.peer.id
-                val catalog = runCatching { buildSnapshotFor(peerId) }
-                    .onFailure { logger.warn { "Failed to build catalog snapshot: ${it::class.simpleName}" } }
-                    .getOrElse { RemoteCatalog(hostName, emptyList(), emptyList(), emptyList()) }
+                val catalog =
+                    runCatching { buildSnapshotFor(peerId) }
+                        .onFailure { logger.warn { "Failed to build catalog snapshot: ${it::class.simpleName}" } }
+                        .getOrElse { RemoteCatalog(hostName, emptyList(), emptyList(), emptyList()) }
                 logger.info {
                     "Serving RemoteCatalog to ${peerMessage.peer.name}: ${catalog.recent.size} recents, " +
                         "${catalog.folders.size} folders, ${catalog.folderLinks.size} links"
@@ -141,15 +148,19 @@ class RemoteCatalogProvider(
      * own "peers list" UI), we reply over the same channel. Reuses the same
      * per-peer allow-list / uri map keyed by host id.
      */
-    fun serve(client: SyncClient, scope: CoroutineScope) {
+    fun serve(
+        client: SyncClient,
+        scope: CoroutineScope,
+    ) {
         scope.launch {
             client.incomingMessages.collect { hostMessage ->
                 val msg = hostMessage.message
                 if (msg !is NetworkMessage.RemoteCatalogRequest) return@collect
                 val peerId = hostMessage.host.id
-                val catalog = runCatching { buildSnapshotFor(peerId) }
-                    .onFailure { logger.warn { "Failed to build catalog snapshot: ${it::class.simpleName}" } }
-                    .getOrElse { RemoteCatalog(hostName, emptyList(), emptyList(), emptyList()) }
+                val catalog =
+                    runCatching { buildSnapshotFor(peerId) }
+                        .onFailure { logger.warn { "Failed to build catalog snapshot: ${it::class.simpleName}" } }
+                        .getOrElse { RemoteCatalog(hostName, emptyList(), emptyList(), emptyList()) }
                 logger.info {
                     "Serving RemoteCatalog to host ${hostMessage.host.name}: ${catalog.recent.size} recents, " +
                         "${catalog.folders.size} folders, ${catalog.folderLinks.size} links"
@@ -166,37 +177,41 @@ class RemoteCatalogProvider(
      */
     suspend fun buildSnapshotFor(peerId: String): RemoteCatalog {
         val recentFiles = historyRepository.getAll()
-        val recent = recentFiles.map { file ->
-            RemoteEntry(
-                documentId = documentIdFromFilePath(file.uri),
-                displayName = file.displayName,
-                fileSize = file.fileSize,
-                lastOpenedAt = file.openedAt,
-            )
-        }
+        val recent =
+            recentFiles.map { file ->
+                RemoteEntry(
+                    documentId = documentIdFromFilePath(file.uri),
+                    displayName = file.displayName,
+                    fileSize = file.fileSize,
+                    lastOpenedAt = file.openedAt,
+                )
+            }
         val uriToDocumentId = recentFiles.associate { it.uri to documentIdFromFilePath(it.uri) }
         val foldersDomain = folderRepository.getAll()
-        val folders = foldersDomain.map { folder ->
-            RemoteFolder(
-                folderId = folder.id,
-                name = folder.name,
-                createdAt = folder.createdAt,
-                parentFolderId = folder.parentId,
-            )
-        }
-        val folderLinks = foldersDomain.flatMap { folder ->
-            val uris = runCatching { folderRepository.getFilesInFolder(folder.id) }
-                .getOrElse { emptyList() }
-            uris.mapNotNull { uri ->
-                uriToDocumentId[uri]?.let { docId ->
-                    RemoteFolderLink(
-                        folderId = folder.id,
-                        documentId = docId,
-                        lastOpenedAt = recentFiles.firstOrNull { it.uri == uri }?.openedAt ?: 0L,
-                    )
+        val folders =
+            foldersDomain.map { folder ->
+                RemoteFolder(
+                    folderId = folder.id,
+                    name = folder.name,
+                    createdAt = folder.createdAt,
+                    parentFolderId = folder.parentId,
+                )
+            }
+        val folderLinks =
+            foldersDomain.flatMap { folder ->
+                val uris =
+                    runCatching { folderRepository.getFilesInFolder(folder.id) }
+                        .getOrElse { emptyList() }
+                uris.mapNotNull { uri ->
+                    uriToDocumentId[uri]?.let { docId ->
+                        RemoteFolderLink(
+                            folderId = folder.id,
+                            documentId = docId,
+                            lastOpenedAt = recentFiles.firstOrNull { it.uri == uri }?.openedAt ?: 0L,
+                        )
+                    }
                 }
             }
-        }
         val allowed = recent.map { it.documentId }.toSet()
         val docToUri = recentFiles.associate { documentIdFromFilePath(it.uri) to it.uri }
         mutex.withLock {

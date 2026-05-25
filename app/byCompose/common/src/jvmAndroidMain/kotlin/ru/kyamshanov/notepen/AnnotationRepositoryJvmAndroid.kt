@@ -101,21 +101,35 @@ private data class AnnotationDataDto(
 // ── Mappers ──────────────────────────────────────────────────────────────────
 
 private fun DrawingPointDto.toDomain() = DrawingPoint(x, y, isNewPath, pressure, tilt)
+
 private fun DrawingPathDto.toDomain() = DrawingPath(points.map { it.toDomain() }, colorArgb, strokeWidth)
+
 private fun PenSettingsDto.toDomain() = PenSettings(colorArgb, strokeWidth, alpha)
+
 private fun EraserShapeDto.toDomain() = if (this == EraserShapeDto.CIRCLE) EraserShape.CIRCLE else EraserShape.SQUARE
+
 private fun EraserModeDto.toDomain() = if (this == EraserModeDto.OBJECT) EraserMode.OBJECT else EraserMode.POINT
+
 private fun EraserSettingsDto.toDomain() = EraserSettings(shape.toDomain(), sizeNormalized, mode.toDomain())
 
 private fun DrawingPoint.toDto() = DrawingPointDto(x, y, isNewPath, pressure, tilt)
+
 private fun DrawingPath.toDto() = DrawingPathDto(points.map { it.toDto() }, colorArgb, strokeWidth)
+
 private fun PenSettings.toDto() = PenSettingsDto(colorArgb, strokeWidth, alpha)
+
 private fun EraserShape.toDto() = if (this == EraserShape.CIRCLE) EraserShapeDto.CIRCLE else EraserShapeDto.SQUARE
+
 private fun EraserMode.toDto() = if (this == EraserMode.OBJECT) EraserModeDto.OBJECT else EraserModeDto.POINT
+
 private fun EraserSettings.toDto() = EraserSettingsDto(shape.toDto(), sizeNormalized, mode.toDto())
+
 private fun MarkerSettings.toDto() = MarkerSettingsDto(colorArgb, strokeWidth)
+
 private fun MarkerSettingsDto.toDomain() = MarkerSettings(colorArgb, strokeWidth)
+
 private fun PageExtentDto.toDomain() = PageExtent(l, t, r, b)
+
 private fun PageExtent.toDto() = PageExtentDto(left, top, right, bottom)
 
 // ── Repository ───────────────────────────────────────────────────────────────
@@ -132,12 +146,19 @@ class AnnotationRepositoryJvmAndroid(
     // блокировала UI и давала лаг рисования (перо «замирает» и скачком дорисовывает).
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : AnnotationRepository {
-
-    private val json = Json { encodeDefaults = true; ignoreUnknownKeys = true }
+    private val json =
+        Json {
+            encodeDefaults = true
+            ignoreUnknownKeys = true
+        }
 
     // Запись без encodeDefaults: не пишем isNewPath=false/pressure=1.0/tilt=0.0 у каждой
     // точки — заметно ужимает файл. Чтение терпимо к отсутствующим полям (дефолты в DTO).
-    private val writeJson = Json { encodeDefaults = false; ignoreUnknownKeys = true }
+    private val writeJson =
+        Json {
+            encodeDefaults = false
+            ignoreUnknownKeys = true
+        }
 
     @OptIn(ExperimentalSerializationApi::class)
     override suspend fun save(
@@ -151,127 +172,138 @@ class AnnotationRepositoryJvmAndroid(
         currentPageOffset: Int,
         favoritePageIndices: Set<Int>,
         pageExtents: Map<Int, PageExtent>,
-    ): Result<Unit> = withContext(ioDispatcher) {
-        try {
-            val dto = AnnotationDataDto(
-                pages = annotations.mapKeys { it.key.toString() }
-                    .mapValues { (_, paths) -> paths.map { it.toDto() } },
-                scale = scale,
-                pen = pen.toDto(),
-                marker = marker.toDto(),
-                eraser = eraser.toDto(),
-                currentPage = currentPage,
-                currentPageOffset = currentPageOffset,
-                favoritePageIndices = favoritePageIndices.toList(),
-                pageExtents = pageExtents
-                    .filterValues { it != PageExtent.Pdf }
-                    .mapKeys { it.key.toString() }
-                    .mapValues { (_, e) -> e.toDto() },
-            )
-            val file = storeFileFor(pdfPath)
-            file.parentFile?.mkdirs()
-            // Поток + временный файл: не строим гигантскую String в памяти (был OOM при
-            // сотнях тысяч точек), и прерывание записи не оставляет битый JSON.
-            writeAtomically(file) { out ->
-                writeJson.encodeToStream(AnnotationDataDto.serializer(), dto, out)
+    ): Result<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val dto =
+                    AnnotationDataDto(
+                        pages =
+                            annotations.mapKeys { it.key.toString() }
+                                .mapValues { (_, paths) -> paths.map { it.toDto() } },
+                        scale = scale,
+                        pen = pen.toDto(),
+                        marker = marker.toDto(),
+                        eraser = eraser.toDto(),
+                        currentPage = currentPage,
+                        currentPageOffset = currentPageOffset,
+                        favoritePageIndices = favoritePageIndices.toList(),
+                        pageExtents =
+                            pageExtents
+                                .filterValues { it != PageExtent.Pdf }
+                                .mapKeys { it.key.toString() }
+                                .mapValues { (_, e) -> e.toDto() },
+                    )
+                val file = storeFileFor(pdfPath)
+                file.parentFile?.mkdirs()
+                // Поток + временный файл: не строим гигантскую String в памяти (был OOM при
+                // сотнях тысяч точек), и прерывание записи не оставляет битый JSON.
+                writeAtomically(file) { out ->
+                    writeJson.encodeToStream(AnnotationDataDto.serializer(), dto, out)
+                }
+                // Лёгкий сайдкар с состоянием вида — читается при открытии отдельно и быстро,
+                // чтобы зум/страница восстанавливались до парсинга всех штрихов. readingMode
+                // тут не передаётся (это сейв штрихов) — сохраняем уже записанный, чтобы не
+                // затереть режим чтения; его пишет отдельный saveViewState.
+                val viewFile = viewFileFor(file)
+                val preservedReadingMode = readReadingMode(viewFile)
+                writeAtomically(viewFile) { out ->
+                    val viewDto = AnnotationViewStateDto(scale, currentPage, currentPageOffset, preservedReadingMode)
+                    writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+                }
+                Result.success(Unit)
+            } catch (e: IOException) {
+                Result.failure(e)
             }
-            // Лёгкий сайдкар с состоянием вида — читается при открытии отдельно и быстро,
-            // чтобы зум/страница восстанавливались до парсинга всех штрихов. readingMode
-            // тут не передаётся (это сейв штрихов) — сохраняем уже записанный, чтобы не
-            // затереть режим чтения; его пишет отдельный saveViewState.
-            val viewFile = viewFileFor(file)
-            val preservedReadingMode = readReadingMode(viewFile)
-            writeAtomically(viewFile) { out ->
-                val viewDto = AnnotationViewStateDto(scale, currentPage, currentPageOffset, preservedReadingMode)
-                writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
-            }
-            Result.success(Unit)
-        } catch (e: IOException) {
-            Result.failure(e)
         }
-    }
 
     @OptIn(ExperimentalSerializationApi::class)
-    override suspend fun load(pdfPath: String): Result<AnnotationBundle> = withContext(ioDispatcher) {
-        try {
-            val file = storeFileFor(pdfPath)
-            if (!file.exists()) {
-                Result.success(AnnotationBundle())
-            } else {
-                // Потоковый декод: не держим весь файл в String (был риск OOM и
-                // лишняя задержка парсинга на больших документах).
-                val dto = file.inputStream().buffered().use { input ->
-                    json.decodeFromStream(AnnotationDataDto.serializer(), input)
+    override suspend fun load(pdfPath: String): Result<AnnotationBundle> =
+        withContext(ioDispatcher) {
+            try {
+                val file = storeFileFor(pdfPath)
+                if (!file.exists()) {
+                    Result.success(AnnotationBundle())
+                } else {
+                    // Потоковый декод: не держим весь файл в String (был риск OOM и
+                    // лишняя задержка парсинга на больших документах).
+                    val dto =
+                        file.inputStream().buffered().use { input ->
+                            json.decodeFromStream(AnnotationDataDto.serializer(), input)
+                        }
+                    val pages =
+                        dto.pages.mapNotNull { (k, paths) ->
+                            k.toIntOrNull()?.let { it to paths.map { p -> p.toDomain() } }
+                        }.toMap()
+                    val extents =
+                        dto.pageExtents.mapNotNull { (k, v) ->
+                            k.toIntOrNull()?.let { it to v.toDomain() }
+                        }.toMap()
+                    Result.success(
+                        AnnotationBundle(
+                            pages = pages,
+                            scale = dto.scale,
+                            pen = dto.pen?.toDomain() ?: PenSettings(),
+                            marker = dto.marker?.toDomain() ?: MarkerSettings(),
+                            eraser = dto.eraser?.toDomain() ?: EraserSettings(),
+                            currentPage = dto.currentPage,
+                            currentPageOffset = dto.currentPageOffset,
+                            favoritePageIndices = dto.favoritePageIndices.toSet(),
+                            pageExtents = extents,
+                        ),
+                    )
                 }
-                val pages = dto.pages.mapNotNull { (k, paths) ->
-                    k.toIntOrNull()?.let { it to paths.map { p -> p.toDomain() } }
-                }.toMap()
-                val extents = dto.pageExtents.mapNotNull { (k, v) ->
-                    k.toIntOrNull()?.let { it to v.toDomain() }
-                }.toMap()
-                Result.success(
-                    AnnotationBundle(
-                        pages = pages,
-                        scale = dto.scale,
-                        pen = dto.pen?.toDomain() ?: PenSettings(),
-                        marker = dto.marker?.toDomain() ?: MarkerSettings(),
-                        eraser = dto.eraser?.toDomain() ?: EraserSettings(),
-                        currentPage = dto.currentPage,
-                        currentPageOffset = dto.currentPageOffset,
-                        favoritePageIndices = dto.favoritePageIndices.toSet(),
-                        pageExtents = extents,
-                    ),
-                )
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
-    }
 
     @OptIn(ExperimentalSerializationApi::class)
-    override suspend fun loadViewState(pdfPath: String): Result<AnnotationViewState?> = withContext(ioDispatcher) {
-        try {
-            val viewFile = viewFileFor(storeFileFor(pdfPath))
-            if (!viewFile.exists()) {
-                Result.success(null)
-            } else {
-                val dto = viewFile.inputStream().buffered().use { input ->
-                    json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
+    override suspend fun loadViewState(pdfPath: String): Result<AnnotationViewState?> =
+        withContext(ioDispatcher) {
+            try {
+                val viewFile = viewFileFor(storeFileFor(pdfPath))
+                if (!viewFile.exists()) {
+                    Result.success(null)
+                } else {
+                    val dto =
+                        viewFile.inputStream().buffered().use { input ->
+                            json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
+                        }
+                    Result.success(
+                        AnnotationViewState(dto.scale, dto.currentPage, dto.currentPageOffset, dto.readingMode),
+                    )
                 }
-                Result.success(
-                    AnnotationViewState(dto.scale, dto.currentPage, dto.currentPageOffset, dto.readingMode),
-                )
+            } catch (e: Exception) {
+                Result.failure(e)
             }
-        } catch (e: Exception) {
-            Result.failure(e)
         }
-    }
 
     @OptIn(ExperimentalSerializationApi::class)
     override suspend fun saveViewState(
         pdfPath: String,
         viewState: AnnotationViewState,
-    ): Result<Unit> = withContext(ioDispatcher) {
-        try {
-            val viewFile = viewFileFor(storeFileFor(pdfPath))
-            writeAtomically(viewFile) { out ->
-                val viewDto = AnnotationViewStateDto(
-                    scale = viewState.scale,
-                    currentPage = viewState.currentPage,
-                    currentPageOffset = viewState.currentPageOffset,
-                    readingMode = viewState.readingMode,
-                )
-                writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+    ): Result<Unit> =
+        withContext(ioDispatcher) {
+            try {
+                val viewFile = viewFileFor(storeFileFor(pdfPath))
+                writeAtomically(viewFile) { out ->
+                    val viewDto =
+                        AnnotationViewStateDto(
+                            scale = viewState.scale,
+                            currentPage = viewState.currentPage,
+                            currentPageOffset = viewState.currentPageOffset,
+                            readingMode = viewState.readingMode,
+                        )
+                    writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+                }
+                Result.success(Unit)
+            } catch (e: IOException) {
+                Result.failure(e)
             }
-            Result.success(Unit)
-        } catch (e: IOException) {
-            Result.failure(e)
         }
-    }
 
     /** Имя лёгкого сайдкара состояния вида рядом с основным файлом аннотаций. */
-    private fun viewFileFor(annotationFile: File): File =
-        File(annotationFile.parentFile, "${annotationFile.name}.view")
+    private fun viewFileFor(annotationFile: File): File = File(annotationFile.parentFile, "${annotationFile.name}.view")
 
     /** Читает уже записанный режим чтения из сайдкара (для preserve в [save]); `false`, если файла/поля нет. */
     @OptIn(ExperimentalSerializationApi::class)
@@ -287,7 +319,10 @@ class AnnotationRepositoryJvmAndroid(
         }
 
     /** Пишет [file] через временный файл + rename, чтобы прерывание не оставило битый JSON. */
-    private fun writeAtomically(file: File, write: (OutputStream) -> Unit) {
+    private fun writeAtomically(
+        file: File,
+        write: (OutputStream) -> Unit,
+    ) {
         file.parentFile?.mkdirs()
         val tmp = File(file.parentFile, "${file.name}.tmp")
         tmp.outputStream().buffered().use(write)

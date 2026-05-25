@@ -7,7 +7,6 @@ import ru.kyamshanov.notepen.reflow.api.ReflowRect
  * прямоугольник страницы и отсев полностраничных изображений (фон скана).
  */
 internal object FigureGeometry {
-
     /** Доля страницы, начиная с которой изображение считается фоном, а не врезкой. */
     private const val FULL_PAGE_FRACTION = 0.9f
 
@@ -46,11 +45,18 @@ internal object FigureGeometry {
     }
 
     /** Покрывает ли область почти всю страницу — тогда это фон скана, а не врезка-картинка. */
-    fun isFullPage(rect: ReflowRect, pageWidthPt: Float, pageHeightPt: Float): Boolean =
-        rect.width >= pageWidthPt * FULL_PAGE_FRACTION && rect.height >= pageHeightPt * FULL_PAGE_FRACTION
+    fun isFullPage(
+        rect: ReflowRect,
+        pageWidthPt: Float,
+        pageHeightPt: Float,
+    ): Boolean = rect.width >= pageWidthPt * FULL_PAGE_FRACTION && rect.height >= pageHeightPt * FULL_PAGE_FRACTION
 
     /** Слишком ли мала область, чтобы быть значимой врезкой (мелкий декор/иконка). */
-    fun isTooSmall(rect: ReflowRect, pageWidthPt: Float, pageHeightPt: Float): Boolean {
+    fun isTooSmall(
+        rect: ReflowRect,
+        pageWidthPt: Float,
+        pageHeightPt: Float,
+    ): Boolean {
         val pageArea = pageWidthPt * pageHeightPt
         return pageArea <= 0f || rect.width * rect.height < pageArea * MIN_AREA_FRACTION
     }

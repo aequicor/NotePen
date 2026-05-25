@@ -21,7 +21,6 @@ class HostHeadlessAnnotationHandler(
     private val provider: RemoteCatalogProvider,
     private val projection: HostAnnotationProjection,
 ) {
-
     /** Starts the request loop; runs until [scope] is cancelled. */
     fun start(scope: CoroutineScope) {
         scope.launch {
@@ -37,7 +36,11 @@ class HostHeadlessAnnotationHandler(
         }
     }
 
-    private suspend fun handleSave(peerId: String, req: NetworkMessage.SaveRequest, scope: CoroutineScope) {
+    private suspend fun handleSave(
+        peerId: String,
+        req: NetworkMessage.SaveRequest,
+        scope: CoroutineScope,
+    ) {
         val documentId = req.documentId
         if (documentId.isEmpty()) {
             logger.warn { "Headless: SaveRequest id=${req.requestId} missing documentId, ignoring" }

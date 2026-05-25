@@ -13,20 +13,22 @@ data class FolderDto(
     val parentId: String? = null,
 ) {
     /** Преобразует DTO в доменную модель. */
-    fun toDomain(): Folder = Folder(
-        id = id,
-        name = name,
-        createdAt = createdAt,
-        parentId = parentId,
-    )
+    fun toDomain(): Folder =
+        Folder(
+            id = id,
+            name = name,
+            createdAt = createdAt,
+            parentId = parentId,
+        )
 
     companion object {
         /** Преобразует доменную модель в DTO. */
-        fun fromDomain(f: Folder): FolderDto = FolderDto(
-            id = f.id,
-            name = f.name,
-            createdAt = f.createdAt,
-            parentId = f.parentId,
-        )
+        fun fromDomain(f: Folder): FolderDto =
+            FolderDto(
+                id = f.id,
+                name = f.name,
+                createdAt = f.createdAt,
+                parentId = f.parentId,
+            )
     }
 }

@@ -1,14 +1,17 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,6 +22,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,8 +46,11 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
@@ -52,6 +61,7 @@ import ru.kyamshanov.notepen.reflow.api.ReaderSettings
 import ru.kyamshanov.notepen.reflow.api.ReaderSettingsReducer
 import ru.kyamshanov.notepen.reflow.api.ReaderTheme
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
+import ru.kyamshanov.notepen.wheelItem
 import kotlin.math.roundToInt
 
 /**
@@ -63,8 +73,11 @@ import kotlin.math.roundToInt
  * [ReaderSettingsReducer]); сам компонент состояния настроек не держит — только
  * локальный флаг «развёрнут/свёрнут».
  *
- * @param stored текущее персистентное состояние (настройки + пресеты + «Моё»)
+ * @param stored текущее персистентное состояние (настройки + пользовательские пресеты)
  * @param onStoredChange применить новое состояние
+ * @param newPresetIdProvider источник id для нового кастомного пресета при первой
+ *   правке встроенного — поднят наружу, чтобы переходы редьюсера оставались чистыми
+ *   (модуль `reflow/impl` не зависит от генератора UUID)
  * @param background фон-основа таблетки (из темы ридера)
  * @param textColor цвет текста/контролов (из темы ридера)
  * @param progressLabel готовая строка индикатора прогресса, либо `null`
@@ -75,6 +88,7 @@ import kotlin.math.roundToInt
 internal fun ReaderAirbar(
     stored: StoredReaderSettings,
     onStoredChange: (StoredReaderSettings) -> Unit,
+    newPresetIdProvider: () -> String,
     background: Color,
     textColor: Color,
     progressLabel: String?,
@@ -100,7 +114,14 @@ internal fun ReaderAirbar(
 
     fun emit(next: ReaderSettings) {
         touched()
-        onStoredChange(ReaderSettingsReducer.edit(stored, next))
+        onStoredChange(
+            ReaderSettingsReducer.editActive(
+                stored = stored,
+                settings = next,
+                newPresetId = newPresetIdProvider(),
+                defaultName = MY_PRESET_NAME,
+            ),
+        )
     }
 
     // Таблетка консьюмит тапы, чтобы тап по ней не сворачивал airbar (тап по
@@ -136,15 +157,62 @@ internal fun ReaderAirbar(
                 touched()
                 onStoredChange(ReaderSettingsReducer.applyPreset(stored, preset))
             },
-            onRestoreMy = {
+            onDeletePreset = { id ->
                 touched()
-                onStoredChange(ReaderSettingsReducer.restoreMy(stored))
+                onStoredChange(ReaderSettingsReducer.deletePreset(stored, id))
             },
         )
     }
 }
 
-/** Свёрнутая «таблетка»: прогресс + быстрые пресеты + кнопка «Настроить». */
+/** Базовое имя кастомного пресета, создаваемого первой ручной правкой. */
+private const val MY_PRESET_NAME = "Моё"
+
+/**
+ * Элемент колеса пресетов: либо пресет (встроенный/кастомный), либо тюнер
+ * «⚙ Настроить», открывающий [TuneSheet]. Вынесено отдельным типом, чтобы порядок
+ * элементов (кастомные первыми) строился чистой функцией [readerWheelElements] и
+ * покрывался unit-тестом без Compose.
+ */
+internal sealed interface ReaderWheelElement {
+    /** Стабильный ключ для `LazyRow` (см. [androidx.compose.foundation.lazy.LazyListScope.items]). */
+    val key: String
+
+    /**
+     * Пресет ридера. [deletable] — только для кастомных: их можно удалить долгим
+     * тапом; встроенные неудаляемы.
+     */
+    data class Preset(
+        val preset: ReaderPreset,
+        val deletable: Boolean,
+    ) : ReaderWheelElement {
+        override val key: String get() = preset.id
+    }
+
+    /** Тюнер: тап раскрывает/сворачивает панель тонких настроек. */
+    data object Tuner : ReaderWheelElement {
+        override val key: String get() = "reader-wheel:tuner"
+    }
+}
+
+/**
+ * Строит порядок элементов колеса: сначала кастомные пресеты
+ * ([StoredReaderSettings.userPresets], они же удаляемы), затем встроенные
+ * ([BuiltinReaderPresets]), в конце — тюнер. Чистая функция (без Compose) —
+ * проверяется в `ReaderWheelTest`.
+ */
+internal fun readerWheelElements(stored: StoredReaderSettings): List<ReaderWheelElement> =
+    buildList {
+        stored.userPresets.forEach { add(ReaderWheelElement.Preset(it, deletable = true)) }
+        BuiltinReaderPresets.all.forEach { add(ReaderWheelElement.Preset(it, deletable = false)) }
+        add(ReaderWheelElement.Tuner)
+    }
+
+/**
+ * Свёрнутая «таблетка»: лидирующий прогресс + одно колесо-«барабан» из пресетов и
+ * тюнера. Кастомные пресеты идут первыми и удаляются долгим тапом; тюнер —
+ * последний элемент колеса (тап раскрывает [TuneSheet]).
+ */
 @Composable
 private fun CollapsedPill(
     stored: StoredReaderSettings,
@@ -154,8 +222,10 @@ private fun CollapsedPill(
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
     onApplyPreset: (ReaderPreset) -> Unit,
-    onRestoreMy: () -> Unit,
+    onDeletePreset: (String) -> Unit,
 ) {
+    val elements = readerWheelElements(stored)
+    val listState = rememberLazyListState()
     Row(
         modifier =
             Modifier
@@ -174,37 +244,128 @@ private fun CollapsedPill(
                 style = TextStyle(color = textColor.copy(alpha = 0.7f), fontSize = 12.sp),
             )
         }
-        Row(
-            modifier =
-                Modifier
-                    .weight(1f, fill = false)
-                    .horizontalScroll(rememberScrollState()),
+        LazyRow(
+            modifier = Modifier.weight(1f, fill = false),
+            state = listState,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
+            contentPadding = PaddingValues(horizontal = 4.dp),
         ) {
-            BuiltinReaderPresets.all.forEach { preset ->
-                Chip(
-                    label = preset.name,
-                    selected = stored.activePresetId == preset.id,
-                    textColor = textColor,
-                    onClick = { onApplyPreset(preset) },
-                )
-            }
-            if (stored.my != null) {
-                Chip(
-                    label = "Моё",
-                    selected = stored.activePresetId == null,
-                    textColor = textColor,
-                    onClick = onRestoreMy,
-                )
+            itemsIndexed(elements, key = { _, e -> e.key }) { index, element ->
+                Box(Modifier.wheelItem(listState, index)) {
+                    when (element) {
+                        is ReaderWheelElement.Preset ->
+                            PresetWheelChip(
+                                preset = element.preset,
+                                selected = stored.activePresetId == element.preset.id,
+                                deletable = element.deletable,
+                                textColor = textColor,
+                                background = background,
+                                onApply = { onApplyPreset(element.preset) },
+                                onDelete = { onDeletePreset(element.preset.id) },
+                            )
+
+                        ReaderWheelElement.Tuner ->
+                            Chip(
+                                label = TUNER_LABEL,
+                                selected = expanded,
+                                textColor = textColor,
+                                onClick = onToggleExpanded,
+                            )
+                    }
+                }
             }
         }
-        Chip(
-            label = if (expanded) "Свернуть" else "Настроить",
-            selected = expanded,
-            textColor = textColor,
-            onClick = onToggleExpanded,
-        )
+    }
+}
+
+/**
+ * Чип пресета в колесе. Кастомные ([deletable]) открывают долгим тапом лёгкий
+ * поповер «Удалить» (без material3 — собственное меню в стиле airbar).
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PresetWheelChip(
+    preset: ReaderPreset,
+    selected: Boolean,
+    deletable: Boolean,
+    textColor: Color,
+    background: Color,
+    onApply: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var menuOpen by remember { mutableStateOf(false) }
+    Box {
+        Box(
+            modifier =
+                Modifier
+                    .clip(RoundedCornerShape(AIRBAR_CHIP_RADIUS))
+                    .background(textColor.copy(alpha = if (selected) 0.18f else 0.06f))
+                    .combinedClickable(
+                        onClick = onApply,
+                        onLongClick = if (deletable) ({ menuOpen = true }) else null,
+                    ).padding(horizontal = 14.dp, vertical = 7.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = preset.name,
+                maxLines = 1,
+                style =
+                    TextStyle(
+                        color = textColor.copy(alpha = if (selected) 1f else 0.65f),
+                        fontSize = 13.sp,
+                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    ),
+            )
+        }
+        if (menuOpen) {
+            DeletePopover(
+                background = background,
+                textColor = textColor,
+                onDismiss = { menuOpen = false },
+                onConfirm = {
+                    menuOpen = false
+                    onDelete()
+                },
+            )
+        }
+    }
+}
+
+/**
+ * Лёгкий поповер удаления поверх чипа: одна строка «Удалить» на фоне-таблетке.
+ * Реализован на foundation ([Popup]) вместо material3 `DropdownMenu`, чтобы не
+ * тянуть material3 в `reflow/impl`.
+ */
+@Composable
+private fun DeletePopover(
+    background: Color,
+    textColor: Color,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit,
+) {
+    Popup(
+        alignment = Alignment.TopCenter,
+        offset = IntOffset(0, -POPOVER_OFFSET_PX),
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .clip(RoundedCornerShape(AIRBAR_CHIP_RADIUS))
+                    .background(background.copy(alpha = AIRBAR_SHEET_ALPHA))
+                    .border(1.dp, textColor.copy(alpha = 0.12f), RoundedCornerShape(AIRBAR_CHIP_RADIUS))
+                    .clickable(onClick = onConfirm)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            BasicText(
+                text = DELETE_LABEL,
+                maxLines = 1,
+                style = TextStyle(color = textColor.copy(alpha = 0.9f), fontSize = 13.sp),
+            )
+        }
     }
 }
 
@@ -648,6 +809,15 @@ private val AIRBAR_SHEET_MAX_HEIGHT = 380.dp
 private val AIRBAR_BOTTOM_PADDING = 16.dp
 private const val AIRBAR_ALPHA = 0.92f
 private const val AIRBAR_SHEET_ALPHA = 0.96f
+
+/** Подпись тюнера в колесе — открывает/сворачивает панель тонких настроек. */
+private const val TUNER_LABEL = "Настроить"
+
+/** Подпись действия удаления кастомного пресета в поповере. */
+private const val DELETE_LABEL = "Удалить"
+
+/** На сколько px приподнять поповер «Удалить» над чипом (airbar внизу — растём вверх). */
+private const val POPOVER_OFFSET_PX = 96
 
 private val SLIDER_HEIGHT = 28.dp
 private val SLIDER_TRACK = 4.dp

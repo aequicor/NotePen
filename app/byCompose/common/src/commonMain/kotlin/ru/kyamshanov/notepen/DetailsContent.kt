@@ -246,7 +246,7 @@ fun DetailsContent(
     var pencilModeManuallyTouched by remember { mutableStateOf(false) }
 
     // Настройки ридера — глобальные (на все документы и панели); видимость самого
-    // airbar — per-tab. Персист между запусками пока в памяти сессии.
+    // airbar — per-tab. Персист между запусками — через ReaderSettingsRepository (ниже).
     var readerStored by remember { mutableStateOf(StoredReaderSettings()) }
 
     // Per-panel tool state: save on lose-focus, restore on gain-focus.
@@ -332,6 +332,14 @@ fun DetailsContent(
         coroutineScope.launch { toolPresetsRepository.save(updated) }
     }
 
+    // Reader settings + user presets, persisted across documents (mirrors tool presets).
+    val readerSettingsRepository = remember { createReaderSettingsRepository() }
+    LaunchedEffect(Unit) { readerStored = readerSettingsRepository.load() }
+    val onReaderStoredChange: (StoredReaderSettings) -> Unit = { updated ->
+        readerStored = updated
+        coroutineScope.launch { readerSettingsRepository.save(updated) }
+    }
+
     // Last preset explicitly selected per tool within this document session.
     // Null means "not yet chosen" — the first activation falls back to the first builtin.
     var lastPenPresetId by remember { mutableStateOf<String?>(null) }
@@ -385,6 +393,9 @@ fun DetailsContent(
     val showThumbnails = controls?.showThumbnails ?: false
     val showToc = controls?.showToc ?: false
     val readingModeEnabled = controls?.readingModeEnabled ?: false
+    // В режиме чтения тап по тексту прячет инструменты и быстрые действия вместе с
+    // airbar ридера (см. PanelControls.chromeHidden); повторный тап — возвращает.
+    val chromeHidden = controls?.chromeHidden ?: false
 
     // ---- Save helpers (across all panels) ---------------------------------
     val saveTab: suspend (PdfDocumentState) -> Unit = { state ->
@@ -601,7 +612,7 @@ fun DetailsContent(
                     pdfExporter = pdfExporter,
                     reflowExtractor = reflowExtractor,
                     readerStored = readerStored,
-                    onReaderStoredChange = { readerStored = it },
+                    onReaderStoredChange = onReaderStoredChange,
                     syncEngineFor = syncEngineFor,
                     peerClient = peerClient,
                     pendingDeltaCounts = pendingDeltaCounts,
@@ -717,7 +728,7 @@ fun DetailsContent(
                 }
 
                 AnimatedVisibility(
-                    visible = true,
+                    visible = !chromeHidden,
                     enter = slideInHorizontally { -it } + fadeIn(),
                     exit = slideOutHorizontally { -it } + fadeOut(),
                     modifier =
@@ -941,52 +952,58 @@ fun DetailsContent(
                             .align(Alignment.TopStart)
                             .fillMaxWidth(),
                 ) {
-                    PortraitTopBar(
-                        currentPage = currentPage,
-                        totalPages = totalPages,
-                        onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
-                        toolMode = toolMode,
-                        onToolModeChange = { toolMode = it },
-                        penSettings = penSettings,
-                        onPenSettingsChange = { penSettings = it },
-                        markerSettings = markerSettings,
-                        onMarkerSettingsChange = {
-                            if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
-                            markerSettings = it
-                        },
-                        eraserSettings = eraserSettings,
-                        onEraserSettingsChange = { eraserSettings = it },
-                        toolPresets = toolPresets,
-                        onToolPresetsChange = onToolPresetsChange,
-                        onPresetApplied = onPresetApplied,
-                        hasAnnotations = hasAnnotations,
-                        isExporting = isExporting,
-                        onExport = { controls?.export?.invoke() },
-                        scale = scale,
-                        onZoomIn = {
-                            tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                            }
-                        },
-                        onZoomOut = {
-                            tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                            }
-                        },
-                        showThumbnails = showThumbnails,
-                        onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
-                        showToc = showToc,
-                        onToggleToc = { controls?.toggleToc?.invoke() },
-                        readingModeEnabled = readingModeEnabled,
-                        onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
-                        showPencilModeButton = SupportsPencilMode,
-                        pencilModeEnabled = pencilModeEnabled,
-                        onPencilModeChange = onPencilModeChange,
-                        magnifierEnabled = magnifierEnabled,
-                        onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
-                        onOpenShortcutsSettings = { showShortcutsDialog = true },
-                        onBack = onBackOrCloseThumbnails,
-                    )
+                    AnimatedVisibility(
+                        visible = !chromeHidden,
+                        enter = slideInVertically { -it } + fadeIn(),
+                        exit = slideOutVertically { -it } + fadeOut(),
+                    ) {
+                        PortraitTopBar(
+                            currentPage = currentPage,
+                            totalPages = totalPages,
+                            onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
+                            toolMode = toolMode,
+                            onToolModeChange = { toolMode = it },
+                            penSettings = penSettings,
+                            onPenSettingsChange = { penSettings = it },
+                            markerSettings = markerSettings,
+                            onMarkerSettingsChange = {
+                                if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                                markerSettings = it
+                            },
+                            eraserSettings = eraserSettings,
+                            onEraserSettingsChange = { eraserSettings = it },
+                            toolPresets = toolPresets,
+                            onToolPresetsChange = onToolPresetsChange,
+                            onPresetApplied = onPresetApplied,
+                            hasAnnotations = hasAnnotations,
+                            isExporting = isExporting,
+                            onExport = { controls?.export?.invoke() },
+                            scale = scale,
+                            onZoomIn = {
+                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                                }
+                            },
+                            onZoomOut = {
+                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                                }
+                            },
+                            showThumbnails = showThumbnails,
+                            onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                            showToc = showToc,
+                            onToggleToc = { controls?.toggleToc?.invoke() },
+                            readingModeEnabled = readingModeEnabled,
+                            onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
+                            showPencilModeButton = SupportsPencilMode,
+                            pencilModeEnabled = pencilModeEnabled,
+                            onPencilModeChange = onPencilModeChange,
+                            magnifierEnabled = magnifierEnabled,
+                            onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                            onOpenShortcutsSettings = { showShortcutsDialog = true },
+                            onBack = onBackOrCloseThumbnails,
+                        )
+                    }
                 }
             }
         }
@@ -1001,7 +1018,7 @@ fun DetailsContent(
             (if (syncPaneEnabled) 1 else 0) +
                 (if (SupportsQuickLoupe) 1 else 0) +
                 (if (showScrollModeButton) 1 else 0)
-        if (airbarButtonCount > 0) {
+        if (airbarButtonCount > 0 && !chromeHidden) {
             GlassSurface(
                 modifier =
                     Modifier

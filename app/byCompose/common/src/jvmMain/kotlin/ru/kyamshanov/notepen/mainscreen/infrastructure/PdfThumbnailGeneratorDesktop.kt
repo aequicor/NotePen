@@ -21,12 +21,15 @@ import javax.imageio.ImageIO
  * Все исключения оборачиваются в [ThumbnailGenerationException].
  */
 class PdfThumbnailGeneratorDesktop : PdfThumbnailGenerator {
-
-    override suspend fun generate(uri: String, widthPx: Int, heightPx: Int): Result<ByteArray> =
+    override suspend fun generate(
+        uri: String,
+        widthPx: Int,
+        heightPx: Int,
+    ): Result<ByteArray> =
         withContext(Dispatchers.IO) {
             runCatching {
                 require(widthPx in 1..4096 && heightPx in 1..4096) {
-                    "Thumbnail dimensions out of range: ${widthPx}x${heightPx}"
+                    "Thumbnail dimensions out of range: ${widthPx}x$heightPx"
                 }
                 Loader.loadPDF(File(uri)).use { doc ->
                     if (doc.numberOfPages == 0) throw ThumbnailGenerationException("Empty PDF: no pages")
@@ -35,13 +38,16 @@ class PdfThumbnailGeneratorDesktop : PdfThumbnailGenerator {
                     val scale = widthPx.toFloat() / page.mediaBox.width
                     // EXPORT avoids screen-dependent Java2D pipeline on Windows (DirectX/D3D)
                     val raw: BufferedImage = renderer.renderImage(0, scale, ImageType.RGB, RenderDestination.EXPORT)
-                    val image = if (raw.type == BufferedImage.TYPE_INT_ARGB) raw else {
-                        val converted = BufferedImage(raw.width, raw.height, BufferedImage.TYPE_INT_ARGB)
-                        val g = converted.createGraphics()
-                        g.drawImage(raw, 0, 0, null)
-                        g.dispose()
-                        converted
-                    }
+                    val image =
+                        if (raw.type == BufferedImage.TYPE_INT_ARGB) {
+                            raw
+                        } else {
+                            val converted = BufferedImage(raw.width, raw.height, BufferedImage.TYPE_INT_ARGB)
+                            val g = converted.createGraphics()
+                            g.drawImage(raw, 0, 0, null)
+                            g.dispose()
+                            converted
+                        }
                     val stream = ByteArrayOutputStream()
                     if (!ImageIO.write(image, "PNG", stream)) {
                         throw ThumbnailGenerationException("No PNG writer for image type ${raw.type}")

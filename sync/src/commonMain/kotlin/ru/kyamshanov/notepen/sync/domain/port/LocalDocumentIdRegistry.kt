@@ -13,7 +13,6 @@ package ru.kyamshanov.notepen.sync.domain.port
  * thread-safe; lookup ожидается синхронным и быстрым (вызывается из UI).
  */
 interface LocalDocumentIdRegistry {
-
     /**
      * Возвращает documentId, ранее зарегистрированный для [localPath],
      * либо `null` если файл не был открыт через `RemoteDocumentOpener`.
@@ -24,7 +23,10 @@ interface LocalDocumentIdRegistry {
      * Запоминает соответствие `localPath → documentId`. Перезаписывает, если
      * запись уже существовала. Должен быть persistent — переживает рестарт.
      */
-    suspend fun register(localPath: String, documentId: String)
+    suspend fun register(
+        localPath: String,
+        documentId: String,
+    )
 
     /** Удаляет запись (например, после удаления кеш-файла cleaner-ом). */
     suspend fun forget(localPath: String)

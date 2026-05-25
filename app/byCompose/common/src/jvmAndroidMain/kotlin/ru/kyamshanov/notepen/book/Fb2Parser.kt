@@ -26,7 +26,6 @@ import java.util.zip.ZipInputStream
  * обязана выполнять её на IO/Default диспетчере.
  */
 object Fb2Parser {
-
     private const val MAX_HEADING_LEVEL = 6
     private const val PROLOG_SCAN_BYTES = 200
 
@@ -39,9 +38,10 @@ object Fb2Parser {
         val xml = unwrapZip(bytes)
         val doc = Jsoup.parse(String(xml, detectCharset(xml)), "", Parser.xmlParser())
         val binaries = readBinaries(doc)
-        val body = doc.select("body").firstOrNull { it.attr("name") != "notes" }
-            ?: doc.selectFirst("body")
-            ?: throw IllegalArgumentException("Not a valid FB2: no <body>")
+        val body =
+            doc.select("body").firstOrNull { it.attr("name") != "notes" }
+                ?: doc.selectFirst("body")
+                ?: throw IllegalArgumentException("Not a valid FB2: no <body>")
 
         val blocks = mutableListOf<ContentBlock>()
         for (child in body.children()) {
@@ -80,39 +80,61 @@ object Fb2Parser {
     }
 
     /** `title`/`subtitle` могут содержать несколько `p` — склеиваем в один заголовок. */
-    private fun appendTitle(title: Element, level: Int, out: MutableList<ContentBlock>) {
-        val text = title.select("p").joinToString(separator = " ") { it.text().trim() }
-            .ifBlank { title.text().trim() }
+    private fun appendTitle(
+        title: Element,
+        level: Int,
+        out: MutableList<ContentBlock>,
+    ) {
+        val text =
+            title.select("p").joinToString(separator = " ") { it.text().trim() }
+                .ifBlank { title.text().trim() }
         if (text.isNotBlank()) out.add(ContentBlock.Heading(level = level, text = text))
     }
 
-    private fun appendQuote(quote: Element, out: MutableList<ContentBlock>) {
+    private fun appendQuote(
+        quote: Element,
+        out: MutableList<ContentBlock>,
+    ) {
         for (line in quote.children().filter { it.normalName() == "p" || it.normalName() == "v" }) {
             inlineSpansOf(line).takeIf { it.isNotEmpty() }?.let { out.add(ContentBlock.Blockquote(it)) }
         }
     }
 
-    private fun appendPoem(poem: Element, out: MutableList<ContentBlock>) {
+    private fun appendPoem(
+        poem: Element,
+        out: MutableList<ContentBlock>,
+    ) {
         poem.selectFirst("title")?.let { appendTitle(it, level = MAX_HEADING_LEVEL, out = out) }
         for (verse in poem.select("stanza > v")) {
             inlineSpansOf(verse).takeIf { it.isNotEmpty() }?.let { out.add(ContentBlock.Paragraph(it)) }
         }
     }
 
-    private fun appendParagraphs(element: Element, out: MutableList<ContentBlock>) {
+    private fun appendParagraphs(
+        element: Element,
+        out: MutableList<ContentBlock>,
+    ) {
         for (p in element.select("p")) {
             inlineSpansOf(p).takeIf { it.isNotEmpty() }?.let { out.add(ContentBlock.Paragraph(it)) }
         }
     }
 
-    private fun appendTable(table: Element, out: MutableList<ContentBlock>) {
-        val rows = table.select("tr").map { tr ->
-            tr.children().filter { it.normalName() == "th" || it.normalName() == "td" }.map { it.text().trim() }
-        }.filter { it.isNotEmpty() }
+    private fun appendTable(
+        table: Element,
+        out: MutableList<ContentBlock>,
+    ) {
+        val rows =
+            table.select("tr").map { tr ->
+                tr.children().filter { it.normalName() == "th" || it.normalName() == "td" }.map { it.text().trim() }
+            }.filter { it.isNotEmpty() }
         if (rows.isNotEmpty()) out.add(ContentBlock.Table(rows))
     }
 
-    private fun appendImage(image: Element, binaries: Map<String, ContentBlock.Image>, out: MutableList<ContentBlock>) {
+    private fun appendImage(
+        image: Element,
+        binaries: Map<String, ContentBlock.Image>,
+        out: MutableList<ContentBlock>,
+    ) {
         val href = imageHref(image) ?: return
         binaries[href.removePrefix("#")]?.let { out.add(it) }
     }
@@ -134,8 +156,9 @@ object Fb2Parser {
     }
 
     private fun authorName(author: Element): String? {
-        val parts = listOf("first-name", "middle-name", "last-name")
-            .mapNotNull { author.selectFirst(it)?.text()?.trim()?.ifBlank { null } }
+        val parts =
+            listOf("first-name", "middle-name", "last-name")
+                .mapNotNull { author.selectFirst(it)?.text()?.trim()?.ifBlank { null } }
         return parts.joinToString(separator = " ")
             .ifBlank { author.selectFirst("nickname")?.text()?.trim()?.ifBlank { null } }
     }
@@ -198,6 +221,7 @@ object Fb2Parser {
 
 private const val BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-private val BASE64_INVERSE: IntArray = IntArray(128) { -1 }.also { table ->
-    BASE64_ALPHABET.forEachIndexed { index, ch -> table[ch.code] = index }
-}
+private val BASE64_INVERSE: IntArray =
+    IntArray(128) { -1 }.also { table ->
+        BASE64_ALPHABET.forEachIndexed { index, ch -> table[ch.code] = index }
+    }
