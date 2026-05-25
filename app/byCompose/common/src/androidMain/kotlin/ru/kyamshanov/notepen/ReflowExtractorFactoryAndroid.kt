@@ -1,13 +1,13 @@
 package ru.kyamshanov.notepen
 
 import kotlinx.coroutines.Dispatchers
-import ru.kyamshanov.notepen.epub.AndroidEpubToPdfConverter
-import ru.kyamshanov.notepen.epub.EpubAwarePdfReflowExtractor
+import ru.kyamshanov.notepen.book.AndroidEbookToPdfConverter
+import ru.kyamshanov.notepen.book.EbookAwarePdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.AndroidPdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 
 actual fun createPdfReflowExtractor(): PdfReflowExtractor =
-    EpubAwarePdfReflowExtractor(
+    EbookAwarePdfReflowExtractor(
         AndroidPdfReflowExtractor(AppContextHolder.context, Dispatchers.IO),
-        AndroidEpubToPdfConverter(AppContextHolder.context, Dispatchers.IO),
+        AndroidEbookToPdfConverter(AppContextHolder.context, Dispatchers.IO),
     )

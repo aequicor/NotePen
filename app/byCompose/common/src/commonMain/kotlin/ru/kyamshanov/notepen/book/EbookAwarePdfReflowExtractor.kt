@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
@@ -13,9 +13,9 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
  * @param delegate базовый извлекатель reflow-содержимого
  * @param converter конвертер EPUB → PDF
  */
-class EpubAwarePdfReflowExtractor(
+class EbookAwarePdfReflowExtractor(
     private val delegate: PdfReflowExtractor,
-    private val converter: EpubToPdfConverter,
+    private val converter: EbookToPdfConverter,
 ) : PdfReflowExtractor {
 
     override suspend fun probe(path: String): PdfContentKind =
@@ -25,5 +25,5 @@ class EpubAwarePdfReflowExtractor(
         delegate.extract(resolve(path))
 
     private suspend fun resolve(path: String): String =
-        if (converter.isEpub(path)) converter.ensurePdf(path) else path
+        if (converter.canConvert(path)) converter.ensurePdf(path) else path
 }

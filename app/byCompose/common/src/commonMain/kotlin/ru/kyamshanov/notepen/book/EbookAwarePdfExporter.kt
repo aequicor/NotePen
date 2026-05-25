@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
@@ -12,9 +12,9 @@ import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
  * @param delegate базовый экспортёр PDF
  * @param converter конвертер EPUB → PDF
  */
-class EpubAwarePdfExporter(
+class EbookAwarePdfExporter(
     private val delegate: PdfExporter,
-    private val converter: EpubToPdfConverter,
+    private val converter: EbookToPdfConverter,
 ) : PdfExporter {
 
     override suspend fun export(
@@ -23,7 +23,7 @@ class EpubAwarePdfExporter(
         outputPath: String,
     ): Result<Unit> {
         val effectiveSource =
-            if (converter.isEpub(sourcePdfPath)) {
+            if (converter.canConvert(sourcePdfPath)) {
                 runCatching { converter.ensurePdf(sourcePdfPath) }
                     .getOrElse { return Result.failure(it) }
             } else {

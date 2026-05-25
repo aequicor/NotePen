@@ -190,16 +190,20 @@ compose.desktop {
             copyright = "© 2025 KYamshanov. All rights reserved."
             vendor = "KYamshanov"
 
-            // Регистрирует NotePen как обработчик .pdf, чтобы его можно было
-            // выбрать приложением по умолчанию и открывать PDF «через него».
-            // macOS: пишется в CFBundleDocumentTypes (Info.plist); путь к файлу
-            // приходит как Apple Event "odoc" → java.awt.Desktop OpenFileHandler.
-            // Windows: jpackage прокидывает путь как аргумент main().
-            fileAssociation(
-                mimeType = "application/pdf",
-                extension = "pdf",
-                description = "PDF Document",
-            )
+            // Регистрирует NotePen как обработчик поддерживаемых форматов, чтобы
+            // его можно было выбрать приложением по умолчанию и открывать файл
+            // «через него». macOS: пишется в CFBundleDocumentTypes (Info.plist),
+            // путь приходит Apple Event "odoc" → java.awt.Desktop OpenFileHandler.
+            // Linux (.deb): MIME + .desktop. Windows: реальную ассоциацию ставит
+            // Inno Setup (installer/windows/notepen.iss) — расширить надо там же.
+            fileAssociation(mimeType = "application/pdf", extension = "pdf", description = "PDF document")
+            fileAssociation(mimeType = "image/png", extension = "png", description = "PNG image")
+            fileAssociation(mimeType = "image/jpeg", extension = "jpg", description = "JPEG image")
+            fileAssociation(mimeType = "image/jpeg", extension = "jpeg", description = "JPEG image")
+            fileAssociation(mimeType = "application/epub+zip", extension = "epub", description = "EPUB book")
+            fileAssociation(mimeType = "application/x-fictionbook+xml", extension = "fb2", description = "FictionBook")
+            fileAssociation(mimeType = "application/vnd.comicbook+zip", extension = "cbz", description = "CBZ comic")
+            fileAssociation(mimeType = "application/vnd.comicbook-rar", extension = "cbr", description = "CBR comic")
 
             windows {
                 // Влияет только на иконку лаунчера NotePen.exe внутри app-image

@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
@@ -12,13 +12,13 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
  * @param delegate базовый загрузчик (PDF/изображения)
  * @param converter конвертер EPUB → PDF
  */
-class EpubAwarePdfDocumentLoader(
+class EbookAwarePdfDocumentLoader(
     private val delegate: PdfDocumentLoader,
-    private val converter: EpubToPdfConverter,
+    private val converter: EbookToPdfConverter,
 ) : PdfDocumentLoader {
 
     override suspend fun load(path: String): PdfDocument {
-        val effectivePath = if (converter.isEpub(path)) converter.ensurePdf(path) else path
+        val effectivePath = if (converter.canConvert(path)) converter.ensurePdf(path) else path
         return delegate.load(effectivePath)
     }
 }

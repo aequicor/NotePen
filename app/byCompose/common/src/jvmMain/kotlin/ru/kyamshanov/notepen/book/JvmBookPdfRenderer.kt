@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
@@ -9,22 +9,27 @@ import java.awt.Color
 import java.awt.Font
 import java.awt.Graphics2D
 import java.awt.RenderingHints
+import java.awt.font.LineBreakMeasurer
+import java.awt.font.TextAttribute
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.File
+import java.text.AttributedString
 import javax.imageio.ImageIO
+import kotlin.math.ceil
 
 /**
- * Верстает [EpubBook] в PDF на JVM.
+ * Верстает [BookContent] в PDF на JVM.
  *
  * Текст рисуется средствами Java2D в растровые страницы (логический шрифт
- * `Serif` покрывает кириллицу без встраивания TTF), которые затем
- * вкладываются в PDF через PDFBox. Это сознательный компромисс: в отличие от
- * Android, на десктопе у нас нет встроенного Unicode-шрифта для векторного
- * текста PDFBox, поэтому страницы растрируются (текст по-прежнему чёткий при
+ * `Serif` покрывает кириллицу без встраивания TTF), которые затем вкладываются
+ * в PDF через PDFBox. Инлайн-начертание ([RichText]) переносится в
+ * `AttributedString` и верстается `LineBreakMeasurer`'ом. Это сознательный
+ * компромисс: в отличие от Android, на десктопе нет встроенного Unicode-шрифта
+ * для векторного текста PDFBox, поэтому страницы растрируются (текст чёткий при
  * 150 DPI).
  */
-object JvmEpubPdfRenderer {
+object JvmBookPdfRenderer {
 
     private const val PAGE_WIDTH = 1240 // A4 @150dpi
     private const val PAGE_HEIGHT = 1754
@@ -41,15 +46,17 @@ object JvmEpubPdfRenderer {
     private const val IMAGE_GAP = 22
 
     private val HEADING_SIZES = floatArrayOf(58f, 48f, 42f, 38f, 34f, 32f)
+    private val LINK_COLOR = Color(0x1A, 0x0D, 0xAB)
+    private val QUOTE_COLOR = Color(0x44, 0x44, 0x44)
 
     /**
      * @param book книга для верстки
      * @param output файл назначения PDF (создаётся/перезаписывается)
      */
-    fun render(book: EpubBook, output: File) {
+    fun render(book: BookContent, output: File) {
         val composer = PageComposer()
         book.metadata.title?.takeIf { it.isNotBlank() }?.let { composer.heading(level = 1, text = it) }
-        book.metadata.author?.takeIf { it.isNotBlank() }?.let { composer.paragraph(it, italic = true) }
+        book.metadata.author?.takeIf { it.isNotBlank() }?.let { composer.paragraph(listOf(InlineSpan(it)), italic = true) }
         for (block in book.blocks) composer.render(block)
         val pages = composer.finish()
 
@@ -85,17 +92,17 @@ object JvmEpubPdfRenderer {
             return pages
         }
 
-        fun render(block: EpubBlock) {
+        fun render(block: ContentBlock) {
             when (block) {
-                is EpubBlock.Heading -> heading(block.level, block.text)
-                is EpubBlock.Paragraph -> paragraph(block.text)
-                is EpubBlock.Blockquote -> paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
-                is EpubBlock.ListItem ->
-                    paragraph(markerFor(block) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
-                is EpubBlock.Table -> block.rows.forEach { row -> paragraph(row.joinToString("   |   ")) }
-                is EpubBlock.Image -> image(block)
-                EpubBlock.HorizontalRule -> rule()
-                EpubBlock.PageBreak -> if (cursorY > MARGIN) newPage()
+                is ContentBlock.Heading -> heading(block.level, block.text)
+                is ContentBlock.Paragraph -> paragraph(block.text)
+                is ContentBlock.Blockquote -> paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
+                is ContentBlock.ListItem ->
+                    paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
+                is ContentBlock.Table -> block.rows.forEach { row -> paragraph(listOf(InlineSpan(row.joinToString("   |   ")))) }
+                is ContentBlock.Image -> image(block)
+                ContentBlock.HorizontalRule -> rule()
+                ContentBlock.PageBreak -> if (cursorY > MARGIN) newPage()
             }
         }
 
@@ -106,13 +113,13 @@ object JvmEpubPdfRenderer {
             cursorY += HEADING_GAP_AFTER
         }
 
-        fun paragraph(text: String, italic: Boolean = false, indent: Int = 0) {
-            val style = if (italic) Font.ITALIC else Font.PLAIN
-            val color = if (italic) Color(0x44, 0x44, 0x44) else Color.BLACK
-            drawText(text, Font(Font.SERIF, style, BODY_SIZE.toInt()), color, indent)
+        fun paragraph(spans: RichText, italic: Boolean = false, indent: Int = 0) {
+            val color = if (italic) QUOTE_COLOR else Color.BLACK
+            drawRich(spans, BODY_SIZE, color, indent, italicBase = italic)
             cursorY += PARAGRAPH_GAP
         }
 
+        /** Однострочный текст одного начертания (заголовки): простой перенос по словам. */
         private fun drawText(text: String, font: Font, color: Color, indent: Int) {
             graphics.font = font
             graphics.color = color
@@ -125,6 +132,44 @@ object JvmEpubPdfRenderer {
                 graphics.font = font
                 graphics.color = color
                 graphics.drawString(line, left, cursorY + metrics.ascent)
+                cursorY += lineHeight
+            }
+        }
+
+        /** Текст со смешанным начертанием ([RichText]) через `AttributedString`. */
+        private fun drawRich(spans: RichText, size: Float, color: Color, indent: Int, italicBase: Boolean) {
+            val text = spans.joinToString(separator = "") { it.text }
+            if (text.isBlank()) return
+            val attr = AttributedString(text)
+            attr.addAttribute(TextAttribute.FAMILY, Font.SERIF)
+            attr.addAttribute(TextAttribute.SIZE, size)
+            attr.addAttribute(TextAttribute.FOREGROUND, color)
+            if (italicBase) attr.addAttribute(TextAttribute.POSTURE, TextAttribute.POSTURE_OBLIQUE)
+            var index = 0
+            for (span in spans) {
+                val start = index
+                val end = index + span.text.length
+                index = end
+                if (start == end) continue
+                if (span.bold) attr.addAttribute(TextAttribute.WEIGHT, TextAttribute.WEIGHT_BOLD, start, end)
+                if (span.italic) attr.addAttribute(TextAttribute.POSTURE, TextAttribute.POSTURE_OBLIQUE, start, end)
+                if (span.code) attr.addAttribute(TextAttribute.FAMILY, Font.MONOSPACED, start, end)
+                if (span.superscript) attr.addAttribute(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUPER, start, end)
+                if (span.subscript) attr.addAttribute(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUB, start, end)
+                if (span.link) {
+                    attr.addAttribute(TextAttribute.FOREGROUND, LINK_COLOR, start, end)
+                    attr.addAttribute(TextAttribute.UNDERLINE, TextAttribute.UNDERLINE_ON, start, end)
+                }
+            }
+            val left = (MARGIN + indent).toFloat()
+            val wrapWidth = (contentWidth - indent).toFloat()
+            val iterator = attr.iterator
+            val measurer = LineBreakMeasurer(iterator, graphics.fontRenderContext)
+            while (measurer.position < iterator.endIndex) {
+                val layout = measurer.nextLayout(wrapWidth)
+                val lineHeight = ceil(layout.ascent + layout.descent + layout.leading).toInt()
+                if (cursorY + lineHeight > contentBottom) newPage()
+                layout.draw(graphics, left, cursorY + layout.ascent)
                 cursorY += lineHeight
             }
         }
@@ -148,7 +193,7 @@ object JvmEpubPdfRenderer {
             return lines
         }
 
-        private fun image(block: EpubBlock.Image) {
+        private fun image(block: ContentBlock.Image) {
             val decoded = runCatching { ImageIO.read(ByteArrayInputStream(block.data)) }.getOrNull() ?: return
             val maxHeight = contentBottom - MARGIN
             var width = decoded.width
@@ -189,7 +234,7 @@ object JvmEpubPdfRenderer {
             cursorY = MARGIN
         }
 
-        private fun markerFor(item: EpubBlock.ListItem): String =
+        private fun markerFor(item: ContentBlock.ListItem): String =
             if (item.ordered) "${item.ordinal}. " else "•  "
     }
 }

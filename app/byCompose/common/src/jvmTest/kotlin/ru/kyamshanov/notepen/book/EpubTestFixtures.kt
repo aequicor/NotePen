@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipEntry
@@ -47,6 +47,7 @@ internal fun sampleEpubBytes(): ByteArray {
         <html xmlns="http://www.w3.org/1999/xhtml"><body>
           <h1>Chapter One</h1>
           <p>This is the first paragraph.</p>
+          <p>Mixed <b>bold</b> and <i>italic</i> and <code>code</code> styles.</p>
           <ul><li>Item A</li><li>Item B</li></ul>
         </body></html>
         """.trimIndent()

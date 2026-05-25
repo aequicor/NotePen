@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -11,12 +11,12 @@ import kotlin.test.assertTrue
 
 class JvmEpubToPdfConverterTest {
 
-    private val converter = JvmEpubToPdfConverter(Dispatchers.IO)
+    private val converter = JvmEbookToPdfConverter(Dispatchers.IO)
 
     @Test
     fun `detects epub by extension`() {
-        assertTrue(converter.isEpub("/books/sample.epub"))
-        assertFalse(converter.isEpub("/books/sample.pdf"))
+        assertTrue(converter.canConvert("/books/sample.epub"))
+        assertFalse(converter.canConvert("/books/sample.pdf"))
     }
 
     @Test

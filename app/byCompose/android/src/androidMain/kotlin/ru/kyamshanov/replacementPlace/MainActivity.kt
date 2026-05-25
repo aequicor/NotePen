@@ -1,11 +1,13 @@
 package ru.kyamshanov.notepen
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -40,8 +42,8 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroi
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
-import ru.kyamshanov.notepen.epub.AndroidEpubToPdfConverter
-import ru.kyamshanov.notepen.epub.EpubAwarePdfDocumentLoader
+import ru.kyamshanov.notepen.book.AndroidEbookToPdfConverter
+import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImageDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImagePageRenderer
@@ -74,6 +76,9 @@ import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var rootComponent: DefaultRootComponent
+
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         enableEdgeToEdge()
@@ -90,13 +95,13 @@ class MainActivity : ComponentActivity() {
         }
         filePicker.init(filePickerLauncher)
 
-        val pdfDocumentLoader = EpubAwarePdfDocumentLoader(
+        val pdfDocumentLoader = EbookAwarePdfDocumentLoader(
             delegate = AndroidDocumentLoader(
                 context = context,
                 pdfLoader = AndroidPdfDocumentLoader(context, Dispatchers.IO),
                 imageLoader = AndroidImageDocumentLoader(context, Dispatchers.IO),
             ),
-            converter = AndroidEpubToPdfConverter(context, Dispatchers.IO),
+            converter = AndroidEbookToPdfConverter(context, Dispatchers.IO),
         )
         val pdfPageRenderer = AndroidPageRenderer(
             pdfRenderer = AndroidPdfPageRenderer(Dispatchers.IO),
@@ -300,6 +305,9 @@ class MainActivity : ComponentActivity() {
             },
         )
 
+        rootComponent = root
+        handleIncomingIntent(intent)
+
         setContent {
             // Remove when https://issuetracker.google.com/issues/364713509 is fixed
             LaunchedEffect(isSystemInDarkTheme()) {
@@ -325,5 +333,33 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    /**
+     * Открывает документ, пришедший извне: «Открыть с помощью» ([Intent.ACTION_VIEW])
+     * или «Поделиться» ([Intent.ACTION_SEND]). URI прокидывается в общий
+     * [RootComponent.openDetailsExternally]; для чтения байт достаточно временного
+     * гранта чтения из самого интента.
+     */
+    private fun handleIncomingIntent(intent: Intent) {
+        val uri = incomingUri(intent) ?: return
+        if (uri.scheme == "content") {
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+        }
+        rootComponent.openDetailsExternally(uri.toString())
+    }
+
+    private fun incomingUri(intent: Intent): Uri? = when (intent.action) {
+        Intent.ACTION_VIEW -> intent.data
+        Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+        else -> null
     }
 }

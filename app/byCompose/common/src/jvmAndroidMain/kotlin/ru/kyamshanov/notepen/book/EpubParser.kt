@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
@@ -9,11 +9,12 @@ import java.util.zip.ZipInputStream
 
 /**
  * Разбирает контейнер EPUB (ZIP с XHTML/OPF) в платформенно-нейтральный
- * [EpubBook]: читает `META-INF/container.xml` → OPF → порядок `spine`, после
- * чего превращает каждый XHTML-документ в поток [EpubBlock] в порядке чтения.
+ * [BookContent]: читает `META-INF/container.xml` → OPF → порядок `spine`, после
+ * чего превращает каждый XHTML-документ в поток [ContentBlock] в порядке чтения.
  *
- * Разбор HTML устойчив к нестрогой разметке (используется толерантный парсер
- * jsoup). Изображения извлекаются из контейнера по `href` манифеста.
+ * Инлайн-разметка собирается общим [inlineSpansOf]. Разбор HTML устойчив к
+ * нестрогой разметке (используется толерантный парсер jsoup). Изображения
+ * извлекаются из контейнера по `href` манифеста.
  *
  * Чистая CPU-операция без собственной диспетчеризации — вызывающая сторона
  * обязана выполнять её на IO/Default диспетчере.
@@ -25,7 +26,7 @@ object EpubParser {
      * @return разобранная книга
      * @throws IllegalArgumentException если контейнер не является валидным EPUB
      */
-    fun parse(epubBytes: ByteArray): EpubBook {
+    fun parse(epubBytes: ByteArray): BookContent {
         val entries = readZipEntries(epubBytes)
         val opfPath = locateOpfPath(entries)
         val opfBytes = requireNotNull(entries[opfPath]) { "EPUB OPF not found: $opfPath" }
@@ -38,17 +39,17 @@ object EpubParser {
         require(spinePaths.isNotEmpty()) { "EPUB spine is empty" }
 
         val blocks = buildBlocks(spinePaths, entries)
-        return EpubBook(metadata = metadata, blocks = blocks)
+        return BookContent(metadata = metadata, blocks = blocks)
     }
 
     private fun buildBlocks(
         spinePaths: List<String>,
         entries: Map<String, ByteArray>,
-    ): List<EpubBlock> {
-        val blocks = mutableListOf<EpubBlock>()
+    ): List<ContentBlock> {
+        val blocks = mutableListOf<ContentBlock>()
         for (path in spinePaths) {
             val bytes = entries[path] ?: continue
-            if (blocks.isNotEmpty()) blocks.add(EpubBlock.PageBreak)
+            if (blocks.isNotEmpty()) blocks.add(ContentBlock.PageBreak)
             val doc = Jsoup.parse(String(bytes, Charsets.UTF_8), path)
             val body = doc.body() ?: continue
             val context = DocumentContext(baseDir = parentDir(path), entries = entries)
@@ -86,7 +87,7 @@ object EpubParser {
 
     // --- OPF ----------------------------------------------------------------
 
-    private fun readMetadata(opf: Document): EpubMetadata = EpubMetadata(
+    private fun readMetadata(opf: Document): BookMetadata = BookMetadata(
         title = firstTagText(opf, "dc:title", "title"),
         author = firstTagText(opf, "dc:creator", "creator"),
         language = firstTagText(opf, "dc:language", "language"),
@@ -129,25 +130,25 @@ object EpubParser {
     private val HEADINGS = setOf("h1", "h2", "h3", "h4", "h5", "h6")
     private val CONTAINERS = setOf("div", "section", "article", "main", "header", "footer", "figure", "aside")
 
-    private fun appendBlocks(parent: Element, ctx: DocumentContext, out: MutableList<EpubBlock>) {
+    private fun appendBlocks(parent: Element, ctx: DocumentContext, out: MutableList<ContentBlock>) {
         for (child in parent.children()) {
             when (val tag = child.normalName()) {
                 in HEADINGS -> child.text().trim().takeIf { it.isNotBlank() }
-                    ?.let { out.add(EpubBlock.Heading(level = tag.substring(1).toInt(), text = it)) }
+                    ?.let { out.add(ContentBlock.Heading(level = tag.substring(1).toInt(), text = it)) }
 
                 "p", "pre" -> appendTextAndImages(child, ctx, out)
                 "blockquote" -> {
-                    child.text().trim().takeIf { it.isNotBlank() }?.let { out.add(EpubBlock.Blockquote(it)) }
+                    inlineSpansOf(child).takeIf { it.isNotEmpty() }?.let { out.add(ContentBlock.Blockquote(it)) }
                     appendImages(child, ctx, out)
                 }
 
                 "ul", "ol" -> appendListItems(child, ordered = tag == "ol", level = 0, ctx = ctx, out = out)
                 "table" -> appendTable(child, out)
-                "hr" -> out.add(EpubBlock.HorizontalRule)
+                "hr" -> out.add(ContentBlock.HorizontalRule)
                 "img", "image" -> appendImageElement(child, ctx, out)
                 in CONTAINERS, "body" -> appendBlocks(child, ctx, out)
                 else -> if (child.children().isEmpty()) {
-                    child.text().trim().takeIf { it.isNotBlank() }?.let { out.add(EpubBlock.Paragraph(it)) }
+                    inlineSpansOf(child).takeIf { it.isNotEmpty() }?.let { out.add(ContentBlock.Paragraph(it)) }
                 } else {
                     appendBlocks(child, ctx, out)
                 }
@@ -155,12 +156,12 @@ object EpubParser {
         }
     }
 
-    private fun appendTextAndImages(element: Element, ctx: DocumentContext, out: MutableList<EpubBlock>) {
-        element.text().trim().takeIf { it.isNotBlank() }?.let { out.add(EpubBlock.Paragraph(it)) }
+    private fun appendTextAndImages(element: Element, ctx: DocumentContext, out: MutableList<ContentBlock>) {
+        inlineSpansOf(element).takeIf { it.isNotEmpty() }?.let { out.add(ContentBlock.Paragraph(it)) }
         appendImages(element, ctx, out)
     }
 
-    private fun appendImages(element: Element, ctx: DocumentContext, out: MutableList<EpubBlock>) {
+    private fun appendImages(element: Element, ctx: DocumentContext, out: MutableList<ContentBlock>) {
         for (img in element.select("img, image")) appendImageElement(img, ctx, out)
     }
 
@@ -169,16 +170,16 @@ object EpubParser {
         ordered: Boolean,
         level: Int,
         ctx: DocumentContext,
-        out: MutableList<EpubBlock>,
+        out: MutableList<ContentBlock>,
     ) {
         var ordinal = 1
         for (li in list.children().filter { it.normalName() == "li" }) {
             val nested = li.children().filter { it.normalName() == "ul" || it.normalName() == "ol" }
-            val ownText = li.clone().also { clone ->
-                clone.select("ul, ol").remove()
-            }.text().trim()
-            if (ownText.isNotBlank()) {
-                out.add(EpubBlock.ListItem(text = ownText, ordered = ordered, ordinal = ordinal, level = level))
+            val ownText = inlineSpansOf(
+                li.clone().also { clone -> clone.select("ul, ol").remove() },
+            )
+            if (ownText.isNotEmpty()) {
+                out.add(ContentBlock.ListItem(text = ownText, ordered = ordered, ordinal = ordinal, level = level))
             }
             ordinal++
             for (sub in nested) {
@@ -187,14 +188,14 @@ object EpubParser {
         }
     }
 
-    private fun appendTable(table: Element, out: MutableList<EpubBlock>) {
+    private fun appendTable(table: Element, out: MutableList<ContentBlock>) {
         val rows = table.select("tr").map { tr ->
             tr.select("th, td").map { it.text().trim() }
         }.filter { it.isNotEmpty() }
-        if (rows.isNotEmpty()) out.add(EpubBlock.Table(rows))
+        if (rows.isNotEmpty()) out.add(ContentBlock.Table(rows))
     }
 
-    private fun appendImageElement(element: Element, ctx: DocumentContext, out: MutableList<EpubBlock>) {
+    private fun appendImageElement(element: Element, ctx: DocumentContext, out: MutableList<ContentBlock>) {
         val rawSrc = element.attr("src").ifBlank {
             element.attr("xlink:href").ifBlank { element.attr("href") }
         }
@@ -202,7 +203,7 @@ object EpubParser {
         val path = resolvePath(ctx.baseDir, percentDecode(rawSrc.substringBefore('#').substringBefore('?')))
         val data = ctx.entries[path] ?: return
         out.add(
-            EpubBlock.Image(
+            ContentBlock.Image(
                 data = data,
                 mimeType = guessImageMime(path),
                 alt = element.attr("alt").trim().ifBlank { null },

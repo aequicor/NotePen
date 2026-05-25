@@ -39,5 +39,14 @@
 -keep class com.arkivanov.decompose.** { *; }
 -keep class com.arkivanov.essenty.** { *; }
 
+# --- PDFBox-Android (com.tom-roush:pdfbox-android) ---
+# JPXFilter.readJPX() декодирует JPEG2000-изображения (JPX/JP2) через
+# com.gemalto.jp2.JP2Decoder. Это ОПЦИОНАЛЬНАЯ зависимость pdfbox-android: её нет
+# на classpath (в проект она не подключена — JP2 в PDF встречается редко).
+# В full-mode R8 ссылка на отсутствующий класс — жёсткая ошибка сборки, а не
+# warning (в debug-сборке она просто игнорировалась). Подавляем: JP2-картинки
+# не декодируются ровно так же, как и в debug, — рабочей фичи это не убирает.
+-dontwarn com.gemalto.jp2.**
+
 # Подавляем шум по отсутствующим опциональным зависимостям.
 -dontnote kotlinx.serialization.**

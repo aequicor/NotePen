@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.epub
+package ru.kyamshanov.notepen.book
 
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -7,19 +7,30 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.Layout
+import android.text.SpannableStringBuilder
+import android.text.Spanned
 import android.text.StaticLayout
 import android.text.TextPaint
+import android.text.style.ForegroundColorSpan
+import android.text.style.RelativeSizeSpan
+import android.text.style.StyleSpan
+import android.text.style.SubscriptSpan
+import android.text.style.SuperscriptSpan
+import android.text.style.TypefaceSpan
+import android.text.style.UnderlineSpan
 import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Верстает [EpubBook] в PDF на Android.
+ * Верстает [BookContent] в PDF на Android.
  *
  * Текст рисуется как настоящий векторный текст PDF (через [Canvas.drawText]
  * силами [StaticLayout]) с использованием системных шрифтов — кириллица
  * поддерживается из коробки, файл компактный, текст чёткий при любом зуме.
+ * Инлайн-начертание ([RichText]) переносится в [SpannableStringBuilder], а
+ * [StaticLayout] отрисовывает спаны нативно.
  */
-object AndroidEpubPdfRenderer {
+object AndroidBookPdfRenderer {
 
     private const val PAGE_WIDTH = 595 // A4 in points (1/72")
     private const val PAGE_HEIGHT = 842
@@ -35,6 +46,8 @@ object AndroidEpubPdfRenderer {
     private const val RULE_GAP = 14
     private const val IMAGE_GAP = 10
     private const val QUOTE_COLOR = 0xFF444444.toInt()
+    private const val LINK_COLOR = 0xFF1A0DAB.toInt()
+    private const val SUPER_SUB_SCALE = 0.75f
 
     private val HEADING_SIZES = floatArrayOf(26f, 22f, 19f, 17f, 15f, 14f)
 
@@ -42,11 +55,11 @@ object AndroidEpubPdfRenderer {
      * @param book книга для верстки
      * @param output файл назначения PDF (создаётся/перезаписывается)
      */
-    fun render(book: EpubBook, output: File) {
+    fun render(book: BookContent, output: File) {
         val pdf = PdfDocument()
         val composer = PageComposer(pdf)
         book.metadata.title?.takeIf { it.isNotBlank() }?.let { composer.heading(level = 1, text = it) }
-        book.metadata.author?.takeIf { it.isNotBlank() }?.let { composer.paragraph(it, italic = true) }
+        book.metadata.author?.takeIf { it.isNotBlank() }?.let { composer.paragraph(listOf(InlineSpan(it)), italic = true) }
         for (block in book.blocks) composer.render(block)
         composer.finish()
 
@@ -71,17 +84,17 @@ object AndroidEpubPdfRenderer {
             pdf.finishPage(page)
         }
 
-        fun render(block: EpubBlock) {
+        fun render(block: ContentBlock) {
             when (block) {
-                is EpubBlock.Heading -> heading(block.level, block.text)
-                is EpubBlock.Paragraph -> paragraph(block.text)
-                is EpubBlock.Blockquote -> paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
-                is EpubBlock.ListItem ->
-                    paragraph(markerFor(block) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
-                is EpubBlock.Table -> block.rows.forEach { row -> paragraph(row.joinToString("   |   ")) }
-                is EpubBlock.Image -> image(block)
-                EpubBlock.HorizontalRule -> rule()
-                EpubBlock.PageBreak -> if (cursorY > MARGIN) newPage()
+                is ContentBlock.Heading -> heading(block.level, block.text)
+                is ContentBlock.Paragraph -> paragraph(block.text)
+                is ContentBlock.Blockquote -> paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
+                is ContentBlock.ListItem ->
+                    paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
+                is ContentBlock.Table -> block.rows.forEach { row -> paragraph(listOf(InlineSpan(row.joinToString("   |   ")))) }
+                is ContentBlock.Image -> image(block)
+                ContentBlock.HorizontalRule -> rule()
+                ContentBlock.PageBreak -> if (cursorY > MARGIN) newPage()
             }
         }
 
@@ -93,10 +106,10 @@ object AndroidEpubPdfRenderer {
             cursorY += HEADING_GAP_AFTER
         }
 
-        fun paragraph(text: String, italic: Boolean = false, indent: Int = 0) {
+        fun paragraph(spans: RichText, italic: Boolean = false, indent: Int = 0) {
             val typeface = Typeface.create(Typeface.SERIF, if (italic) Typeface.ITALIC else Typeface.NORMAL)
             val color = if (italic) QUOTE_COLOR else Color.BLACK
-            drawLayout(text, textPaint(BODY_SIZE, typeface, color), indent)
+            drawLayout(spannableOf(spans), textPaint(BODY_SIZE, typeface, color), indent)
             cursorY += PARAGRAPH_GAP
         }
 
@@ -108,7 +121,40 @@ object AndroidEpubPdfRenderer {
                 isSubpixelText = true
             }
 
-        private fun drawLayout(text: String, paint: TextPaint, indent: Int) {
+        /** Строит [SpannableStringBuilder] из [RichText]; спаны применяет [StaticLayout]. */
+        private fun spannableOf(spans: RichText): CharSequence {
+            val builder = SpannableStringBuilder()
+            for (span in spans) {
+                val start = builder.length
+                builder.append(span.text)
+                val end = builder.length
+                if (end == start) continue
+                styleOf(span)?.let { builder.setSpan(StyleSpan(it), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) }
+                if (span.code) builder.setSpan(TypefaceSpan("monospace"), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (span.superscript) {
+                    builder.setSpan(SuperscriptSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    builder.setSpan(RelativeSizeSpan(SUPER_SUB_SCALE), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                if (span.subscript) {
+                    builder.setSpan(SubscriptSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    builder.setSpan(RelativeSizeSpan(SUPER_SUB_SCALE), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                if (span.link) {
+                    builder.setSpan(UnderlineSpan(), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    builder.setSpan(ForegroundColorSpan(LINK_COLOR), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+            }
+            return builder
+        }
+
+        private fun styleOf(span: InlineSpan): Int? = when {
+            span.bold && span.italic -> Typeface.BOLD_ITALIC
+            span.bold -> Typeface.BOLD
+            span.italic -> Typeface.ITALIC
+            else -> null
+        }
+
+        private fun drawLayout(text: CharSequence, paint: TextPaint, indent: Int) {
             val left = MARGIN + indent
             val width = (contentWidth - indent).coerceAtLeast(1)
             val layout = StaticLayout.Builder
@@ -146,7 +192,7 @@ object AndroidEpubPdfRenderer {
             }
         }
 
-        private fun image(block: EpubBlock.Image) {
+        private fun image(block: ContentBlock.Image) {
             val bitmap = runCatching { BitmapFactory.decodeByteArray(block.data, 0, block.data.size) }
                 .getOrNull() ?: return
             val maxHeight = contentBottom - MARGIN
@@ -186,7 +232,7 @@ object AndroidEpubPdfRenderer {
         private fun startPage(number: Int): PdfDocument.Page =
             pdf.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, number).create())
 
-        private fun markerFor(item: EpubBlock.ListItem): String =
+        private fun markerFor(item: ContentBlock.ListItem): String =
             if (item.ordered) "${item.ordinal}. " else "•  "
     }
 }

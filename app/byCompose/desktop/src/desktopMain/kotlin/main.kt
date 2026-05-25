@@ -109,7 +109,7 @@ import kotlin.system.exitProcess
 private const val SKIA_HWND_SETTLE_DELAY_MS: Long = 500L
 
 /**
- * Маршрутизация запросов «открыть PDF через NotePen» от ОС в навигацию приложения.
+ * Маршрутизация запросов «открыть документ через NotePen» от ОС в навигацию приложения.
  *
  * Путь к файлу может прийти раньше, чем создан [RootComponent] (особенно на macOS,
  * где Apple Event "odoc" доставляется AWT почти сразу при старте). Поэтому до
@@ -143,10 +143,13 @@ private object OpenFileRouter {
     }
 }
 
+/** Расширения, которые NotePen умеет открыть из аргументов запуска (Windows/Linux). */
+private val OPENABLE_EXTENSIONS = listOf("pdf", "png", "jpg", "jpeg", "epub", "fb2.zip", "fb2", "cbz", "cbr")
+
 fun main(args: Array<String>) {
     // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
     // (macOS использует Apple Event "odoc", регистрируем OpenFileHandler ниже.)
-    args.firstOrNull { it.endsWith(".pdf", ignoreCase = true) }
+    args.firstOrNull { arg -> OPENABLE_EXTENSIONS.any { arg.endsWith(".$it", ignoreCase = true) } }
         ?.let { OpenFileRouter.submit(java.io.File(it).absolutePath) }
 
     // Must be set BEFORE any AWT class is loaded — Taskbar.isTaskbarSupported() already
