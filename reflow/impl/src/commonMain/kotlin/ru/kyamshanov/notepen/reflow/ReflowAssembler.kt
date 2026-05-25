@@ -35,6 +35,28 @@ internal object ReflowAssembler {
     /** Вертикальный зазор (доля основного кегля) между строками, разрывающий абзац. */
     private const val PARA_GAP_FACTOR = 0.7f
 
+    /**
+     * Минимальный шаг строк (baseline-to-baseline, доля основного кегля), с
+     * которого начинается разрыв абзаца, — нижняя граница на случай, когда
+     * медианный шаг документа недоступен/вырожден (мало строк). Обычная вёрстка
+     * книги идёт с шагом ~1.0–1.45 кегля (сгенерированный PDF — 1.25), а разрыв
+     * абзаца добавляет заметную выноску, поэтому порог берётся с запасом выше.
+     */
+    private const val MIN_PARA_PITCH_FRAC = 1.8f
+
+    /**
+     * Во сколько раз шаг строк должен превысить **медианный** шаг документа,
+     * чтобы это был разрыв абзаца (когда медиана надёжна). Адаптируется к
+     * реальной выноске документа независимо от кегля.
+     */
+    private const val PARA_PITCH_FACTOR = 1.5f
+
+    /**
+     * Сколько образцов межстрочного шага нужно, чтобы медиане можно было верить
+     * (иначе работает только кегельный порог [MIN_PARA_PITCH_FRAC]).
+     */
+    private const val MIN_PITCH_SAMPLES = 4
+
     /** Допуск группировки глифов в одну строку (доля основного кегля). */
     private const val LINE_TOLERANCE_FRAC = 0.5f
 
@@ -84,15 +106,21 @@ internal object ReflowAssembler {
      */
     fun assemble(pages: List<RawPage>): ReflowDocument {
         val bodyFont = medianFontSize(pages.flatMap { it.glyphs })
-        val blocks = pages.flatMap { buildPageBlocks(it, bodyFont) }
+        val pageLines = pages.map { it to groupLines(it.glyphs, bodyFont, it) }
+        // Шаг строк (baseline-to-baseline) стабилен к вариации высоты глиф-бокса
+        // между шрифтами/версиями PDFBox, в отличие от зазора по нижнему краю
+        // бокса, — поэтому разрыв абзаца считаем по нему.
+        val medianPitch = medianLinePitch(pageLines.map { it.second })
+        val blocks = pageLines.flatMap { (page, lines) -> buildPageBlocks(page, lines, bodyFont, medianPitch) }
         return ReflowDocument(kind = classify(pages), blocks = blocks)
     }
 
     private fun buildPageBlocks(
         page: RawPage,
+        lines: List<Line>,
         bodyFont: Float,
+        medianPitch: Float,
     ): List<ReflowBlock> {
-        val lines = groupLines(page.glyphs, bodyFont, page)
         // Таблицы вытаскиваем до сборки абзацев: их строки не должны слипнуться в текст.
         val tables =
             detectTableRanges(lines, page.widthPt, bodyFont).mapNotNull { range ->
@@ -113,7 +141,7 @@ internal object ReflowAssembler {
                     .forEach { add(Item.Image(it)) }
             }.sortedBy { it.top }
 
-        val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont)
+        val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont, medianPitch)
         items.forEach { item ->
             when (item) {
                 is Item.Text -> builder.addLine(item.line)
@@ -338,6 +366,25 @@ internal object ReflowAssembler {
         return sizes[sizes.size / 2]
     }
 
+    /**
+     * Медианный шаг строк (baseline-to-baseline, в пунктах) по всем парам
+     * соседних строк всех страниц. Это нормальная межстрочная выноска
+     * документа; разрыв абзаца — шаг, заметно её превышающий. `0`, если строк
+     * недостаточно для оценки.
+     */
+    private fun medianLinePitch(pageLines: List<List<Line>>): Float {
+        val pitches = mutableListOf<Float>()
+        for (lines in pageLines) {
+            for (i in 1 until lines.size) {
+                val pitch = lines[i].top - lines[i - 1].top
+                if (pitch > 0f) pitches += pitch
+            }
+        }
+        if (pitches.size < MIN_PITCH_SAMPLES) return 0f
+        pitches.sort()
+        return pitches[pitches.size / 2]
+    }
+
     private fun headingLevelForRatio(ratio: Float): Int =
         when {
             ratio >= HEADING_LEVEL_1_RATIO -> 1
@@ -367,6 +414,7 @@ internal object ReflowAssembler {
         private val widthPt: Float,
         private val heightPt: Float,
         private val bodyFont: Float,
+        private val medianPitch: Float,
     ) {
         private val blocks = mutableListOf<ReflowBlock>()
         private val pending = mutableListOf<Line>()
@@ -424,12 +472,27 @@ internal object ReflowAssembler {
                 0
             }
 
+        /**
+         * Разрыв абзаца — по **шагу строк** (baseline-to-baseline,
+         * `line.top - last.top`), а не по зазору между боксами глифов: высота
+         * глиф-бокса (`heightDir`) меняется от шрифта и версии PDFBox, из-за чего
+         * нормальная межстрочная выноска (например, 1.25 кегля в
+         * сгенерированном PDF) ложно превышала прежний бокс-порог и каждая строка
+         * становилась отдельным абзацем. Шаг же остаётся стабильным.
+         *
+         * Порог — `max` от медианной выноски документа (когда она надёжна) и
+         * кегельной нижней границы: реальный разрыв добавляет заметную выноску
+         * сверх обычной, поэтому отделяется и в сканах/нативных PDF.
+         */
         private fun breaksParagraph(line: Line): Boolean {
             if (pendingHeadingLevel > 0) return true
             val last = pending.last()
-            val gap = line.top - last.bottom
+            val pitch = line.top - last.top
+            val medianThreshold = if (medianPitch > 0f) medianPitch * PARA_PITCH_FACTOR else 0f
+            val fontThreshold = bodyFont * MIN_PARA_PITCH_FRAC
+            val pitchThreshold = maxOf(medianThreshold, fontThreshold)
             val fontJump = bodyFont > 0f && abs(line.fontSize - last.fontSize) > bodyFont * FONT_CHANGE_FRAC
-            return gap > bodyFont * PARA_GAP_FACTOR || fontJump
+            return pitch > pitchThreshold || fontJump
         }
 
         private fun flush() {

@@ -45,5 +45,4 @@ class ReaderSettingsRepositoryAndroid(
         }
 }
 
-actual fun createReaderSettingsRepository(): ReaderSettingsRepository =
-    ReaderSettingsRepositoryAndroid(AppContextHolder.context)
+actual fun createReaderSettingsRepository(): ReaderSettingsRepository = ReaderSettingsRepositoryAndroid(AppContextHolder.context)

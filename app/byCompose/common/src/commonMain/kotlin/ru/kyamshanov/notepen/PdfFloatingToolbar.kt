@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.dp
  *   indicator when selected. Independent toggles (magnifier, thumbnails…) keep it
  *   `true`; the mutually-exclusive drawing tools pass `false` because the wheel
  *   draws one shared indicator that physically slides between them.
+ * @param enabled when `false` the button is non-interactive and its icon is
+ *   dimmed — e.g. reading mode on an image-only PDF with no selectable text.
  */
 @Composable
 internal fun ToolToggleButton(
@@ -38,10 +40,11 @@ internal fun ToolToggleButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     showSelectionBackground: Boolean = true,
+    enabled: Boolean = true,
 ) {
     val indicatorColor by animateColorAsState(
         targetValue =
-            if (selected && showSelectionBackground) {
+            if (selected && showSelectionBackground && enabled) {
                 MaterialTheme.colorScheme.primaryContainer
             } else {
                 Color.Transparent
@@ -50,15 +53,16 @@ internal fun ToolToggleButton(
     )
     val iconTint by animateColorAsState(
         targetValue =
-            if (selected) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
+            when {
+                !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = TOOL_DISABLED_ALPHA)
+                selected -> MaterialTheme.colorScheme.onPrimaryContainer
+                else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
         label = "toolIconTint",
     )
     IconButton(
         onClick = onClick,
+        enabled = enabled,
         modifier =
             modifier
                 .size(RAIL_BUTTON_SIZE)
@@ -111,6 +115,9 @@ internal val RAIL_BUTTON_SIZE = 40.dp
 
 /** Selected-tool circular indicator — same size as the button's round hover/ripple state layer. */
 private val RAIL_INDICATOR_SIZE = RAIL_BUTTON_SIZE
+
+/** Icon-tint alpha for a disabled [ToolToggleButton] (matches Material's disabled affordance). */
+private const val TOOL_DISABLED_ALPHA = 0.38f
 
 private val TOOLBAR_PADDING = 4.dp
 

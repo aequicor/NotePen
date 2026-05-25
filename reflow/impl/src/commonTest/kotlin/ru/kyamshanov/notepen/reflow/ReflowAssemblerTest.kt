@@ -41,6 +41,52 @@ class ReflowAssemblerTest {
     }
 
     @Test
+    fun `generated-ebook line spacing does not over-split a paragraph`() {
+        // Регресс: один абзац сгенерированного PDF (шаг строк 1.25 кегля, низкий
+        // глиф-бокс ~0.5 кегля, как heightDir у PdfBox) дробился на отдельные
+        // абзацы — прежний порог считал зазор по нижнему краю бокса. Шаг строк
+        // тут стабилен, поэтому всё остаётся одним абзацем с пробелами.
+        val fontSize = 13f
+        val pitch = fontSize * 1.25f
+        val frac = 0.5f
+        val glyphs =
+            line("first line of one paragraph", top = 100f, fontSize = fontSize, boxHeightFrac = frac) +
+                line("second line same paragraph", top = 100f + pitch, fontSize = fontSize, boxHeightFrac = frac) +
+                line("third line same paragraph", top = 100f + 2 * pitch, fontSize = fontSize, boxHeightFrac = frac)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        val paragraph = assertIs<ReflowBlock.Paragraph>(blocks.single())
+        assertEquals("first line of one paragraph second line same paragraph third line same paragraph", paragraph.text)
+    }
+
+    @Test
+    fun `real paragraph break with extra leading still splits at generated line spacing`() {
+        // Двойная защита: при том же низком боксе настоящий разрыв абзаца (лишняя
+        // выноска поверх обычного шага) обязан разделить текст на два абзаца.
+        val fontSize = 13f
+        val pitch = fontSize * 1.25f
+        val frac = 0.5f
+        val glyphs = mutableListOf<RawGlyph>()
+        var top = 100f
+        repeat(4) {
+            glyphs += line("body line of paragraph one", top = top, fontSize = fontSize, boxHeightFrac = frac)
+            top += pitch
+        }
+        top += fontSize * 0.9f // межабзацная выноска поверх обычного шага
+        repeat(4) {
+            glyphs += line("body line of paragraph two", top = top, fontSize = fontSize, boxHeightFrac = frac)
+            top += pitch
+        }
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        val paragraphs = blocks.filterIsInstance<ReflowBlock.Paragraph>()
+        assertEquals(2, paragraphs.size)
+        assertEquals(
+            "body line of paragraph one body line of paragraph one " +
+                "body line of paragraph one body line of paragraph one",
+            paragraphs[0].text,
+        )
+    }
+
+    @Test
     fun `split paragraphs separated by a large gap`() {
         val glyphs = line("paragraph one", top = 100f) + line("paragraph two", top = 140f)
         val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks

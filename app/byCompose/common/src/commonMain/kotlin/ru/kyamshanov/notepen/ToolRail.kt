@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -59,40 +61,53 @@ import kotlin.math.roundToInt
 /**
  * Tool toggles (Pen / Marker / Eraser) as a list of [WheelEntry] for the unified
  * tool wheel. Re-tapping the active tool deactivates it — see [nextToolModeOnToggle].
+ *
+ * @param includePen when `false`, the pen/brush toggle is omitted (the marker and
+ *   eraser remain). Reading mode passes `false`: free-hand drawing is meaningless
+ *   on reflowed text, but highlighting (marker) and erasing it stay available.
  */
 internal fun toolSelectorEntries(
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
+    includePen: Boolean = true,
 ): List<WheelEntry> =
-    listOf(
-        WheelEntry(TOOL_PEN_KEY) {
-            ToolToggleButton(
-                icon = NotePenIcons.Brush,
-                contentDescription = "Перо",
-                selected = toolMode == ToolMode.PEN,
-                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN)) },
-                showSelectionBackground = false,
+    buildList {
+        if (includePen) {
+            add(
+                WheelEntry(TOOL_PEN_KEY) {
+                    ToolToggleButton(
+                        icon = NotePenIcons.Brush,
+                        contentDescription = "Перо",
+                        selected = toolMode == ToolMode.PEN,
+                        onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN)) },
+                        showSelectionBackground = false,
+                    )
+                },
             )
-        },
-        WheelEntry(TOOL_MARKER_KEY) {
-            ToolToggleButton(
-                icon = NotePenIcons.Highlighter,
-                contentDescription = "Маркер",
-                selected = toolMode == ToolMode.MARKER,
-                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER)) },
-                showSelectionBackground = false,
-            )
-        },
-        WheelEntry(TOOL_ERASER_KEY) {
-            ToolToggleButton(
-                icon = NotePenIcons.Eraser,
-                contentDescription = "Ластик",
-                selected = toolMode == ToolMode.ERASER,
-                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER)) },
-                showSelectionBackground = false,
-            )
-        },
-    )
+        }
+        add(
+            WheelEntry(TOOL_MARKER_KEY) {
+                ToolToggleButton(
+                    icon = NotePenIcons.Highlighter,
+                    contentDescription = "Маркер",
+                    selected = toolMode == ToolMode.MARKER,
+                    onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER)) },
+                    showSelectionBackground = false,
+                )
+            },
+        )
+        add(
+            WheelEntry(TOOL_ERASER_KEY) {
+                ToolToggleButton(
+                    icon = NotePenIcons.Eraser,
+                    contentDescription = "Ластик",
+                    selected = toolMode == ToolMode.ERASER,
+                    onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER)) },
+                    showSelectionBackground = false,
+                )
+            },
+        )
+    }
 
 /** Wheel-entry key of the currently selected drawing tool, or `null` for [ToolMode.NONE]. */
 internal fun selectedToolWheelKey(toolMode: ToolMode): Any? =
@@ -139,44 +154,63 @@ internal fun unifiedToolWheelEntries(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showTocButton: Boolean,
     showToc: Boolean,
     onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
+    readingModeAvailable: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
     magnifierEnabled: Boolean,
     onMagnifierToggle: () -> Unit,
+    showSyncButton: Boolean,
+    syncTint: Color,
+    onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
     expandedButtonModifier: Modifier = Modifier,
 ): List<WheelEntry> {
+    // В режиме чтения свободное рисование пером бессмысленно, но выделять текст
+    // маркером и стирать выделение нужно. Поэтому в чтении прячем только перо
+    // (вместе с его настройками/пресетами), а маркер/ластик и их настройки
+    // оставляем. Для остальных режимов поведение прежнее.
+    val includePen = !readingModeEnabled
+    val penHidden = readingModeEnabled && toolMode == ToolMode.PEN
     val settings =
-        toolSettingsSlotEntries(
-            toolMode = toolMode,
-            penSettings = penSettings,
-            onPenSettingsChange = onPenSettingsChange,
-            markerSettings = markerSettings,
-            onMarkerSettingsChange = onMarkerSettingsChange,
-            eraserSettings = eraserSettings,
-            onEraserSettingsChange = onEraserSettingsChange,
-            expandedIndex = expandedIndex,
-            onToggle = onSlotToggle,
-            expandedButtonModifier = expandedButtonModifier,
-        )
+        if (penHidden) {
+            emptyList()
+        } else {
+            toolSettingsSlotEntries(
+                toolMode = toolMode,
+                penSettings = penSettings,
+                onPenSettingsChange = onPenSettingsChange,
+                markerSettings = markerSettings,
+                onMarkerSettingsChange = onMarkerSettingsChange,
+                eraserSettings = eraserSettings,
+                onEraserSettingsChange = onEraserSettingsChange,
+                expandedIndex = expandedIndex,
+                onToggle = onSlotToggle,
+                expandedButtonModifier = expandedButtonModifier,
+            )
+        }
     val presets =
-        toolPresetEntries(
-            toolMode = toolMode,
-            penSettings = penSettings,
-            onPenSettingsChange = onPenSettingsChange,
-            markerSettings = markerSettings,
-            onMarkerSettingsChange = onMarkerSettingsChange,
-            eraserSettings = eraserSettings,
-            onEraserSettingsChange = onEraserSettingsChange,
-            presets = toolPresets,
-            onPresetsChange = onToolPresetsChange,
-            onPresetApplied = onPresetApplied,
-        )
+        if (penHidden) {
+            emptyList()
+        } else {
+            toolPresetEntries(
+                toolMode = toolMode,
+                penSettings = penSettings,
+                onPenSettingsChange = onPenSettingsChange,
+                markerSettings = markerSettings,
+                onMarkerSettingsChange = onMarkerSettingsChange,
+                eraserSettings = eraserSettings,
+                onEraserSettingsChange = onEraserSettingsChange,
+                presets = toolPresets,
+                onPresetsChange = onToolPresetsChange,
+                onPresetApplied = onPresetApplied,
+            )
+        }
     val system =
         systemControlEntries(
             hasAnnotations = hasAnnotations,
@@ -187,19 +221,25 @@ internal fun unifiedToolWheelEntries(
             onZoomOut = onZoomOut,
             showThumbnails = showThumbnails,
             onToggleThumbnails = onToggleThumbnails,
+            showTocButton = showTocButton,
             showToc = showToc,
             onToggleToc = onToggleToc,
             readingModeEnabled = readingModeEnabled,
+            readingModeAvailable = readingModeAvailable,
             onToggleReadingMode = onToggleReadingMode,
             showPencilModeButton = showPencilModeButton,
             pencilModeEnabled = pencilModeEnabled,
             onPencilModeChange = onPencilModeChange,
             magnifierEnabled = magnifierEnabled,
             onMagnifierToggle = onMagnifierToggle,
+            showSyncButton = showSyncButton,
+            syncTint = syncTint,
+            onOpenSync = onOpenSync,
             onOpenShortcutsSettings = onOpenShortcutsSettings,
         )
     return buildList {
-        addAll(toolSelectorEntries(toolMode, onToolModeChange))
+        // В чтении перо скрыто, но маркер/ластик остаются (см. includePen).
+        addAll(toolSelectorEntries(toolMode, onToolModeChange, includePen = includePen))
         if (settings.isNotEmpty()) {
             add(WheelEntry("div_settings", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
             addAll(settings)
@@ -208,9 +248,10 @@ internal fun unifiedToolWheelEntries(
             add(WheelEntry("div_presets", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
             addAll(presets)
         }
-        // Системные кнопки показываем ТОЛЬКО когда инструмент не выбран: при
-        // активном инструменте их место занимают настройки и пресеты.
-        if (toolMode == ToolMode.NONE && system.isNotEmpty()) {
+        // Системные кнопки заполняют колесо, когда нет настроек/пресетов активного
+        // инструмента: либо инструмент не выбран, либо это скрытое в чтении перо.
+        // При активном маркере/ластике их место занимают настройки и пресеты.
+        if (settings.isEmpty() && presets.isEmpty() && system.isNotEmpty()) {
             add(WheelEntry("div_system", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
             addAll(system)
         }
@@ -243,8 +284,16 @@ internal fun RailDivider(orientation: RailOrientation) {
 
 /**
  * System (non-drawing) controls as wheel entries: pencil mode (optional),
- * magnifier, page thumbnails, shortcuts, PDF export and a zoom cluster. Appended
- * to the unified wheel so the phone bar needs no `⋮` overflow menu.
+ * magnifier, page thumbnails, table of contents, reading mode, shortcuts, sync,
+ * PDF export and a zoom cluster. Appended to the unified wheel so the phone bar
+ * needs no `⋮` overflow menu.
+ *
+ * In reading mode the drawing-adjacent controls (pencil mode, magnifier, export)
+ * are dropped — only navigation / reading controls remain. The ToC button is
+ * shown only when the document has a table of contents ([showTocButton]); the
+ * reading-mode button is disabled when reflow is unavailable
+ * ([readingModeAvailable]); the sync button appears only when sync is wired
+ * ([showSyncButton]).
  */
 internal fun systemControlEntries(
     hasAnnotations: Boolean,
@@ -255,15 +304,20 @@ internal fun systemControlEntries(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showTocButton: Boolean,
     showToc: Boolean,
     onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
+    readingModeAvailable: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
     magnifierEnabled: Boolean,
     onMagnifierToggle: () -> Unit,
+    showSyncButton: Boolean,
+    syncTint: Color,
+    onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
 ): List<WheelEntry> {
     val pencilModeButton: @Composable () -> Unit = {
@@ -298,7 +352,17 @@ internal fun systemControlEntries(
             contentDescription = "Режим чтения",
             selected = readingModeEnabled,
             onClick = onToggleReadingMode,
+            enabled = readingModeAvailable,
         )
+    }
+    val syncButton: @Composable () -> Unit = {
+        IconButton(onClick = onOpenSync, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+            Icon(
+                imageVector = Icons.Default.Sync,
+                contentDescription = "Синхронизация",
+                tint = syncTint,
+            )
+        }
     }
     val shortcutsButton: @Composable () -> Unit = {
         IconButton(onClick = onOpenShortcutsSettings, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
@@ -376,13 +440,16 @@ internal fun systemControlEntries(
         }
     }
     return buildList {
-        if (showPencilModeButton) add(WheelEntry("sys_pencil") { pencilModeButton() })
-        add(WheelEntry("sys_magnifier") { magnifierButton() })
+        // Инструменты рисования и их спутники (стилус, лупа, экспорт) в режиме
+        // чтения не нужны — оставляем только навигацию и контролы чтения.
+        if (showPencilModeButton && !readingModeEnabled) add(WheelEntry("sys_pencil") { pencilModeButton() })
+        if (!readingModeEnabled) add(WheelEntry("sys_magnifier") { magnifierButton() })
         add(WheelEntry("sys_thumbnails") { thumbnailsButton() })
-        add(WheelEntry("sys_toc") { tocButton() })
+        if (showTocButton) add(WheelEntry("sys_toc") { tocButton() })
         add(WheelEntry("sys_reading") { readingModeButton() })
+        if (showSyncButton) add(WheelEntry("sys_sync") { syncButton() })
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
-        add(WheelEntry("sys_export") { exportButton() })
+        if (!readingModeEnabled) add(WheelEntry("sys_export") { exportButton() })
         add(WheelEntry("sys_zoom_in") { zoomInButton() })
         add(WheelEntry("sys_zoom_label", WHEEL_LABEL_ENTRY_SIZE) { zoomLabel() })
         add(WheelEntry("sys_zoom_out") { zoomOutButton() })
@@ -423,17 +490,24 @@ fun LandscapeToolRail(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showTocButton: Boolean,
     showToc: Boolean,
     onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
+    readingModeAvailable: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
     magnifierEnabled: Boolean,
     onMagnifierToggle: () -> Unit,
+    showSyncButton: Boolean,
+    syncTint: Color,
+    onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Фон активной темы ридера для стекла рельсы; `null` — цвет [MaterialTheme]. */
+    readerBackground: Color? = null,
     onRailWidthChanged: (Dp) -> Unit = {},
 ) {
     val density = LocalDensity.current
@@ -507,15 +581,20 @@ fun LandscapeToolRail(
                 onZoomOut = onZoomOut,
                 showThumbnails = showThumbnails,
                 onToggleThumbnails = onToggleThumbnails,
+                showTocButton = showTocButton,
                 showToc = showToc,
                 onToggleToc = onToggleToc,
                 readingModeEnabled = readingModeEnabled,
+                readingModeAvailable = readingModeAvailable,
                 onToggleReadingMode = onToggleReadingMode,
                 showPencilModeButton = showPencilModeButton,
                 pencilModeEnabled = pencilModeEnabled,
                 onPencilModeChange = onPencilModeChange,
                 magnifierEnabled = magnifierEnabled,
                 onMagnifierToggle = onMagnifierToggle,
+                showSyncButton = showSyncButton,
+                syncTint = syncTint,
+                onOpenSync = onOpenSync,
                 onOpenShortcutsSettings = onOpenShortcutsSettings,
                 expandedButtonModifier =
                     Modifier.onGloballyPositioned { btn ->
@@ -530,6 +609,7 @@ fun LandscapeToolRail(
                     },
             )
         GlassSurface(
+            tint = readerBackground ?: MaterialTheme.colorScheme.surface,
             modifier = Modifier.onSizeChanged { onRailWidthChanged(with(density) { it.width.toDp() }) },
         ) {
             WheelStrip(

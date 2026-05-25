@@ -85,7 +85,17 @@ class AndroidPdfReflowExtractor(
                     text: String,
                     textPositions: List<TextPosition>,
                 ) {
-                    textPositions.forEach { position -> position.toGlyph()?.let(glyphs::add) }
+                    val chunk = textPositions.mapNotNull { it.toGlyph() }
+                    // PDFBox emits one writeString per word and signals the inter-word break
+                    // by a separate call, not a space glyph. So insert a blank glyph at the
+                    // boundary — otherwise words run together in PDFs whose text layer has no
+                    // explicit space glyphs and whose word gap is below the spacing threshold.
+                    // A same-line boundary becomes a word space; a new line places it at the
+                    // line start, where buildLine ignores it.
+                    chunk.firstOrNull()?.let { first ->
+                        if (glyphs.isNotEmpty()) glyphs.add(first.copy(text = " "))
+                    }
+                    glyphs.addAll(chunk)
                 }
             }
         stripper.sortByPosition = true

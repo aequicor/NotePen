@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -71,9 +72,11 @@ import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
 import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
 import ru.kyamshanov.notepen.reflow.ReflowPageLocator
 import ru.kyamshanov.notepen.reflow.ReflowReading
+import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.ui.ReflowReader
+import ru.kyamshanov.notepen.reflow.ui.toRenderSettings
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
 import ru.kyamshanov.notepen.sync.SyncBridge
@@ -126,9 +129,25 @@ class PanelControls(
     val magnifierEnabled: Boolean,
     val showThumbnails: Boolean,
     val showToc: Boolean,
+    /** `true`, когда у документа есть оглавление — иначе кнопку ToC скрываем. */
+    val hasToc: Boolean,
     val readingModeEnabled: Boolean,
+    /**
+     * `true`, когда документ содержит извлекаемый текст (reflow применим) —
+     * иначе кнопку режима чтения дизейблим. По умолчанию `true`, пока проба не
+     * завершилась или упала, чтобы текстовый PDF не блокировался ошибочно.
+     */
+    val readingModeAvailable: Boolean,
     /** `true` в режиме чтения, когда airbar скрыт тапом — родитель прячет весь хром. */
     val chromeHidden: Boolean,
+    /**
+     * Фон активной темы ридера; не `null` ТОЛЬКО в режиме чтения. Хром
+     * (рельса, airbar, вкладки) перекрашивается под него; `null` — хром
+     * сохраняет цвета [androidx.compose.material3.MaterialTheme].
+     */
+    val readerBackground: Color?,
+    /** Цвет контента активной темы ридера; парный к [readerBackground] (см. его). */
+    val readerContentColor: Color?,
     val quickLoupeArmed: Boolean,
     val scrollMode: ScrollMode,
     val zoomIn: () -> Unit,
@@ -224,6 +243,10 @@ fun EditorPanel(
     var showThumbnails by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
+    // Доступность режима чтения зависит от наличия извлекаемого текста в PDF.
+    // По умолчанию true (см. PanelControls.readingModeAvailable): пока проба не
+    // завершилась, текстовый документ не должен быть ошибочно заблокирован.
+    var readingModeAvailable by remember(pdfState) { mutableStateOf(true) }
 
     // ---- Reading (reflow) mode -------------------------------------------
     val reflowReadingUseCase = remember(reflowExtractor) { BuildReflowReadingUseCase(reflowExtractor) }
@@ -483,6 +506,17 @@ fun EditorPanel(
                 .onFailure { e -> panelLogger.warn { "Outline load failed: ${e::class.simpleName}" } }
                 .getOrDefault(emptyList())
         pdfState.outline = outline
+    }
+
+    // ---- Reflow availability probe ---------------------------------------
+    // Классифицируем содержимое (есть ли извлекаемый текст), чтобы решить,
+    // дизейблить ли кнопку режима чтения. probe — main-safe (сам уводит блок-IO
+    // на инжектируемый диспетчер). На ошибке/медленной пробе остаёмся на true.
+    LaunchedEffect(pdfState, filePath) {
+        readingModeAvailable =
+            runCatching { reflowExtractor.probe(filePath) != PdfContentKind.IMAGE_ONLY }
+                .onFailure { e -> panelLogger.warn { "Reflow probe failed: ${e::class.simpleName}" } }
+                .getOrDefault(true)
     }
 
     LaunchedEffect(openDocs.tabs) {
@@ -950,6 +984,13 @@ fun EditorPanel(
         // Read scrollMode in composition (not only inside SideEffect) so the
         // composition subscribes to it — toggling it republishes PanelControls.
         val currentScrollMode = pdfViewerState.scrollMode
+        // Read the outline here so a republish fires when it loads asynchronously
+        // (the TOC button hides until then).
+        val tocAvailable = pdfState.outline.isNotEmpty()
+        // Reader theme colours, resolved the same way ReaderAirbar does
+        // (StoredReaderSettings.current.toRenderSettings()). Only published in
+        // reading mode; null otherwise so the chrome keeps its MaterialTheme look.
+        val readerRender = if (readingModeVisible) readerStored.current.toRenderSettings() else null
         SideEffect {
             onControlsChanged(
                 PanelControls(
@@ -961,8 +1002,12 @@ fun EditorPanel(
                     magnifierEnabled = magnifierState.enabled,
                     showThumbnails = thumbnailsVisible,
                     showToc = tocVisible,
+                    hasToc = tocAvailable,
                     readingModeEnabled = readingModeVisible,
+                    readingModeAvailable = readingModeAvailable,
                     chromeHidden = readingModeVisible && !readerBarVisible,
+                    readerBackground = readerRender?.background,
+                    readerContentColor = readerRender?.textColor,
                     quickLoupeArmed = quickLoupeArmed.value,
                     scrollMode = currentScrollMode,
                     zoomIn = onZoomIn,
@@ -1250,6 +1295,12 @@ fun EditorPanel(
             onOpenInNewPanel = onOpenPanelPicker,
             onClosePanel = onClosePanel,
             modifier = Modifier.align(Alignment.TopStart),
+            // В режиме чтения красим полосу вкладок под фон активной темы ридера,
+            // чтобы хром сливался с ридером (как и остальной хром этой панели), а
+            // подписи/иконки — под цвет текста темы, иначе на тёмной теме они
+            // остаются тёмными и нечитаемыми.
+            tint = if (pdfState.readingMode) readerStored.current.toRenderSettings().background else null,
+            contentColor = if (pdfState.readingMode) readerStored.current.toRenderSettings().textColor else null,
         )
     }
 }

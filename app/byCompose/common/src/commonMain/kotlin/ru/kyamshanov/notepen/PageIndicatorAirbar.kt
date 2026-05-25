@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
@@ -44,6 +45,10 @@ import ru.kyamshanov.notepen.ui.glass.GlassSurface
  * @param totalPages Total page count.
  * @param onNavigateToPage Called with a 0-based page index on confirmation.
  *   Pass `null` to render a non-interactive indicator.
+ * @param containerColor Glass tint; `null` keeps the default [GlassSurface] look.
+ *   Used to repaint the airbar under the active reader theme.
+ * @param contentColor Text colour; `null` keeps `onSurface`. Pairs with
+ *   [containerColor] for reader-theme tinting.
  */
 @Composable
 fun PageIndicatorAirbar(
@@ -51,10 +56,14 @@ fun PageIndicatorAirbar(
     totalPages: Int,
     onNavigateToPage: ((Int) -> Unit)? = null,
     modifier: Modifier = Modifier,
+    containerColor: Color? = null,
+    contentColor: Color? = null,
 ) {
+    val textColor = contentColor ?: MaterialTheme.colorScheme.onSurface
     GlassSurface(
         modifier = modifier,
         shape = RoundedCornerShape(AIRBAR_CORNER_RADIUS),
+        tint = containerColor ?: MaterialTheme.colorScheme.surface,
     ) {
         Row(
             modifier =
@@ -67,25 +76,26 @@ fun PageIndicatorAirbar(
             Text(
                 text = "Страница ",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = textColor,
             )
             if (onNavigateToPage != null) {
                 EditablePageNumber(
                     currentPage = currentPage,
                     totalPages = totalPages,
                     onNavigateToPage = onNavigateToPage,
+                    contentColor = textColor,
                 )
             } else {
                 Text(
                     text = currentPage.toString(),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    color = textColor,
                 )
             }
             Text(
                 text = " / $totalPages",
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = textColor,
             )
         }
     }
@@ -96,6 +106,7 @@ private fun EditablePageNumber(
     currentPage: Int,
     totalPages: Int,
     onNavigateToPage: (Int) -> Unit,
+    contentColor: Color,
 ) {
     var editing by remember { mutableStateOf(false) }
     var fieldValue by remember { mutableStateOf(TextFieldValue(currentPage.toString())) }
@@ -134,7 +145,7 @@ private fun EditablePageNumber(
                 },
                 textStyle =
                     MaterialTheme.typography.labelLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
+                        color = contentColor,
                     ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 singleLine = true,

@@ -52,6 +52,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
+import ru.kyamshanov.notepen.RailOrientation
+import ru.kyamshanov.notepen.fadingEdges
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
@@ -245,14 +247,17 @@ private fun CollapsedPill(
             )
         }
         LazyRow(
-            modifier = Modifier.weight(1f, fill = false),
+            modifier =
+                Modifier
+                    .weight(1f, fill = false)
+                    .fadingEdges(RailOrientation.HORIZONTAL, READER_WHEEL_FADE_EDGE),
             state = listState,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically,
             contentPadding = PaddingValues(horizontal = 4.dp),
         ) {
             itemsIndexed(elements, key = { _, e -> e.key }) { index, element ->
-                Box(Modifier.wheelItem(listState, index)) {
+                Box(Modifier.wheelItem(listState, index, RailOrientation.HORIZONTAL)) {
                     when (element) {
                         is ReaderWheelElement.Preset ->
                             PresetWheelChip(
@@ -807,6 +812,9 @@ private val AIRBAR_CHIP_RADIUS = 16.dp
 private val AIRBAR_MAX_WIDTH = 560.dp
 private val AIRBAR_SHEET_MAX_HEIGHT = 380.dp
 private val AIRBAR_BOTTOM_PADDING = 16.dp
+
+/** Ширина растворяющей кромки колеса пресетов: плашки у краёв исчезают, а не обрезаются. */
+private val READER_WHEEL_FADE_EDGE = 32.dp
 private const val AIRBAR_ALPHA = 0.92f
 private const val AIRBAR_SHEET_ALPHA = 0.96f
 

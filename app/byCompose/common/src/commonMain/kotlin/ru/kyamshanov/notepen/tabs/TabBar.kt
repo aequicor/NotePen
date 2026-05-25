@@ -94,6 +94,19 @@ fun TabBar(
      */
     onClosePanel: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /**
+     * Glass tint of the strip; `null` keeps the default `surfaceContainerLow`.
+     * The editor passes the active reader-theme background so the tab strip
+     * blends with the reader chrome in reading mode.
+     */
+    tint: Color? = null,
+    /**
+     * Color for tab labels / close icons / the active-chip highlight; `null`
+     * keeps the default Material scheme. The editor passes the active
+     * reader-theme text color in reading mode so tab labels stay legible on a
+     * dark (or otherwise themed) reader background.
+     */
+    contentColor: Color? = null,
 ) {
     val titleBarInteraction = LocalTitleBarInteraction.current
     val startInset = LocalTitleBarStartInset.current
@@ -102,7 +115,7 @@ fun TabBar(
     GlassSurface(
         modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
         shape = RectangleShape,
-        tint = MaterialTheme.colorScheme.surfaceContainerLow,
+        tint = tint ?: MaterialTheme.colorScheme.surfaceContainerLow,
         fillAlpha = 0.35f,
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = startInset, end = endInset)) {
@@ -161,6 +174,7 @@ fun TabBar(
                             onNewTab = { onAddTab(side) },
                             onOpenInNewPanel = onOpenInNewPanel?.let { cb -> { cb(tab.id) } },
                             onClosePanel = onClosePanel,
+                            contentColor = contentColor,
                             modifier = Modifier.width(tabWidth),
                         )
                     }
@@ -174,7 +188,9 @@ fun TabBar(
                 Icon(
                     imageVector = Icons.Default.Add,
                     contentDescription = "Открыть PDF в новой вкладке",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // В режиме чтения «+» красится под тему ридера вместе с
+                    // подписями вкладок, иначе тёмная иконка теряется на тёмной полосе.
+                    tint = contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }
@@ -193,19 +209,27 @@ private fun TabChip(
     onOpenInNewPanel: (() -> Unit)?,
     onClosePanel: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    /**
+     * Theme color for the label / close icon / active highlight; `null` falls
+     * back to the Material scheme (see [TabBar.contentColor]).
+     */
+    contentColor: Color? = null,
 ) {
     // "Новая вкладка" is always available, so the context menu always opens.
     val hasMenu = true
     // Active tab: subtle highlight that lets the outer glass bar show through.
     // Inactive tab: fully transparent — the glass bar background is the visual context.
+    // With a reader-theme [contentColor] the highlight is derived from it (a faint
+    // wash of the text color) so it reads against any reader background; otherwise
+    // the Material `secondaryContainer` is used unchanged.
     val chipBackground: Color =
-        if (isActive) {
-            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
-        } else {
-            Color.Transparent
+        when {
+            !isActive -> Color.Transparent
+            contentColor != null -> contentColor.copy(alpha = 0.14f)
+            else -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
         }
-    val contentColor: Color =
-        if (isActive) {
+    val labelColor: Color =
+        contentColor ?: if (isActive) {
             MaterialTheme.colorScheme.onSecondaryContainer
         } else {
             MaterialTheme.colorScheme.onSurfaceVariant
@@ -268,7 +292,7 @@ private fun TabChip(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Spacer(modifier = Modifier.width(TAB_CLOSE_SLOT))
-            CompositionLocalProvider(LocalContentColor provides contentColor) {
+            CompositionLocalProvider(LocalContentColor provides labelColor) {
                 Text(
                     text = tab.displayName,
                     style = MaterialTheme.typography.bodyMedium,
@@ -286,7 +310,7 @@ private fun TabChip(
                     Icon(
                         imageVector = Icons.Default.Close,
                         contentDescription = "Закрыть вкладку ${tab.displayName}",
-                        tint = contentColor,
+                        tint = labelColor,
                         modifier = Modifier.size(16.dp),
                     )
                 }

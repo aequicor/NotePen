@@ -222,7 +222,9 @@ fun main(args: Array<String>) {
         )
     val availabilityChecker = FileAvailabilityCheckerDesktop()
     val thumbnailRepo = ThumbnailRepositoryDesktop()
-    val thumbnailGenerator = PdfThumbnailGeneratorDesktop()
+    // Эскиз книги (EPUB/FB2/комикс) строится по её PDF-версии — конвертируем тем
+    // же кешом, что и при открытии, иначе loadPDF падает на сыром ebook'е.
+    val thumbnailGenerator = PdfThumbnailGeneratorDesktop(converter = ebookConverter, ioDispatcher = Dispatchers.IO)
 
     val peerServer = KtorPeerServer(selfInfo = selfInfo, ioDispatcher = Dispatchers.IO)
     val serviceRegistrar = JmDnsServiceRegistrar()

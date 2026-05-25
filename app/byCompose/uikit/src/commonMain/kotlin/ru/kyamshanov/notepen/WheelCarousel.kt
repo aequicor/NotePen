@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -27,10 +28,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -38,6 +44,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * «Барабан»/wheel-эффект как в пикере часов: масштабирует и притеняет элемент
@@ -49,9 +56,16 @@ import kotlin.math.abs
  * прокрутка в Compose реализована сдвигом слоя, поэтому `onGloballyPositioned`
  * детей при скролле не дёргается, и эффект был бы статичным. `layoutInfo` —
  * snapshot-state, обновляется каждый кадр прокрутки, так что чтение его внутри
- * `graphicsLayer` пересчитывает трансформу на лету.
+ * `graphicsLayer`/`layout` пересчитывает трансформу и след на лету.
  *
- * Эффект чисто отрисовочный (`graphicsLayer`) — layout/замеры/снап не меняются.
+ * Уменьшается не только рисунок (`graphicsLayer`), но и СЛЕД элемента по главной
+ * оси (`layout`): слоту в Lazy-списке докладывается `mainAxisSize * scale`, а
+ * ребёнок центрируется в нём. Поэтому крайние элементы не оставляют пустого
+ * полноразмерного зазора — `LazyRow`/`LazyColumn` подтягивает соседей внутрь, и
+ * рисунок ровно заполняет свой ужатый слот (тот же `scale` из [wheelItemFalloff]
+ * управляет и следом, и визуальным масштабом, так что в покое они совпадают).
+ * Затухание сосредоточено в узкой кромочной полосе ([edgeBand]) — в середине
+ * элементы полноразмерны и зазоры не «гуляют».
  *
  * @param index индекс ЭТОГО элемента в [listState] (в т.ч. trailing-кнопки).
  * Затухание привязано к возможности скролла: элемент тускнеет/уменьшается только
@@ -59,43 +73,150 @@ import kotlin.math.abs
  * всё помещается и скролл невозможен) крайний элемент остаётся полного размера —
  * как у настоящего барабана, чьи концы упираются в стоп.
  *
- * @param falloffPx расстояние (px) от центра, на котором масштаб достигает
- *   [minScale]. `<= 0` → половина видимого размера вьюпорта (крайние у кромки).
+ * @param orientation ось прокрутки списка: вдоль неё ужимается след элемента.
+ *   Поперечная ось не меняется. `CollapsedPill`/горизонтальные полосы — [RailOrientation.HORIZONTAL].
+ * @param falloffPx расстояние (px) от центра, на котором эффект достигает максимума.
+ *   `<= 0` → половина видимого размера вьюпорта (крайние у кромки).
+ * @param minAlpha непрозрачность элемента на краю. По умолчанию `0` — уезжающий
+ *   за кромку элемент исчезает полностью, без обрезанного «половинчатого» тайла.
+ * @param edgeBand доля [falloffPx] у самой кромки, на которой эффект нарастает
+ *   `0 → 1`; до неё элемент полноразмерный. Меньше → резче и ближе к краю.
  */
 public fun Modifier.wheelItem(
     listState: LazyListState,
     index: Int,
+    orientation: RailOrientation = RailOrientation.HORIZONTAL,
     falloffPx: Float = 0f,
     minScale: Float = 0.6f,
-    minAlpha: Float = 0.4f,
-): Modifier = this.graphicsLayer {
-    val info = listState.layoutInfo
-    val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return@graphicsLayer
-    val viewportCenter = (info.viewportStartOffset + info.viewportEndOffset) / 2f
+    minAlpha: Float = 0f,
+    edgeBand: Float = 0.35f,
+): Modifier =
+    this
+        // След по главной оси ужимается тем же `scale`, что и визуальный масштаб
+        // ниже: слоту докладывается уменьшенный размер, ребёнок центрируется —
+        // соседи подтягиваются, пустого полноразмерного зазора у кромки нет.
+        .layout { measurable, constraints ->
+            val placeable = measurable.measure(constraints)
+            val t = wheelItemFalloff(listState.layoutInfo, index, falloffPx, edgeBand) ?: 0f
+            val scale = lerp(1f, minScale, t)
+            if (orientation == RailOrientation.VERTICAL) {
+                val h = (placeable.height * scale).roundToInt()
+                layout(placeable.width, h) {
+                    placeable.placeRelative(0, (h - placeable.height) / 2)
+                }
+            } else {
+                val w = (placeable.width * scale).roundToInt()
+                layout(w, placeable.height) {
+                    placeable.placeRelative((w - placeable.width) / 2, 0)
+                }
+            }
+        }.graphicsLayer {
+            val t = wheelItemFalloff(listState.layoutInfo, index, falloffPx, edgeBand) ?: return@graphicsLayer
+            val scale = lerp(1f, minScale, t)
+            scaleX = scale
+            scaleY = scale
+            alpha = lerp(1f, minAlpha, t)
+        }
+
+/**
+ * Доля «отдаления» элемента `[0..1]`: `0` пока его центр в середине вьюпорта
+ * (полный размер/непрозрачность), плавно → `1` по мере ухода центра в кромочную
+ * полосу [edgeBand] со стороны, в которую ещё есть запас прокрутки. Чистая
+ * функция от [layoutInfo] — общий источник для масштаба и альфы [wheelItem].
+ *
+ * `null`, если элемент не виден или вьюпорт вырожден (трансформацию не применяем).
+ *
+ * @param falloffPx см. [wheelItem]; `<= 0` → половина видимого размера вьюпорта.
+ * @param edgeBand см. [wheelItem]: ширина кромочной полосы (доля [falloffPx]),
+ *   только внутри которой геометрическая дистанция переводится в эффект.
+ */
+internal fun wheelItemFalloff(
+    layoutInfo: LazyListLayoutInfo,
+    index: Int,
+    falloffPx: Float,
+    edgeBand: Float = 0.35f,
+): Float? {
+    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
+    val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
     val itemCenter = item.offset + item.size / 2f
-    val falloff = (if (falloffPx > 0f) falloffPx else (info.viewportEndOffset - info.viewportStartOffset) / 2f)
-    if (falloff <= 0f) return@graphicsLayer
+    val falloff = if (falloffPx > 0f) falloffPx else (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f
+    if (falloff <= 0f) return null
     val raw = (abs(itemCenter - viewportCenter) / falloff).coerceIn(0f, 1f)
+
+    // Эффект только в кромочной полосе: до неё `raw` отображается в 0 (полный
+    // размер), внутри — нарастает 0→1 со сглаживанием (smoothstep), чтобы не было
+    // резкого скачка масштаба на въезде в полосу.
+    val band = edgeBand.coerceIn(0.01f, 1f)
+    val inBand = ((raw - (1f - band)) / band).coerceIn(0f, 1f)
+    val eased = inBand * inBand * (3f - 2f * inBand)
 
     // Сколько контента скрыто за кромкой со стороны этого элемента — это и есть
     // запас прокрутки в его сторону. Нет запаса → не затемняем (элемент «упёрся»).
-    val hiddenOnSide = if (itemCenter >= viewportCenter) {
-        info.visibleItemsInfo.firstOrNull { it.index == info.totalItemsCount - 1 }
-            ?.let { (it.offset + it.size - info.viewportEndOffset).coerceAtLeast(0).toFloat() }
-            ?: falloff
-    } else {
-        info.visibleItemsInfo.firstOrNull { it.index == 0 }
-            ?.let { (info.viewportStartOffset - it.offset).coerceAtLeast(0).toFloat() }
-            ?: falloff
-    }
+    val hiddenOnSide =
+        if (itemCenter >= viewportCenter) {
+            layoutInfo.visibleItemsInfo.firstOrNull { it.index == layoutInfo.totalItemsCount - 1 }
+                ?.let { (it.offset + it.size - layoutInfo.viewportEndOffset).coerceAtLeast(0).toFloat() }
+                ?: falloff
+        } else {
+            layoutInfo.visibleItemsInfo.firstOrNull { it.index == 0 }
+                ?.let { (layoutInfo.viewportStartOffset - it.offset).coerceAtLeast(0).toFloat() }
+                ?: falloff
+        }
     val sideFactor = (hiddenOnSide / falloff).coerceIn(0f, 1f)
-
-    val t = raw * sideFactor
-    val scale = lerp(1f, minScale, t)
-    scaleX = scale
-    scaleY = scale
-    alpha = lerp(1f, minAlpha, t)
+    return eased * sideFactor
 }
+
+/**
+ * Draws [content] with its leading and trailing [edgeWidth]-px bands faded to
+ * fully transparent along [orientation]'s scroll axis, so items scrolling past
+ * either end of a [LazyRow]/[LazyColumn] dissolve smoothly instead of being
+ * hard-clipped to half-tiles at the viewport edge.
+ *
+ * Implemented as an offscreen layer masked by a `DstIn` gradient: the content is
+ * rendered into its own buffer ([CompositingStrategy.Offscreen]) and then
+ * multiplied by an alpha gradient that is `0` at each edge and `1` across the
+ * middle. `DstIn` keeps the destination (content) only where the source (the
+ * gradient) is opaque, fading the edges to nothing. The offscreen layer is
+ * required: without it `DstIn` would blend against whatever is behind the strip
+ * and erase it instead of just the content.
+ *
+ * The cross-axis is untouched. A `0` or negative [edgeWidth] is a no-op.
+ */
+public fun Modifier.fadingEdges(
+    orientation: RailOrientation,
+    edgeWidth: Dp,
+): Modifier =
+    if (edgeWidth <= 0.dp) {
+        this
+    } else {
+        this
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                val edge = edgeWidth.toPx()
+                val mainAxis = if (orientation == RailOrientation.VERTICAL) size.height else size.width
+                // Доля главной оси, занятая каждой кромкой; на коротких полосах
+                // ограничиваем половиной, чтобы кромки не перекрылись.
+                val fraction = (edge / mainAxis).coerceIn(0f, 0.5f)
+                val brush =
+                    if (orientation == RailOrientation.VERTICAL) {
+                        Brush.verticalGradient(
+                            0f to Color.Transparent,
+                            fraction to Color.Black,
+                            (1f - fraction) to Color.Black,
+                            1f to Color.Transparent,
+                        )
+                    } else {
+                        Brush.horizontalGradient(
+                            0f to Color.Transparent,
+                            fraction to Color.Black,
+                            (1f - fraction) to Color.Black,
+                            1f to Color.Transparent,
+                        )
+                    }
+                drawRect(brush = brush, blendMode = BlendMode.DstIn)
+            }
+    }
 
 /**
  * One entry in a [WheelStrip]: a stable [key] and the composable [content] drawn
@@ -122,13 +243,21 @@ public class WheelEntry(
  * scroll axis so everything fits on a phone where a fixed strip would overflow.
  * The strip sizes itself to its content and is centred in the available space;
  * once the content would exceed it, the strip caps at the available size and
- * scrolls. The first/last entries therefore sit at the dimmed edges by design.
+ * scrolls. Entry slots stay full-size with even gaps — only the rendered icon
+ * scales/fades near the ends ([wheelItem]) and a fading-edge mask
+ * ([fadingEdges]) dissolves whatever crosses either end, so no half-clipped
+ * tile is ever shown.
  *
  * @param crossAxisSize Fixed size across the scroll axis (height for a
  *   horizontal strip, width for a vertical one). Pinned so the strip's thickness
  *   stays constant regardless of which entries are currently on-screen — a lazy
  *   list otherwise measures only visible items and the bar would resize (and
  *   shift neighbours) as the tallest entry scrolls out of view.
+ * @param minAlpha edge opacity of the [wheelItem] falloff; `0` (default) lets an
+ *   item fully vanish before it would clip at the viewport edge.
+ * @param fadeEdgeWidth width of the leading/trailing fade band applied to the
+ *   whole strip (see [fadingEdges]); defaults to one [crossAxisSize] (≈ one
+ *   tile). `0.dp` disables the mask.
  * @param selectedKey key of the entry to mark as selected. A single circular
  *   indicator is drawn behind that entry and physically slides to its position
  *   when the selection changes (and follows the entry while scrolling). Pass
@@ -145,7 +274,8 @@ public fun WheelStrip(
     edgePadding: Dp = 4.dp,
     falloff: Dp = 0.dp,
     minScale: Float = 0.6f,
-    minAlpha: Float = 0.4f,
+    minAlpha: Float = 0f,
+    fadeEdgeWidth: Dp = crossAxisSize,
     selectedKey: Any? = null,
     indicatorColor: Color = MaterialTheme.colorScheme.primaryContainer,
     indicatorSize: Dp = 40.dp,
@@ -182,16 +312,18 @@ public fun WheelStrip(
         targetValue = if (selectedCenter != null) 1f else 0f,
         label = "wheelIndicatorAlpha",
     )
-    val indicatorModifier = Modifier.drawBehind {
-        if (indicatorAlpha <= 0f) return@drawBehind
-        val c = animCenter.value
-        val center = if (orientation == RailOrientation.VERTICAL) {
-            Offset(size.width / 2f, c)
-        } else {
-            Offset(c, size.height / 2f)
+    val indicatorModifier =
+        Modifier.drawBehind {
+            if (indicatorAlpha <= 0f) return@drawBehind
+            val c = animCenter.value
+            val center =
+                if (orientation == RailOrientation.VERTICAL) {
+                    Offset(size.width / 2f, c)
+                } else {
+                    Offset(c, size.height / 2f)
+                }
+            drawCircle(color = indicatorColor, radius = indicatorRadiusPx, center = center, alpha = indicatorAlpha)
         }
-        drawCircle(color = indicatorColor, radius = indicatorRadiusPx, center = center, alpha = indicatorAlpha)
-    }
     val onListPositioned: (LayoutCoordinates) -> Unit = { coords ->
         val origin = coords.positionInRoot()
         listOriginMain = if (orientation == RailOrientation.VERTICAL) origin.y else origin.x
@@ -199,54 +331,65 @@ public fun WheelStrip(
 
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val itemBox: @Composable LazyItemScope.(Int, WheelEntry) -> Unit = { index, entry ->
-            val reportModifier = if (index == selectedIndex) {
-                Modifier.onGloballyPositioned { coords ->
-                    val pos = coords.positionInRoot()
-                    selectedCenterRootMain = if (orientation == RailOrientation.VERTICAL) {
-                        pos.y + coords.size.height / 2f
-                    } else {
-                        pos.x + coords.size.width / 2f
+            val reportModifier =
+                if (index == selectedIndex) {
+                    Modifier.onGloballyPositioned { coords ->
+                        val pos = coords.positionInRoot()
+                        selectedCenterRootMain =
+                            if (orientation == RailOrientation.VERTICAL) {
+                                pos.y + coords.size.height / 2f
+                            } else {
+                                pos.x + coords.size.width / 2f
+                            }
                     }
+                } else {
+                    Modifier
                 }
-            } else {
-                Modifier
-            }
             Box(
                 Modifier
                     .animateItem()
-                    .wheelItem(state, index, falloffPx, minScale, minAlpha)
+                    // Масштаб/альфа + ужатый след по главной оси (соседи
+                    // подтягиваются). report-модификатор последним: индикатор
+                    // отслеживает фактические (уже ужатые) границы элемента.
+                    .wheelItem(state, index, orientation, falloffPx, minScale, minAlpha)
                     .then(reportModifier),
             ) { entry.content() }
         }
         when (orientation) {
-            RailOrientation.HORIZONTAL -> LazyRow(
-                modifier = Modifier
-                    .height(crossAxisSize)
-                    .width(naturalLength.coerceAtMost(maxWidth))
-                    .then(indicatorModifier)
-                    .animateContentSize()
-                    .onGloballyPositioned(onListPositioned),
-                state = state,
-                horizontalArrangement = Arrangement.spacedBy(gap),
-                verticalAlignment = Alignment.CenterVertically,
-                contentPadding = PaddingValues(horizontal = edgePadding),
-            ) {
-                itemsIndexed(entries, key = { _, e -> e.key }) { index, entry -> itemBox(index, entry) }
-            }
-            RailOrientation.VERTICAL -> LazyColumn(
-                modifier = Modifier
-                    .width(crossAxisSize)
-                    .height(naturalLength.coerceAtMost(maxHeight))
-                    .then(indicatorModifier)
-                    .animateContentSize()
-                    .onGloballyPositioned(onListPositioned),
-                state = state,
-                verticalArrangement = Arrangement.spacedBy(gap),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                contentPadding = PaddingValues(vertical = edgePadding),
-            ) {
-                itemsIndexed(entries, key = { _, e -> e.key }) { index, entry -> itemBox(index, entry) }
-            }
+            RailOrientation.HORIZONTAL ->
+                LazyRow(
+                    modifier =
+                        Modifier
+                            .height(crossAxisSize)
+                            .width(naturalLength.coerceAtMost(maxWidth))
+                            .fadingEdges(orientation, fadeEdgeWidth)
+                            .then(indicatorModifier)
+                            .animateContentSize()
+                            .onGloballyPositioned(onListPositioned),
+                    state = state,
+                    horizontalArrangement = Arrangement.spacedBy(gap),
+                    verticalAlignment = Alignment.CenterVertically,
+                    contentPadding = PaddingValues(horizontal = edgePadding),
+                ) {
+                    itemsIndexed(entries, key = { _, e -> e.key }) { index, entry -> itemBox(index, entry) }
+                }
+            RailOrientation.VERTICAL ->
+                LazyColumn(
+                    modifier =
+                        Modifier
+                            .width(crossAxisSize)
+                            .height(naturalLength.coerceAtMost(maxHeight))
+                            .fadingEdges(orientation, fadeEdgeWidth)
+                            .then(indicatorModifier)
+                            .animateContentSize()
+                            .onGloballyPositioned(onListPositioned),
+                    state = state,
+                    verticalArrangement = Arrangement.spacedBy(gap),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    contentPadding = PaddingValues(vertical = edgePadding),
+                ) {
+                    itemsIndexed(entries, key = { _, e -> e.key }) { index, entry -> itemBox(index, entry) }
+                }
         }
     }
 }

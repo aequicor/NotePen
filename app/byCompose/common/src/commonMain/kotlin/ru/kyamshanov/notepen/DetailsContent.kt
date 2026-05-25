@@ -46,7 +46,6 @@ import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.SwapVert
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -392,10 +391,52 @@ fun DetailsContent(
     val magnifierEnabled = controls?.magnifierEnabled ?: false
     val showThumbnails = controls?.showThumbnails ?: false
     val showToc = controls?.showToc ?: false
+    val hasToc = controls?.hasToc ?: false
     val readingModeEnabled = controls?.readingModeEnabled ?: false
+    val readingModeAvailable = controls?.readingModeAvailable ?: true
     // В режиме чтения тап по тексту прячет инструменты и быстрые действия вместе с
     // airbar ридера (см. PanelControls.chromeHidden); повторный тап — возвращает.
     val chromeHidden = controls?.chromeHidden ?: false
+    // Цвета активной темы ридера: не null только в режиме чтения. Хром (рельса,
+    // airbar, вкладки) перекрашивается под них; null — сохраняем цвета темы.
+    val readerBackground = controls?.readerBackground
+    val readerContentColor = controls?.readerContentColor
+
+    // ---- Sync availability + status tint ----------------------------------
+    // Кнопка синхронизации живёт в колесе настроек (см. systemControlEntries) —
+    // здесь держим её доступность, состояние диалога и цвет-индикатор связи,
+    // потому что они нужны и колесу (выше по дереву), и панели/острову ниже.
+    val syncPaneEnabled = hostQrViewModel != null || clientScanViewModel != null
+    var showSyncPanel by remember { mutableStateOf(false) }
+    val syncStatusTint =
+        if (syncPaneEnabled) {
+            val hostPeers =
+                peerServer
+                    ?.connectedPeers
+                    ?.collectAsState(emptySet())
+                    ?.value
+                    ?: emptySet()
+            val hostLifecycle =
+                peerServer
+                    ?.lifecycle
+                    ?.collectAsState(ServerLifecycleState.Idle)
+                    ?.value
+            val clientHosts =
+                peerClient
+                    ?.connectedHosts
+                    ?.collectAsState(emptySet())
+                    ?.value
+                    ?: emptySet()
+            val clientStates =
+                peerClient
+                    ?.pairingStates
+                    ?.collectAsState(emptyMap())
+                    ?.value
+                    ?: emptyMap()
+            syncIndicatorTint(hostPeers, hostLifecycle, clientHosts, clientStates)
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        }
 
     // ---- Save helpers (across all panels) ---------------------------------
     val saveTab: suspend (PdfDocumentState) -> Unit = { state ->
@@ -484,10 +525,11 @@ fun DetailsContent(
     val fitWidthStartInset =
         if (isLandscape && layout.template == LayoutTemplate.FULL) {
             val sidebar =
-                if (showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true) {
-                    SIDEBAR_WIDTH
-                } else {
-                    0.dp
+                when {
+                    showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true -> SIDEBAR_WIDTH
+                    // ToC-сайдбар (шире миниатюр) тоже сдвигает контент при fit-to-width.
+                    showToc -> TOC_SIDEBAR_WIDTH
+                    else -> 0.dp
                 }
             sidebar + landscapeToolbarWidthDp + 32.dp
         } else {
@@ -675,25 +717,24 @@ fun DetailsContent(
                 .padding(top = TAB_BAR_HEIGHT + topChromeInset),
         ) {
             if (isLandscape) {
-                // When the thumbnail sidebar is open at the screen's left edge it would
-                // otherwise sit on top of the back button and tool rail; push them right
-                // by the sidebar width so they sit beside the sidebar instead of under it.
+                // When a left-edge sidebar is open it would otherwise sit on top of the
+                // back button and tool rail; push them right by the sidebar's width so
+                // they sit beside it. Both the thumbnails and the (wider) ToC sidebar
+                // anchor to the left edge, so each one shifts the chrome by its own width.
                 val railShift by animateDpAsState(
                     targetValue =
-                        if (
-                            showThumbnails &&
-                            tabSession.focusedActiveState?.pages?.isNotEmpty() == true &&
-                            focusedPanelStartXFraction(layout) == 0f
-                        ) {
-                            SIDEBAR_WIDTH
-                        } else {
-                            0.dp
+                        when {
+                            focusedPanelStartXFraction(layout) != 0f -> 0.dp
+                            showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true ->
+                                SIDEBAR_WIDTH
+                            showToc -> TOC_SIDEBAR_WIDTH
+                            else -> 0.dp
                         },
                     animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS),
                     label = "railShift",
                 )
                 AnimatedVisibility(
-                    visible = true,
+                    visible = !chromeHidden,
                     enter = slideInHorizontally { -it } + fadeIn(),
                     exit = slideOutHorizontally { -it } + fadeOut(),
                     modifier =
@@ -708,6 +749,7 @@ fun DetailsContent(
                 ) {
                     GlassSurface(
                         shape = CircleShape,
+                        tint = readerBackground ?: MaterialTheme.colorScheme.surface,
                         modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp),
                     ) {
                         Box(
@@ -721,7 +763,7 @@ fun DetailsContent(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = BACK_CONTENT_DESCRIPTION,
-                                tint = MaterialTheme.colorScheme.onSurface,
+                                tint = readerContentColor ?: MaterialTheme.colorScheme.onSurface,
                             )
                         }
                     }
@@ -781,16 +823,22 @@ fun DetailsContent(
                             },
                             showThumbnails = showThumbnails,
                             onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                            showTocButton = hasToc,
                             showToc = showToc,
                             onToggleToc = { controls?.toggleToc?.invoke() },
                             readingModeEnabled = readingModeEnabled,
+                            readingModeAvailable = readingModeAvailable,
                             onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
                             showPencilModeButton = SupportsPencilMode,
                             pencilModeEnabled = pencilModeEnabled,
                             onPencilModeChange = onPencilModeChange,
                             magnifierEnabled = magnifierEnabled,
                             onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                            showSyncButton = syncPaneEnabled,
+                            syncTint = syncStatusTint,
+                            onOpenSync = { showSyncPanel = true },
                             onOpenShortcutsSettings = { showShortcutsDialog = true },
+                            readerBackground = readerBackground,
                             onRailWidthChanged = { landscapeToolbarWidthDp = it },
                         )
                     }
@@ -832,7 +880,7 @@ fun DetailsContent(
                             .padding(top = 8.dp),
                 ) {
                     AnimatedVisibility(
-                        visible = totalPages > 0,
+                        visible = totalPages > 0 && !chromeHidden,
                         enter = slideInVertically { -it } + fadeIn(),
                         exit = slideOutVertically { -it } + fadeOut(),
                     ) {
@@ -840,6 +888,8 @@ fun DetailsContent(
                             currentPage = currentPage,
                             totalPages = totalPages,
                             onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
+                            containerColor = readerBackground,
+                            contentColor = readerContentColor,
                             modifier =
                                 Modifier.onSizeChanged {
                                     landscapePageCounterHeightDp = with(density) { it.height.toDp() }
@@ -991,32 +1041,37 @@ fun DetailsContent(
                             },
                             showThumbnails = showThumbnails,
                             onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                            showTocButton = hasToc,
                             showToc = showToc,
                             onToggleToc = { controls?.toggleToc?.invoke() },
                             readingModeEnabled = readingModeEnabled,
+                            readingModeAvailable = readingModeAvailable,
                             onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
                             showPencilModeButton = SupportsPencilMode,
                             pencilModeEnabled = pencilModeEnabled,
                             onPencilModeChange = onPencilModeChange,
                             magnifierEnabled = magnifierEnabled,
                             onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                            showSyncButton = syncPaneEnabled,
+                            syncTint = syncStatusTint,
+                            onOpenSync = { showSyncPanel = true },
                             onOpenShortcutsSettings = { showShortcutsDialog = true },
                             onBack = onBackOrCloseThumbnails,
+                            readerBackground = readerBackground,
+                            readerContentColor = readerContentColor,
                         )
                     }
                 }
             }
         }
 
-        // Floating airbar (bottom-right): the sync button, quick loupe (touch
-        // only) and the scroll-mode toggle stacked into one glass island. Each
-        // entry renders only when its feature is wired up.
-        val syncPaneEnabled = hostQrViewModel != null || clientScanViewModel != null
-        var showSyncPanel by remember { mutableStateOf(false) }
+        // Floating airbar (bottom-right): the quick loupe (touch only) and the
+        // scroll-mode toggle stacked into one glass island. The sync entry now
+        // lives in the settings wheel (see systemControlEntries); its panel and
+        // status tint are owned higher up so the wheel can reach them too.
         val showScrollModeButton = controls != null
         val airbarButtonCount =
-            (if (syncPaneEnabled) 1 else 0) +
-                (if (SupportsQuickLoupe) 1 else 0) +
+            (if (SupportsQuickLoupe) 1 else 0) +
                 (if (showScrollModeButton) 1 else 0)
         if (airbarButtonCount > 0 && !chromeHidden) {
             GlassSurface(
@@ -1033,38 +1088,6 @@ fun DetailsContent(
                     },
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (syncPaneEnabled) {
-                        val hostPeers =
-                            peerServer
-                                ?.connectedPeers
-                                ?.collectAsState(emptySet())
-                                ?.value
-                                ?: emptySet()
-                        val hostLifecycle =
-                            peerServer
-                                ?.lifecycle
-                                ?.collectAsState(ServerLifecycleState.Idle)
-                                ?.value
-                        val clientHosts =
-                            peerClient
-                                ?.connectedHosts
-                                ?.collectAsState(emptySet())
-                                ?.value
-                                ?: emptySet()
-                        val clientStates =
-                            peerClient
-                                ?.pairingStates
-                                ?.collectAsState(emptyMap())
-                                ?.value
-                                ?: emptyMap()
-                        IconButton(onClick = { showSyncPanel = true }) {
-                            Icon(
-                                imageVector = Icons.Default.Sync,
-                                contentDescription = "Синхронизация",
-                                tint = syncIndicatorTint(hostPeers, hostLifecycle, clientHosts, clientStates),
-                            )
-                        }
-                    }
                     if (SupportsQuickLoupe) {
                         val armed = controls?.quickLoupeArmed == true
                         IconButton(onClick = { controls?.toggleQuickLoupe?.invoke() }) {

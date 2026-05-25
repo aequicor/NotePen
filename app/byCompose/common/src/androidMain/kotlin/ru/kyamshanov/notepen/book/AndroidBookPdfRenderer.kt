@@ -40,6 +40,14 @@ object AndroidBookPdfRenderer {
     private const val MARGIN = 54
 
     private const val BODY_SIZE = 13f
+
+    /**
+     * Втяжка первой строки абзаца ("красная строка") — 1.5 кегля основного
+     * текста, конвенциональный книжный отступ (тот же em-множитель, что и в
+     * JVM-рендерере, для физической согласованности). Применяется только к
+     * [ContentBlock.Paragraph]; заголовки, списки, цитаты и таблицы — без неё.
+     */
+    private val PARAGRAPH_FIRST_LINE_INDENT = (BODY_SIZE * 1.5f).toInt()
     private const val BLOCKQUOTE_INDENT = 28
     private const val LIST_INDENT_STEP = 22
     private const val LINE_SPACING_MULT = 1.25f
@@ -103,7 +111,7 @@ object AndroidBookPdfRenderer {
         fun render(block: ContentBlock) {
             when (block) {
                 is ContentBlock.Heading -> heading(block.level, block.text)
-                is ContentBlock.Paragraph -> paragraph(block.text)
+                is ContentBlock.Paragraph -> paragraph(block.text, firstLineIndent = PARAGRAPH_FIRST_LINE_INDENT)
                 is ContentBlock.Blockquote -> paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
                 is ContentBlock.ListItem ->
                     paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
@@ -127,14 +135,20 @@ object AndroidBookPdfRenderer {
             cursorY += HEADING_GAP_AFTER
         }
 
+        /**
+         * @param indent сдвиг всего блока вправо (цитаты, втяжка списков)
+         * @param firstLineIndent дополнительная втяжка только первой строки
+         *   ("красная строка"); для не-абзацных блоков — 0
+         */
         fun paragraph(
             spans: RichText,
             italic: Boolean = false,
             indent: Int = 0,
+            firstLineIndent: Int = 0,
         ) {
             val typeface = Typeface.create(Typeface.SERIF, if (italic) Typeface.ITALIC else Typeface.NORMAL)
             val color = if (italic) QUOTE_COLOR else Color.BLACK
-            drawLayout(spannableOf(spans), textPaint(BODY_SIZE, typeface, color), indent)
+            drawLayout(spannableOf(spans), textPaint(BODY_SIZE, typeface, color), indent, firstLineIndent)
             cursorY += PARAGRAPH_GAP
         }
 
@@ -184,21 +198,30 @@ object AndroidBookPdfRenderer {
                 else -> null
             }
 
+        /**
+         * @param firstLineIndent втяжка только первой строки ("красная строка").
+         *   Реализуется нативно через [StaticLayout.Builder.setIndents]: массив
+         *   задаёт отступ слева по строкам, для строк за последним элементом
+         *   повторяется последний (AOSP `StaticLayout#getIndentAdjust`), поэтому
+         *   `[firstLineIndent, 0]` сдвигает и сужает только первую строку, а все
+         *   следующие — без отступа.
+         */
         private fun drawLayout(
             text: CharSequence,
             paint: TextPaint,
             indent: Int,
+            firstLineIndent: Int = 0,
         ) {
             val left = MARGIN + indent
             val width = (contentWidth - indent).coerceAtLeast(1)
-            val layout =
+            val builder =
                 StaticLayout.Builder
                     .obtain(text, 0, text.length, paint, width)
                     .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                     .setLineSpacing(0f, LINE_SPACING_MULT)
                     .setIncludePad(false)
-                    .build()
-            drawLayoutPaginated(layout, left)
+            if (firstLineIndent > 0) builder.setIndents(intArrayOf(firstLineIndent, 0), null)
+            drawLayoutPaginated(builder.build(), left)
         }
 
         private fun drawLayoutPaginated(

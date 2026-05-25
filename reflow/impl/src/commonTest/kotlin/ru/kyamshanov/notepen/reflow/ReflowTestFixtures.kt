@@ -22,7 +22,12 @@ internal fun page(
 /**
  * Раскладывает строку в глифы по символам (координаты в пунктах): пробел
  * сдвигает курсор без глифа (создавая межсловный зазор), остальные символы
- * получают прямоугольник шириной [charWidth] и высотой [fontSize].
+ * получают прямоугольник шириной [charWidth].
+ *
+ * Высота бокса — [fontSize] * [boxHeightFrac]. По умолчанию `1.0` (бокс ростом в
+ * кегль). Меньшие значения моделируют реальный `heightDir` PDFBox (высота
+ * глиф-бокса < кегля): так из бокса нельзя надёжно вывести межстрочный шаг —
+ * см. [ReflowAssemblerTest] про разрыв абзаца по baseline-to-baseline.
  *
  * [bold]/[monospace] помечают все глифы строки соответствующим начертанием —
  * чтобы проверять перенос стиля шрифта в провенанс.
@@ -35,6 +40,7 @@ internal fun line(
     charWidth: Float = 6f,
     bold: Boolean = false,
     monospace: Boolean = false,
+    boxHeightFrac: Float = 1f,
 ): List<RawGlyph> {
     var x = startX
     val glyphs = mutableListOf<RawGlyph>()
@@ -46,7 +52,7 @@ internal fun line(
         glyphs +=
             RawGlyph(
                 text = ch.toString(),
-                rect = ReflowRect(left = x, top = top, right = x + charWidth, bottom = top + fontSize),
+                rect = ReflowRect(left = x, top = top, right = x + charWidth, bottom = top + fontSize * boxHeightFrac),
                 fontSizePt = fontSize,
                 bold = bold,
                 monospace = monospace,

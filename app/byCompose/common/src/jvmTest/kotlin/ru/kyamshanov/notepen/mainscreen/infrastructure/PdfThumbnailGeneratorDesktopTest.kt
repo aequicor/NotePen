@@ -1,6 +1,8 @@
 package ru.kyamshanov.notepen.mainscreen.infrastructure
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
+import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
 import ru.kyamshanov.notepen.mainscreen.domain.exception.ThumbnailGenerationException
 import kotlin.test.Test
 import kotlin.test.assertIs
@@ -11,7 +13,7 @@ import kotlin.test.assertTrue
  * TC-44 (CC-4): пустой PDF (0 страниц) → Result.failure(ThumbnailGenerationException)
  */
 class PdfThumbnailGeneratorDesktopTest {
-    private val generator = PdfThumbnailGeneratorDesktop()
+    private val generator = PdfThumbnailGeneratorDesktop(converter = JvmEbookToPdfConverter(Dispatchers.IO))
 
     // TC-44: несуществующий файл → Result.failure с ThumbnailGenerationException
     @Test

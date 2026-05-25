@@ -1,40 +1,65 @@
 package ru.kyamshanov.notepen.book
 
+import org.apache.fontbox.ttf.TrueTypeCollection
+import org.apache.fontbox.ttf.TrueTypeFont
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
 import org.apache.pdfbox.pdmodel.common.PDRectangle
+import org.apache.pdfbox.pdmodel.font.PDFont
+import org.apache.pdfbox.pdmodel.font.PDType0Font
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory
 import java.awt.Color
-import java.awt.Font
-import java.awt.Graphics2D
-import java.awt.RenderingHints
-import java.awt.font.LineBreakMeasurer
-import java.awt.font.TextAttribute
-import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.io.File
-import java.text.AttributedString
 import javax.imageio.ImageIO
-import kotlin.math.ceil
 
 /**
  * Верстает [BookContent] в PDF на JVM.
  *
- * Текст рисуется средствами Java2D в растровые страницы (логический шрифт
- * `Serif` покрывает кириллицу без встраивания TTF), которые затем вкладываются
- * в PDF через PDFBox. Инлайн-начертание ([RichText]) переносится в
- * `AttributedString` и верстается `LineBreakMeasurer`'ом. Это сознательный
- * компромисс: в отличие от Android, на десктопе нет встроенного Unicode-шрифта
- * для векторного текста PDFBox, поэтому страницы растрируются (текст чёткий при
- * 150 DPI).
+ * Текст пишется НАСТОЯЩИМ векторным слоем через PDFBox ([PDPageContentStream]),
+ * а не растрируется: страницы остаются чёткими при любом зуме на HiDPI, а
+ * текстовый слой делает книгу доступной для reflow-чтения (см.
+ * [ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor]).
+ *
+ * Для покрытия кириллицы и латиницы встроен Unicode-засечный шрифт **PT Serif**
+ * (ParaType Free Font License — разрешает встраивание в документы и бандлинг с
+ * продуктами; перераспространяем) — он лежит JVM-ресурсом `/fonts/PTSerif.ttc`
+ * и встраивается в PDF подмножеством (subset). Четыре начертания
+ * (Regular/Bold/Italic/BoldItalic) берутся реальными гранями коллекции:
+ * PDFBox не синтезирует жирность/курсив. Моноширинный инлайн-код рисуется тем же
+ * засечным шрифтом — у стандартных PDF-шрифтов (Courier) нет кириллицы, а
+ * покрытие важнее точного начертания.
+ *
+ * Авторские шрифты книги ([BookContent.fonts]) используются для фрагмента, только
+ * если та грань целиком покрывает его глифы; иначе фрагмент остаётся на PT Serif.
+ *
+ * Координаты: PDFBox считает начало текста СНИЗУ-слева (y растёт вверх). Внутри
+ * верстка ведётся сверху-вниз в «пикселях» прежнего растра (A4 @150 dpi,
+ * [PAGE_WIDTH]×[PAGE_HEIGHT]); при выводе значения переводятся в пункты через
+ * [PT_PER_PX], а вертикаль зеркалится: `y_pt = (PAGE_HEIGHT − cursorPx) · PT_PER_PX`.
+ * Так физическая раскладка (поля, кегли, отступы) совпадает с прежней растровой.
  */
 object JvmBookPdfRenderer {
     private const val PAGE_WIDTH = 1240 // A4 @150dpi
     private const val PAGE_HEIGHT = 1754
     private const val MARGIN = 104
 
+    /**
+     * Множитель перевода «пикселей» прежнего растра (150 dpi) в пункты PDF
+     * (72 dpi): `72/150`. A4 шириной 1240 px ↦ 595.2 pt ≈ [PDRectangle.A4].
+     */
+    private const val PT_PER_PX = 72f / 150f
+
     private const val BODY_SIZE = 30f
+
+    /**
+     * Втяжка первой строки абзаца ("красная строка") — 1.5 кегля основного
+     * текста, конвенциональный книжный отступ. Применяется только к
+     * [ContentBlock.Paragraph]; заголовки, списки, цитаты и таблицы рисуются без
+     * неё (см. [PageComposer.render]).
+     */
+    private val PARAGRAPH_FIRST_LINE_INDENT = (BODY_SIZE * 1.5f).toInt()
     private const val BLOCKQUOTE_INDENT = 64
     private const val LIST_INDENT_STEP = 40
     private const val LINE_FACTOR = 1.42f
@@ -44,9 +69,27 @@ object JvmBookPdfRenderer {
     private const val RULE_GAP = 26
     private const val IMAGE_GAP = 22
 
+    /** Доля кегля для смещения и уменьшения над-/подстрочных индексов. */
+    private const val SCRIPT_SCALE = 0.6f
+    private const val SUPERSCRIPT_RISE = 0.33f
+    private const val SUBSCRIPT_RISE = -0.16f
+    private const val RULE_LINE_WIDTH_PX = 2f
+    private const val UNDERLINE_OFFSET_PX = 4f
+    private const val UNDERLINE_WIDTH_PX = 1.5f
+
     private val HEADING_SIZES = floatArrayOf(58f, 48f, 42f, 38f, 34f, 32f)
     private val LINK_COLOR = Color(0x1A, 0x0D, 0xAB)
     private val QUOTE_COLOR = Color(0x44, 0x44, 0x44)
+    private val RULE_COLOR = Color(0xBB, 0xBB, 0xBB)
+
+    /** Имя ресурса со встроенным шрифтом PT Serif (TrueType Collection). */
+    private const val FONT_RESOURCE = "/fonts/PTSerif.ttc"
+
+    // PostScript-имена граней внутри PTSerif.ttc (подтверждены при сборке шрифта).
+    private const val FACE_REGULAR = "PTSerif-Regular"
+    private const val FACE_BOLD = "PTSerif-Bold"
+    private const val FACE_ITALIC = "PTSerif-Italic"
+    private const val FACE_BOLD_ITALIC = "PTSerif-BoldItalic"
 
     /**
      * @param book книга для верстки
@@ -56,56 +99,150 @@ object JvmBookPdfRenderer {
         book: BookContent,
         output: File,
     ): List<TocEntry> {
-        val composer = PageComposer(loadFonts(book.fonts))
-        book.metadata.title
-            ?.takeIf { it.isNotBlank() }
-            ?.let { composer.heading(level = 1, text = it) }
-        book.metadata.author
-            ?.takeIf { it.isNotBlank() }
-            ?.let { composer.paragraph(listOf(InlineSpan(it)), italic = true) }
-        for (block in book.blocks) composer.render(block)
-        val pages = composer.finish()
-
         PDDocument().use { doc ->
-            for (image in pages) {
-                val page = PDPage(PDRectangle.A4)
-                doc.addPage(page)
-                val xObject = LosslessFactory.createFromImage(doc, image)
-                PDPageContentStream(doc, page).use { stream ->
-                    stream.drawImage(xObject, 0f, 0f, PDRectangle.A4.width, PDRectangle.A4.height)
-                }
+            // Коллекция граней PT Serif должна оставаться открытой до doc.save():
+            // subset граней встраивается именно при сохранении (PDFBox не закрывает
+            // TrueTypeFont, загруженный из коллекции, — это наша ответственность).
+            openBundledFonts(doc).use { bundled ->
+                val composer =
+                    PageComposer(
+                        doc = doc,
+                        bundled = bundled,
+                        bookFonts = loadBookFonts(doc, book.fonts),
+                    )
+                book.metadata.title
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { composer.heading(level = 1, text = it) }
+                book.metadata.author
+                    ?.takeIf { it.isNotBlank() }
+                    ?.let { composer.paragraph(listOf(InlineSpan(it)), italic = true) }
+                for (block in book.blocks) composer.render(block)
+                composer.finish()
+
+                if (doc.numberOfPages == 0) doc.addPage(PDPage(PDRectangle.A4))
+                output.parentFile?.mkdirs()
+                doc.save(output)
+                return composer.outline()
             }
-            if (doc.numberOfPages == 0) doc.addPage(PDPage(PDRectangle.A4))
-            output.parentFile?.mkdirs()
-            doc.save(output)
         }
-        return composer.outline()
     }
 
-    /** Загружает встроенные шрифты книги; нечитаемые (например, WOFF) пропускает. */
-    private fun loadFonts(fonts: List<ByteArray>): List<Font> =
-        fonts.mapNotNull { bytes ->
-            runCatching { Font.createFont(Font.TRUETYPE_FONT, ByteArrayInputStream(bytes)) }.getOrNull()
+    /**
+     * Грань шрифта: встраиваемый [PDFont] для рисования и [TrueTypeFont] (или
+     * `null` для нетипизированных фолбэков) для проверки покрытия глифов до
+     * вызова `showText` — иначе [PDType0Font.encode] бросит исключение на
+     * непокрытом символе.
+     */
+    private class Face(
+        val font: PDFont,
+        private val ttf: TrueTypeFont?,
+    ) {
+        /** Покрывает ли грань кодовую точку [codePoint] (есть глиф в unicode-cmap). */
+        fun covers(codePoint: Int): Boolean {
+            val lookup = ttf?.unicodeCmapLookup ?: return false
+            return lookup.getGlyphId(codePoint) != 0
+        }
+    }
+
+    /** Четыре начертания встроенного PT Serif, удерживающие открытую коллекцию. */
+    private class BundledFonts(
+        private val collection: TrueTypeCollection,
+        val regular: Face,
+        val bold: Face,
+        val italic: Face,
+        val boldItalic: Face,
+    ) : AutoCloseable {
+        /** Грань PT Serif под запрошенное начертание. */
+        fun face(
+            bold: Boolean,
+            italic: Boolean,
+        ): Face =
+            when {
+                bold && italic -> boldItalic
+                bold -> this.bold
+                italic -> this.italic
+                else -> regular
+            }
+
+        override fun close() {
+            collection.close()
+        }
+    }
+
+    /** Открывает встроенный PT Serif и загружает 4 грани как встраиваемые subset-шрифты. */
+    private fun openBundledFonts(doc: PDDocument): BundledFonts {
+        val stream =
+            requireNotNull(JvmBookPdfRenderer::class.java.getResourceAsStream(FONT_RESOURCE)) {
+                "Bundled font resource missing: $FONT_RESOURCE"
+            }
+        val collection = TrueTypeCollection(stream)
+
+        fun face(name: String): Face {
+            val ttf = collection.getFontByName(name)
+            return Face(font = PDType0Font.load(doc, ttf, true), ttf = ttf)
         }
 
-    /** Накопитель страниц с курсором верстки сверху вниз. */
+        // Регуляр обязателен и обязан покрывать кириллицу — иначе верстка молча
+        // потеряла бы текст; падаем явно.
+        val regular = face(FACE_REGULAR)
+        require(regular.covers(CYRILLIC_PROBE)) {
+            "Bundled font $FONT_RESOURCE does not cover Cyrillic"
+        }
+        return BundledFonts(
+            collection = collection,
+            regular = regular,
+            bold = face(FACE_BOLD),
+            italic = face(FACE_ITALIC),
+            boldItalic = face(FACE_BOLD_ITALIC),
+        )
+    }
+
+    /**
+     * Загружает встроенные шрифты книги как встраиваемые [PDType0Font]; нечитаемые
+     * (например, WOFF) и не-TrueType пропускает. Каждая грань удерживает свой
+     * [TrueTypeFont] для проверки покрытия.
+     */
+    private fun loadBookFonts(
+        doc: PDDocument,
+        fonts: List<ByteArray>,
+    ): List<Face> =
+        fonts.mapNotNull { bytes ->
+            runCatching {
+                val ttf = org.apache.fontbox.ttf.TTFParser().parse(org.apache.pdfbox.io.RandomAccessReadBuffer(bytes))
+                Face(font = PDType0Font.load(doc, ttf, true), ttf = ttf)
+            }.getOrNull()
+        }
+
+    /** Одно «слово» с пробельным хвостом и оформлением — единица переноса строк. */
+    private data class StyledChunk(
+        val text: String,
+        val face: Face,
+        val color: Color,
+        val size: Float,
+        val rise: Float,
+        val underline: Boolean,
+    )
+
+    /** Накопитель страниц с курсором верстки сверху вниз (в «пикселях» A4 @150dpi). */
     private class PageComposer(
-        private val embeddedFonts: List<Font>,
+        private val doc: PDDocument,
+        private val bundled: BundledFonts,
+        private val bookFonts: List<Face>,
     ) {
-        private val pages = mutableListOf<BufferedImage>()
         private val tocEntries = mutableListOf<TocEntry>()
         private val contentBottom = PAGE_HEIGHT - MARGIN
         private val contentWidth = PAGE_WIDTH - 2 * MARGIN
-        private lateinit var graphics: Graphics2D
+        private var pageIndex = -1
+        private var stream: PDPageContentStream? = null
         private var cursorY = MARGIN
 
         init {
             newPage()
         }
 
-        fun finish(): List<BufferedImage> {
-            graphics.dispose()
-            return pages
+        fun finish() {
+            stream?.close()
+            stream = null
         }
 
         fun outline(): List<TocEntry> = tocEntries.toList()
@@ -113,7 +250,7 @@ object JvmBookPdfRenderer {
         fun render(block: ContentBlock) {
             when (block) {
                 is ContentBlock.Heading -> heading(block.level, block.text)
-                is ContentBlock.Paragraph -> paragraph(block.text)
+                is ContentBlock.Paragraph -> paragraph(block.text, firstLineIndent = PARAGRAPH_FIRST_LINE_INDENT)
                 is ContentBlock.Blockquote -> paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
                 is ContentBlock.ListItem ->
                     paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
@@ -132,148 +269,212 @@ object JvmBookPdfRenderer {
             val size = HEADING_SIZES[(level - 1).coerceIn(0, HEADING_SIZES.lastIndex)]
             val lineHeight = (size * LINE_FACTOR).toInt()
             if (cursorY + lineHeight > contentBottom) newPage()
-            tocEntries.add(TocEntry(level = level, title = text, pageIndex = pages.lastIndex))
-            drawText(text, Font(Font.SERIF, Font.BOLD, size.toInt()), Color.BLACK, indent = 0)
+            tocEntries.add(TocEntry(level = level, title = text, pageIndex = pageIndex))
+            val chunks = chunksFor(listOf(InlineSpan(text, bold = true)), size, Color.BLACK, italicBase = false)
+            drawChunks(chunks, indent = 0, firstLineIndent = 0)
             cursorY += HEADING_GAP_AFTER
         }
 
+        /**
+         * @param indent сдвиг всего блока вправо (цитаты, втяжка списков)
+         * @param firstLineIndent дополнительная втяжка только первой строки
+         *   ("красная строка"); для не-абзацных блоков — 0
+         */
         fun paragraph(
             spans: RichText,
             italic: Boolean = false,
             indent: Int = 0,
+            firstLineIndent: Int = 0,
         ) {
             val color = if (italic) QUOTE_COLOR else Color.BLACK
-            drawRich(spans, BODY_SIZE, color, indent, italicBase = italic)
+            val chunks = chunksFor(spans, BODY_SIZE, color, italicBase = italic)
+            drawChunks(chunks, indent, firstLineIndent)
             cursorY += PARAGRAPH_GAP
         }
 
-        /** Однострочный текст одного начертания (заголовки): простой перенос по словам. */
-        private fun drawText(
-            text: String,
-            font: Font,
-            color: Color,
-            indent: Int,
-        ) {
-            graphics.font = font
-            graphics.color = color
-            val metrics = graphics.fontMetrics
-            val lineHeight = (font.size * LINE_FACTOR).toInt()
-            val left = MARGIN + indent
-            val maxWidth = contentWidth - indent
-            for (line in wrap(text, maxWidth)) {
-                if (cursorY + lineHeight > contentBottom) newPage()
-                graphics.font = font
-                graphics.color = color
-                graphics.drawString(line, left, cursorY + metrics.ascent)
-                cursorY += lineHeight
-            }
-        }
-
-        /** Текст со смешанным начертанием ([RichText]) через `AttributedString`. */
-        private fun drawRich(
+        /**
+         * Разбивает [RichText] на «слова» ([StyledChunk]) с уже выбранной гранью,
+         * цветом, кеглем и над-/подстрочным смещением — единицы переноса строк.
+         * Каждое слово несёт свой пробельный хвост, чтобы при переносе пробел между
+         * словами не терялся (важно для извлечения текста reflow: между словами
+         * должен быть пробел).
+         */
+        private fun chunksFor(
             spans: RichText,
-            size: Float,
-            color: Color,
-            indent: Int,
+            baseSize: Float,
+            baseColor: Color,
             italicBase: Boolean,
-        ) {
-            val text = spans.joinToString(separator = "") { it.text }
-            if (text.isBlank()) return
-            val attr = AttributedString(text)
-            attr.addAttribute(TextAttribute.FAMILY, Font.SERIF)
-            attr.addAttribute(TextAttribute.SIZE, size)
-            attr.addAttribute(TextAttribute.FOREGROUND, color)
-            if (italicBase) attr.addAttribute(TextAttribute.POSTURE, TextAttribute.POSTURE_OBLIQUE)
-            var index = 0
+        ): List<StyledChunk> {
+            val chunks = mutableListOf<StyledChunk>()
             for (span in spans) {
-                val start = index
-                val end = index + span.text.length
-                index = end
-                if (start == end) continue
-                val embedded =
-                    if (span.code) {
-                        null
-                    } else {
-                        embeddedFontFor(span.text, size, span.bold, span.italic || italicBase)
+                if (span.text.isEmpty()) continue
+                val italic = span.italic || italicBase
+                val face = faceFor(span.text, bold = span.bold, italic = italic)
+                val color = if (span.link) LINK_COLOR else baseColor
+                val size = if (span.superscript || span.subscript) baseSize * SCRIPT_SCALE else baseSize
+                val rise =
+                    when {
+                        span.superscript -> baseSize * SUPERSCRIPT_RISE
+                        span.subscript -> baseSize * SUBSCRIPT_RISE
+                        else -> 0f
                     }
-                styleSpan(attr, span, start, end, embedded)
-            }
-            val left = (MARGIN + indent).toFloat()
-            val wrapWidth = (contentWidth - indent).toFloat()
-            val iterator = attr.iterator
-            val measurer = LineBreakMeasurer(iterator, graphics.fontRenderContext)
-            while (measurer.position < iterator.endIndex) {
-                val layout = measurer.nextLayout(wrapWidth)
-                val lineHeight = ceil(layout.ascent + layout.descent + layout.leading).toInt()
-                if (cursorY + lineHeight > contentBottom) newPage()
-                layout.draw(graphics, left, cursorY + layout.ascent)
-                cursorY += lineHeight
-            }
-        }
-
-        /** Применяет к диапазону [start]..[end] начертание фрагмента [span]. */
-        private fun styleSpan(
-            attr: AttributedString,
-            span: InlineSpan,
-            start: Int,
-            end: Int,
-            embedded: Font?,
-        ) {
-            if (embedded != null) {
-                attr.addAttribute(TextAttribute.FONT, embedded, start, end)
-            } else {
-                if (span.bold) attr.addAttribute(TextAttribute.WEIGHT, TextAttribute.WEIGHT_BOLD, start, end)
-                if (span.italic) attr.addAttribute(TextAttribute.POSTURE, TextAttribute.POSTURE_OBLIQUE, start, end)
-                if (span.code) attr.addAttribute(TextAttribute.FAMILY, Font.MONOSPACED, start, end)
-            }
-            if (span.superscript) {
-                attr.addAttribute(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUPER, start, end)
-            }
-            if (span.subscript) {
-                attr.addAttribute(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUB, start, end)
-            }
-            if (span.link) {
-                attr.addAttribute(TextAttribute.FOREGROUND, LINK_COLOR, start, end)
-                attr.addAttribute(TextAttribute.UNDERLINE, TextAttribute.UNDERLINE_ON, start, end)
-            }
-        }
-
-        private fun wrap(
-            text: String,
-            maxWidth: Int,
-        ): List<String> {
-            val metrics = graphics.fontMetrics
-            val lines = mutableListOf<String>()
-            for (rawLine in text.split('\n')) {
-                var current = StringBuilder()
-                for (word in rawLine.split(' ').filter { it.isNotEmpty() }) {
-                    val candidate = if (current.isEmpty()) word else "$current $word"
-                    if (metrics.stringWidth(candidate) <= maxWidth || current.isEmpty()) {
-                        current = StringBuilder(candidate)
-                    } else {
-                        lines.add(current.toString())
-                        current = StringBuilder(word)
-                    }
+                // Переводы строк схлопнуты ещё парсером; \n страхуемся как пробел.
+                val normalized = span.text.replace('\n', ' ')
+                // Граница фрагмента не должна терять пробел: если фрагмент
+                // начинается с пробела, дотягиваем его в хвост предыдущего слова
+                // (иначе слова соседних фрагментов слиплись бы — "важныйи").
+                if (normalized.firstOrNull() == ' ') chunks.appendTrailingSpace()
+                val words = normalized.split(' ').filter { it.isNotEmpty() }
+                words.forEachIndexed { i, word ->
+                    // Пробел в хвосте слова, если за ним ещё слово в этом фрагменте
+                    // или сам фрагмент кончается пробелом (граница со следующим).
+                    val spaced = i < words.lastIndex || normalized.lastOrNull() == ' '
+                    chunks.add(
+                        StyledChunk(
+                            text = sanitize(if (spaced) "$word " else word, face),
+                            face = face,
+                            color = color,
+                            size = size,
+                            rise = rise,
+                            underline = span.link,
+                        ),
+                    )
                 }
-                lines.add(current.toString())
             }
-            return lines
+            return chunks
         }
 
-        // Встроенный шрифт берём для фрагмента ТОЛЬКО если он покрывает все его
-        // глифы — иначе латинский авторский шрифт «съел» бы кириллицу. Непокрытые
-        // фрагменты остаются на логическом Serif с широким покрытием.
-        private fun embeddedFontFor(
+        /** Добавляет одиночный пробел в хвост последнего слова, если его там ещё нет. */
+        private fun MutableList<StyledChunk>.appendTrailingSpace() {
+            val last = lastOrNull() ?: return
+            if (last.text.endsWith(' ')) return
+            this[lastIndex] = last.copy(text = "${last.text} ")
+        }
+
+        /**
+         * Раскладывает слова в строки по ширине ([contentWidth] минус втяжки),
+         * измеряя их встроенными метриками PDFBox, и рисует построчно с переносом
+         * страниц. Первая строка получает дополнительную втяжку [firstLineIndent].
+         */
+        private fun drawChunks(
+            chunks: List<StyledChunk>,
+            indent: Int,
+            firstLineIndent: Int,
+        ) {
+            if (chunks.isEmpty()) return
+            val left = (MARGIN + indent).toFloat()
+            val fullWidth = (contentWidth - indent).toFloat()
+            var line = mutableListOf<StyledChunk>()
+            var lineWidth = 0f
+            var firstLine = true
+
+            fun flush() {
+                if (line.isEmpty()) return
+                val lineLeft = if (firstLine) left + firstLineIndent else left
+                drawLine(line, lineLeft)
+                firstLine = false
+                line = mutableListOf()
+                lineWidth = 0f
+            }
+
+            for (chunk in chunks) {
+                val available = (if (firstLine) fullWidth - firstLineIndent else fullWidth)
+                val width = widthOf(chunk)
+                if (line.isNotEmpty() && lineWidth + width > available) flush()
+                line.add(chunk)
+                lineWidth += width
+            }
+            flush()
+        }
+
+        /** Рисует одну готовую строку слов с общей базовой линией; продвигает курсор. */
+        private fun drawLine(
+            line: List<StyledChunk>,
+            lineLeft: Float,
+        ) {
+            val maxSize = line.maxOf { it.size }
+            val lineHeight = (maxSize * LINE_FACTOR).toInt()
+            if (cursorY + lineHeight > contentBottom) newPage()
+            val cs = stream ?: return
+            // Базовая линия: верх строки + восходящая часть (приближаем кеглем).
+            val baselinePx = cursorY + maxSize
+            val baselinePt = (PAGE_HEIGHT - baselinePx) * PT_PER_PX
+            cs.beginText()
+            // Одна установка матрицы на строку; showText сам продвигает перо по
+            // ширине каждого слова, поэтому слова встают подряд без ручных сдвигов.
+            cs.setTextMatrix(org.apache.pdfbox.util.Matrix.getTranslateInstance(lineLeft * PT_PER_PX, baselinePt))
+            for (chunk in line) {
+                if (chunk.text.isEmpty()) continue
+                cs.setFont(chunk.face.font, chunk.size * PT_PER_PX)
+                cs.setNonStrokingColor(chunk.color)
+                cs.setTextRise(chunk.rise * PT_PER_PX)
+                cs.showText(chunk.text)
+                cs.setTextRise(0f)
+            }
+            cs.endText()
+            drawUnderlines(cs, line, lineLeft, baselinePt)
+            cursorY += lineHeight
+        }
+
+        /** Подчёркивает ссылочные слова строки тонкой линией под базовой. */
+        private fun drawUnderlines(
+            cs: PDPageContentStream,
+            line: List<StyledChunk>,
+            lineLeft: Float,
+            baselinePt: Float,
+        ) {
+            var penPx = lineLeft
+            val y = baselinePt - UNDERLINE_OFFSET_PX * PT_PER_PX
+            for (chunk in line) {
+                val width = widthOf(chunk)
+                if (chunk.underline && chunk.text.isNotBlank()) {
+                    cs.setStrokingColor(chunk.color)
+                    cs.setLineWidth(UNDERLINE_WIDTH_PX * PT_PER_PX)
+                    cs.moveTo(penPx * PT_PER_PX, y)
+                    cs.lineTo((penPx + width) * PT_PER_PX, y)
+                    cs.stroke()
+                }
+                penPx += width
+            }
+        }
+
+        /** Ширина слова в «пикселях» по встроенным метрикам грани. */
+        private fun widthOf(chunk: StyledChunk): Float {
+            if (chunk.text.isEmpty()) return 0f
+            val width1000 = runCatching { chunk.face.font.getStringWidth(chunk.text) }.getOrDefault(0f)
+            return width1000 / 1000f * chunk.size
+        }
+
+        /**
+         * Грань под фрагмент: сперва авторский шрифт книги, если он ПОЛНОСТЬЮ
+         * покрывает текст (иначе латинский шрифт «съел» бы кириллицу), затем
+         * PT Serif нужного начертания.
+         */
+        private fun faceFor(
             text: String,
-            size: Float,
             bold: Boolean,
             italic: Boolean,
-        ): Font? {
-            val font = embeddedFonts.firstOrNull { it.canDisplayUpTo(text) == -1 } ?: return null
-            var style = Font.PLAIN
-            if (bold) style = style or Font.BOLD
-            if (italic) style = style or Font.ITALIC
-            return font.deriveFont(style, size)
+        ): Face {
+            val book = bookFonts.firstOrNull { face -> text.codePoints().allMatch(face::covers) }
+            return book ?: bundled.face(bold = bold, italic = italic)
+        }
+
+        /**
+         * Заменяет в [text] кодовые точки, не покрытые гранью [face], на пробел —
+         * иначе `showText` бросил бы [IllegalArgumentException] (см.
+         * [PDType0Font]/`PDCIDFontType2.encode`). PT Serif покрывает кириллицу и
+         * латиницу; редкие символы (эмодзи) деградируют в пробел, текст не теряется.
+         */
+        private fun sanitize(
+            text: String,
+            face: Face,
+        ): String {
+            if (text.codePoints().allMatch { it == ' '.code || face.covers(it) }) return text
+            val sb = StringBuilder(text.length)
+            text.codePoints().forEach { cp ->
+                if (cp == ' '.code || face.covers(cp)) sb.appendCodePoint(cp) else sb.append(' ')
+            }
+            return sb.toString()
         }
 
         private fun image(block: ContentBlock.Image) {
@@ -290,34 +491,40 @@ object JvmBookPdfRenderer {
                 height = maxHeight
             }
             if (cursorY + height > contentBottom) newPage()
-            val x = MARGIN + (contentWidth - width) / 2
-            graphics.drawImage(decoded, x, cursorY, width, height, null)
+            val cs = stream ?: return
+            val xObject = LosslessFactory.createFromImage(doc, decoded)
+            val xPx = MARGIN + (contentWidth - width) / 2
+            // Низ изображения в PDF-координатах (y вверх): верх = cursorY (сверху-вниз).
+            val bottomPt = (PAGE_HEIGHT - (cursorY + height)) * PT_PER_PX
+            cs.drawImage(xObject, xPx * PT_PER_PX, bottomPt, width * PT_PER_PX, height * PT_PER_PX)
             cursorY += height + IMAGE_GAP
         }
 
         private fun rule() {
             if (cursorY + RULE_GAP > contentBottom) newPage()
-            graphics.color = Color(0xBB, 0xBB, 0xBB)
             cursorY += RULE_GAP / 2
-            graphics.drawLine(MARGIN, cursorY, PAGE_WIDTH - MARGIN, cursorY)
+            val cs = stream ?: return
+            val y = (PAGE_HEIGHT - cursorY) * PT_PER_PX
+            cs.setStrokingColor(RULE_COLOR)
+            cs.setLineWidth(RULE_LINE_WIDTH_PX * PT_PER_PX)
+            cs.moveTo(MARGIN * PT_PER_PX, y)
+            cs.lineTo((PAGE_WIDTH - MARGIN) * PT_PER_PX, y)
+            cs.stroke()
             cursorY += RULE_GAP / 2
         }
 
         private fun newPage() {
-            if (::graphics.isInitialized) graphics.dispose()
-            val image = BufferedImage(PAGE_WIDTH, PAGE_HEIGHT, BufferedImage.TYPE_INT_RGB)
-            graphics =
-                image.createGraphics().apply {
-                    setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
-                    setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-                    setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
-                    color = Color.WHITE
-                    fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT)
-                }
-            pages.add(image)
+            stream?.close()
+            val page = PDPage(PDRectangle.A4)
+            doc.addPage(page)
+            pageIndex = doc.numberOfPages - 1
+            stream = PDPageContentStream(doc, page)
             cursorY = MARGIN
         }
 
         private fun markerFor(item: ContentBlock.ListItem): String = if (item.ordered) "${item.ordinal}. " else "•  "
     }
+
+    /** Кириллический пробник покрытия шрифта: «П» (U+041F). */
+    private const val CYRILLIC_PROBE = 0x041F
 }

@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -91,18 +92,27 @@ fun PortraitTopBar(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showTocButton: Boolean,
     showToc: Boolean,
     onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
+    readingModeAvailable: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
     pencilModeEnabled: Boolean,
     onPencilModeChange: (Boolean) -> Unit,
     magnifierEnabled: Boolean,
     onMagnifierToggle: () -> Unit,
+    showSyncButton: Boolean,
+    syncTint: Color,
+    onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Фон активной темы ридера для стекла бара; `null` — цвет [MaterialTheme]. */
+    readerBackground: Color? = null,
+    /** Цвет контента активной темы ридера (кнопка назад, счётчик); `null` — цвет [MaterialTheme]. */
+    readerContentColor: Color? = null,
 ) {
     var expandedIndex by remember(toolMode) { mutableStateOf<Int?>(null) }
     // Switching directly between two slots first collapses the open panel, then
@@ -141,7 +151,7 @@ fun PortraitTopBar(
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.statusBars),
             shape = RectangleShape,
-            tint = MaterialTheme.colorScheme.surfaceVariant,
+            tint = readerBackground ?: MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Row(
                 modifier =
@@ -154,13 +164,14 @@ fun PortraitTopBar(
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = "Назад",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        tint = readerContentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
                 PortraitPageCounter(
                     currentPage = currentPage,
                     totalPages = totalPages,
                     onNavigateToPage = onNavigateToPage,
+                    contentColor = readerContentColor,
                     modifier = Modifier.padding(horizontal = PORTRAIT_BAR_PAGE_PADDING),
                 )
                 // Инструменты, настройки, пресеты и системные кнопки — в ОДНОМ
@@ -190,15 +201,20 @@ fun PortraitTopBar(
                         onZoomOut = onZoomOut,
                         showThumbnails = showThumbnails,
                         onToggleThumbnails = onToggleThumbnails,
+                        showTocButton = showTocButton,
                         showToc = showToc,
                         onToggleToc = onToggleToc,
                         readingModeEnabled = readingModeEnabled,
+                        readingModeAvailable = readingModeAvailable,
                         onToggleReadingMode = onToggleReadingMode,
                         showPencilModeButton = showPencilModeButton,
                         pencilModeEnabled = pencilModeEnabled,
                         onPencilModeChange = onPencilModeChange,
                         magnifierEnabled = magnifierEnabled,
                         onMagnifierToggle = onMagnifierToggle,
+                        showSyncButton = showSyncButton,
+                        syncTint = syncTint,
+                        onOpenSync = onOpenSync,
                         onOpenShortcutsSettings = onOpenShortcutsSettings,
                     )
                 WheelStrip(
@@ -260,7 +276,9 @@ private fun PortraitPageCounter(
     totalPages: Int,
     onNavigateToPage: ((Int) -> Unit)?,
     modifier: Modifier = Modifier,
+    contentColor: Color? = null,
 ) {
+    val labelColor = contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         if (onNavigateToPage != null) {
             var editing by remember { mutableStateOf(false) }
@@ -297,7 +315,7 @@ private fun PortraitPageCounter(
                         },
                         textStyle =
                             MaterialTheme.typography.labelLarge.copy(
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = labelColor,
                             ),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         singleLine = true,
@@ -347,13 +365,13 @@ private fun PortraitPageCounter(
             Text(
                 text = currentPage.toString(),
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = labelColor,
             )
         }
         Text(
             text = " / $totalPages",
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = labelColor,
         )
     }
 }
