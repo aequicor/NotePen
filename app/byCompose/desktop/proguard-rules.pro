@@ -102,12 +102,13 @@
     kotlinx.serialization.KSerializer serializer(...);
 }
 
-# kotlin-logging тянет в jar опциональный logback-адаптер, но самого logback
-# на classpath нет (логирование идёт через slf4j-simple). Фаза оптимизации
-# ProGuard падает с IncompleteClassHierarchyException, пытаясь вычислить
-# суперкласс LogbackLogEvent (его база ch.qos.logback.* отсутствует).
-# Добавлять logback в рантайм нельзя — это раздувает бандл и даёт конфликт
-# slf4j-биндингов. Поэтому отключаем именно оптимизацию байткода и оставляем
-# главное: shrinking (вес) + обфускацию (безопасность).
+# Опциональный logback-адаптер kotlin-logging (io.github.oshai...logback.**)
+# наследует отсутствующий ch.qos.logback.* и раньше ронял фазу оптимизации
+# ProGuard (IncompleteClassHierarchyException на суперклассе LogbackLogEvent),
+# из-за чего приходилось целиком глушить оптимизацию через -dontoptimize.
+# Теперь эти классы вырезаются из kotlin-logging-jvm ещё до ProGuard артефакт-
+# трансформом PruneDesktopRuntimeJars (см. build.gradle.kts), поэтому оптимизация
+# (ускорение кода) снова включена. Подавляем оставшиеся ссылки на вырезанный
+# адаптер из KLoggerFactory и любые упоминания ch.qos.logback.
 -dontwarn ch.qos.logback.**
--dontoptimize
+-dontwarn io.github.oshai.kotlinlogging.logback.**

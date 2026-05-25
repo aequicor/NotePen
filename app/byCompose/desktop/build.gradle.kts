@@ -18,34 +18,49 @@ plugins {
 }
 
 /**
- * Удаляет из `sqlite-jdbc` нативные библиотеки всех платформ, кроме целевой.
+ * Подрезает сторонние jar для desktop-дистрибутива перед упаковкой и ProGuard.
  *
- * Jar тянет ~23 натива (Linux/Windows/FreeBSD/Mac × все архитектуры, ~23 МБ),
- * хотя в дистрибутиве нужна ровно одна либа под текущую ОС/архитектуру.
- * В CI каждая платформа собирается на своём раннере, поэтому `os.name`/`os.arch`
- * сборочной машины совпадают с целью. Прочие jar проходят без изменений.
+ * `sqlite-jdbc`: удаляет нативные либы всех платформ, кроме целевой. Jar тянет ~23
+ * натива (Linux/Windows/FreeBSD/Mac × все архитектуры, ~23 МБ), хотя в дистрибутиве
+ * нужна ровно одна под текущую ОС/архитектуру. В CI каждая платформа собирается на
+ * своём раннере, поэтому `os.name`/`os.arch` сборочной машины совпадают с целью.
+ *
+ * `kotlin-logging-jvm`: удаляет опциональный logback-адаптер
+ * (`io/github/oshai/kotlinlogging/logback/`). Он наследует отсутствующий `ch.qos.logback.*`
+ * (логирование идёт через slf4j-simple) и роняет фазу оптимизации ProGuard с
+ * `IncompleteClassHierarchyException` на суперклассе `LogbackLogEvent`. На рантайме адаптер
+ * не используется (ветка logback в `KLoggerFactory` включается лишь системным свойством и
+ * грузится лениво), поэтому удаление безопасно и держит оптимизацию ProGuard включённой.
+ *
+ * Оба пруна в одном трансформе под одной attribute намеренно: вторая кастомная attribute
+ * со своим трансформом на artifactType `jar` ломает регистрацию Kotlin-таргета в KGP 2.1.0.
+ *
+ * Прочие jar проходят без изменений.
  */
 @CacheableTransform
-abstract class StripForeignSqliteNatives : TransformAction<TransformParameters.None> {
+abstract class PruneDesktopRuntimeJars : TransformAction<TransformParameters.None> {
     @get:PathSensitive(PathSensitivity.NAME_ONLY)
     @get:InputArtifact
     abstract val inputArtifact: Provider<FileSystemLocation>
 
     override fun transform(outputs: TransformOutputs) {
         val input = inputArtifact.get().asFile
-        if (!input.name.startsWith("sqlite-jdbc")) {
+        val drop: (String) -> Boolean
+        if (input.name.startsWith("sqlite-jdbc")) {
+            val keepDir = currentPlatformNativeDir()
+            drop = { it.startsWith(SQLITE_NATIVE_ROOT) && !it.startsWith(keepDir) }
+        } else if (input.name.startsWith("kotlin-logging-jvm")) {
+            drop = { it.startsWith(LOGBACK_ADAPTER_ROOT) }
+        } else {
             outputs.file(input)
             return
         }
-        val keepDir = currentPlatformNativeDir()
         val output = outputs.file(input.name)
         ZipFile(input).use { zip ->
             ZipOutputStream(output.outputStream().buffered()).use { out ->
                 for (entry in zip.entries()) {
-                    val name = entry.name
-                    val foreignNative = name.startsWith(SQLITE_NATIVE_ROOT) && !name.startsWith(keepDir)
-                    if (foreignNative) continue
-                    out.putNextEntry(ZipEntry(name))
+                    if (drop(entry.name)) continue
+                    out.putNextEntry(ZipEntry(entry.name))
                     if (!entry.isDirectory) zip.getInputStream(entry).use { it.copyTo(out) }
                     out.closeEntry()
                 }
@@ -72,23 +87,24 @@ abstract class StripForeignSqliteNatives : TransformAction<TransformParameters.N
 
     private companion object {
         const val SQLITE_NATIVE_ROOT = "org/sqlite/native/"
+        const val LOGBACK_ADAPTER_ROOT = "io/github/oshai/kotlinlogging/logback/"
     }
 }
 
-private val sqliteStripped = Attribute.of("sqlite.natives.stripped", Boolean::class.javaObjectType)
+private val desktopJarsPruned = Attribute.of("desktop.jars.pruned", Boolean::class.javaObjectType)
 
 dependencies {
-    attributesSchema { attribute(sqliteStripped) }
-    artifactTypes.getByName("jar") { attributes.attribute(sqliteStripped, false) }
-    registerTransform(StripForeignSqliteNatives::class) {
-        from.attribute(sqliteStripped, false).attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar")
-        to.attribute(sqliteStripped, true).attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar")
+    attributesSchema { attribute(desktopJarsPruned) }
+    artifactTypes.getByName("jar") { attributes.attribute(desktopJarsPruned, false) }
+    registerTransform(PruneDesktopRuntimeJars::class) {
+        from.attribute(desktopJarsPruned, false).attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar")
+        to.attribute(desktopJarsPruned, true).attribute(ARTIFACT_TYPE_ATTRIBUTE, "jar")
     }
 }
 
 configurations.configureEach {
     if (name == "desktopRuntimeClasspath") {
-        attributes.attribute(sqliteStripped, true)
+        attributes.attribute(desktopJarsPruned, true)
     }
 }
 
