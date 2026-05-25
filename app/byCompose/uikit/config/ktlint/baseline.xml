@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="build.gradle.kts">
+        <error line="1" column="1" source="standard:final-newline" />
+        <error line="26" column="13" source="standard:comment-spacing" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/androidMainResourceCollectors/notepen/app/bycompose/uikit/generated/resources/ActualResourceCollectors.kt">
+        <error line="5" column="1" source="standard:import-ordering" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="16" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="35" column="1" source="standard:indent" />
+        <error line="36" column="1" source="standard:indent" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/commonMainResourceCollectors/notepen/app/bycompose/uikit/generated/resources/ExpectResourceCollectors.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/commonResClass/notepen/app/bycompose/uikit/generated/resources/Res.kt">
+        <error line="3" column="1" source="standard:indent" />
+        <error line="4" column="1" source="standard:indent" />
+        <error line="9" column="1" source="standard:import-ordering" />
+        <error line="18" column="1" source="standard:indent" />
+        <error line="19" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="22" column="1" source="standard:indent" />
+        <error line="23" column="1" source="standard:indent" />
+        <error line="24" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:max-line-length" />
+        <error line="26" column="32" source="standard:parameter-list-wrapping" />
+        <error line="26" column="44" source="standard:parameter-list-wrapping" />
+        <error line="26" column="59" source="standard:function-signature" />
+        <error line="26" column="77" source="standard:argument-list-wrapping" />
+        <error line="26" column="151" source="standard:argument-list-wrapping" />
+        <error line="28" column="1" source="standard:indent" />
+        <error line="29" column="1" source="standard:indent" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="32" column="1" source="standard:indent" />
+        <error line="33" column="1" source="standard:indent" />
+        <error line="34" column="1" source="standard:indent" />
+        <error line="35" column="1" source="standard:indent" />
+        <error line="36" column="1" source="standard:indent" />
+        <error line="38" column="1" source="standard:indent" />
+        <error line="38" column="17" source="standard:class-naming" />
+        <error line="40" column="1" source="standard:indent" />
+        <error line="40" column="17" source="standard:class-naming" />
+        <error line="42" column="1" source="standard:indent" />
+        <error line="42" column="17" source="standard:class-naming" />
+        <error line="44" column="1" source="standard:indent" />
+        <error line="44" column="17" source="standard:class-naming" />
+        <error line="46" column="1" source="standard:indent" />
+        <error line="46" column="17" source="standard:class-naming" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/jvmMainResourceCollectors/notepen/app/bycompose/uikit/generated/resources/ActualResourceCollectors.kt">
+        <error line="5" column="1" source="standard:import-ordering" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="16" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="35" column="1" source="standard:indent" />
+        <error line="36" column="1" source="standard:indent" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/CustomButton.kt">
+        <error line="1" column="1" source="standard:final-newline" />
+        <error line="12" column="45" source="standard:trailing-comma-on-declaration-site" />
+        <error line="18" column="26" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/GlassmorphismBackButton.kt">
+        <error line="20" column="19" source="standard:property-naming" />
+        <error line="21" column="19" source="standard:property-naming" />
+        <error line="23" column="44" source="standard:multiline-expression-wrapping" />
+        <error line="57" column="20" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/ToolPresetsWidgets.kt">
+        <error line="65" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="65" column="23" source="standard:function-signature" />
+        <error line="96" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="122" column="29" source="standard:function-signature" />
+        <error line="122" column="48" source="standard:function-signature" />
+        <error line="122" column="67" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/ToolSettingsWidgets.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="66" column="39" source="standard:multiline-expression-wrapping" />
+        <error line="69" column="37" source="standard:multiline-expression-wrapping" />
+        <error line="84" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="84" column="37" source="standard:multiline-if-else" />
+        <error line="84" column="37" source="standard:if-else-wrapping" />
+        <error line="85" column="1" source="standard:indent" />
+        <error line="85" column="29" source="standard:multiline-if-else" />
+        <error line="85" column="29" source="standard:if-else-wrapping" />
+        <error line="87" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="130" column="39" source="standard:multiline-expression-wrapping" />
+        <error line="136" column="37" source="standard:multiline-expression-wrapping" />
+        <error line="170" column="18" source="standard:multiline-expression-wrapping" />
+        <error line="176" column="28" source="standard:multiline-expression-wrapping" />
+        <error line="176" column="29" source="standard:wrapping" />
+        <error line="177" column="72" source="standard:wrapping" />
+        <error line="222" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="228" column="32" source="standard:multiline-expression-wrapping" />
+        <error line="228" column="33" source="standard:wrapping" />
+        <error line="229" column="76" source="standard:wrapping" />
+        <error line="242" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="248" column="37" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/WheelCarousel.kt">
+        <error line="71" column="15" source="standard:multiline-expression-wrapping" />
+        <error line="71" column="15" source="standard:function-signature" />
+        <error line="82" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="185" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="188" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="202" column="34" source="standard:multiline-expression-wrapping" />
+        <error line="205" column="46" source="standard:multiline-expression-wrapping" />
+        <error line="222" column="43" source="standard:multiline-expression-wrapping" />
+        <error line="223" column="28" source="standard:multiline-expression-wrapping" />
+        <error line="236" column="41" source="standard:multiline-expression-wrapping" />
+        <error line="237" column="28" source="standard:multiline-expression-wrapping" />
+    </file>
+</baseline>

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# PostToolUse hook for Edit|Write. Auto-formats Kotlin files with ktlint after every edit.
+# PostToolUse hook for Edit|Write. Auto-formats the edited Kotlin file with ktlint.
 # Receives tool input as JSON on stdin. Silent for non-Kotlin files.
+#
+# Only the single edited file is formatted (never the whole tree): we pass it through
+# ktlint-gradle's incremental git filter — the same mechanism its git pre-commit
+# integration uses — so unrelated files are left untouched.
 
 set -euo pipefail
 
@@ -19,19 +23,25 @@ esac
 # Skip if file no longer exists (e.g. moved/deleted).
 [ -f "$file_path" ] || exit 0
 
-# Skip if there's no Gradle wrapper — ktlint integration is project-specific.
+# Skip if there's no Gradle wrapper — fall back to a standalone ktlint binary if present.
 if [ ! -x "./gradlew" ]; then
-  # Fallback to a standalone ktlint binary on PATH, if any.
   if command -v ktlint >/dev/null 2>&1; then
     ktlint -F "$file_path" >/dev/null 2>&1 || true
   fi
   exit 0
 fi
 
-# Run ktlintFormat. Some projects expose only a project-wide task — that is OK,
-# it's idempotent and the daemon makes repeat invocations cheap.
-./gradlew ktlintFormat --quiet >/dev/null 2>&1 || {
-  echo "[post-edit-ktlint] ktlintFormat reported issues that could not be auto-fixed in $file_path — run ./gradlew ktlintCheck for details." >&2
-}
+# ktlint-gradle's filter expects a path relative to the git root.
+root="$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")"
+case "$file_path" in
+  "$root"/*) rel="${file_path#"$root"/}" ;;
+  *) rel="$file_path" ;;
+esac
+
+# Format only this file. Configuration cache is disabled because the filter value
+# changes per edit, which would otherwise churn the cache on every invocation.
+if ! ./gradlew ktlintFormat -PinternalKtlintGitFilter="$rel" --no-configuration-cache --quiet >/dev/null 2>&1; then
+  echo "[post-edit-ktlint] ktlint could not auto-format $rel — run ./gradlew ktlintCheck for details." >&2
+fi
 
 exit 0

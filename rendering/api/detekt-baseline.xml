@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>LongParameterList:PageRasterizer.kt$PageRasterizer$( document: PdfDocument, pageIndex: Int, baseWidthPx: Int, scalePercent: Int, densityScale: Float, maxDimPx: Int, )</ID>
+    <ID>LongParameterList:SplineSmoothing.kt$( p0x: Float, p0y: Float, p1x: Float, p1y: Float, p2x: Float, p2y: Float, p3x: Float, p3y: Float, )</ID>
+    <ID>MatchingDeclarationName:SplineSmoothing.kt$CubicControlPoints</ID>
+  </CurrentIssues>
+</SmellBaseline>

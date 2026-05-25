@@ -231,7 +231,7 @@ actual class PdfViewerState internal constructor(
      * Сохраняет инвариант cursor-anchor: точка под [prevCentroid] при старом
      * (gestureScale, gestureTranslation) окажется под [newCentroid] при
      * новом. Для wheel-зума `prev == new` (фокус — позиция курсора).
-     * Effective-зум `zoom * gestureScale` кламп'ится в [MIN_ZOOM..MAX_ZOOM],
+     * Effective-зум `zoom * gestureScale` кламп'ится в `MIN_ZOOM..MAX_ZOOM`,
      * gestureTranslation пересчитывается уже с учётом клампа.
      */
     internal fun pinchGestureUpdate(prevCentroid: Offset, newCentroid: Offset, factor: Float) {

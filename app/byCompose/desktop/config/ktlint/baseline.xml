@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="build.gradle.kts">
+        <error line="59" column="21" source="standard:multiline-expression-wrapping" />
+        <error line="64" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="137" column="13" source="standard:comment-spacing" />
+        <error line="141" column="13" source="standard:comment-spacing" />
+        <error line="165" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="172" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="177" column="32" source="standard:trailing-comma-on-call-site" />
+        <error line="185" column="33" source="standard:trailing-comma-on-call-site" />
+        <error line="219" column="39" source="standard:multiline-expression-wrapping" />
+        <error line="226" column="21" source="standard:string-template-indent" />
+        <error line="238" column="20" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/commonMainResourceCollectors/notepen/app/bycompose/desktop/generated/resources/ExpectResourceCollectors.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/commonResClass/notepen/app/bycompose/desktop/generated/resources/Res.kt">
+        <error line="3" column="1" source="standard:indent" />
+        <error line="4" column="1" source="standard:indent" />
+        <error line="9" column="1" source="standard:import-ordering" />
+        <error line="18" column="1" source="standard:indent" />
+        <error line="19" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="22" column="1" source="standard:indent" />
+        <error line="23" column="1" source="standard:indent" />
+        <error line="24" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:max-line-length" />
+        <error line="26" column="32" source="standard:parameter-list-wrapping" />
+        <error line="26" column="44" source="standard:parameter-list-wrapping" />
+        <error line="26" column="59" source="standard:function-signature" />
+        <error line="26" column="77" source="standard:argument-list-wrapping" />
+        <error line="26" column="153" source="standard:argument-list-wrapping" />
+        <error line="28" column="1" source="standard:indent" />
+        <error line="29" column="1" source="standard:indent" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="32" column="1" source="standard:indent" />
+        <error line="33" column="1" source="standard:indent" />
+        <error line="34" column="1" source="standard:indent" />
+        <error line="35" column="1" source="standard:indent" />
+        <error line="36" column="1" source="standard:indent" />
+        <error line="38" column="1" source="standard:indent" />
+        <error line="38" column="17" source="standard:class-naming" />
+        <error line="40" column="1" source="standard:indent" />
+        <error line="40" column="17" source="standard:class-naming" />
+        <error line="42" column="1" source="standard:indent" />
+        <error line="42" column="17" source="standard:class-naming" />
+        <error line="44" column="1" source="standard:indent" />
+        <error line="44" column="17" source="standard:class-naming" />
+        <error line="46" column="1" source="standard:indent" />
+        <error line="46" column="17" source="standard:class-naming" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/desktopMainResourceAccessors/notepen/app/bycompose/desktop/generated/resources/Drawable0.desktopMain.kt">
+        <error line="5" column="1" source="standard:import-ordering" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="15" column="24" source="standard:wrapping" />
+        <error line="15" column="44" source="standard:wrapping" />
+        <error line="15" column="45" source="standard:multiline-expression-wrapping" />
+        <error line="17" column="1" source="standard:indent" />
+        <error line="17" column="7" source="standard:wrapping" />
+        <error line="18" column="1" source="standard:indent" />
+        <error line="22" column="1" source="standard:indent" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/desktopMainResourceCollectors/notepen/app/bycompose/desktop/generated/resources/ActualResourceCollectors.kt">
+        <error line="5" column="1" source="standard:import-ordering" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="16" column="1" source="standard:indent" />
+        <error line="17" column="1" source="standard:indent" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="22" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="27" column="1" source="standard:indent" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="32" column="1" source="standard:indent" />
+        <error line="36" column="1" source="standard:indent" />
+        <error line="37" column="1" source="standard:indent" />
+    </file>
+    <file name="src/desktopMain/kotlin/JbrTitleBar.kt">
+        <error line="43" column="14" source="standard:multiline-expression-wrapping" />
+        <error line="55" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="62" column="59" source="standard:multiline-expression-wrapping" />
+        <error line="62" column="59" source="standard:function-signature" />
+        <error line="80" column="62" source="standard:multiline-expression-wrapping" />
+        <error line="80" column="62" source="standard:function-signature" />
+    </file>
+    <file name="src/desktopMain/kotlin/Utils.kt">
+        <error line="1" column="1" source="standard:final-newline" />
+    </file>
+    <file name="src/desktopMain/kotlin/main.kt">
+        <error line="1" column="1" source="standard:import-ordering" />
+        <error line="100" column="1" source="standard:no-unused-imports" />
+        <error line="192" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="193" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="199" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="205" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="209" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="220" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="238" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="244" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="254" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="259" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="272" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="281" column="33" source="standard:multiline-expression-wrapping" />
+        <error line="308" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="331" column="35" source="standard:multiline-expression-wrapping" />
+        <error line="335" column="32" source="standard:multiline-expression-wrapping" />
+        <error line="365" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="472" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="490" column="59" source="standard:multiline-expression-wrapping" />
+    </file>
+</baseline>

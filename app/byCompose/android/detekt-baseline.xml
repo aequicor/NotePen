@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>InvalidPackageDeclaration:App.kt$package ru.kyamshanov.notepen</ID>
+    <ID>InvalidPackageDeclaration:MainActivity.kt$package ru.kyamshanov.notepen</ID>
+    <ID>LongMethod:MainActivity.kt$MainActivity$override fun onCreate(savedInstanceState: Bundle?)</ID>
+  </CurrentIssues>
+</SmellBaseline>

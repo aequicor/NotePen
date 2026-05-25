@@ -238,7 +238,7 @@ class MagnifierInputController(
      * Конвертирует panel-local координату в page-normalized для конкретного
      * сегмента. По X — линейно через [MagnifierPageSegment.targetOnPage].
      * По Y — переводим panel-y в page-y, учитывая что сегмент занимает
-     * [panelTopFrac..panelBottomFrac] полосу панели.
+     * `panelTopFrac..panelBottomFrac` полосу панели.
      */
     private fun panelLocalToPage(
         panelLocal: Offset,

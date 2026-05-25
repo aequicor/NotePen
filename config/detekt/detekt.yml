@@ -1,0 +1,16 @@
+# detekt configuration for NotePen.
+#
+# `buildUponDefaultConfig = true` is set in the root build script, so detekt's full
+# default rule set is active. Only deviations from those defaults belong here.
+
+naming:
+  FunctionNaming:
+    # Jetpack Compose @Composable functions are intentionally PascalCase.
+    ignoreAnnotated: ['Composable']
+
+style:
+  MagicNumber:
+    # Compose UI code is dense with dp/sp literals; flagging each one is noise.
+    active: false
+  UnusedPrivateMember:
+    ignoreAnnotated: ['Composable', 'Preview']

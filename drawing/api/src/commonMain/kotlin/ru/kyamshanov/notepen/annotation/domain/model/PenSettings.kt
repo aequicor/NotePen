@@ -119,7 +119,7 @@ fun strokeWidthToSliderPosition(width: Float, min: Float, max: Float): Float {
 }
 
 /**
- * Inverse of [strokeWidthToSliderPosition]: `t∈[0..1] → width∈[min..max]` on a log scale.
+ * Inverse of [strokeWidthToSliderPosition]: `t∈[0..1] → width∈min..max` on a log scale.
  */
 fun sliderPositionToStrokeWidth(t: Float, min: Float, max: Float): Float {
     val clamped = t.coerceIn(0f, 1f)

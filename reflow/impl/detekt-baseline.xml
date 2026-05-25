@@ -1,0 +1,24 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>EmptyFunctionBlock:AndroidPdfReflowExtractor.kt$AndroidPdfReflowExtractor.ImageRegionCollector${}</ID>
+    <ID>EmptyFunctionBlock:JvmPdfReflowExtractor.kt$JvmPdfReflowExtractor.ImageRegionCollector${}</ID>
+    <ID>LongMethod:ReflowReader.kt$@Composable public fun ReflowReader( document: ReflowDocument, modifier: Modifier = Modifier, highlights: List&lt;TextAnchor&gt; = emptyList(), settings: ReflowReaderSettings = ReflowReaderSettings(), listState: LazyListState = rememberLazyListState(), renderPage: (suspend (pageIndex: Int) -&gt; ImageBitmap?)? = null, )</ID>
+    <ID>LongParameterList:FigureGeometry.kt$FigureGeometry$( scaleX: Float, shearY: Float, shearX: Float, scaleY: Float, translateX: Float, translateY: Float, pageHeightPt: Float, )</ID>
+    <ID>LongParameterList:ReflowReader.kt$( document: ReflowDocument, modifier: Modifier = Modifier, highlights: List&lt;TextAnchor&gt; = emptyList(), settings: ReflowReaderSettings = ReflowReaderSettings(), listState: LazyListState = rememberLazyListState(), renderPage: (suspend (pageIndex: Int) -&gt; ImageBitmap?)? = null, )</ID>
+    <ID>MaxLineLength:ReflowAssembler.kt$ReflowAssembler$/** Горизонтальный зазор (доля кегля строки), трактуемый как пробел между словами (когда ширина пробела неизвестна). */</ID>
+    <ID>MaxLineLength:ReflowPageLocator.kt$ReflowPageLocator$is ReflowBlock.Table -&gt; rows.asSequence().flatMap { it.cells }.flatMap { it.source }.minOfOrNull { it.pageIndex }</ID>
+    <ID>MaxLineLength:ReflowReader.kt$if (rowIndex == 0) settings.textColor.copy(alpha = TABLE_HEADER_ALPHA) else Color.Transparent</ID>
+    <ID>NestedBlockDepth:ReflowAssembler.kt$ReflowAssembler.BlockBuilder$private fun buildParagraph(lines: List&lt;Line&gt;): BuiltText</ID>
+    <ID>ReturnCount:ReadingErgonomics.kt$ReadingErgonomics$fun dimAlpha(elapsedMs: Long, afterMs: Long, rampMs: Long, maxDim: Float): Float</ID>
+    <ID>ReturnCount:ReflowAssembler.kt$ReflowAssembler$private fun buildTable(lines: List&lt;Line&gt;, pageWidthPt: Float, fontSize: Float): ReflowBlock.Table?</ID>
+    <ID>ReturnCount:ReflowAssembler.kt$ReflowAssembler.Line$fun startsListItem(): Boolean</ID>
+    <ID>ReturnCount:ReflowPageLocator.kt$ReflowPageLocator$public fun pageForBlock(document: ReflowDocument, blockIndex: Int): Int?</ID>
+    <ID>TooManyFunctions:AndroidPdfReflowExtractor.kt$AndroidPdfReflowExtractor$ImageRegionCollector : PDFGraphicsStreamEngine</ID>
+    <ID>TooManyFunctions:JvmPdfReflowExtractor.kt$JvmPdfReflowExtractor$ImageRegionCollector : PDFGraphicsStreamEngine</ID>
+    <ID>TooManyFunctions:ReflowAssembler.kt$ReflowAssembler</ID>
+    <ID>TooManyFunctions:ReflowAssembler.kt$ReflowAssembler$BlockBuilder</ID>
+    <ID>TooManyFunctions:ReflowReader.kt$ru.kyamshanov.notepen.reflow.ui.ReflowReader.kt</ID>
+  </CurrentIssues>
+</SmellBaseline>

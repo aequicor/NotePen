@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/tools/marker/MarkerSlots.kt">
+        <error line="18" column="21" source="standard:multiline-expression-wrapping" />
+        <error line="18" column="21" source="standard:function-signature" />
+    </file>
+</baseline>

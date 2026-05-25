@@ -1,0 +1,549 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="build/generated/sqldelight/code/NotePenSyncDatabase/commonMain/ru/kyamshanov/notepen/sync/db/CountsAll.kt">
+        <error line="7" column="1" source="standard:indent" />
+        <error line="8" column="1" source="standard:indent" />
+    </file>
+    <file name="build/generated/sqldelight/code/NotePenSyncDatabase/commonMain/ru/kyamshanov/notepen/sync/db/NotePenSyncDatabase.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="12" column="1" source="standard:indent" />
+        <error line="14" column="1" source="standard:indent" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="16" column="1" source="standard:indent" />
+        <error line="18" column="1" source="standard:indent" />
+        <error line="18" column="73" source="standard:function-signature" />
+        <error line="19" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+    </file>
+    <file name="build/generated/sqldelight/code/NotePenSyncDatabase/commonMain/ru/kyamshanov/notepen/sync/db/PendingDelta.kt">
+        <error line="7" column="1" source="standard:indent" />
+        <error line="8" column="1" source="standard:indent" />
+        <error line="9" column="1" source="standard:indent" />
+        <error line="10" column="1" source="standard:indent" />
+        <error line="11" column="1" source="standard:indent" />
+    </file>
+    <file name="build/generated/sqldelight/code/NotePenSyncDatabase/commonMain/ru/kyamshanov/notepen/sync/db/PendingDeltaQueries.kt">
+        <error line="13" column="1" source="standard:indent" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="15" column="67" source="standard:multiline-expression-wrapping" />
+        <error line="15" column="67" source="standard:function-signature" />
+        <error line="16" column="1" source="standard:indent" />
+        <error line="17" column="1" source="standard:indent" />
+        <error line="18" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+        <error line="20" column="66" source="standard:multiline-expression-wrapping" />
+        <error line="20" column="66" source="standard:function-signature" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="22" column="1" source="standard:indent" />
+        <error line="23" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="26" column="13" source="standard:wrapping" />
+        <error line="26" column="90" source="standard:wrapping" />
+        <error line="26" column="91" source="standard:multiline-expression-wrapping" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="30" column="18" source="standard:wrapping" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="32" column="1" source="standard:indent" />
+        <error line="33" column="1" source="standard:indent" />
+        <error line="33" column="26" source="standard:trailing-comma-on-call-site" />
+        <error line="34" column="1" source="standard:indent" />
+        <error line="35" column="1" source="standard:indent" />
+        <error line="37" column="1" source="standard:indent" />
+        <error line="37" column="46" source="standard:multiline-expression-wrapping" />
+        <error line="37" column="46" source="standard:function-signature" />
+        <error line="38" column="1" source="standard:indent" />
+        <error line="39" column="1" source="standard:indent" />
+        <error line="40" column="1" source="standard:indent" />
+        <error line="40" column="19" source="standard:trailing-comma-on-call-site" />
+        <error line="41" column="1" source="standard:indent" />
+        <error line="42" column="1" source="standard:indent" />
+        <error line="44" column="1" source="standard:indent" />
+        <error line="45" column="1" source="standard:indent" />
+        <error line="45" column="5" source="standard:function-signature" />
+        <error line="46" column="1" source="standard:indent" />
+        <error line="46" column="5" source="standard:function-signature" />
+        <error line="47" column="1" source="standard:indent" />
+        <error line="47" column="5" source="standard:function-signature" />
+        <error line="48" column="1" source="standard:indent" />
+        <error line="48" column="5" source="standard:function-signature" />
+        <error line="49" column="1" source="standard:indent" />
+        <error line="50" column="1" source="standard:indent" />
+        <error line="50" column="20" source="standard:wrapping" />
+        <error line="50" column="34" source="standard:wrapping" />
+        <error line="50" column="35" source="standard:multiline-expression-wrapping" />
+        <error line="53" column="26" source="standard:wrapping" />
+        <error line="53" column="27" source="standard:wrapping" />
+        <error line="54" column="1" source="standard:indent" />
+        <error line="55" column="1" source="standard:indent" />
+        <error line="56" column="1" source="standard:indent" />
+        <error line="57" column="1" source="standard:indent" />
+        <error line="59" column="1" source="standard:indent" />
+        <error line="60" column="1" source="standard:indent" />
+        <error line="61" column="1" source="standard:indent" />
+        <error line="62" column="1" source="standard:indent" />
+        <error line="64" column="1" source="standard:indent" />
+        <error line="64" column="30" source="standard:function-signature" />
+        <error line="64" column="51" source="standard:function-signature" />
+        <error line="64" column="62" source="standard:function-signature" />
+        <error line="65" column="1" source="standard:indent" />
+        <error line="65" column="20" source="standard:wrapping" />
+        <error line="65" column="32" source="standard:wrapping" />
+        <error line="65" column="33" source="standard:multiline-expression-wrapping" />
+        <error line="68" column="26" source="standard:wrapping" />
+        <error line="68" column="27" source="standard:wrapping" />
+        <error line="69" column="1" source="standard:indent" />
+        <error line="70" column="1" source="standard:indent" />
+        <error line="72" column="1" source="standard:indent" />
+        <error line="73" column="1" source="standard:indent" />
+        <error line="74" column="1" source="standard:indent" />
+        <error line="75" column="1" source="standard:indent" />
+        <error line="77" column="1" source="standard:indent" />
+        <error line="78" column="1" source="standard:indent" />
+        <error line="79" column="1" source="standard:indent" />
+        <error line="80" column="1" source="standard:indent" />
+        <error line="81" column="1" source="standard:indent" />
+        <error line="82" column="1" source="standard:indent" />
+        <error line="83" column="1" source="standard:indent" />
+        <error line="85" column="1" source="standard:indent" />
+        <error line="86" column="1" source="standard:indent" />
+        <error line="87" column="1" source="standard:indent" />
+        <error line="89" column="1" source="standard:indent" />
+        <error line="90" column="1" source="standard:indent" />
+        <error line="90" column="29" source="standard:wrapping" />
+        <error line="90" column="44" source="standard:wrapping" />
+        <error line="90" column="45" source="standard:multiline-expression-wrapping" />
+        <error line="95" column="1" source="standard:indent" />
+        <error line="95" column="22" source="standard:wrapping" />
+        <error line="95" column="31" source="standard:wrapping" />
+        <error line="96" column="1" source="standard:indent" />
+        <error line="97" column="1" source="standard:indent" />
+        <error line="99" column="1" source="standard:indent" />
+        <error line="100" column="1" source="standard:indent" />
+        <error line="102" column="1" source="standard:indent" />
+        <error line="103" column="1" source="standard:indent" />
+        <error line="104" column="1" source="standard:indent" />
+        <error line="105" column="1" source="standard:indent" />
+        <error line="106" column="1" source="standard:indent" />
+        <error line="107" column="1" source="standard:indent" />
+        <error line="108" column="1" source="standard:indent" />
+        <error line="110" column="1" source="standard:indent" />
+        <error line="111" column="1" source="standard:indent" />
+        <error line="112" column="1" source="standard:indent" />
+        <error line="114" column="1" source="standard:indent" />
+        <error line="115" column="1" source="standard:indent" />
+        <error line="115" column="29" source="standard:wrapping" />
+        <error line="115" column="43" source="standard:wrapping" />
+        <error line="115" column="44" source="standard:multiline-expression-wrapping" />
+        <error line="119" column="1" source="standard:indent" />
+        <error line="119" column="22" source="standard:wrapping" />
+        <error line="119" column="31" source="standard:wrapping" />
+        <error line="120" column="1" source="standard:indent" />
+        <error line="121" column="1" source="standard:indent" />
+        <error line="123" column="1" source="standard:indent" />
+        <error line="124" column="1" source="standard:indent" />
+    </file>
+    <file name="build/generated/sqldelight/code/NotePenSyncDatabase/commonMain/ru/kyamshanov/notepen/sync/db/sync/NotePenSyncDatabaseImpl.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="17" column="95" source="standard:function-signature" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="23" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="27" column="1" source="standard:indent" />
+        <error line="29" column="1" source="standard:indent" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="30" column="22" source="standard:wrapping" />
+        <error line="30" column="27" source="standard:wrapping" />
+        <error line="30" column="28" source="standard:multiline-expression-wrapping" />
+        <error line="38" column="1" source="standard:indent" />
+        <error line="38" column="28" source="standard:wrapping" />
+        <error line="38" column="29" source="standard:wrapping" />
+        <error line="39" column="1" source="standard:indent" />
+        <error line="39" column="22" source="standard:wrapping" />
+        <error line="39" column="22" source="standard:argument-list-wrapping" />
+        <error line="39" column="28" source="standard:argument-list-wrapping" />
+        <error line="40" column="1" source="standard:indent" />
+        <error line="40" column="11" source="standard:wrapping" />
+        <error line="40" column="12" source="standard:argument-list-wrapping" />
+        <error line="40" column="12" source="standard:trailing-comma-on-call-site" />
+        <error line="41" column="1" source="standard:indent" />
+        <error line="42" column="1" source="standard:indent" />
+        <error line="44" column="1" source="standard:indent" />
+        <error line="45" column="1" source="standard:indent" />
+        <error line="45" column="7" source="standard:function-signature" />
+        <error line="46" column="1" source="standard:indent" />
+        <error line="46" column="7" source="standard:function-signature" />
+        <error line="47" column="1" source="standard:indent" />
+        <error line="47" column="7" source="standard:function-signature" />
+        <error line="48" column="1" source="standard:indent" />
+        <error line="48" column="7" source="standard:function-signature" />
+        <error line="49" column="1" source="standard:indent" />
+        <error line="50" column="1" source="standard:indent" />
+    </file>
+    <file name="src/androidMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/FileTransferActuals.kt">
+        <error line="8" column="28" source="standard:function-signature" />
+        <error line="8" column="42" source="standard:function-signature" />
+        <error line="8" column="58" source="standard:function-signature" />
+        <error line="21" column="52" source="standard:function-signature" />
+        <error line="24" column="54" source="standard:function-signature" />
+    </file>
+    <file name="src/androidMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/SqlDelightActuals.kt">
+        <error line="19" column="18" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/CatalogDiffOrphanDetector.kt">
+        <error line="36" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="50" column="43" source="standard:multiline-expression-wrapping" />
+        <error line="54" column="38" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/DocumentId.kt">
+        <error line="30" column="31" source="standard:function-signature" />
+        <error line="30" column="51" source="standard:function-signature" />
+        <error line="30" column="70" source="standard:function-signature" />
+        <error line="31" column="26" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/DocumentStatusCoordinator.kt">
+        <error line="32" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="45" column="40" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/DocumentTransferRequestHandler.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="33" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="45" column="32" source="standard:function-signature" />
+        <error line="45" column="48" source="standard:function-signature" />
+        <error line="45" column="91" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/HostAnnotationProjection.kt">
+        <error line="71" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="75" column="5" source="standard:spacing-between-declarations-with-comments" />
+        <error line="93" column="16" source="standard:function-signature" />
+        <error line="93" column="36" source="standard:function-signature" />
+        <error line="93" column="57" source="standard:function-signature" />
+        <error line="123" column="33" source="standard:function-signature" />
+        <error line="123" column="53" source="standard:function-signature" />
+        <error line="123" column="73" source="standard:function-signature" />
+        <error line="123" column="94" source="standard:function-signature" />
+        <error line="135" column="30" source="standard:function-signature" />
+        <error line="135" column="50" source="standard:function-signature" />
+        <error line="135" column="71" source="standard:function-signature" />
+        <error line="140" column="39" source="standard:function-signature" />
+        <error line="140" column="59" source="standard:function-signature" />
+        <error line="140" column="80" source="standard:function-signature" />
+        <error line="143" column="37" source="standard:multiline-expression-wrapping" />
+        <error line="153" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="171" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="202" column="31" source="standard:function-signature" />
+        <error line="202" column="51" source="standard:function-signature" />
+        <error line="202" column="69" source="standard:function-signature" />
+        <error line="231" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="269" column="54" source="standard:multiline-expression-wrapping" />
+        <error line="269" column="54" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/HostHeadlessAnnotationHandler.kt">
+        <error line="24" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="40" column="36" source="standard:function-signature" />
+        <error line="40" column="52" source="standard:function-signature" />
+        <error line="40" column="85" source="standard:function-signature" />
+        <error line="40" column="106" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/LocalCachedDocumentCleaner.kt">
+        <error line="46" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="65" column="31" source="standard:multiline-expression-wrapping" />
+        <error line="81" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="95" column="9" source="standard:function-signature" />
+        <error line="95" column="50" source="standard:function-signature" />
+        <error line="109" column="22" source="standard:function-signature" />
+        <error line="109" column="35" source="standard:function-signature" />
+        <error line="109" column="47" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/PendingDeltaReplayCoordinator.kt">
+        <error line="31" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/RemoteCatalogClientCoordinator.kt">
+        <error line="31" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="88" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/RemoteCatalogProvider.kt">
+        <error line="49" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="55" column="28" source="standard:function-signature" />
+        <error line="55" column="44" source="standard:function-signature" />
+        <error line="55" column="62" source="standard:function-signature" />
+        <error line="55" column="74" source="standard:function-signature" />
+        <error line="71" column="27" source="standard:function-signature" />
+        <error line="71" column="43" source="standard:function-signature" />
+        <error line="71" column="61" source="standard:function-signature" />
+        <error line="71" column="73" source="standard:function-signature" />
+        <error line="79" column="15" source="standard:function-signature" />
+        <error line="79" column="35" source="standard:function-signature" />
+        <error line="79" column="56" source="standard:function-signature" />
+        <error line="85" column="31" source="standard:multiline-expression-wrapping" />
+        <error line="144" column="15" source="standard:function-signature" />
+        <error line="144" column="35" source="standard:function-signature" />
+        <error line="144" column="56" source="standard:function-signature" />
+        <error line="150" column="31" source="standard:multiline-expression-wrapping" />
+        <error line="169" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="179" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="187" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="188" column="24" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/RemoteDocumentOpener.kt">
+        <error line="27" column="5" source="standard:blank-line-before-declaration" />
+        <error line="28" column="5" source="standard:blank-line-before-declaration" />
+        <error line="29" column="5" source="standard:blank-line-before-declaration" />
+        <error line="54" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="56" column="22" source="standard:function-signature" />
+        <error line="56" column="42" source="standard:function-signature" />
+        <error line="56" column="69" source="standard:function-signature" />
+        <error line="67" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="72" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="79" column="46" source="standard:multiline-expression-wrapping" />
+        <error line="81" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="84" column="32" source="standard:multiline-expression-wrapping" />
+        <error line="89" column="32" source="standard:multiline-expression-wrapping" />
+        <error line="90" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="98" column="52" source="standard:multiline-expression-wrapping" />
+        <error line="126" column="22" source="standard:function-signature" />
+        <error line="126" column="35" source="standard:function-signature" />
+        <error line="126" column="47" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/SyncEngine.kt">
+        <error line="58" column="17" source="standard:property-naming" />
+        <error line="95" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="122" column="26" source="standard:wrapping" />
+        <error line="122" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="122" column="27" source="standard:statement-wrapping" />
+        <error line="123" column="57" source="standard:wrapping" />
+        <error line="123" column="58" source="standard:statement-wrapping" />
+        <error line="127" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="145" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="195" column="63" source="standard:multiline-expression-wrapping" />
+        <error line="195" column="63" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/SyncEngineRegistry.kt">
+        <error line="33" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/model/NetworkMessage.kt">
+        <error line="14" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/model/PairingState.kt">
+        <error line="5" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/model/ServerLifecycleState.kt">
+        <error line="11" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/model/StrokeDelta.kt">
+        <error line="19" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="58" column="5" source="standard:blank-line-before-declaration" />
+        <error line="106" column="18" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/CatalogChangeNotifier.kt">
+        <error line="19" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/FileTransfer.kt">
+        <error line="18" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="26" column="14" source="standard:function-signature" />
+        <error line="26" column="34" source="standard:function-signature" />
+        <error line="26" column="52" source="standard:function-signature" />
+        <error line="36" column="25" source="standard:function-signature" />
+        <error line="36" column="45" source="standard:function-signature" />
+        <error line="36" column="61" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/LocalDocumentIdRegistry.kt">
+        <error line="16" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="27" column="26" source="standard:function-signature" />
+        <error line="27" column="45" source="standard:function-signature" />
+        <error line="27" column="63" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/OpenDocumentRegistry.kt">
+        <error line="19" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/PeerServer.kt">
+        <error line="26" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="52" column="22" source="standard:function-signature" />
+        <error line="52" column="38" source="standard:function-signature" />
+        <error line="52" column="61" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/PendingDeltaQueue.kt">
+        <error line="22" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="24" column="25" source="standard:function-signature" />
+        <error line="24" column="45" source="standard:function-signature" />
+        <error line="24" column="63" source="standard:function-signature" />
+        <error line="38" column="26" source="standard:function-signature" />
+        <error line="38" column="46" source="standard:function-signature" />
+        <error line="38" column="61" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/RemoteCatalogCache.kt">
+        <error line="16" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="21" column="24" source="standard:function-signature" />
+        <error line="21" column="42" source="standard:function-signature" />
+        <error line="21" column="62" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/RemoteDocumentStatusRegistry.kt">
+        <error line="16" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="21" column="21" source="standard:function-signature" />
+        <error line="21" column="41" source="standard:function-signature" />
+        <error line="21" column="59" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/SyncClient.kt">
+        <error line="19" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="48" column="22" source="standard:function-signature" />
+        <error line="48" column="38" source="standard:function-signature" />
+        <error line="48" column="61" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/projection/ProjectionHostController.kt">
+        <error line="24" column="17" source="standard:property-naming" />
+        <error line="36" column="24" source="standard:function-signature" />
+        <error line="36" column="35" source="standard:function-signature" />
+        <error line="36" column="59" source="standard:function-signature" />
+        <error line="36" column="79" source="standard:function-signature" />
+        <error line="38" column="31" source="standard:multiline-expression-wrapping" />
+        <error line="48" column="23" source="standard:function-signature" />
+        <error line="48" column="34" source="standard:function-signature" />
+        <error line="48" column="51" source="standard:function-signature" />
+        <error line="48" column="66" source="standard:function-signature" />
+        <error line="50" column="31" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/FileTransferReceiver.kt">
+        <error line="41" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="71" column="45" source="standard:multiline-expression-wrapping" />
+        <error line="83" column="45" source="standard:multiline-expression-wrapping" />
+        <error line="108" column="22" source="standard:function-signature" />
+        <error line="108" column="35" source="standard:function-signature" />
+        <error line="108" column="47" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/InMemoryCatalogChangeNotifier.kt">
+        <error line="15" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="16" column="28" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/InMemoryOpenDocumentRegistry.kt">
+        <error line="16" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/InMemoryPendingDeltaQueue.kt">
+        <error line="24" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="27" column="17" source="standard:property-naming" />
+        <error line="29" column="34" source="standard:function-signature" />
+        <error line="29" column="54" source="standard:function-signature" />
+        <error line="29" column="72" source="standard:function-signature" />
+        <error line="36" column="71" source="standard:function-signature" />
+        <error line="39" column="35" source="standard:function-signature" />
+        <error line="39" column="55" source="standard:function-signature" />
+        <error line="39" column="70" source="standard:function-signature" />
+        <error line="50" column="65" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/InMemoryRemoteCatalogCache.kt">
+        <error line="18" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="22" column="33" source="standard:function-signature" />
+        <error line="22" column="51" source="standard:function-signature" />
+        <error line="22" column="71" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/InMemoryRemoteDocumentStatusRegistry.kt">
+        <error line="18" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="22" column="30" source="standard:function-signature" />
+        <error line="22" column="50" source="standard:function-signature" />
+        <error line="22" column="68" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/JsonLocalDocumentIdRegistry.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="29" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="37" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="50" column="35" source="standard:function-signature" />
+        <error line="50" column="54" source="standard:function-signature" />
+        <error line="50" column="72" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/KtorSyncClient.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="52" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="59" column="58" source="standard:multiline-expression-wrapping" />
+        <error line="66" column="17" source="standard:property-naming" />
+        <error line="88" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="102" column="31" source="standard:function-signature" />
+        <error line="102" column="47" source="standard:function-signature" />
+        <error line="102" column="70" source="standard:function-signature" />
+        <error line="127" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="139" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="148" column="37" source="standard:function-signature" />
+        <error line="148" column="53" source="standard:function-signature" />
+        <error line="148" column="74" source="standard:function-signature" />
+        <error line="148" column="97" source="standard:function-signature" />
+        <error line="180" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="267" column="39" source="standard:multiline-expression-wrapping" />
+        <error line="282" column="33" source="standard:multiline-expression-wrapping" />
+        <error line="348" column="5" source="standard:blank-line-before-declaration" />
+        <error line="349" column="5" source="standard:blank-line-before-declaration" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/NotifyingFileHistoryRepository.kt">
+        <error line="16" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="19" column="33" source="standard:function-signature" />
+        <error line="19" column="51" source="standard:function-signature" />
+        <error line="19" column="69" source="standard:function-signature" />
+        <error line="24" column="39" source="standard:function-signature" />
+        <error line="24" column="51" source="standard:function-signature" />
+        <error line="24" column="77" source="standard:function-signature" />
+        <error line="29" column="41" source="standard:function-signature" />
+        <error line="29" column="54" source="standard:function-signature" />
+        <error line="29" column="68" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/NotifyingFolderRepository.kt">
+        <error line="17" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="18" column="33" source="standard:function-signature" />
+        <error line="18" column="47" source="standard:function-signature" />
+        <error line="18" column="64" source="standard:function-signature" />
+        <error line="18" column="75" source="standard:function-signature" />
+        <error line="26" column="34" source="standard:function-signature" />
+        <error line="26" column="52" source="standard:function-signature" />
+        <error line="26" column="63" source="standard:function-signature" />
+        <error line="31" column="37" source="standard:function-signature" />
+        <error line="31" column="55" source="standard:function-signature" />
+        <error line="31" column="66" source="standard:function-signature" />
+        <error line="36" column="33" source="standard:function-signature" />
+        <error line="36" column="45" source="standard:function-signature" />
+        <error line="36" column="60" source="standard:function-signature" />
+        <error line="43" column="76" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/SqlDelightPendingDeltaQueue.kt">
+        <error line="40" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="44" column="34" source="standard:function-signature" />
+        <error line="44" column="54" source="standard:function-signature" />
+        <error line="44" column="72" source="standard:function-signature" />
+        <error line="63" column="35" source="standard:function-signature" />
+        <error line="63" column="55" source="standard:function-signature" />
+        <error line="63" column="70" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/WebSocketFileTransfer.kt">
+        <error line="32" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="39" column="23" source="standard:function-signature" />
+        <error line="39" column="43" source="standard:function-signature" />
+        <error line="39" column="61" source="standard:function-signature" />
+        <error line="39" column="88" source="standard:function-signature" />
+        <error line="51" column="33" source="standard:multiline-expression-wrapping" />
+        <error line="51" column="33" source="standard:function-signature" />
+        <error line="57" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="73" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="97" column="34" source="standard:function-signature" />
+        <error line="97" column="54" source="standard:function-signature" />
+        <error line="97" column="70" source="standard:function-signature" />
+        <error line="108" column="28" source="standard:function-signature" />
+        <error line="108" column="42" source="standard:function-signature" />
+        <error line="108" column="58" source="standard:function-signature" />
+    </file>
+    <file name="src/jvmMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/FileTransferActuals.kt">
+        <error line="8" column="28" source="standard:function-signature" />
+        <error line="8" column="42" source="standard:function-signature" />
+        <error line="8" column="58" source="standard:function-signature" />
+    </file>
+    <file name="src/jvmMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/KtorPeerServer.kt">
+        <error line="60" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="70" column="17" source="standard:property-naming" />
+        <error line="89" column="74" source="standard:multiline-expression-wrapping" />
+        <error line="89" column="74" source="standard:function-signature" />
+        <error line="94" column="18" source="standard:multiline-expression-wrapping" />
+        <error line="133" column="28" source="standard:multiline-expression-wrapping" />
+        <error line="239" column="31" source="standard:function-signature" />
+        <error line="239" column="47" source="standard:function-signature" />
+        <error line="239" column="70" source="standard:function-signature" />
+    </file>
+    <file name="src/jvmMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/PairingManager.kt">
+        <error line="14" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+</baseline>

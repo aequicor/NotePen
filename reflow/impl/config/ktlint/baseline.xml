@@ -1,0 +1,312 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/androidMain/kotlin/ru/kyamshanov/notepen/reflow/AndroidPdfReflowExtractor.kt">
+        <error line="42" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="43" column="64" source="standard:multiline-expression-wrapping" />
+        <error line="43" column="64" source="standard:function-signature" />
+        <error line="50" column="66" source="standard:multiline-expression-wrapping" />
+        <error line="50" column="66" source="standard:function-signature" />
+        <error line="59" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="66" column="21" source="standard:multiline-expression-wrapping" />
+        <error line="72" column="29" source="standard:function-signature" />
+        <error line="72" column="51" source="standard:function-signature" />
+        <error line="72" column="65" source="standard:function-signature" />
+        <error line="76" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="77" column="38" source="standard:function-signature" />
+        <error line="77" column="52" source="standard:function-signature" />
+        <error line="77" column="85" source="standard:function-signature" />
+        <error line="104" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="127" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="138" column="38" source="standard:function-signature" />
+        <error line="138" column="50" source="standard:function-signature" />
+        <error line="138" column="62" source="standard:function-signature" />
+        <error line="138" column="74" source="standard:function-signature" />
+        <error line="138" column="84" source="standard:function-signature" />
+        <error line="139" column="9" source="standard:blank-line-before-declaration" />
+        <error line="140" column="9" source="standard:blank-line-before-declaration" />
+        <error line="140" column="29" source="standard:function-signature" />
+        <error line="140" column="39" source="standard:function-signature" />
+        <error line="140" column="47" source="standard:function-signature" />
+        <error line="141" column="9" source="standard:blank-line-before-declaration" />
+        <error line="141" column="29" source="standard:function-signature" />
+        <error line="141" column="39" source="standard:function-signature" />
+        <error line="141" column="47" source="standard:function-signature" />
+        <error line="142" column="9" source="standard:blank-line-before-declaration" />
+        <error line="142" column="30" source="standard:function-signature" />
+        <error line="142" column="41" source="standard:function-signature" />
+        <error line="142" column="52" source="standard:function-signature" />
+        <error line="142" column="63" source="standard:function-signature" />
+        <error line="142" column="74" source="standard:function-signature" />
+        <error line="142" column="85" source="standard:function-signature" />
+        <error line="142" column="94" source="standard:function-signature" />
+        <error line="143" column="9" source="standard:blank-line-before-declaration" />
+        <error line="144" column="9" source="standard:blank-line-before-declaration" />
+        <error line="145" column="9" source="standard:blank-line-before-declaration" />
+        <error line="146" column="9" source="standard:blank-line-before-declaration" />
+        <error line="147" column="9" source="standard:blank-line-before-declaration" />
+        <error line="148" column="9" source="standard:blank-line-before-declaration" />
+        <error line="149" column="9" source="standard:blank-line-before-declaration" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/BuildReflowReadingUseCase.kt">
+        <error line="30" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="41" column="26" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/FigureGeometry.kt">
+        <error line="10" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="49" column="20" source="standard:function-signature" />
+        <error line="49" column="38" source="standard:function-signature" />
+        <error line="49" column="58" source="standard:function-signature" />
+        <error line="49" column="77" source="standard:function-signature" />
+        <error line="49" column="89" source="standard:function-signature" />
+        <error line="53" column="20" source="standard:function-signature" />
+        <error line="53" column="38" source="standard:function-signature" />
+        <error line="53" column="58" source="standard:function-signature" />
+        <error line="53" column="77" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/FontStyles.kt">
+        <error line="12" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="25" column="69" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ReflowAssembler.kt">
+        <error line="29" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="92" column="33" source="standard:function-signature" />
+        <error line="92" column="48" source="standard:function-signature" />
+        <error line="92" column="63" source="standard:function-signature" />
+        <error line="95" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="101" column="21" source="standard:multiline-expression-wrapping" />
+        <error line="128" column="35" source="standard:function-signature" />
+        <error line="128" column="54" source="standard:function-signature" />
+        <error line="128" column="74" source="standard:function-signature" />
+        <error line="128" column="89" source="standard:function-signature" />
+        <error line="171" column="28" source="standard:function-signature" />
+        <error line="171" column="47" source="standard:function-signature" />
+        <error line="171" column="67" source="standard:function-signature" />
+        <error line="171" column="82" source="standard:function-signature" />
+        <error line="178" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="182" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="192" column="29" source="standard:function-signature" />
+        <error line="192" column="54" source="standard:function-signature" />
+        <error line="192" column="68" source="standard:function-signature" />
+        <error line="234" column="28" source="standard:function-signature" />
+        <error line="234" column="52" source="standard:function-signature" />
+        <error line="234" column="69" source="standard:function-signature" />
+        <error line="234" column="82" source="standard:function-signature" />
+        <error line="259" column="27" source="standard:function-signature" />
+        <error line="259" column="51" source="standard:function-signature" />
+        <error line="259" column="64" source="standard:function-signature" />
+        <error line="284" column="34" source="standard:multiline-expression-wrapping" />
+        <error line="286" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="289" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="314" column="59" source="standard:multiline-expression-wrapping" />
+        <error line="314" column="59" source="standard:function-signature" />
+        <error line="321" column="39" source="standard:function-signature" />
+        <error line="321" column="55" source="standard:function-signature" />
+        <error line="321" column="70" source="standard:function-signature" />
+        <error line="340" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="414" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="466" column="34" source="standard:function-signature" />
+        <error line="466" column="46" source="standard:function-signature" />
+        <error line="466" column="65" source="standard:function-signature" />
+        <error line="466" column="95" source="standard:function-signature" />
+        <error line="482" column="63" source="standard:function-signature" />
+        <error line="516" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="536" column="24" source="standard:function-signature" />
+        <error line="536" column="44" source="standard:function-signature" />
+        <error line="536" column="62" source="standard:function-signature" />
+        <error line="556" column="30" source="standard:function-signature" />
+        <error line="556" column="52" source="standard:function-signature" />
+        <error line="556" column="66" source="standard:function-signature" />
+        <error line="573" column="31" source="standard:function-signature" />
+        <error line="573" column="42" source="standard:function-signature" />
+        <error line="573" column="49" source="standard:function-signature" />
+        <error line="623" column="22" source="standard:function-signature" />
+        <error line="623" column="35" source="standard:function-signature" />
+        <error line="623" column="57" source="standard:function-signature" />
+        <error line="623" column="71" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ReflowPageLocator.kt">
+        <error line="12" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="22" column="34" source="standard:function-signature" />
+        <error line="22" column="60" source="standard:function-signature" />
+        <error line="22" column="74" source="standard:function-signature" />
+        <error line="40" column="29" source="standard:function-signature" />
+        <error line="40" column="55" source="standard:function-signature" />
+        <error line="40" column="70" source="standard:function-signature" />
+        <error line="52" column="50" source="standard:multiline-expression-wrapping" />
+        <error line="52" column="50" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/StrokeTextMapper.kt">
+        <error line="21" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="37" column="27" source="standard:function-signature" />
+        <error line="37" column="53" source="standard:function-signature" />
+        <error line="37" column="69" source="standard:function-signature" />
+        <error line="37" column="86" source="standard:function-signature" />
+        <error line="41" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="58" column="25" source="standard:function-signature" />
+        <error line="58" column="51" source="standard:function-signature" />
+        <error line="58" column="69" source="standard:function-signature" />
+        <error line="63" column="63" source="standard:multiline-expression-wrapping" />
+        <error line="63" column="63" source="standard:function-signature" />
+        <error line="89" column="28" source="standard:function-signature" />
+        <error line="89" column="43" source="standard:function-signature" />
+        <error line="89" column="56" source="standard:function-signature" />
+        <error line="89" column="68" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReadingErgonomics.kt">
+        <error line="8" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="13" column="18" source="standard:function-signature" />
+        <error line="13" column="35" source="standard:function-signature" />
+        <error line="13" column="50" source="standard:function-signature" />
+        <error line="13" column="64" source="standard:function-signature" />
+        <error line="13" column="77" source="standard:function-signature" />
+        <error line="21" column="23" source="standard:function-signature" />
+        <error line="21" column="40" source="standard:function-signature" />
+        <error line="21" column="50" source="standard:function-signature" />
+        <error line="21" column="62" source="standard:function-signature" />
+    </file>
+    <file name="src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReflowReader.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="117" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="124" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="134" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="139" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="180" column="35" source="standard:multiline-expression-wrapping" />
+        <error line="185" column="37" source="standard:multiline-expression-wrapping" />
+        <error line="190" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="208" column="23" source="standard:function-signature" />
+        <error line="208" column="49" source="standard:function-signature" />
+        <error line="208" column="79" source="standard:function-signature" />
+        <error line="215" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="276" column="30" source="standard:function-signature" />
+        <error line="276" column="62" source="standard:function-signature" />
+        <error line="276" column="91" source="standard:function-signature" />
+        <error line="306" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="333" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="341" column="21" source="standard:multiline-expression-wrapping" />
+        <error line="358" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="369" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="390" column="17" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/BuildReflowReadingUseCaseTest.kt">
+        <error line="15" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="18" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="20" column="9" source="standard:blank-line-before-declaration" />
+        <error line="24" column="52" source="standard:multiline-expression-wrapping" />
+        <error line="24" column="52" source="standard:function-signature" />
+        <error line="25" column="31" source="standard:multiline-expression-wrapping" />
+        <error line="26" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="31" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="40" column="47" source="standard:multiline-expression-wrapping" />
+        <error line="40" column="47" source="standard:function-signature" />
+        <error line="47" column="56" source="standard:multiline-expression-wrapping" />
+        <error line="47" column="56" source="standard:function-signature" />
+        <error line="48" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="51" column="23" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/FigureGeometryTest.kt">
+        <error line="10" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="14" column="20" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/FontStylesTest.kt">
+        <error line="8" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/ReflowAssemblerTest.kt">
+        <error line="12" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="55" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="98" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="232" column="1" source="standard:no-blank-line-before-rbrace" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/ReflowPageLocatorTest.kt">
+        <error line="8" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="9" column="55" source="standard:multiline-expression-wrapping" />
+        <error line="9" column="55" source="standard:function-signature" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/ReflowTestFixtures.kt">
+        <error line="46" column="19" source="standard:multiline-expression-wrapping" />
+        <error line="59" column="33" source="standard:function-signature" />
+        <error line="59" column="50" source="standard:function-signature" />
+        <error line="59" column="65" source="standard:function-signature" />
+        <error line="59" column="89" source="standard:function-signature" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/SourceSpanTest.kt">
+        <error line="13" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="25" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="35" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="50" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="60" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="80" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="93" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="105" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="116" column="21" source="standard:multiline-expression-wrapping" />
+        <error line="129" column="21" source="standard:multiline-expression-wrapping" />
+        <error line="151" column="9" source="standard:blank-line-before-declaration" />
+        <error line="151" column="19" source="standard:function-signature" />
+        <error line="151" column="33" source="standard:function-signature" />
+        <error line="151" column="44" source="standard:function-signature" />
+        <error line="151" column="47" source="standard:function-signature" />
+        <error line="155" column="25" source="standard:multiline-expression-wrapping" />
+        <error line="162" column="43" source="standard:function-signature" />
+        <error line="162" column="57" source="standard:function-signature" />
+        <error line="162" column="80" source="standard:function-signature" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/StrokeTextMapperTest.kt">
+        <error line="13" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="92" column="47" source="standard:function-signature" />
+        <error line="95" column="29" source="standard:function-signature" />
+        <error line="95" column="50" source="standard:function-signature" />
+        <error line="95" column="68" source="standard:function-signature" />
+        <error line="96" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="106" column="22" source="standard:function-signature" />
+        <error line="106" column="34" source="standard:function-signature" />
+        <error line="106" column="44" source="standard:function-signature" />
+        <error line="106" column="61" source="standard:function-signature" />
+    </file>
+    <file name="src/commonTest/kotlin/ru/kyamshanov/notepen/reflow/ui/ReadingErgonomicsTest.kt">
+        <error line="10" column="1" source="standard:no-empty-first-line-in-class-body" />
+    </file>
+    <file name="src/jvmMain/kotlin/ru/kyamshanov/notepen/reflow/JvmPdfReflowExtractor.kt">
+        <error line="34" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="35" column="64" source="standard:multiline-expression-wrapping" />
+        <error line="35" column="64" source="standard:function-signature" />
+        <error line="42" column="66" source="standard:multiline-expression-wrapping" />
+        <error line="42" column="66" source="standard:function-signature" />
+        <error line="54" column="29" source="standard:function-signature" />
+        <error line="54" column="51" source="standard:function-signature" />
+        <error line="54" column="65" source="standard:function-signature" />
+        <error line="58" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="59" column="38" source="standard:function-signature" />
+        <error line="59" column="52" source="standard:function-signature" />
+        <error line="59" column="85" source="standard:function-signature" />
+        <error line="86" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="109" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="120" column="38" source="standard:function-signature" />
+        <error line="120" column="51" source="standard:function-signature" />
+        <error line="120" column="64" source="standard:function-signature" />
+        <error line="120" column="77" source="standard:function-signature" />
+        <error line="120" column="88" source="standard:function-signature" />
+        <error line="121" column="9" source="standard:blank-line-before-declaration" />
+        <error line="122" column="9" source="standard:blank-line-before-declaration" />
+        <error line="122" column="29" source="standard:function-signature" />
+        <error line="122" column="39" source="standard:function-signature" />
+        <error line="122" column="47" source="standard:function-signature" />
+        <error line="123" column="9" source="standard:blank-line-before-declaration" />
+        <error line="123" column="29" source="standard:function-signature" />
+        <error line="123" column="39" source="standard:function-signature" />
+        <error line="123" column="47" source="standard:function-signature" />
+        <error line="124" column="9" source="standard:blank-line-before-declaration" />
+        <error line="124" column="30" source="standard:function-signature" />
+        <error line="124" column="41" source="standard:function-signature" />
+        <error line="124" column="52" source="standard:function-signature" />
+        <error line="124" column="63" source="standard:function-signature" />
+        <error line="124" column="74" source="standard:function-signature" />
+        <error line="124" column="85" source="standard:function-signature" />
+        <error line="124" column="94" source="standard:function-signature" />
+        <error line="125" column="9" source="standard:blank-line-before-declaration" />
+        <error line="126" column="9" source="standard:blank-line-before-declaration" />
+        <error line="127" column="9" source="standard:blank-line-before-declaration" />
+        <error line="128" column="9" source="standard:blank-line-before-declaration" />
+        <error line="129" column="9" source="standard:blank-line-before-declaration" />
+        <error line="130" column="9" source="standard:blank-line-before-declaration" />
+        <error line="131" column="9" source="standard:blank-line-before-declaration" />
+    </file>
+</baseline>

@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="build/generated/compose/resourceGenerator/kotlin/androidMainResourceCollectors/notepen/app/bycompose/android/generated/resources/ActualResourceCollectors.kt">
+        <error line="5" column="1" source="standard:import-ordering" />
+        <error line="15" column="1" source="standard:indent" />
+        <error line="16" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="35" column="1" source="standard:indent" />
+        <error line="36" column="1" source="standard:indent" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/commonMainResourceCollectors/notepen/app/bycompose/android/generated/resources/ExpectResourceCollectors.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+    </file>
+    <file name="build/generated/compose/resourceGenerator/kotlin/commonResClass/notepen/app/bycompose/android/generated/resources/Res.kt">
+        <error line="3" column="1" source="standard:indent" />
+        <error line="4" column="1" source="standard:indent" />
+        <error line="9" column="1" source="standard:import-ordering" />
+        <error line="18" column="1" source="standard:indent" />
+        <error line="19" column="1" source="standard:indent" />
+        <error line="20" column="1" source="standard:indent" />
+        <error line="21" column="1" source="standard:indent" />
+        <error line="22" column="1" source="standard:indent" />
+        <error line="23" column="1" source="standard:indent" />
+        <error line="24" column="1" source="standard:indent" />
+        <error line="25" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:indent" />
+        <error line="26" column="1" source="standard:max-line-length" />
+        <error line="26" column="32" source="standard:parameter-list-wrapping" />
+        <error line="26" column="44" source="standard:parameter-list-wrapping" />
+        <error line="26" column="59" source="standard:function-signature" />
+        <error line="26" column="77" source="standard:argument-list-wrapping" />
+        <error line="26" column="153" source="standard:argument-list-wrapping" />
+        <error line="28" column="1" source="standard:indent" />
+        <error line="29" column="1" source="standard:indent" />
+        <error line="30" column="1" source="standard:indent" />
+        <error line="31" column="1" source="standard:indent" />
+        <error line="32" column="1" source="standard:indent" />
+        <error line="33" column="1" source="standard:indent" />
+        <error line="34" column="1" source="standard:indent" />
+        <error line="35" column="1" source="standard:indent" />
+        <error line="36" column="1" source="standard:indent" />
+        <error line="38" column="1" source="standard:indent" />
+        <error line="38" column="17" source="standard:class-naming" />
+        <error line="40" column="1" source="standard:indent" />
+        <error line="40" column="17" source="standard:class-naming" />
+        <error line="42" column="1" source="standard:indent" />
+        <error line="42" column="17" source="standard:class-naming" />
+        <error line="44" column="1" source="standard:indent" />
+        <error line="44" column="17" source="standard:class-naming" />
+        <error line="46" column="1" source="standard:indent" />
+        <error line="46" column="17" source="standard:class-naming" />
+    </file>
+    <file name="src/androidMain/kotlin/ru/kyamshanov/replacementPlace/App.kt">
+        <error line="9" column="9" source="standard:comment-spacing" />
+    </file>
+    <file name="src/androidMain/kotlin/ru/kyamshanov/replacementPlace/MainActivity.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="60" column="1" source="standard:no-unused-imports" />
+        <error line="79" column="1" source="standard:no-empty-first-line-in-class-body" />
+        <error line="90" column="34" source="standard:multiline-expression-wrapping" />
+        <error line="98" column="33" source="standard:multiline-expression-wrapping" />
+        <error line="99" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="106" column="31" source="standard:multiline-expression-wrapping" />
+        <error line="111" column="27" source="standard:multiline-expression-wrapping" />
+        <error line="115" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="121" column="34" source="standard:multiline-expression-wrapping" />
+        <error line="130" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="133" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="140" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="155" column="33" source="standard:multiline-expression-wrapping" />
+        <error line="160" column="34" source="standard:multiline-expression-wrapping" />
+        <error line="168" column="31" source="standard:multiline-expression-wrapping" />
+        <error line="177" column="35" source="standard:multiline-expression-wrapping" />
+        <error line="182" column="38" source="standard:multiline-expression-wrapping" />
+        <error line="210" column="37" source="standard:multiline-expression-wrapping" />
+        <error line="223" column="39" source="standard:multiline-expression-wrapping" />
+        <error line="227" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="256" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="360" column="53" source="standard:multiline-expression-wrapping" />
+        <error line="360" column="53" source="standard:function-signature" />
+    </file>
+</baseline>
