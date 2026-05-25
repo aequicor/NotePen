@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.displayCutout
@@ -87,6 +88,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.width
 import kotlin.math.roundToInt
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
@@ -477,6 +479,16 @@ fun DetailsContent(
         modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
+            // Landscape side notch / punch-hole: inset the whole editor from the
+            // horizontal display cutout (and any side system bar) so the tab-strip
+            // edges — and the content below them — never slide under it. Consumed
+            // here, so the tool rail's own systemBars∪displayCutout padding doesn't
+            // double-apply. No-op in portrait, on desktop, and on cutout-less screens.
+            .windowInsetsPadding(
+                WindowInsets.systemBars
+                    .union(WindowInsets.displayCutout)
+                    .only(WindowInsetsSides.Horizontal),
+            )
             .focusRequester(focusRequester)
             .focusTarget()
             .onKeyEvent { e ->
