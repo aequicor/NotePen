@@ -1,0 +1,7 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <CurrentIssues>
+    <ID>ReturnCount:ReaderSettingsReducer.kt$ReaderSettingsReducer$public fun renamePreset( stored: StoredReaderSettings, id: String, newName: String, ): StoredReaderSettings</ID>
+  </CurrentIssues>
+</SmellBaseline>

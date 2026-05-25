@@ -1,5 +1,11 @@
 package ru.kyamshanov.notepen
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -243,10 +249,12 @@ fun EditorPanel(
     var showThumbnails by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
-    // Доступность режима чтения зависит от наличия извлекаемого текста в PDF.
-    // По умолчанию true (см. PanelControls.readingModeAvailable): пока проба не
-    // завершилась, текстовый документ не должен быть ошибочно заблокирован.
-    var readingModeAvailable by remember(pdfState) { mutableStateOf(true) }
+    // Доступность режима чтения зависит от наличия извлекаемого текста (см.
+    // PanelControls.readingModeAvailable). По умолчанию false: кнопку показываем
+    // только когда проба подтвердила текстовый слой. Для картинок/не-PDF (проба
+    // падает) и image-only PDF кнопка остаётся скрытой — иначе вход завис бы на
+    // «Готовим режим чтения…».
+    var readingModeAvailable by remember(pdfState) { mutableStateOf(false) }
 
     // ---- Reading (reflow) mode -------------------------------------------
     val reflowReadingUseCase = remember(reflowExtractor) { BuildReflowReadingUseCase(reflowExtractor) }
@@ -510,13 +518,15 @@ fun EditorPanel(
 
     // ---- Reflow availability probe ---------------------------------------
     // Классифицируем содержимое (есть ли извлекаемый текст), чтобы решить,
-    // дизейблить ли кнопку режима чтения. probe — main-safe (сам уводит блок-IO
-    // на инжектируемый диспетчер). На ошибке/медленной пробе остаёмся на true.
+    // ПОКАЗЫВАТЬ ли кнопку режима чтения. probe — main-safe (сам уводит блок-IO
+    // на инжектируемый диспетчер). На ошибке пробы (например, не-PDF картинка
+    // вроде PNG) считаем недоступным — кнопку не показываем, иначе вход завис бы
+    // на «Готовим режим чтения…».
     LaunchedEffect(pdfState, filePath) {
         readingModeAvailable =
             runCatching { reflowExtractor.probe(filePath) != PdfContentKind.IMAGE_ONLY }
                 .onFailure { e -> panelLogger.warn { "Reflow probe failed: ${e::class.simpleName}" } }
-                .getOrDefault(true)
+                .getOrDefault(false)
     }
 
     LaunchedEffect(openDocs.tabs) {
@@ -969,6 +979,12 @@ fun EditorPanel(
             }
     }
 
+    // В режиме чтения с тапом-скрытым хромом панель с единственной вкладкой прячет и
+    // полосу вкладок: одиночная вкладка не несёт навигационной ценности, а при >1
+    // вкладке полосу оставляем, чтобы можно было переключаться. Per-panel — каждая
+    // панель владеет своей полосой (см. оба сайта ниже: резерв места и сам TabBar).
+    val tabStripHidden = pdfState.readingMode && !pdfState.readerBarVisible && openDocs.tabs.size == 1
+
     if (isFocused) {
         // Read showThumbnails here in the composition (not only inside SideEffect)
         // so the composition subscribes to it: a SideEffect block's state reads do
@@ -977,9 +993,9 @@ fun EditorPanel(
         val thumbnailsVisible = showThumbnails
         val tocVisible = showToc
         val readingModeVisible = pdfState.readingMode
-        // Read readerBarVisible in composition too: tapping the text to hide the
-        // bar then republishes PanelControls so the parent hides the rest of the
-        // chrome (toolbar, quick actions) in lockstep — and shows it again on tap.
+        // Read readerBarVisible in composition so the published read-out tracks it.
+        // NB: chrome visibility itself is derived in DetailsContent straight from the
+        // focused tab's PdfDocumentState, not from this relayed value (see chromeHidden).
         val readerBarVisible = pdfState.readerBarVisible
         // Read scrollMode in composition (not only inside SideEffect) so the
         // composition subscribes to it — toggling it republishes PanelControls.
@@ -1042,8 +1058,14 @@ fun EditorPanel(
     }
 
     // ---- UI ---------------------------------------------------------------
+    // Резерв места под полосу вкладок схлопываем в такт её скрытию, чтобы ридер
+    // дотянулся до самого верха панели (анимация совпадает со слайдом TabBar ниже).
+    val tabStripReserve by animateDpAsState(
+        targetValue = if (tabStripHidden) 0.dp else TAB_BAR_HEIGHT,
+        label = "tabStripReserve",
+    )
     Box(modifier.fillMaxSize().onSizeChanged { panelSizePx = it }) {
-        Box(Modifier.fillMaxSize().padding(top = TAB_BAR_HEIGHT)) {
+        Box(Modifier.fillMaxSize().padding(top = tabStripReserve)) {
             PdfPagesViewer(
                 state = pdfViewerState,
                 pdfDocument = pdfDocument,
@@ -1283,25 +1305,31 @@ fun EditorPanel(
             }
         }
 
-        TabBar(
-            side = panel.id,
-            openDocs = openDocs,
-            onSelect = { _, id -> tabSession.setActiveTab(panel.id, id) },
-            onClose = { _, id ->
-                val result = tabSession.closeTab(panel.id, id)
-                if (result == TabCloseResult.AllClosed) onAllTabsClosed()
-            },
-            onAddTab = { onAddTab() },
-            onOpenInNewPanel = onOpenPanelPicker,
-            onClosePanel = onClosePanel,
+        AnimatedVisibility(
+            visible = !tabStripHidden,
+            enter = slideInVertically { -it } + fadeIn(),
+            exit = slideOutVertically { -it } + fadeOut(),
             modifier = Modifier.align(Alignment.TopStart),
-            // В режиме чтения красим полосу вкладок под фон активной темы ридера,
-            // чтобы хром сливался с ридером (как и остальной хром этой панели), а
-            // подписи/иконки — под цвет текста темы, иначе на тёмной теме они
-            // остаются тёмными и нечитаемыми.
-            tint = if (pdfState.readingMode) readerStored.current.toRenderSettings().background else null,
-            contentColor = if (pdfState.readingMode) readerStored.current.toRenderSettings().textColor else null,
-        )
+        ) {
+            TabBar(
+                side = panel.id,
+                openDocs = openDocs,
+                onSelect = { _, id -> tabSession.setActiveTab(panel.id, id) },
+                onClose = { _, id ->
+                    val result = tabSession.closeTab(panel.id, id)
+                    if (result == TabCloseResult.AllClosed) onAllTabsClosed()
+                },
+                onAddTab = { onAddTab() },
+                onOpenInNewPanel = onOpenPanelPicker,
+                onClosePanel = onClosePanel,
+                // В режиме чтения красим полосу вкладок под фон активной темы ридера,
+                // чтобы хром сливался с ридером (как и остальной хром этой панели), а
+                // подписи/иконки — под цвет текста темы, иначе на тёмной теме они
+                // остаются тёмными и нечитаемыми.
+                tint = if (pdfState.readingMode) readerStored.current.toRenderSettings().background else null,
+                contentColor = if (pdfState.readingMode) readerStored.current.toRenderSettings().textColor else null,
+            )
+        }
     }
 }
 

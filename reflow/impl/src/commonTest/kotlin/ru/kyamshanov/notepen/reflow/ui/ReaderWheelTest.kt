@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 
 class ReaderWheelTest {
     @Test
-    fun customPresetsFirst_thenBuiltins_thenTuner() {
+    fun customPresetsFirst_thenBuiltins() {
         val custom = ReaderPreset(id = "c1", name = "Моё", settings = ReaderSettings())
         val stored = StoredReaderSettings(userPresets = listOf(custom))
 
@@ -21,21 +21,19 @@ class ReaderWheelTest {
         assertTrue(first is ReaderWheelElement.Preset && first.deletable)
         assertEquals("c1", first.key)
 
-        // Тюнер — последний элемент колеса.
-        assertTrue(elements.last() is ReaderWheelElement.Tuner)
-
-        // Между ними — встроенные пресеты в порядке BuiltinReaderPresets.all, неудаляемые.
-        val middle = elements.drop(1).dropLast(1)
-        assertEquals(BuiltinReaderPresets.all.map { it.id }, middle.map { it.key })
-        assertTrue(middle.all { it is ReaderWheelElement.Preset && !it.deletable })
+        // Далее — встроенные пресеты в порядке BuiltinReaderPresets.all, неудаляемые.
+        // Тюнер «Настроить» в колесо больше не входит — он закреплён отдельной кнопкой.
+        val rest = elements.drop(1)
+        assertEquals(BuiltinReaderPresets.all.map { it.id }, rest.map { it.key })
+        assertTrue(rest.all { it is ReaderWheelElement.Preset && !it.deletable })
     }
 
     @Test
-    fun noCustomPresets_justBuiltinsAndTuner() {
+    fun noCustomPresets_justBuiltins() {
         val elements = readerWheelElements(StoredReaderSettings())
 
-        assertEquals(BuiltinReaderPresets.all.size + 1, elements.size)
+        assertEquals(BuiltinReaderPresets.all.size, elements.size)
         assertEquals(BuiltinReaderPresets.all.first().id, elements.first().key)
-        assertTrue(elements.last() is ReaderWheelElement.Tuner)
+        assertTrue(elements.all { it is ReaderWheelElement.Preset })
     }
 }

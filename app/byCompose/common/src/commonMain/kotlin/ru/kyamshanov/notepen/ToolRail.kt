@@ -352,7 +352,6 @@ internal fun systemControlEntries(
             contentDescription = "Режим чтения",
             selected = readingModeEnabled,
             onClick = onToggleReadingMode,
-            enabled = readingModeAvailable,
         )
     }
     val syncButton: @Composable () -> Unit = {
@@ -446,7 +445,9 @@ internal fun systemControlEntries(
         if (!readingModeEnabled) add(WheelEntry("sys_magnifier") { magnifierButton() })
         add(WheelEntry("sys_thumbnails") { thumbnailsButton() })
         if (showTocButton) add(WheelEntry("sys_toc") { tocButton() })
-        add(WheelEntry("sys_reading") { readingModeButton() })
+        // Скрываем кнопку (а не дизейблим) для документов без извлекаемого текста;
+        // оставляем видимой, пока режим чтения активен, чтобы из него можно было выйти.
+        if (readingModeAvailable || readingModeEnabled) add(WheelEntry("sys_reading") { readingModeButton() })
         if (showSyncButton) add(WheelEntry("sys_sync") { syncButton() })
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
         if (!readingModeEnabled) add(WheelEntry("sys_export") { exportButton() })

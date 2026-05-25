@@ -9,6 +9,7 @@
     <ID>LongParameterList:WheelCarousel.kt$( listState: LazyListState, index: Int, orientation: RailOrientation = RailOrientation.HORIZONTAL, falloffPx: Float = 0f, minScale: Float = 0.6f, minAlpha: Float = 0f, edgeBand: Float = 0.35f, )</ID>
     <ID>MatchingDeclarationName:ToolPresetsWidgets.kt$ToolPresetItem</ID>
     <ID>MaxLineLength:ToolPresetsWidgets.kt$targetValue = if (item.selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant</ID>
+    <ID>MaxLineLength:WheelCarousel.kt$.</ID>
     <ID>MaxLineLength:WheelCarousel.kt$val falloff = if (falloffPx &gt; 0f) falloffPx else (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f</ID>
     <ID>NewLineAtEndOfFile:CustomButton.kt$ru.kyamshanov.notepen.CustomButton.kt</ID>
     <ID>ReturnCount:WheelCarousel.kt$internal fun wheelItemFalloff( layoutInfo: LazyListLayoutInfo, index: Int, falloffPx: Float, edgeBand: Float = 0.35f, ): Float?</ID>

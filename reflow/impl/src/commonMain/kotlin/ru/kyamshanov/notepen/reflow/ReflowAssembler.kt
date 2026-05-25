@@ -39,17 +39,36 @@ internal object ReflowAssembler {
      * Минимальный шаг строк (baseline-to-baseline, доля основного кегля), с
      * которого начинается разрыв абзаца, — нижняя граница на случай, когда
      * медианный шаг документа недоступен/вырожден (мало строк). Обычная вёрстка
-     * книги идёт с шагом ~1.0–1.45 кегля (сгенерированный PDF — 1.25), а разрыв
-     * абзаца добавляет заметную выноску, поэтому порог берётся с запасом выше.
+     * книги идёт с шагом ~1.15–1.45 кегля (внутри абзаца; сгенерированный PDF —
+     * 1.25), а разрыв абзаца добавляет заметную выноску — в измеренном PDF-гайде
+     * (15 pt) абзацный шаг ≈1.60 кегля (24 pt) против внутриабзацного ≈1.20
+     * (18 pt). Порог берётся между этими кластерами (1.5), чтобы и не дробить
+     * перенос строк, и отделять абзацы при недоступной медиане.
      */
-    private const val MIN_PARA_PITCH_FRAC = 1.8f
+    private const val MIN_PARA_PITCH_FRAC = 1.5f
 
     /**
-     * Во сколько раз шаг строк должен превысить **медианный** шаг документа,
-     * чтобы это был разрыв абзаца (когда медиана надёжна). Адаптируется к
-     * реальной выноске документа независимо от кегля.
+     * Абсолютная надбавка к **типичному внутриабзацному** шагу (доля основного
+     * кегля), начиная с которой шаг считается разрывом абзаца, когда медиана
+     * надёжна. Разрыв — это обычная выноска плюс заметный зазор: в измеренном
+     * PDF абзацный шаг (≈24 pt) превышает типичный (≈18 pt) на ≈6 pt ≈ 0.4 кегля,
+     * тогда как самый плотный список даёт лишь +1.5–2.3 pt (≤0.15 кегля). Порог
+     * +0.30 кегля проходит между ними (типичный 18 → порог 22.5 pt: на 2.2 pt
+     * выше плотного списка, на 1.5 pt ниже абзацного разрыва). Аддитивная (а не
+     * множительная) надбавка устойчива к величине выноски: разрыв всегда
+     * прибавляет абсолютный зазор поверх обычного шага.
      */
-    private const val PARA_PITCH_FACTOR = 1.5f
+    private const val PARA_PITCH_MARGIN_FRAC = 0.30f
+
+    /**
+     * Квантиль (доля) шага строк, берущийся за **типичный внутриабзацный**:
+     * разрывы абзацев и зазоры вокруг заголовков образуют верхний хвост
+     * распределения, поэтому медиана (0.5) может смещаться вверх в документах с
+     * множеством коротких одностраничных абзацев. Нижний квантиль попадает на
+     * самый частый (и самый малый) повторяющийся шаг — обычную межстрочную
+     * выноску — и не завышается хвостом разрывов.
+     */
+    private const val INTRA_PITCH_QUANTILE = 0.4f
 
     /**
      * Сколько образцов межстрочного шага нужно, чтобы медиане можно было верить
@@ -110,8 +129,8 @@ internal object ReflowAssembler {
         // Шаг строк (baseline-to-baseline) стабилен к вариации высоты глиф-бокса
         // между шрифтами/версиями PDFBox, в отличие от зазора по нижнему краю
         // бокса, — поэтому разрыв абзаца считаем по нему.
-        val medianPitch = medianLinePitch(pageLines.map { it.second })
-        val blocks = pageLines.flatMap { (page, lines) -> buildPageBlocks(page, lines, bodyFont, medianPitch) }
+        val typicalPitch = typicalLinePitch(pageLines.map { it.second })
+        val blocks = pageLines.flatMap { (page, lines) -> buildPageBlocks(page, lines, bodyFont, typicalPitch) }
         return ReflowDocument(kind = classify(pages), blocks = blocks)
     }
 
@@ -119,7 +138,7 @@ internal object ReflowAssembler {
         page: RawPage,
         lines: List<Line>,
         bodyFont: Float,
-        medianPitch: Float,
+        typicalPitch: Float,
     ): List<ReflowBlock> {
         // Таблицы вытаскиваем до сборки абзацев: их строки не должны слипнуться в текст.
         val tables =
@@ -141,7 +160,7 @@ internal object ReflowAssembler {
                     .forEach { add(Item.Image(it)) }
             }.sortedBy { it.top }
 
-        val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont, medianPitch)
+        val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont, typicalPitch)
         items.forEach { item ->
             when (item) {
                 is Item.Text -> builder.addLine(item.line)
@@ -367,12 +386,17 @@ internal object ReflowAssembler {
     }
 
     /**
-     * Медианный шаг строк (baseline-to-baseline, в пунктах) по всем парам
-     * соседних строк всех страниц. Это нормальная межстрочная выноска
-     * документа; разрыв абзаца — шаг, заметно её превышающий. `0`, если строк
-     * недостаточно для оценки.
+     * Типичный внутриабзацный шаг строк (baseline-to-baseline, в пунктах) по
+     * всем парам соседних строк всех страниц. Это нормальная межстрочная
+     * выноска документа; разрыв абзаца — шаг, заметно её превышающий.
+     *
+     * Берётся не медиана, а нижний квантиль [INTRA_PITCH_QUANTILE]: разрывы
+     * абзацев и зазоры у заголовков сидят в верхнем хвосте распределения и
+     * завысили бы медиану в документах с множеством коротких абзацев, тогда как
+     * нижний квантиль устойчиво попадает на самый частый малый шаг — обычную
+     * выноску. `0`, если строк недостаточно для надёжной оценки.
      */
-    private fun medianLinePitch(pageLines: List<List<Line>>): Float {
+    private fun typicalLinePitch(pageLines: List<List<Line>>): Float {
         val pitches = mutableListOf<Float>()
         for (lines in pageLines) {
             for (i in 1 until lines.size) {
@@ -382,7 +406,8 @@ internal object ReflowAssembler {
         }
         if (pitches.size < MIN_PITCH_SAMPLES) return 0f
         pitches.sort()
-        return pitches[pitches.size / 2]
+        val index = (pitches.size * INTRA_PITCH_QUANTILE).toInt().coerceIn(0, pitches.size - 1)
+        return pitches[index]
     }
 
     private fun headingLevelForRatio(ratio: Float): Int =
@@ -414,7 +439,7 @@ internal object ReflowAssembler {
         private val widthPt: Float,
         private val heightPt: Float,
         private val bodyFont: Float,
-        private val medianPitch: Float,
+        private val typicalPitch: Float,
     ) {
         private val blocks = mutableListOf<ReflowBlock>()
         private val pending = mutableListOf<Line>()
@@ -480,17 +505,24 @@ internal object ReflowAssembler {
          * сгенерированном PDF) ложно превышала прежний бокс-порог и каждая строка
          * становилась отдельным абзацем. Шаг же остаётся стабильным.
          *
-         * Порог — `max` от медианной выноски документа (когда она надёжна) и
-         * кегельной нижней границы: реальный разрыв добавляет заметную выноску
-         * сверх обычной, поэтому отделяется и в сканах/нативных PDF.
+         * Порог — `max` от двух оценок, чтобы и не дробить перенос строк, и
+         * отделять абзацы при умеренном межабзацном зазоре:
+         *  - **аддитивный** относительно типичного шага документа (когда тот
+         *    надёжен): `typicalPitch + margin·bodyFont`. Разрыв — обычная выноска
+         *    плюс заметный абсолютный зазор; надбавка устойчива к величине самой
+         *    выноски. Прежний множительный порог (×1.5 медианы ≈ 1.8 кегля) был
+         *    слишком высок и сливал абзацы с умеренным зазором (в измеренном
+         *    PDF-гайде разрыв ≈1.6 кегля при выноске ≈1.2);
+         *  - **кегельная нижняя граница** [MIN_PARA_PITCH_FRAC] — когда типичный
+         *    шаг недоступен (мало строк): отделяет абзац и в сканах/нативных PDF.
          */
         private fun breaksParagraph(line: Line): Boolean {
             if (pendingHeadingLevel > 0) return true
             val last = pending.last()
             val pitch = line.top - last.top
-            val medianThreshold = if (medianPitch > 0f) medianPitch * PARA_PITCH_FACTOR else 0f
+            val additiveThreshold = if (typicalPitch > 0f) typicalPitch + bodyFont * PARA_PITCH_MARGIN_FRAC else 0f
             val fontThreshold = bodyFont * MIN_PARA_PITCH_FRAC
-            val pitchThreshold = maxOf(medianThreshold, fontThreshold)
+            val pitchThreshold = maxOf(additiveThreshold, fontThreshold)
             val fontJump = bodyFont > 0f && abs(line.fontSize - last.fontSize) > bodyFont * FONT_CHANGE_FRAC
             return pitch > pitchThreshold || fontJump
         }
@@ -605,8 +637,10 @@ internal object ReflowAssembler {
         /**
          * Строка открывает элемент списка: начинается с маркера-буллета
          * (`•`, `-`, `*`… — см. [BULLET_CHARS]) либо с нумерации вида `1.` / `2)`.
-         * За номером должен идти не-цифровой символ — так `1.` (пункт) отличается
-         * от `3.14` (дробь): пробелы тут не помогают, их глифы отбрасываются в
+         * За маркером должна идти буква — начало текста пункта. Так `1.` (пункт)
+         * отличается и от `3.14` (дробь, дальше цифра), и от перенесённой строки
+         * `3), то …` (закрывающая скобка выражения вроде `mutableListOf(1, 2, 3)`,
+         * дальше пунктуация). Пробелы тут не помогают — их глифы отбрасываются в
          * [buildLine].
          */
         fun startsListItem(): Boolean {
@@ -624,7 +658,7 @@ internal object ReflowAssembler {
                 return false
             }
             val afterMarker = lead.getOrNull(digits.length + 1)
-            return afterMarker == null || !afterMarker.isDigit()
+            return afterMarker == null || afterMarker.isLetter()
         }
 
         /**

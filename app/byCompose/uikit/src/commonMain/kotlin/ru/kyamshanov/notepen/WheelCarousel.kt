@@ -181,12 +181,18 @@ internal fun wheelItemFalloff(
  * and erase it instead of just the content.
  *
  * The cross-axis is untouched. A `0` or negative [edgeWidth] is a no-op.
+ *
+ * @param fadeStart fade the leading edge — pass the list's `canScrollBackward`
+ *   so a strip scrolled to its very start doesn't fade its first item.
+ * @param fadeEnd fade the trailing edge — pass the list's `canScrollForward`.
  */
 public fun Modifier.fadingEdges(
     orientation: RailOrientation,
     edgeWidth: Dp,
+    fadeStart: Boolean = true,
+    fadeEnd: Boolean = true,
 ): Modifier =
-    if (edgeWidth <= 0.dp) {
+    if (edgeWidth <= 0.dp || (!fadeStart && !fadeEnd)) {
         this
     } else {
         this
@@ -198,20 +204,24 @@ public fun Modifier.fadingEdges(
                 // Доля главной оси, занятая каждой кромкой; на коротких полосах
                 // ограничиваем половиной, чтобы кромки не перекрылись.
                 val fraction = (edge / mainAxis).coerceIn(0f, 0.5f)
+                // The edge that can no longer scroll (the drum hit its stop) is not
+                // faded — its end item stays fully shown instead of being shadowed.
+                val startColor = if (fadeStart) Color.Transparent else Color.Black
+                val endColor = if (fadeEnd) Color.Transparent else Color.Black
                 val brush =
                     if (orientation == RailOrientation.VERTICAL) {
                         Brush.verticalGradient(
-                            0f to Color.Transparent,
+                            0f to startColor,
                             fraction to Color.Black,
                             (1f - fraction) to Color.Black,
-                            1f to Color.Transparent,
+                            1f to endColor,
                         )
                     } else {
                         Brush.horizontalGradient(
-                            0f to Color.Transparent,
+                            0f to startColor,
                             fraction to Color.Black,
                             (1f - fraction) to Color.Black,
-                            1f to Color.Transparent,
+                            1f to endColor,
                         )
                     }
                 drawRect(brush = brush, blendMode = BlendMode.DstIn)
@@ -362,7 +372,7 @@ public fun WheelStrip(
                         Modifier
                             .height(crossAxisSize)
                             .width(naturalLength.coerceAtMost(maxWidth))
-                            .fadingEdges(orientation, fadeEdgeWidth)
+                            .fadingEdges(orientation, fadeEdgeWidth, fadeStart = state.canScrollBackward, fadeEnd = state.canScrollForward)
                             .then(indicatorModifier)
                             .animateContentSize()
                             .onGloballyPositioned(onListPositioned),
@@ -379,7 +389,7 @@ public fun WheelStrip(
                         Modifier
                             .width(crossAxisSize)
                             .height(naturalLength.coerceAtMost(maxHeight))
-                            .fadingEdges(orientation, fadeEdgeWidth)
+                            .fadingEdges(orientation, fadeEdgeWidth, fadeStart = state.canScrollBackward, fadeEnd = state.canScrollForward)
                             .then(indicatorModifier)
                             .animateContentSize()
                             .onGloballyPositioned(onListPositioned),

@@ -87,6 +87,43 @@ class ReflowAssemblerTest {
     }
 
     @Test
+    fun `modest paragraph gap splits without over-splitting wrapped lines`() {
+        // Регресс: после поднятия порога (до ×1.5 медианы ≈ 1.8 кегля) реальные
+        // абзацы с умеренным межабзацным зазором слипались в один блок. Числа
+        // сняты с измеренного PDF-гайда (см. ScratchPitchProbe): типичный
+        // внутриабзацный шаг ≈1.20 кегля, разрыв абзаца ≈1.60 кегля — заметно
+        // меньше «двойной» выноски (+0.9 кегля) из соседнего теста. Порог должен
+        // лечь между ними: перенос строк (1.20) остаётся одним абзацем, разрыв
+        // (1.60) делит на два.
+        val fontSize = 10f
+        val intraPitch = fontSize * 1.2f // обычная межстрочная выноска
+        val breakPitch = fontSize * 1.6f // умеренный межабзацный шаг
+        val glyphs = mutableListOf<RawGlyph>()
+        var top = 100f
+        repeat(4) {
+            glyphs += line("body line of paragraph one", top = top, fontSize = fontSize)
+            top += intraPitch
+        }
+        top += breakPitch - intraPitch // последняя пара = разрыв абзаца
+        repeat(4) {
+            glyphs += line("body line of paragraph two", top = top, fontSize = fontSize)
+            top += intraPitch
+        }
+        val paragraphs = ReflowAssembler.assemble(listOf(page(glyphs))).blocks.filterIsInstance<ReflowBlock.Paragraph>()
+        assertEquals(2, paragraphs.size)
+        assertEquals(
+            "body line of paragraph one body line of paragraph one " +
+                "body line of paragraph one body line of paragraph one",
+            paragraphs[0].text,
+        )
+        assertEquals(
+            "body line of paragraph two body line of paragraph two " +
+                "body line of paragraph two body line of paragraph two",
+            paragraphs[1].text,
+        )
+    }
+
+    @Test
     fun `split paragraphs separated by a large gap`() {
         val glyphs = line("paragraph one", top = 100f) + line("paragraph two", top = 140f)
         val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
@@ -275,5 +312,23 @@ class ReflowAssemblerTest {
     fun `plain prose is not detected as a table`() {
         val glyphs = line("just some normal prose", top = 100f) + line("second line of the prose", top = 112f)
         assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+    }
+
+    @Test
+    fun `wrapped closing paren is not mistaken for a numbered list item`() {
+        // A code expression wraps so the next line starts with "3)," — the closing
+        // paren of mutableListOf(1, 2, 3), not a list marker (it is followed by a comma).
+        val glyphs =
+            line("val list = mutableListOf(1, 2,", top = 100f) +
+                line("3), then list add four runs", top = 112f)
+        val block = ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single()
+        assertIs<ReflowBlock.Paragraph>(block)
+        assertTrue("mutableListOf" in block.text && "3)" in block.text, "text=${block.text}")
+    }
+
+    @Test
+    fun `numbered marker followed by a letter is still a list item`() {
+        val block = ReflowAssembler.assemble(listOf(page(line("3) third list entry", top = 100f)))).blocks.single()
+        assertIs<ReflowBlock.ListItem>(block)
     }
 }

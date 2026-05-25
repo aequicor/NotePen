@@ -395,8 +395,17 @@ fun DetailsContent(
     val readingModeEnabled = controls?.readingModeEnabled ?: false
     val readingModeAvailable = controls?.readingModeAvailable ?: true
     // В режиме чтения тап по тексту прячет инструменты и быстрые действия вместе с
-    // airbar ридера (см. PanelControls.chromeHidden); повторный тап — возвращает.
-    val chromeHidden = controls?.chromeHidden ?: false
+    // airbar ридера; повторный тап — возвращает. Берём состояние НАПРЯМУЮ из
+    // персистентного per-tab состояния сфокусированной панели, а не из
+    // ретранслируемого PanelControls.chromeHidden: при возврате с другой панели в
+    // split view focusedActiveState меняется синхронно с фокусом, поэтому хром не
+    // «моргает» видимым на кадр перехода и не залипает на чужом (устаревшем)
+    // значении, пока сфокусированная панель не переопубликует свой SideEffect.
+    val focusedReaderState = tabSession.focusedActiveState
+    val chromeHidden =
+        focusedReaderState != null &&
+            focusedReaderState.readingMode &&
+            !focusedReaderState.readerBarVisible
     // Цвета активной темы ридера: не null только в режиме чтения. Хром (рельса,
     // airbar, вкладки) перекрашивается под них; null — сохраняем цвета темы.
     val readerBackground = controls?.readerBackground
