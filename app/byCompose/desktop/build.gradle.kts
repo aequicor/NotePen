@@ -264,3 +264,22 @@ tasks.register<Exec>("openApp") {
         layout.buildDirectory.file("compose/binaries/main/app/NotePen.app").get().asFile.absolutePath,
     )
 }
+
+// Portable Windows-дистрибутив: тот же релизный app-image, что оборачивает в
+// инсталлятор Inno Setup, плюс файл-маркер NotePen.portable в корне архива. Он
+// переключает приложение на хранение данных в <папка_exe>/data (см. getAppDataDir),
+// поэтому ZIP можно распаковать и запустить без установки — ничего не оставляя в
+// системе. Имеет смысл только на Windows-хосте: createReleaseDistributable
+// собирает app-image под ОС сборки.
+val packageReleasePortableZip by tasks.registering(Zip::class) {
+    group = "compose desktop"
+    description = "Packages the release app-image into a portable (no-install) Windows ZIP."
+    dependsOn("createReleaseDistributable")
+
+    val appVersion = providers.gradleProperty("app.version").getOrElse("1.0.0")
+    from(layout.buildDirectory.dir("compose/binaries/main-release/app/NotePen"))
+    from(rootProject.file("installer/windows/NotePen.portable"))
+
+    archiveFileName.set("NotePen-$appVersion-portable-windows-x64.zip")
+    destinationDirectory.set(layout.buildDirectory.dir("portable"))
+}

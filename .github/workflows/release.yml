@@ -143,7 +143,7 @@ jobs:
           if-no-files-found: error
 
   build-windows:
-    name: Build Windows installer
+    name: Build Windows installer + portable
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -201,6 +201,19 @@ jobs:
           path: installer/windows/Output/*.exe
           if-no-files-found: error
 
+      # Portable (no-install) сборка: тот же релизный app-image + маркер
+      # NotePen.portable, упакованные в ZIP. createReleaseDistributable уже
+      # отработал выше, поэтому Gradle переиспользует его и только архивирует.
+      - name: Build Windows portable ZIP
+        shell: bash
+        run: ./gradlew :app:byCompose:desktop:packageReleasePortableZip -Papp.version=${{ env.APP_VERSION }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-portable
+          path: app/byCompose/desktop/build/portable/*.zip
+          if-no-files-found: error
+
   publish-release:
     name: Publish GitHub Release
     needs: [build-android, build-macos, build-windows]
@@ -221,3 +234,4 @@ jobs:
             artifacts/android-apk/*.apk
             artifacts/macos-dmg/*.dmg
             artifacts/windows-exe/*.exe
+            artifacts/windows-portable/*.zip

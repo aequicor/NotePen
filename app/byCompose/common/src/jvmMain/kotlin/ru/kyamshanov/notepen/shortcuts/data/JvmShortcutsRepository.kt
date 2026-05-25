@@ -6,11 +6,11 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import ru.kyamshanov.notepen.mainscreen.infrastructure.getAppDataDir
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
 import ru.kyamshanov.notepen.shortcuts.domain.port.ShortcutsRepository
 import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import kotlin.coroutines.CoroutineContext
 import kotlin.io.path.deleteIfExists
@@ -20,7 +20,8 @@ private val logger = KotlinLogging.logger {}
 /**
  * JSON-репозиторий настроек шорткатов на JVM.
  *
- * Файл лежит в `${user.home}/.notepen/shortcuts.json`. При первом запуске
+ * Файл `shortcuts.json` — в каталоге данных приложения (`getAppDataDir`):
+ * `${user.home}/.notepen` либо рядом с `.exe` в portable. При первом запуске
  * или ошибке чтения возвращаются значения по умолчанию. Запись идёт через
  * temp-файл + atomic rename, чтобы внезапный crash посреди save'а не
  * оставил повреждённый JSON.
@@ -77,9 +78,6 @@ class JvmShortcutsRepository(
     private companion object {
         const val FILE_NAME = "shortcuts.json"
 
-        fun defaultConfigDir(): Path {
-            val home = System.getProperty("user.home") ?: "."
-            return Paths.get(home, ".notepen")
-        }
+        fun defaultConfigDir(): Path = getAppDataDir().toPath()
     }
 }

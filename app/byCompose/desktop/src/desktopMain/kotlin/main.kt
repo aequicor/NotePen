@@ -57,12 +57,13 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.FileHistoryRepositoryDesk
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
+import ru.kyamshanov.notepen.mainscreen.infrastructure.getAppDataDir
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
-import ru.kyamshanov.notepen.epub.EpubAwarePdfDocumentLoader
-import ru.kyamshanov.notepen.epub.JvmEpubToPdfConverter
+import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
+import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmImageDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmImagePageRenderer
@@ -185,12 +186,12 @@ fun main(args: Array<String>) {
     val selfName = runCatching { InetAddress.getLocalHost().hostName }.getOrDefault("NotePen Desktop")
     val selfInfo = DeviceInfo(id = selfId, name = selfName, host = "", port = 0)
 
-    val pdfDocumentLoader = EpubAwarePdfDocumentLoader(
+    val pdfDocumentLoader = EbookAwarePdfDocumentLoader(
         delegate = JvmDocumentLoader(
             pdfLoader = JvmPdfDocumentLoader(Dispatchers.IO),
             imageLoader = JvmImageDocumentLoader(Dispatchers.IO),
         ),
-        converter = JvmEpubToPdfConverter(Dispatchers.IO),
+        converter = JvmEbookToPdfConverter(Dispatchers.IO),
     )
     val pdfPageRenderer = JvmPageRenderer(
         pdfRenderer = JvmPdfPageRenderer(Dispatchers.IO),
@@ -228,7 +229,7 @@ fun main(args: Array<String>) {
 
     // Persistent offline buffer (SQLDelight-backed) — survives app restarts so
     // edits made offline still replay after a restart + reconnect.
-    val syncDatabasePath = System.getProperty("user.home") + "/.notepen/sync.db"
+    val syncDatabasePath = getAppDataDir().resolve("sync.db").absolutePath
     // Lazy: opening SQLite (native lib + first connection) costs seconds cold —
     // defer it off the main thread so it doesn't block the first frame.
     val pendingDeltaQueue = SqlDelightPendingDeltaQueue(
