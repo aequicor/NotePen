@@ -55,7 +55,7 @@ object JvmBookPdfRenderer {
     fun render(
         book: BookContent,
         output: File,
-    ) {
+    ): List<TocEntry> {
         val composer = PageComposer(loadFonts(book.fonts))
         book.metadata.title
             ?.takeIf { it.isNotBlank() }
@@ -79,6 +79,7 @@ object JvmBookPdfRenderer {
             output.parentFile?.mkdirs()
             doc.save(output)
         }
+        return composer.outline()
     }
 
     /** Загружает встроенные шрифты книги; нечитаемые (например, WOFF) пропускает. */
@@ -92,6 +93,7 @@ object JvmBookPdfRenderer {
         private val embeddedFonts: List<Font>,
     ) {
         private val pages = mutableListOf<BufferedImage>()
+        private val tocEntries = mutableListOf<TocEntry>()
         private val contentBottom = PAGE_HEIGHT - MARGIN
         private val contentWidth = PAGE_WIDTH - 2 * MARGIN
         private lateinit var graphics: Graphics2D
@@ -105,6 +107,8 @@ object JvmBookPdfRenderer {
             graphics.dispose()
             return pages
         }
+
+        fun outline(): List<TocEntry> = tocEntries.toList()
 
         fun render(block: ContentBlock) {
             when (block) {
@@ -126,6 +130,9 @@ object JvmBookPdfRenderer {
         ) {
             cursorY += HEADING_GAP_BEFORE
             val size = HEADING_SIZES[(level - 1).coerceIn(0, HEADING_SIZES.lastIndex)]
+            val lineHeight = (size * LINE_FACTOR).toInt()
+            if (cursorY + lineHeight > contentBottom) newPage()
+            tocEntries.add(TocEntry(level = level, title = text, pageIndex = pages.lastIndex))
             drawText(text, Font(Font.SERIF, Font.BOLD, size.toInt()), Color.BLACK, indent = 0)
             cursorY += HEADING_GAP_AFTER
         }

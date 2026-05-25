@@ -61,7 +61,7 @@ object AndroidBookPdfRenderer {
     fun render(
         book: BookContent,
         output: File,
-    ) {
+    ): List<TocEntry> {
         val pdf = PdfDocument()
         val composer = PageComposer(pdf)
         book.metadata.title
@@ -79,6 +79,7 @@ object AndroidBookPdfRenderer {
         } finally {
             pdf.close()
         }
+        return composer.outline()
     }
 
     /** Накопитель страниц PDF с курсором верстки сверху вниз. */
@@ -87,6 +88,7 @@ object AndroidBookPdfRenderer {
     ) {
         private val contentWidth = PAGE_WIDTH - 2 * MARGIN
         private val contentBottom = PAGE_HEIGHT - MARGIN
+        private val tocEntries = mutableListOf<TocEntry>()
         private var pageNumber = 1
         private var page = startPage(pageNumber)
         private var canvas: Canvas = page.canvas
@@ -95,6 +97,8 @@ object AndroidBookPdfRenderer {
         fun finish() {
             pdf.finishPage(page)
         }
+
+        fun outline(): List<TocEntry> = tocEntries.toList()
 
         fun render(block: ContentBlock) {
             when (block) {
@@ -116,6 +120,8 @@ object AndroidBookPdfRenderer {
         ) {
             cursorY += HEADING_GAP_BEFORE
             val size = HEADING_SIZES[(level - 1).coerceIn(0, HEADING_SIZES.lastIndex)]
+            if (cursorY + size * LINE_SPACING_MULT > contentBottom) newPage()
+            tocEntries.add(TocEntry(level = level, title = text, pageIndex = pageNumber - 1))
             val paint = textPaint(size, Typeface.create(Typeface.SERIF, Typeface.BOLD), Color.BLACK)
             drawLayout(text, paint, indent = 0)
             cursorY += HEADING_GAP_AFTER

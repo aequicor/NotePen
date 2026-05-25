@@ -23,54 +23,66 @@ import java.security.MessageDigest
 class AndroidEbookToPdfConverter(
     private val context: Context,
     private val ioDispatcher: CoroutineDispatcher,
-) : EbookToPdfConverter {
-
+) : EbookToPdfConverter,
+    DocumentOutlineProvider {
     private val cacheDir = File(context.cacheDir, "notepen-books")
     private val mutex = Mutex()
+    private val resolver = context.contentResolver
 
     override fun canConvert(path: String): Boolean = detectBookFormat(path, mimeOf(path)) != null
 
-    override suspend fun ensurePdf(path: String): String = withContext(ioDispatcher) {
-        val uri = Uri.parse(path)
-        val format = requireNotNull(detectBookFormat(path, mimeOf(path))) { "Unsupported book format: $path" }
+    override suspend fun ensurePdf(path: String): String =
+        withContext(ioDispatcher) {
+            val uri = Uri.parse(path)
+            val format = requireNotNull(detectBookFormat(path, mimeOf(path))) { "Unsupported book format: $path" }
 
-        val target = cacheFileFor(path, sourceSize(uri))
-        if (target.exists() && target.length() > 0L) return@withContext target.absolutePath
+            val target = cacheFileFor(path, sourceSize(uri))
+            if (target.exists() && target.length() > 0L) return@withContext target.absolutePath
 
-        mutex.withLock {
-            if (target.exists() && target.length() > 0L) return@withLock target.absolutePath
-            cacheDir.mkdirs()
-            val bytes = readBytes(uri) ?: throw IllegalArgumentException("Cannot read book: $path")
-            val tmp = File.createTempFile("book", ".pdf.tmp", cacheDir)
-            try {
-                when (val parsed = readBookSource(bytes, format)) {
-                    is BookSource.Text -> AndroidBookPdfRenderer.render(parsed.content, tmp)
-                    is BookSource.Comic -> AndroidComicPdfRenderer.render(parsed.images, tmp)
+            mutex.withLock {
+                if (target.exists() && target.length() > 0L) return@withLock target.absolutePath
+                cacheDir.mkdirs()
+                val bytes = readBytes(uri) ?: throw IllegalArgumentException("Cannot read book: $path")
+                val tmp = File.createTempFile("book", ".pdf.tmp", cacheDir)
+                try {
+                    val outline =
+                        when (val parsed = readBookSource(bytes, format)) {
+                            is BookSource.Text -> AndroidBookPdfRenderer.render(parsed.content, tmp)
+                            is BookSource.Comic -> {
+                                AndroidComicPdfRenderer.render(parsed.images, tmp)
+                                emptyList<TocEntry>()
+                            }
+                        }
+                    if (!tmp.renameTo(target)) tmp.copyTo(target, overwrite = true)
+                    OutlineSidecar.write(target.absolutePath, outline)
+                } finally {
+                    tmp.delete()
                 }
-                if (!tmp.renameTo(target)) tmp.copyTo(target, overwrite = true)
-            } finally {
-                tmp.delete()
+                target.absolutePath
             }
-            target.absolutePath
         }
-    }
 
-    private fun mimeOf(path: String): String? =
-        runCatching { context.contentResolver.getType(Uri.parse(path)) }.getOrNull()
+    private fun mimeOf(path: String): String? = runCatching { resolver.getType(Uri.parse(path)) }.getOrNull()
 
-    private fun readBytes(uri: Uri): ByteArray? = when (uri.scheme) {
-        null, "file" -> uri.path?.let { File(it) }?.takeIf { it.canRead() }?.readBytes()
-        else -> context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-    }
+    private fun readBytes(uri: Uri): ByteArray? =
+        when (uri.scheme) {
+            null, "file" ->
+                uri.path
+                    ?.let { File(it) }
+                    ?.takeIf { it.canRead() }
+                    ?.readBytes()
+            else -> resolver.openInputStream(uri)?.use { it.readBytes() }
+        }
 
-    private fun sourceSize(uri: Uri): Long = when (uri.scheme) {
-        null, "file" -> uri.path?.let { File(it).length() } ?: 0L
-        else -> queryContentSize(uri)
-    }
+    private fun sourceSize(uri: Uri): Long =
+        when (uri.scheme) {
+            null, "file" -> uri.path?.let { File(it).length() } ?: 0L
+            else -> queryContentSize(uri)
+        }
 
     private fun queryContentSize(uri: Uri): Long =
         runCatching {
-            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+            resolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val index = cursor.getColumnIndex(OpenableColumns.SIZE)
                     if (index >= 0 && !cursor.isNull(index)) cursor.getLong(index) else 0L
@@ -80,10 +92,21 @@ class AndroidEbookToPdfConverter(
             } ?: 0L
         }.getOrDefault(0L)
 
-    private fun cacheFileFor(path: String, size: Long): File {
-        val digest = MessageDigest.getInstance("MD5")
-            .digest("$path|$size".toByteArray(Charsets.UTF_8))
-            .joinToString("") { byte -> "%02x".format(byte) }
+    override suspend fun outlineFor(path: String): List<TocEntry> {
+        if (!canConvert(path)) return emptyList()
+        val pdfPath = ensurePdf(path)
+        return withContext(ioDispatcher) { OutlineSidecar.read(pdfPath) }
+    }
+
+    private fun cacheFileFor(
+        path: String,
+        size: Long,
+    ): File {
+        val digest =
+            MessageDigest
+                .getInstance("MD5")
+                .digest("$path|$size".toByteArray(Charsets.UTF_8))
+                .joinToString("") { byte -> "%02x".format(byte) }
         return File(cacheDir, "book_$digest.pdf")
     }
 }
