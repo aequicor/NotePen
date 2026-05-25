@@ -8,7 +8,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class EpubParserTest {
-
     @Test
     fun `parses metadata and blocks in spine order`() {
         val book = EpubParser.parse(sampleEpubBytes())
@@ -34,13 +33,15 @@ class EpubParserTest {
 
     @Test
     fun `rejects a zip that is not an epub`() {
-        val notEpub = ByteArrayOutputStream().also { bos ->
-            ZipOutputStream(bos).use { zip ->
-                zip.putNextEntry(ZipEntry("hello.txt"))
-                zip.write("hi".toByteArray())
-                zip.closeEntry()
-            }
-        }.toByteArray()
+        val notEpub =
+            ByteArrayOutputStream()
+                .also { bos ->
+                    ZipOutputStream(bos).use { zip ->
+                        zip.putNextEntry(ZipEntry("hello.txt"))
+                        zip.write("hi".toByteArray())
+                        zip.closeEntry()
+                    }
+                }.toByteArray()
 
         val error = runCatching { EpubParser.parse(notEpub) }.exceptionOrNull()
         assertTrue(error is IllegalArgumentException)
@@ -48,11 +49,21 @@ class EpubParserTest {
 
     @Test
     fun `parses inline emphasis into styled spans`() {
-        val para = EpubParser.parse(sampleEpubBytes()).blocks
-            .filterIsInstance<ContentBlock.Paragraph>()
-            .first { it.text.plainText().contains("Mixed") }
+        val para =
+            EpubParser
+                .parse(sampleEpubBytes())
+                .blocks
+                .filterIsInstance<ContentBlock.Paragraph>()
+                .first { it.text.plainText().contains("Mixed") }
         assertTrue(para.text.any { it.bold && it.text.trim() == "bold" })
         assertTrue(para.text.any { it.italic && it.text.trim() == "italic" })
         assertTrue(para.text.any { it.code && it.text.trim() == "code" })
+    }
+
+    @Test
+    fun `extracts embedded fonts from manifest`() {
+        val fonts = EpubParser.parse(sampleEpubBytes()).fonts
+        assertEquals(1, fonts.size)
+        assertEquals("OTTO-fake-font-bytes", String(fonts.first(), Charsets.UTF_8))
     }
 }

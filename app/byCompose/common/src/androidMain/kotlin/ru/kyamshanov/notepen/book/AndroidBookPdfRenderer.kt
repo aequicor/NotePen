@@ -29,9 +29,12 @@ import java.io.FileOutputStream
  * поддерживается из коробки, файл компактный, текст чёткий при любом зуме.
  * Инлайн-начертание ([RichText]) переносится в [SpannableStringBuilder], а
  * [StaticLayout] отрисовывает спаны нативно.
+ *
+ * Встроенные шрифты EPUB ([BookContent.fonts]) здесь намеренно не применяются:
+ * [StaticLayout] и так делает системный фолбэк по скриптам, а принудительный
+ * авторский шрифт мог бы сломать это покрытие (например, кириллицу).
  */
 object AndroidBookPdfRenderer {
-
     private const val PAGE_WIDTH = 595 // A4 in points (1/72")
     private const val PAGE_HEIGHT = 842
     private const val MARGIN = 54
@@ -55,11 +58,18 @@ object AndroidBookPdfRenderer {
      * @param book книга для верстки
      * @param output файл назначения PDF (создаётся/перезаписывается)
      */
-    fun render(book: BookContent, output: File) {
+    fun render(
+        book: BookContent,
+        output: File,
+    ) {
         val pdf = PdfDocument()
         val composer = PageComposer(pdf)
-        book.metadata.title?.takeIf { it.isNotBlank() }?.let { composer.heading(level = 1, text = it) }
-        book.metadata.author?.takeIf { it.isNotBlank() }?.let { composer.paragraph(listOf(InlineSpan(it)), italic = true) }
+        book.metadata.title
+            ?.takeIf { it.isNotBlank() }
+            ?.let { composer.heading(level = 1, text = it) }
+        book.metadata.author
+            ?.takeIf { it.isNotBlank() }
+            ?.let { composer.paragraph(listOf(InlineSpan(it)), italic = true) }
         for (block in book.blocks) composer.render(block)
         composer.finish()
 
@@ -72,7 +82,9 @@ object AndroidBookPdfRenderer {
     }
 
     /** Накопитель страниц PDF с курсором верстки сверху вниз. */
-    private class PageComposer(private val pdf: PdfDocument) {
+    private class PageComposer(
+        private val pdf: PdfDocument,
+    ) {
         private val contentWidth = PAGE_WIDTH - 2 * MARGIN
         private val contentBottom = PAGE_HEIGHT - MARGIN
         private var pageNumber = 1
@@ -98,7 +110,10 @@ object AndroidBookPdfRenderer {
             }
         }
 
-        fun heading(level: Int, text: String) {
+        fun heading(
+            level: Int,
+            text: String,
+        ) {
             cursorY += HEADING_GAP_BEFORE
             val size = HEADING_SIZES[(level - 1).coerceIn(0, HEADING_SIZES.lastIndex)]
             val paint = textPaint(size, Typeface.create(Typeface.SERIF, Typeface.BOLD), Color.BLACK)
@@ -106,14 +121,22 @@ object AndroidBookPdfRenderer {
             cursorY += HEADING_GAP_AFTER
         }
 
-        fun paragraph(spans: RichText, italic: Boolean = false, indent: Int = 0) {
+        fun paragraph(
+            spans: RichText,
+            italic: Boolean = false,
+            indent: Int = 0,
+        ) {
             val typeface = Typeface.create(Typeface.SERIF, if (italic) Typeface.ITALIC else Typeface.NORMAL)
             val color = if (italic) QUOTE_COLOR else Color.BLACK
             drawLayout(spannableOf(spans), textPaint(BODY_SIZE, typeface, color), indent)
             cursorY += PARAGRAPH_GAP
         }
 
-        private fun textPaint(size: Float, typeface: Typeface, color: Int): TextPaint =
+        private fun textPaint(
+            size: Float,
+            typeface: Typeface,
+            color: Int,
+        ): TextPaint =
             TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 this.textSize = size
                 this.typeface = typeface
@@ -147,26 +170,35 @@ object AndroidBookPdfRenderer {
             return builder
         }
 
-        private fun styleOf(span: InlineSpan): Int? = when {
-            span.bold && span.italic -> Typeface.BOLD_ITALIC
-            span.bold -> Typeface.BOLD
-            span.italic -> Typeface.ITALIC
-            else -> null
-        }
+        private fun styleOf(span: InlineSpan): Int? =
+            when {
+                span.bold && span.italic -> Typeface.BOLD_ITALIC
+                span.bold -> Typeface.BOLD
+                span.italic -> Typeface.ITALIC
+                else -> null
+            }
 
-        private fun drawLayout(text: CharSequence, paint: TextPaint, indent: Int) {
+        private fun drawLayout(
+            text: CharSequence,
+            paint: TextPaint,
+            indent: Int,
+        ) {
             val left = MARGIN + indent
             val width = (contentWidth - indent).coerceAtLeast(1)
-            val layout = StaticLayout.Builder
-                .obtain(text, 0, text.length, paint, width)
-                .setAlignment(Layout.Alignment.ALIGN_NORMAL)
-                .setLineSpacing(0f, LINE_SPACING_MULT)
-                .setIncludePad(false)
-                .build()
+            val layout =
+                StaticLayout.Builder
+                    .obtain(text, 0, text.length, paint, width)
+                    .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+                    .setLineSpacing(0f, LINE_SPACING_MULT)
+                    .setIncludePad(false)
+                    .build()
             drawLayoutPaginated(layout, left)
         }
 
-        private fun drawLayoutPaginated(layout: StaticLayout, left: Int) {
+        private fun drawLayoutPaginated(
+            layout: StaticLayout,
+            left: Int,
+        ) {
             var line = 0
             while (line < layout.lineCount) {
                 val startTop = layout.getLineTop(line)
@@ -193,8 +225,9 @@ object AndroidBookPdfRenderer {
         }
 
         private fun image(block: ContentBlock.Image) {
-            val bitmap = runCatching { BitmapFactory.decodeByteArray(block.data, 0, block.data.size) }
-                .getOrNull() ?: return
+            val bitmap =
+                runCatching { BitmapFactory.decodeByteArray(block.data, 0, block.data.size) }
+                    .getOrNull() ?: return
             val maxHeight = contentBottom - MARGIN
             var width = bitmap.width
             var height = bitmap.height
@@ -232,7 +265,6 @@ object AndroidBookPdfRenderer {
         private fun startPage(number: Int): PdfDocument.Page =
             pdf.startPage(PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, number).create())
 
-        private fun markerFor(item: ContentBlock.ListItem): String =
-            if (item.ordered) "${item.ordinal}. " else "•  "
+        private fun markerFor(item: ContentBlock.ListItem): String = if (item.ordered) "${item.ordinal}. " else "•  "
     }
 }

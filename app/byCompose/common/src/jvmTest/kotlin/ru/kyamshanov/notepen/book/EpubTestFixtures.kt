@@ -33,6 +33,7 @@ internal fun sampleEpubBytes(): ByteArray {
           <manifest>
             <item id="c1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
             <item id="c2" href="ch2.xhtml" media-type="application/xhtml+xml"/>
+            <item id="f1" href="fonts/test.otf" media-type="application/vnd.ms-opentype"/>
           </manifest>
           <spine>
             <itemref idref="c1"/>
@@ -66,7 +67,11 @@ internal fun sampleEpubBytes(): ByteArray {
         zip.putNextEntry(ZipEntry("mimetype"))
         zip.write("application/epub+zip".toByteArray(Charsets.US_ASCII))
         zip.closeEntry()
-        fun put(name: String, content: String) {
+
+        fun put(
+            name: String,
+            content: String,
+        ) {
             zip.putNextEntry(ZipEntry(name))
             zip.write(content.toByteArray(Charsets.UTF_8))
             zip.closeEntry()
@@ -75,6 +80,7 @@ internal fun sampleEpubBytes(): ByteArray {
         put("OEBPS/content.opf", opf)
         put("OEBPS/ch1.xhtml", ch1)
         put("OEBPS/ch2.xhtml", ch2)
+        put("OEBPS/fonts/test.otf", "OTTO-fake-font-bytes")
     }
     return out.toByteArray()
 }

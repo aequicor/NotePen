@@ -9,10 +9,13 @@ package ru.kyamshanov.notepen.book
  *
  * @property metadata метаданные книги
  * @property blocks блоки в порядке чтения (склейка всех документов источника)
+ * @property fonts встроенные шрифты (TTF/OTF, уже деобфусцированные); пусто для
+ *   форматов без встраивания (FB2) и комиксов
  */
 data class BookContent(
     val metadata: BookMetadata,
     val blocks: List<ContentBlock>,
+    val fonts: List<ByteArray> = emptyList(),
 )
 
 /**
