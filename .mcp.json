@@ -1,5 +1,21 @@
 {
     "mcpServers": {
+        "mobile": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "claude-in-mobile"
+            ]
+        },
+        "maven-indexer": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "maven-indexer-mcp@latest"
+            ]
+        },
         "github": {
             "transport": "stdio",
             "command": "npx",
@@ -17,14 +33,6 @@
                 "serena",
                 "--project-dir",
                 "."
-            ]
-        },
-        "mobile": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": [
-                "-y",
-                "claude-in-mobile"
             ]
         }
     }

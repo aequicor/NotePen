@@ -1,0 +1,116 @@
+{
+    "includeCoAuthoredBy": false,
+    "permissions": {
+        "defaultMode": "acceptEdits",
+        "allow": [
+            {
+                "value": "Read(./**)"
+            },
+            {
+                "value": "Bash(./gradlew:*)"
+            },
+            {
+                "value": "Bash(git status)"
+            },
+            {
+                "value": "Bash(git diff:*)"
+            },
+            {
+                "value": "Bash(git log:*)"
+            },
+            {
+                "value": "Bash(git branch:*)"
+            },
+            {
+                "value": "Bash(git add:*)"
+            },
+            {
+                "value": "Bash(git commit:*)"
+            }
+        ],
+        "deny": [
+            {
+                "value": "Read(./.env)"
+            },
+            {
+                "value": "Read(./secrets/**)"
+            },
+            {
+                "value": "Read(./local.properties)"
+            },
+            {
+                "value": "Read(./**/*.keystore)"
+            },
+            {
+                "value": "Read(./**/*.jks)"
+            },
+            {
+                "value": "Read(./**/google-services.json)"
+            },
+            {
+                "value": "Bash(rm -rf:*)"
+            },
+            {
+                "value": "Bash(git push --force:*)"
+            },
+            {
+                "value": "Bash(git reset --hard:*)"
+            }
+        ]
+    },
+    "hooks": {
+        "SessionStart": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/hooks/session-start.sh"
+                    }
+                ]
+            }
+        ],
+        "PreToolUse": [
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/strict/hooks/block-dangerous.sh"
+                    }
+                ]
+            },
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/strict/hooks/guard-commit.sh"
+                    }
+                ]
+            }
+        ],
+        "PostToolUse": [
+            {
+                "matcher": "Edit|Write",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/hooks/post-edit-ktlint.sh"
+                    }
+                ]
+            }
+        ],
+        "Stop": [
+            {
+                "matcher": "*",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": ".claude/hooks/stop-checks.sh"
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
-# PostToolUse hook for Edit|Write. Auto-formats the single edited Kotlin file with ktlint.
+# PostToolUse hook for Edit|Write. Auto-formats Kotlin files with ktlint after every edit.
 # Receives tool input as JSON on stdin. Silent for non-Kotlin files.
-#
-# Formats ONLY the edited file, via the root project's `ktlintFormatFile` task (it runs the
-# ktlint CLI's `-F` on exactly one path). ktlint-gradle has no single-file task, and its
-# per-source-set format tasks reformat every file in the set — which would touch unrelated,
-# possibly in-progress files. Driving the CLI on one path avoids that.
 
 set -euo pipefail
 
@@ -24,19 +19,19 @@ esac
 # Skip if file no longer exists (e.g. moved/deleted).
 [ -f "$file_path" ] || exit 0
 
-# Skip if there's no Gradle wrapper — fall back to a standalone ktlint binary if present.
+# Skip if there's no Gradle wrapper — ktlint integration is project-specific.
 if [ ! -x "./gradlew" ]; then
+  # Fallback to a standalone ktlint binary on PATH, if any.
   if command -v ktlint >/dev/null 2>&1; then
     ktlint -F "$file_path" >/dev/null 2>&1 || true
   fi
   exit 0
 fi
 
-# ktlint resolves its rules from .editorconfig relative to the file; an absolute path is fine.
-# Configuration cache is disabled because the -P value changes per edit, which would otherwise
-# churn the cache on every invocation.
-if ! ./gradlew ktlintFormatFile -PktlintFile="$file_path" --no-configuration-cache --quiet >/dev/null 2>&1; then
-  echo "[post-edit-ktlint] ktlint could not auto-format $file_path — run ./gradlew ktlintCheck for details." >&2
-fi
+# Run ktlintFormat. Some projects expose only a project-wide task — that is OK,
+# it's idempotent and the daemon makes repeat invocations cheap.
+./gradlew ktlintFormat --quiet >/dev/null 2>&1 || {
+  echo "[post-edit-ktlint] ktlintFormat reported issues that could not be auto-fixed in $file_path — run ./gradlew ktlintCheck for details." >&2
+}
 
 exit 0

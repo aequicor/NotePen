@@ -1,0 +1,24 @@
+{
+  "aikitVersion": "0.2.0",
+  "applications": [
+    {
+      "id": "root",
+      "path": ".",
+      "targets": {
+        "claude": {
+          "bundle": "flow-kit@0.0.1",
+          "source": "internal",
+          "inputs": {
+            "projectName": "NotePen",
+            "projectType": "kmp-fullstack",
+            "autonomyLevel": "auto",
+            "githubMcp": true,
+            "mobileMcp": true,
+            "serenaMcp": true,
+            "strict": true
+          }
+        }
+      }
+    }
+  ]
+}
