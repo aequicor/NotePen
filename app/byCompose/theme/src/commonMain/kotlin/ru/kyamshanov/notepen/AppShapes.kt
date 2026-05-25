@@ -10,17 +10,19 @@ import androidx.compose.ui.unit.dp
 @Immutable
 data class AppShapes(
     val component: Shape,
-    val surface: Shape
+    val surface: Shape,
 )
 
-internal val LocalAppShapes = staticCompositionLocalOf {
+internal val LocalAppShapes =
+    staticCompositionLocalOf {
+        AppShapes(
+            component = RoundedCornerShape(ZeroCornerSize),
+            surface = RoundedCornerShape(ZeroCornerSize),
+        )
+    }
+
+internal val DefaultAppShapes =
     AppShapes(
-        component = RoundedCornerShape(ZeroCornerSize),
-        surface = RoundedCornerShape(ZeroCornerSize)
+        component = RoundedCornerShape(percent = 50),
+        surface = RoundedCornerShape(size = 40.dp),
     )
-}
-
-internal val DefaultAppShapes = AppShapes(
-    component = RoundedCornerShape(percent = 50),
-    surface = RoundedCornerShape(size = 40.dp)
-)

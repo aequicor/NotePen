@@ -13,14 +13,16 @@ data class AppSpacing(
     val screenEdge: Dp,
 )
 
-internal val LocalAppSpacing = staticCompositionLocalOf {
+internal val LocalAppSpacing =
+    staticCompositionLocalOf {
+        AppSpacing(
+            touchTarget = 48.dp,
+            screenEdge = 16.dp,
+        )
+    }
+
+internal val DefaultAppSpacing =
     AppSpacing(
         touchTarget = 48.dp,
         screenEdge = 16.dp,
     )
-}
-
-internal val DefaultAppSpacing = AppSpacing(
-    touchTarget = 48.dp,
-    screenEdge = 16.dp,
-)

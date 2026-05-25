@@ -6,8 +6,10 @@ import androidx.compose.runtime.Composable
 @Composable
 expect fun ComposableAppTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,     // Dynamic color is available on Android 12+
-    content: @Composable() () -> Unit
+    dynamicColor: Boolean = true, // Dynamic color is available on Android 12+
+    content:
+        @Composable()
+        () -> Unit,
 )
 
 object AppTheme {
@@ -19,4 +21,3 @@ object AppTheme {
         @Composable
         get() = LocalAppSpacing.current
 }
-
