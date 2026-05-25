@@ -54,7 +54,6 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
@@ -72,6 +71,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -264,19 +264,36 @@ private fun CollapsedPill(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (progressLabel != null) {
+            val progressStyle = TextStyle(color = textColor.copy(alpha = 0.7f), fontSize = 12.sp)
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            // Процент проходит диапазон 0..100 — число цифр в строке растёт (9→10, 99→100),
+            // из-за чего «таблетка» меняла ширину и перецентровывалась, дёргая колесо пресетов.
+            // Резервируем постоянную ширину под самую широкую строку процента («100%»);
+            // прочим форматам прогресса резерв не нужен.
+            val minWidth =
+                if (stored.current.progress == ProgressFormat.PERCENT) {
+                    remember(progressStyle, density) {
+                        with(density) { measurer.measure("100%", progressStyle).size.width.toDp() }
+                    }
+                } else {
+                    0.dp
+                }
             BasicText(
                 text = progressLabel,
-                modifier = Modifier.padding(start = 4.dp, end = 2.dp),
-                style = TextStyle(color = textColor.copy(alpha = 0.7f), fontSize = 12.sp),
+                modifier =
+                    Modifier
+                        .padding(start = 4.dp, end = 2.dp)
+                        .widthIn(min = minWidth),
+                style = progressStyle,
             )
         }
-        // Колесо пресетов + наложенные на края указатели «есть ещё» (см. ScrollChevron).
-        // Указатели — только над краем, в который ещё можно прокрутить (canScroll*),
-        // поэтому у границы прокрутки сторона остаётся чистой.
-        Box(
-            modifier = Modifier.weight(1f, fill = false),
-            contentAlignment = Alignment.Center,
-        ) {
+        // Колесо пресетов: «барабанный» эффект (wheelItem) ужимает и притеняет
+        // плашки к краям, в которые ещё можно прокрутить, но НЕ до полного
+        // исчезновения — крайняя плашка остаётся читаемой (READER_WHEEL_MIN_ALPHA),
+        // пока для неё есть место. Тонкая fade-кромка (fadingEdges) лишь сглаживает
+        // срез у самого края.
+        Box(modifier = Modifier.weight(1f, fill = false)) {
             LazyRow(
                 modifier =
                     Modifier
@@ -294,7 +311,14 @@ private fun CollapsedPill(
                 itemsIndexed(elements, key = { _, e -> e.key }) { index, element ->
                     when (element) {
                         is ReaderWheelElement.Preset ->
-                            Box(Modifier.wheelItem(listState, index, RailOrientation.HORIZONTAL)) {
+                            Box(
+                                Modifier.wheelItem(
+                                    listState,
+                                    index,
+                                    RailOrientation.HORIZONTAL,
+                                    minAlpha = READER_WHEEL_MIN_ALPHA,
+                                ),
+                            ) {
                                 PresetWheelChip(
                                     preset = element.preset,
                                     selected = stored.activePresetId == element.preset.id,
@@ -309,12 +333,6 @@ private fun CollapsedPill(
                     }
                 }
             }
-            if (listState.canScrollBackward) {
-                ScrollChevron(pointsForward = false, tint = textColor, modifier = Modifier.align(Alignment.CenterStart))
-            }
-            if (listState.canScrollForward) {
-                ScrollChevron(pointsForward = true, tint = textColor, modifier = Modifier.align(Alignment.CenterEnd))
-            }
         }
         // Тюнер закреплён вне прокрутки — справа от колеса, всегда видим.
         TunerGearButton(
@@ -322,38 +340,6 @@ private fun CollapsedPill(
             textColor = textColor,
             onClick = onToggleExpanded,
         )
-    }
-}
-
-/**
- * Декоративный указатель «есть ещё пресеты в эту сторону»: маленькая «галочка»-каретка
- * поверх растворяющегося края колеса. Делает скрытый контент очевидным там, где одной
- * fade-кромки мало. Кладётся вызывающим только на ту сторону, в которую ещё есть запас
- * прокрутки ([androidx.compose.foundation.lazy.LazyListState.canScrollForward] /
- * `canScrollBackward`), поэтому у границы прокрутки сторона остаётся пустой.
- *
- * Не перехватывает ввод (рисунок поверх колеса) — скролл/тап по пресетам под ним
- * работают как обычно. Цвет — [tint] темы ридера, как остальной airbar.
- *
- * @param pointsForward `true` — каретка `›` (к концу списка), `false` — `‹` (к началу).
- */
-@Composable
-private fun ScrollChevron(
-    pointsForward: Boolean,
-    tint: Color,
-    modifier: Modifier = Modifier,
-) {
-    Canvas(modifier.size(width = CHEVRON_WIDTH, height = CHEVRON_HEIGHT)) {
-        val strokePx = CHEVRON_STROKE.toPx()
-        // Кончик каретки смотрит в сторону прокрутки; основание — у края колеса.
-        val tipX = if (pointsForward) size.width - strokePx else strokePx
-        val baseX = if (pointsForward) strokePx else size.width - strokePx
-        val tip = Offset(tipX, size.height / 2f)
-        val top = Offset(baseX, strokePx)
-        val bottom = Offset(baseX, size.height - strokePx)
-        val color = tint.copy(alpha = CHEVRON_ALPHA)
-        drawLine(color, top, tip, strokeWidth = strokePx, cap = StrokeCap.Round)
-        drawLine(color, tip, bottom, strokeWidth = strokePx, cap = StrokeCap.Round)
     }
 }
 
@@ -1069,12 +1055,6 @@ private const val CHIP_SELECTED_FILL_ALPHA = 0.22f
 private const val CHIP_TEXT_ALPHA = 0.65f
 private const val CHIP_SELECTED_TEXT_ALPHA = 1f
 
-/** Размер каретки-указателя «есть ещё» у края колеса и толщина её штриха. См. [ScrollChevron]. */
-private val CHEVRON_WIDTH = 7.dp
-private val CHEVRON_HEIGHT = 13.dp
-private val CHEVRON_STROKE = 1.5.dp
-private const val CHEVRON_ALPHA = 0.55f
-
 /** Сторона глифа-шестерёнки тюнера и внутренний отступ круглой тап-цели вокруг неё. */
 private val GEAR_ICON_SIZE = 18.dp
 private val GEAR_BUTTON_PADDING = 7.dp
@@ -1093,8 +1073,19 @@ private val AIRBAR_MAX_WIDTH = 560.dp
 private val AIRBAR_SHEET_MAX_HEIGHT = 380.dp
 private val AIRBAR_BOTTOM_PADDING = 16.dp
 
-/** Ширина растворяющей кромки колеса пресетов: плашки у краёв исчезают, а не обрезаются. */
-private val READER_WHEEL_FADE_EDGE = 32.dp
+/**
+ * Узкая растворяющая кромка колеса пресетов: лишь сглаживает срез плашки у самого
+ * края, не пряча её целиком — «барабан» [wheelItem] и так оставляет крайнюю плашку
+ * частично видимой ([READER_WHEEL_MIN_ALPHA]).
+ */
+private val READER_WHEEL_FADE_EDGE = 14.dp
+
+/**
+ * Нижняя граница непрозрачности крайней плашки колеса. «Барабан» [wheelItem] притеняет
+ * уезжающие к краю пресеты, но не до нуля: пока для плашки есть место, она остаётся
+ * читаемой (чуть бледнее и меньше центральной), а не исчезает совсем.
+ */
+private const val READER_WHEEL_MIN_ALPHA = 0.5f
 private const val AIRBAR_ALPHA = 0.92f
 private const val AIRBAR_SHEET_ALPHA = 0.96f
 
