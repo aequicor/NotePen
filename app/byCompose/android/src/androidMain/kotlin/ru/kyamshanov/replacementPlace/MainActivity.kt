@@ -68,6 +68,7 @@ import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
+import ru.kyamshanov.notepen.sync.infrastructure.RecentsLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseAndroid
 import ru.kyamshanov.notepen.tablet.AndroidTabletInputController
@@ -226,7 +227,7 @@ class MainActivity : ComponentActivity() {
         val remoteCatalogProvider =
             RemoteCatalogProvider(
                 hostName = selfInfo.name,
-                historyRepository = historyRepo,
+                manifestProvider = RecentsLibraryManifestProvider(historyRepo),
                 folderRepository = folderRepo,
             )
         remoteCatalogProvider.serve(client = syncClient, scope = appScope)

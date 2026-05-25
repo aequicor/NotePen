@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
@@ -15,6 +14,7 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolder
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolderLink
 import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
+import ru.kyamshanov.notepen.sync.domain.port.LibraryManifestProvider
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
@@ -38,12 +38,13 @@ private const val CATALOG_BROADCAST_DEBOUNCE_MS = 500L
  * [ru.kyamshanov.notepen.sync.domain.model.DeviceInfo.id].
  *
  * @param hostName Display name of this host, embedded in the served catalog.
- * @param historyRepository Source of "recent" files.
+ * @param manifestProvider Source of the published library — the books a peer
+ *   may see and the id→path resolution used when streaming a document.
  * @param folderRepository Source of user folders and folder/file links.
  */
 class RemoteCatalogProvider(
     private val hostName: String,
-    private val historyRepository: FileHistoryRepository,
+    private val manifestProvider: LibraryManifestProvider,
     private val folderRepository: FolderRepository,
 ) {
     private val mutex = Mutex()
@@ -176,17 +177,24 @@ class RemoteCatalogProvider(
      * push proactive updates as well (Phase 5).
      */
     suspend fun buildSnapshotFor(peerId: String): RemoteCatalog {
-        val recentFiles = historyRepository.getAll()
+        val manifest = manifestProvider.current()
+        // Resolve every book to its concrete host path once. A book that fails
+        // to resolve (e.g. deleted between the walk and now) is simply dropped.
+        val booksWithUri =
+            manifest.books.mapNotNull { book ->
+                manifestProvider.resolveAbsolutePath(book.id)?.let { uri -> book to uri }
+            }
         val recent =
-            recentFiles.map { file ->
+            booksWithUri.map { (book, _) ->
                 RemoteEntry(
-                    documentId = documentIdFromFilePath(file.uri),
-                    displayName = file.displayName,
-                    fileSize = file.fileSize,
-                    lastOpenedAt = file.openedAt,
+                    documentId = book.id.value,
+                    displayName = book.displayName,
+                    fileSize = book.fileSize,
+                    lastOpenedAt = book.modifiedAt,
                 )
             }
-        val uriToDocumentId = recentFiles.associate { it.uri to documentIdFromFilePath(it.uri) }
+        val uriToDocumentId = booksWithUri.associate { (book, uri) -> uri to book.id.value }
+        val modifiedByUri = booksWithUri.associate { (book, uri) -> uri to book.modifiedAt }
         val foldersDomain = folderRepository.getAll()
         val folders =
             foldersDomain.map { folder ->
@@ -207,13 +215,13 @@ class RemoteCatalogProvider(
                         RemoteFolderLink(
                             folderId = folder.id,
                             documentId = docId,
-                            lastOpenedAt = recentFiles.firstOrNull { it.uri == uri }?.openedAt ?: 0L,
+                            lastOpenedAt = modifiedByUri[uri] ?: 0L,
                         )
                     }
                 }
             }
         val allowed = recent.map { it.documentId }.toSet()
-        val docToUri = recentFiles.associate { documentIdFromFilePath(it.uri) to it.uri }
+        val docToUri = booksWithUri.associate { (book, uri) -> book.id.value to uri }
         mutex.withLock {
             allowedByPeer[peerId] = allowed
             uriByPeer[peerId] = docToUri

@@ -1,5 +1,7 @@
 package ru.kyamshanov.notepen.sync.domain
 
+import ru.kyamshanov.notepen.sync.domain.model.BookId
+
 /**
  * Stable cross-device document identifier derived from a local file path.
  *
@@ -19,6 +21,20 @@ fun documentIdFromFilePath(filePath: String): String {
     val basename = filePath.substringAfterLast('/').substringAfterLast('\\')
     val hash = fnv1a32Hex(filePath)
     return "$basename#$hash"
+}
+
+/**
+ * Derives a stable [BookId] from a path *relative to the library root*.
+ *
+ * Same wire shape as [documentIdFromFilePath] (`<basename>#<hash>`), but the
+ * hash is taken over the relative path — so the id does not change when the
+ * library root itself moves or the app restarts. Moving the file to a different
+ * relative location inside the root does change the id (avoiding that needs a
+ * persisted per-book id, which is intentionally deferred).
+ */
+fun bookIdFromRelativePath(relativePath: String): BookId {
+    val basename = relativePath.substringAfterLast('/').substringAfterLast('\\')
+    return BookId("$basename#${fnv1a32Hex(relativePath)}")
 }
 
 /**

@@ -77,6 +77,7 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
+import ru.kyamshanov.notepen.sync.infrastructure.FileSystemLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
@@ -100,6 +101,7 @@ import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 import ru.kyamshanov.notepen.titlebar.TitleBarInteraction
+import java.io.File
 import java.net.InetAddress
 import java.util.UUID
 import kotlin.system.exitProcess
@@ -296,10 +298,27 @@ fun main(args: Array<String>) {
 
     // Host: build & serve the library catalog to any paired tablet, and
     // respond to on-demand DocumentOpenRequests by streaming the file.
+    // Local library: the single sandboxed folder paired tablets may borrow
+    // from. Everything else on disk stays invisible to peers. Override the
+    // location with -Dnotepen.library.root=…; defaults to a visible folder in
+    // the user home (created empty — drop books in to share them).
+    val libraryRoot =
+        System.getProperty("notepen.library.root")
+            ?.let(::File)
+            ?: File(System.getProperty("user.home"), "NotePen Library")
+    libraryRoot.mkdirs()
+    val libraryManifestProvider =
+        FileSystemLibraryManifestProvider(
+            root = libraryRoot,
+            isBook = { file ->
+                val name = file.name.lowercase()
+                OPENABLE_EXTENSIONS.any { name.endsWith(".$it") }
+            },
+        )
     val remoteCatalogProvider =
         RemoteCatalogProvider(
             hostName = selfName,
-            historyRepository = historyRepo,
+            manifestProvider = libraryManifestProvider,
             folderRepository = folderRepo,
         )
     remoteCatalogProvider.serve(server = peerServer, scope = appScope)
