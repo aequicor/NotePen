@@ -1102,7 +1102,9 @@ fun DetailsContent(
         // scroll-mode toggle stacked into one glass island. The sync entry now
         // lives in the settings wheel (see systemControlEntries); its panel and
         // status tint are owned higher up so the wheel can reach them too.
-        val showScrollModeButton = controls != null
+        // В режиме чтения прокрутка только вертикальная (reflow-поток), поэтому
+        // переключатель режима скролла бессмысленен — прячем его.
+        val showScrollModeButton = controls != null && !readingModeEnabled
         val airbarButtonCount =
             (if (SupportsQuickLoupe) 1 else 0) +
                 (if (showScrollModeButton) 1 else 0)
