@@ -62,18 +62,19 @@ public fun toolPresetWheelEntries(
     onAdd: () -> Unit,
     onDelete: (String) -> Unit,
     showAdd: Boolean = true,
-): List<WheelEntry> = buildList {
-    items.forEach { item ->
-        add(
-            WheelEntry(item.id, PRESET_ITEM_SIZE) {
-                PresetChip(item = item, onApply = { onApply(item.id) }, onDelete = { onDelete(item.id) })
-            },
-        )
+): List<WheelEntry> =
+    buildList {
+        items.forEach { item ->
+            add(
+                WheelEntry(item.id, PRESET_ITEM_SIZE) {
+                    PresetChip(item = item, onApply = { onApply(item.id) }, onDelete = { onDelete(item.id) })
+                },
+            )
+        }
+        if (showAdd) {
+            add(WheelEntry(ADD_PRESET_KEY, PRESET_ITEM_SIZE) { AddPresetButton(icon = addIcon, onClick = onAdd) })
+        }
     }
-    if (showAdd) {
-        add(WheelEntry(ADD_PRESET_KEY, PRESET_ITEM_SIZE) { AddPresetButton(icon = addIcon, onClick = onAdd) })
-    }
-}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -93,11 +94,12 @@ private fun PresetChip(
     )
 
     val openMenu = { if (item.deletable) menuOpen = true }
-    var itemModifier = Modifier
-        .size(PRESET_ITEM_SIZE)
-        .clip(CircleShape)
-        .border(borderWidth, borderColor, CircleShape)
-        .combinedClickable(onClick = onApply, onLongClick = openMenu)
+    var itemModifier =
+        Modifier
+            .size(PRESET_ITEM_SIZE)
+            .clip(CircleShape)
+            .border(borderWidth, borderColor, CircleShape)
+            .combinedClickable(onClick = onApply, onLongClick = openMenu)
     if (item.deletable) {
         itemModifier = itemModifier.secondaryClickModifier { menuOpen = true }
     }
@@ -119,7 +121,10 @@ private fun PresetChip(
 }
 
 @Composable
-private fun AddPresetButton(icon: ImageVector, onClick: () -> Unit) {
+private fun AddPresetButton(
+    icon: ImageVector,
+    onClick: () -> Unit,
+) {
     IconButton(onClick = onClick, modifier = Modifier.size(PRESET_ITEM_SIZE)) {
         Icon(
             imageVector = icon,
