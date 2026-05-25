@@ -1,4 +1,5 @@
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
+import org.gradle.api.attributes.Bundling
 
 plugins {
     // this is necessary to avoid the plugins to be loaded multiple times
@@ -44,6 +45,30 @@ subprojects {
             }
         }
     }
+}
+
+// Single-file ktlint formatter used by the PostToolUse hook (.claude/hooks/post-edit-ktlint.sh).
+// ktlint-gradle exposes only per-source-set format tasks, which reformat every file in the set;
+// to touch exactly the edited file we drive the ktlint CLI on one path via `-PktlintFile=<path>`.
+val ktlintCli: Configuration by configurations.creating {
+    // ktlint-cli publishes two variants; pick the self-contained ("shadowed") fat jar.
+    attributes {
+        attribute(Bundling.BUNDLING_ATTRIBUTE, objects.named(Bundling::class.java, Bundling.SHADOWED))
+    }
+}
+
+dependencies {
+    ktlintCli(libs.ktlint.cli)
+}
+
+tasks.register<JavaExec>("ktlintFormatFile") {
+    description = "Formats one Kotlin file with ktlint: ./gradlew ktlintFormatFile -PktlintFile=<path>"
+    classpath = ktlintCli
+    mainClass.set("com.pinterest.ktlint.Main")
+    // ktlint exits non-zero on non-autocorrectable issues; the hook must not fail on that.
+    isIgnoreExitValue = true
+    val target = (project.findProperty("ktlintFile") as String?)?.takeIf(String::isNotBlank)
+    if (target != null) args("-F", target) else args("--help")
 }
 
 // task for easy run
