@@ -1,11 +1,5 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -18,11 +12,6 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
-import ru.kyamshanov.notepen.reflow.ReflowPageLocator
-import ru.kyamshanov.notepen.reflow.ReflowReading
-import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
-import ru.kyamshanov.notepen.reflow.ui.ReflowReader
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -58,8 +47,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.random.Random
-import kotlin.time.Duration.Companion.seconds
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
@@ -69,12 +56,22 @@ import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
+import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
 import ru.kyamshanov.notepen.magnifier.MagnifierInputPanel
 import ru.kyamshanov.notepen.magnifier.asMagnifierGeometry
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
+import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
+import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
+import ru.kyamshanov.notepen.pdfviewer.ScrollMode
+import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
+import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
+import ru.kyamshanov.notepen.reflow.ReflowPageLocator
+import ru.kyamshanov.notepen.reflow.ReflowReading
+import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
+import ru.kyamshanov.notepen.reflow.ui.ReflowReader
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
 import ru.kyamshanov.notepen.sync.SyncBridge
@@ -86,13 +83,9 @@ import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
-import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
-import ru.kyamshanov.notepen.pdfviewer.ScrollMode
-import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.PenPointerEventType
 import ru.kyamshanov.notepen.tablet.stylusEventSink
-import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.tabs.DocumentId
 import ru.kyamshanov.notepen.tabs.Panel
 import ru.kyamshanov.notepen.tabs.PdfDocumentState
@@ -100,6 +93,8 @@ import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
 import ru.kyamshanov.notepen.tabs.TabBar
 import ru.kyamshanov.notepen.tabs.TabCloseResult
 import ru.kyamshanov.notepen.tabs.TabSession
+import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
 
 private val panelLogger = KotlinLogging.logger {}
 
@@ -128,6 +123,7 @@ class PanelControls(
     val isExporting: Boolean,
     val magnifierEnabled: Boolean,
     val showThumbnails: Boolean,
+    val showToc: Boolean,
     val readingModeEnabled: Boolean,
     val quickLoupeArmed: Boolean,
     val scrollMode: ScrollMode,
@@ -136,6 +132,7 @@ class PanelControls(
     val toggleMagnifier: () -> Unit,
     val export: () -> Unit,
     val toggleThumbnails: () -> Unit,
+    val toggleToc: () -> Unit,
     val toggleReadingMode: () -> Unit,
     val navigateToPage: (Int) -> Unit,
     val toggleQuickLoupe: () -> Unit,
@@ -161,6 +158,7 @@ fun EditorPanel(
     isFocused: Boolean,
     loader: PdfDocumentLoader,
     renderer: PdfPageRenderer,
+    outlineProvider: DocumentOutlineProvider,
     toolMode: ToolMode,
     penSettings: PenSettings,
     markerSettings: MarkerSettings,
@@ -218,6 +216,7 @@ fun EditorPanel(
 
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
     var showThumbnails by remember { mutableStateOf(false) }
+    var showToc by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
 
     // ---- Reading (reflow) mode -------------------------------------------
@@ -245,12 +244,14 @@ fun EditorPanel(
         // чтения сразу встать на соответствующий абзац.
         val targetPage = pdfViewerState.firstVisiblePageIndex
         val strokesByPage = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
-        val reading = runCatching { reflowReadingUseCase(filePath, strokesByPage) }
-            .onFailure { e -> panelLogger.warn { "Reflow reading build failed: ${e::class.simpleName}" } }
-            .getOrNull()
+        val reading =
+            runCatching { reflowReadingUseCase(filePath, strokesByPage) }
+                .onFailure { e -> panelLogger.warn { "Reflow reading build failed: ${e::class.simpleName}" } }
+                .getOrNull()
         reflowReading = reading
         if (reading != null) {
-            ReflowPageLocator.blockIndexForPage(reading.document, targetPage)
+            ReflowPageLocator
+                .blockIndexForPage(reading.document, targetPage)
                 ?.let { reflowListState.scrollToItem(it) }
         }
     }
@@ -269,7 +270,8 @@ fun EditorPanel(
     }
     val annotatedPageIndices by remember {
         derivedStateOf {
-            drawingStates.asSequence()
+            drawingStates
+                .asSequence()
                 .filter { (_, state) -> state.currentPaths.isNotEmpty() }
                 .map { (pageIndex, _) -> pageIndex }
                 .toSet()
@@ -299,13 +301,14 @@ fun EditorPanel(
             val aspect = pageInfo.aspectRatio.takeIf { it > 0f } ?: 1f
             val widthCapped = PANEL_HIGH_RES_DIM_PX
             val heightFromWidth = (widthCapped / aspect).toInt().coerceAtLeast(1)
-            val (w, h) = if (heightFromWidth > PANEL_HIGH_RES_DIM_PX) {
-                val hh = PANEL_HIGH_RES_DIM_PX
-                val ww = (hh * aspect).toInt().coerceAtLeast(1)
-                ww to hh
-            } else {
-                widthCapped to heightFromWidth
-            }
+            val (w, h) =
+                if (heightFromWidth > PANEL_HIGH_RES_DIM_PX) {
+                    val hh = PANEL_HIGH_RES_DIM_PX
+                    val ww = (hh * aspect).toInt().coerceAtLeast(1)
+                    ww to hh
+                } else {
+                    widthCapped to heightFromWidth
+                }
             launch {
                 runCatching {
                     val data = renderer.renderPage(doc, pageIndex, w, h)
@@ -317,9 +320,10 @@ fun EditorPanel(
         }
     }
 
-    val syncBridge = remember(syncEngine) {
-        syncEngine?.let { SyncBridge(engine = it, drawingStates = drawingStates, scope = coroutineScope) }
-    }
+    val syncBridge =
+        remember(syncEngine) {
+            syncEngine?.let { SyncBridge(engine = it, drawingStates = drawingStates, scope = coroutineScope) }
+        }
     LaunchedEffect(syncBridge) { syncBridge?.start() }
 
     // ---- Tablet: request annotation snapshot from connected hosts ---------
@@ -348,23 +352,25 @@ fun EditorPanel(
 
     // ---- Tablet: aggregate pairing state + offline / reconnect snackbars --
     var clientPairingState by remember { mutableStateOf<PairingState?>(null) }
-    val isRemoteOpenedDoc = remember(filePath, receivedPdfDir) {
-        receivedPdfDir != null && filePath.startsWith(receivedPdfDir)
-    }
+    val isRemoteOpenedDoc =
+        remember(filePath, receivedPdfDir) {
+            receivedPdfDir != null && filePath.startsWith(receivedPdfDir)
+        }
     LaunchedEffect(peerClient) {
         val client = peerClient ?: return@LaunchedEffect
         client.pairingStates.collect { states ->
-            clientPairingState = when {
-                states.values.any { it is PairingState.Connected } ->
-                    states.values.first { it is PairingState.Connected }
-                states.isNotEmpty() && states.values.all { it is PairingState.LostConnection } ->
-                    PairingState.LostConnection
-                states.values.any { it is PairingState.Reconnecting } ->
-                    states.values.first { it is PairingState.Reconnecting }
-                states.values.any { it is PairingState.Error } ->
-                    states.values.first { it is PairingState.Error }
-                else -> PairingState.Idle
-            }
+            clientPairingState =
+                when {
+                    states.values.any { it is PairingState.Connected } ->
+                        states.values.first { it is PairingState.Connected }
+                    states.isNotEmpty() && states.values.all { it is PairingState.LostConnection } ->
+                        PairingState.LostConnection
+                    states.values.any { it is PairingState.Reconnecting } ->
+                        states.values.first { it is PairingState.Reconnecting }
+                    states.values.any { it is PairingState.Error } ->
+                        states.values.first { it is PairingState.Error }
+                    else -> PairingState.Idle
+                }
         }
     }
 
@@ -373,27 +379,29 @@ fun EditorPanel(
         val flow = pendingDeltaCounts ?: return@LaunchedEffect
         flow.collect { counts -> pendingForDoc = counts[documentId] ?: 0 }
     }
-    val showOfflineBanner = peerClient != null &&
-        clientPairingState != null &&
-        clientPairingState !is PairingState.Idle &&
-        clientPairingState !is PairingState.Connected &&
-        pendingForDoc > 0
+    val showOfflineBanner =
+        peerClient != null &&
+            clientPairingState != null &&
+            clientPairingState !is PairingState.Idle &&
+            clientPairingState !is PairingState.Connected &&
+            pendingForDoc > 0
 
     val saveLocallyAndNotify: suspend (String) -> Unit = { message ->
         val annotations = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
         val extents = drawingStates.mapValues { (_, state) -> state.extent.value }
-        val result = annotationRepository.save(
-            pdfPath = filePath,
-            annotations = annotations,
-            scale = currentScalePercent,
-            pen = penSettings,
-            marker = markerSettings,
-            eraser = eraserSettings,
-            currentPage = firstVisiblePage,
-            currentPageOffset = currentPageOffsetPx,
-            favoritePageIndices = favoritePageIndices.toSet(),
-            pageExtents = extents,
-        )
+        val result =
+            annotationRepository.save(
+                pdfPath = filePath,
+                annotations = annotations,
+                scale = currentScalePercent,
+                pen = penSettings,
+                marker = markerSettings,
+                eraser = eraserSettings,
+                currentPage = firstVisiblePage,
+                currentPageOffset = currentPageOffsetPx,
+                favoritePageIndices = favoritePageIndices.toSet(),
+                pageExtents = extents,
+            )
         showSnackbar(if (result.isSuccess) message else "Ошибка локального сохранения")
     }
     var previouslyConnected by remember(filePath) { mutableStateOf(false) }
@@ -401,9 +409,10 @@ fun EditorPanel(
     LaunchedEffect(clientPairingState, isRemoteOpenedDoc) {
         if (!isRemoteOpenedDoc) return@LaunchedEffect
         val nowConnected = clientPairingState is PairingState.Connected
-        val nowOffline = clientPairingState is PairingState.Reconnecting ||
-            clientPairingState is PairingState.LostConnection ||
-            clientPairingState is PairingState.Error
+        val nowOffline =
+            clientPairingState is PairingState.Reconnecting ||
+                clientPairingState is PairingState.LostConnection ||
+                clientPairingState is PairingState.Error
         when {
             previouslyConnected && nowOffline -> {
                 previouslyConnected = false
@@ -418,17 +427,21 @@ fun EditorPanel(
                     showSnackbar("Соединение восстановлено")
                 } else {
                     val flow = pendingDeltaCounts
-                    val syncedInTime = if (flow != null) {
-                        withTimeoutOrNull(PANEL_REPLAY_DEADLINE) {
-                            flow.first { (it[documentId] ?: 0) == 0 }
-                            true
-                        } ?: false
-                    } else {
-                        false
-                    }
+                    val syncedInTime =
+                        if (flow != null) {
+                            withTimeoutOrNull(PANEL_REPLAY_DEADLINE) {
+                                flow.first { (it[documentId] ?: 0) == 0 }
+                                true
+                            } ?: false
+                        } else {
+                            false
+                        }
                     showSnackbar(
-                        if (syncedInTime) "Соединение восстановлено. Изменения синхронизированы"
-                        else "Соединение восстановлено, но не все изменения отправлены",
+                        if (syncedInTime) {
+                            "Соединение восстановлено. Изменения синхронизированы"
+                        } else {
+                            "Соединение восстановлено, но не все изменения отправлены"
+                        },
                     )
                 }
             }
@@ -452,14 +465,29 @@ fun EditorPanel(
             }
         }
     }
+
+    // ---- TOC outline load -------------------------------------------------
+    // Грузим оглавление один раз на таб. Провайдер сам переключает диспетчер на
+    // IO (commonMain не трогает Dispatchers.* напрямую); для обычных PDF вернёт
+    // пустой список, и сайдбар покажет заглушку.
+    LaunchedEffect(pdfState) {
+        if (pdfState.outline.isNotEmpty()) return@LaunchedEffect
+        val outline =
+            runCatching { outlineProvider.outlineFor(filePath) }
+                .onFailure { e -> panelLogger.warn { "Outline load failed: ${e::class.simpleName}" } }
+                .getOrDefault(emptyList())
+        pdfState.outline = outline
+    }
+
     LaunchedEffect(openDocs.tabs) {
         openDocs.tabs.forEach { tab ->
             val state = tabSession.stateOf(tab)
             if (state.pdfDocument == null && !state.isPdfLoading) {
-                val sameFileIsLoading = openDocs.tabs.any { other ->
-                    other.id != tab.id &&
-                        tabSession.stateOf(other).let { s -> s.filePath == state.filePath && s.isPdfLoading }
-                }
+                val sameFileIsLoading =
+                    openDocs.tabs.any { other ->
+                        other.id != tab.id &&
+                            tabSession.stateOf(other).let { s -> s.filePath == state.filePath && s.isPdfLoading }
+                    }
                 if (sameFileIsLoading) return@forEach
                 state.isPdfLoading = true
                 try {
@@ -485,22 +513,25 @@ fun EditorPanel(
     LaunchedEffect(pdfState) {
         if (pdfState.annotationsLoaded) return@LaunchedEffect
         pdfState.annotationsLoaded = true
-        val restoredView = annotationRepository.loadViewState(filePath).getOrNull()?.also { view ->
-            pdfViewerState.applyInitialState(
-                scalePercent = view.scale,
-                pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
-                pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
-            )
-            // Вторичный таб того же файла открываем в обычном (не reading) режиме —
-            // как и позицию, режим чтения для него не восстанавливаем.
-            pdfState.readingMode = if (pdfState.skipPageRestore) false else view.readingMode
-        }
-        val projectionStrokes = hostAnnotationSnapshotFor?.let { provider ->
-            runCatching { provider(documentId) }.getOrElse { e ->
-                panelLogger.warn { "Host projection read failed for doc=$documentId: ${e::class.simpleName}" }
-                emptyList()
+        val restoredView =
+            annotationRepository.loadViewState(filePath).getOrNull()?.also { view ->
+                pdfViewerState.applyInitialState(
+                    scalePercent = view.scale,
+                    pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
+                    pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
+                )
+                // Вторичный таб того же файла открываем в обычном (не reading) режиме —
+                // как и позицию, режим чтения для него не восстанавливаем.
+                pdfState.readingMode = if (pdfState.skipPageRestore) false else view.readingMode
             }
-        }.orEmpty()
+        val projectionStrokes =
+            hostAnnotationSnapshotFor
+                ?.let { provider ->
+                    runCatching { provider(documentId) }.getOrElse { e ->
+                        panelLogger.warn { "Host projection read failed for doc=$documentId: ${e::class.simpleName}" }
+                        emptyList()
+                    }
+                }.orEmpty()
 
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
             if (restoredView == null) {
@@ -544,18 +575,19 @@ fun EditorPanel(
     val saveTab: suspend (PdfDocumentState) -> Unit = { state ->
         val annotations = state.drawingStates.mapValues { (_, s) -> s.currentPaths.toList() }
         val extents = state.drawingStates.mapValues { (_, s) -> s.extent.value }
-        annotationRepository.save(
-            pdfPath = state.filePath,
-            annotations = annotations,
-            scale = state.pdfViewerState.scalePercent,
-            pen = penSettings,
-            marker = markerSettings,
-            eraser = eraserSettings,
-            currentPage = state.pdfViewerState.firstVisiblePageIndex,
-            currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
-            favoritePageIndices = state.favoritePageIndices.toSet(),
-            pageExtents = extents,
-        ).onFailure { e -> panelLogger.warn { "Auto-save failed for ${state.filePath}: ${e::class.simpleName}" } }
+        annotationRepository
+            .save(
+                pdfPath = state.filePath,
+                annotations = annotations,
+                scale = state.pdfViewerState.scalePercent,
+                pen = penSettings,
+                marker = markerSettings,
+                eraser = eraserSettings,
+                currentPage = state.pdfViewerState.firstVisiblePageIndex,
+                currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
+                favoritePageIndices = state.favoritePageIndices.toSet(),
+                pageExtents = extents,
+            ).onFailure { e -> panelLogger.warn { "Auto-save failed for ${state.filePath}: ${e::class.simpleName}" } }
     }
     val requestRemoteSaveIfConnected: suspend () -> Unit = {
         if (peerClient != null && clientPairingState is PairingState.Connected) {
@@ -576,8 +608,7 @@ fun EditorPanel(
             for ((_, s) in pdfState.drawingStates) acc += s.historyVersion.value
             acc + pdfState.favoritePageIndices.size +
                 penSettings.hashCode() + markerSettings.hashCode() + eraserSettings.hashCode()
-        }
-            .drop(1)
+        }.drop(1)
             .distinctUntilChanged()
             .debounce(PANEL_AUTOSAVE_DEBOUNCE)
             .collect {
@@ -599,8 +630,7 @@ fun EditorPanel(
                 currentPageOffset = pdfViewerState.firstVisiblePageOffsetPx,
                 readingMode = pdfState.readingMode,
             )
-        }
-            .drop(1)
+        }.drop(1)
             .distinctUntilChanged()
             .debounce(PANEL_AUTOSAVE_DEBOUNCE)
             .collect { view ->
@@ -618,28 +648,29 @@ fun EditorPanel(
     val eraserOverrideProvider = rememberUpdatedState(eraserOverride)
     val pencilModeProvider = rememberUpdatedState(pencilModeEnabled)
     val syncEngineProvider = rememberUpdatedState(syncEngine)
-    val drawingController = remember(pdfViewerState, drawingStates, magnifierState) {
-        MultiPageDrawingController(
-            drawingStates = drawingStates,
-            geometry = pdfViewerState.asPageLayoutGeometry(),
-            toolMode = { toolModeProvider.value },
-            penSettings = { penSettingsProvider.value },
-            markerSettings = { markerSettingsProvider.value },
-            eraserSettings = { eraserSettingsProvider.value },
-            eraserOverride = { eraserOverrideProvider.value },
-            skipPage = { magnifierState.enabled },
-            onGestureStart = { pageIndex, snapshot -> pdfState.pushUndoSnapshot(pageIndex, snapshot) },
-            onStrokeFinished = { pageIndex, path ->
-                val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
-                handlePanelStrokeFinished(state, pageIndex, path, syncEngineProvider.value)
-            },
-            onEraseFinished = { pageIndex, before, _ ->
-                val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
-                handlePanelEraseFinished(state, pageIndex, before, syncEngineProvider.value)
-            },
-            scope = coroutineScope,
-        )
-    }
+    val drawingController =
+        remember(pdfViewerState, drawingStates, magnifierState) {
+            MultiPageDrawingController(
+                drawingStates = drawingStates,
+                geometry = pdfViewerState.asPageLayoutGeometry(),
+                toolMode = { toolModeProvider.value },
+                penSettings = { penSettingsProvider.value },
+                markerSettings = { markerSettingsProvider.value },
+                eraserSettings = { eraserSettingsProvider.value },
+                eraserOverride = { eraserOverrideProvider.value },
+                skipPage = { magnifierState.enabled },
+                onGestureStart = { pageIndex, snapshot -> pdfState.pushUndoSnapshot(pageIndex, snapshot) },
+                onStrokeFinished = { pageIndex, path ->
+                    val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
+                    handlePanelStrokeFinished(state, pageIndex, path, syncEngineProvider.value)
+                },
+                onEraseFinished = { pageIndex, before, _ ->
+                    val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
+                    handlePanelEraseFinished(state, pageIndex, before, syncEngineProvider.value)
+                },
+                scope = coroutineScope,
+            )
+        }
     val palmRejectionActive = remember { { pencilModeProvider.value } }
 
     fun bindingActive(b: ShortcutBinding): Boolean {
@@ -669,27 +700,29 @@ fun EditorPanel(
     }
 
     val pinnedRect = remember(pdfState) { mutableStateOf<Rect?>(null) }
-    val magnifierTargetGestureController = remember(pdfViewerState, magnifierState) {
-        ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController(
-            state = magnifierState,
-            viewerState = pdfViewerState,
-            onMoveFinished = {
-                if (magnifierState.attachment == ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN) {
-                    pinnedRect.value = magnifierState.targetRectInViewport(pdfViewerState)
-                }
-            },
-        )
-    }
+    val magnifierTargetGestureController =
+        remember(pdfViewerState, magnifierState) {
+            ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController(
+                state = magnifierState,
+                viewerState = pdfViewerState,
+                onMoveFinished = {
+                    if (magnifierState.attachment == ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN) {
+                        pinnedRect.value = magnifierState.targetRectInViewport(pdfViewerState)
+                    }
+                },
+            )
+        }
     LaunchedEffect(pdfState, magnifierState.attachment, magnifierState.enabled) {
         if (!magnifierState.enabled) {
             pinnedRect.value = null
             return@LaunchedEffect
         }
-        pinnedRect.value = when (magnifierState.attachment) {
-            ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN ->
-                magnifierState.targetRectInViewport(pdfViewerState)
-            ru.kyamshanov.notepen.magnifier.MagnifierAttachment.PAGE -> null
-        }
+        pinnedRect.value =
+            when (magnifierState.attachment) {
+                ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN ->
+                    magnifierState.targetRectInViewport(pdfViewerState)
+                ru.kyamshanov.notepen.magnifier.MagnifierAttachment.PAGE -> null
+            }
     }
     LaunchedEffect(pdfState, magnifierState.attachment, magnifierState.enabled, pdfViewerState.pan, pdfViewerState.zoom) {
         if (!magnifierState.enabled) return@LaunchedEffect
@@ -700,30 +733,38 @@ fun EditorPanel(
     }
 
     val quickLoupeArmed = remember(pdfState) { mutableStateOf(false) }
-    val loupeSelectionController = remember(pdfViewerState, magnifierState) {
-        LoupeSelectionController(
-            viewerState = pdfViewerState,
-            viewportSizeProvider = { Size(panelSizePx.width.toFloat(), panelSizePx.height.toFloat()) },
-            onSelected = { segments, viewportSize, selectionSizePx, panelCenter ->
-                magnifierState.enableMulti(
-                    viewportSize = viewportSize,
-                    segs = segments,
-                    selectionSizePx = selectionSizePx,
-                    panelCenter = panelCenter,
-                )
-                quickLoupeArmed.value = false
-            },
-        )
-    }
+    val loupeSelectionController =
+        remember(pdfViewerState, magnifierState) {
+            LoupeSelectionController(
+                viewerState = pdfViewerState,
+                viewportSizeProvider = { Size(panelSizePx.width.toFloat(), panelSizePx.height.toFloat()) },
+                onSelected = { segments, viewportSize, selectionSizePx, panelCenter ->
+                    magnifierState.enableMulti(
+                        viewportSize = viewportSize,
+                        segs = segments,
+                        selectionSizePx = selectionSizePx,
+                        panelCenter = panelCenter,
+                    )
+                    quickLoupeArmed.value = false
+                },
+            )
+        }
     val gestureRoute = remember(pdfState) { mutableStateOf(PanelGestureRoute.NONE) }
     val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
-    val magnifierInputControllerHolder = remember(pdfState) {
-        mutableStateOf<ru.kyamshanov.notepen.magnifier.MagnifierInputController?>(null)
-    }
+    val magnifierInputControllerHolder =
+        remember(pdfState) {
+            mutableStateOf<ru.kyamshanov.notepen.magnifier.MagnifierInputController?>(null)
+        }
 
-    fun routedOnDown(viewportPos: Offset, pressure: Float, tilt: Float) {
+    fun routedOnDown(
+        viewportPos: Offset,
+        pressure: Float,
+        tilt: Float,
+    ) {
         if (magnifierState.enabled) {
-            val panelLocal = ru.kyamshanov.notepen.magnifier.viewportToPanelLocal(magnifierState, viewportPos)
+            val panelLocal =
+                ru.kyamshanov.notepen.magnifier
+                    .viewportToPanelLocal(magnifierState, viewportPos)
             val mc = magnifierInputControllerHolder.value
             if (panelLocal != null && mc != null) {
                 mc.onDown(panelLocal, magnifierState.panelSize, pressure, tilt)
@@ -747,12 +788,18 @@ fun EditorPanel(
         }
     }
 
-    fun routedOnMove(viewportPos: Offset, pressure: Float, tilt: Float) {
+    fun routedOnMove(
+        viewportPos: Offset,
+        pressure: Float,
+        tilt: Float,
+    ) {
         when (gestureRoute.value) {
             PanelGestureRoute.LOUPE -> loupeSelectionController.onMove(viewportPos)
             PanelGestureRoute.DRAWING -> drawingController.onMove(viewportPos, pressure, tilt)
             PanelGestureRoute.MAGNIFIER -> {
-                val panelLocal = ru.kyamshanov.notepen.magnifier.viewportToPanelLocal(magnifierState, viewportPos)
+                val panelLocal =
+                    ru.kyamshanov.notepen.magnifier
+                        .viewportToPanelLocal(magnifierState, viewportPos)
                 val mc = magnifierInputControllerHolder.value
                 if (panelLocal != null && mc != null) mc.onMove(panelLocal, magnifierState.panelSize, pressure, tilt)
             }
@@ -834,28 +881,30 @@ fun EditorPanel(
             val viewportCenterDocY = ((viewportH / 2f) - pan.y) / zoom
             val viewportCenterDocX = ((viewportW / 2f) - pan.x) / zoom
             val tops = layout.pageTopsPx
-            val pageIdx = when {
-                tops.isEmpty() -> firstVisiblePage
-                viewportCenterDocY <= tops[0] -> 0
-                else -> {
-                    var lo = 0
-                    var hi = tops.size - 1
-                    while (lo < hi) {
-                        val mid = (lo + hi + 1) ushr 1
-                        if (tops[mid] <= viewportCenterDocY) lo = mid else hi = mid - 1
+            val pageIdx =
+                when {
+                    tops.isEmpty() -> firstVisiblePage
+                    viewportCenterDocY <= tops[0] -> 0
+                    else -> {
+                        var lo = 0
+                        var hi = tops.size - 1
+                        while (lo < hi) {
+                            val mid = (lo + hi + 1) ushr 1
+                            if (tops[mid] <= viewportCenterDocY) lo = mid else hi = mid - 1
+                        }
+                        lo
                     }
-                    lo
                 }
-            }
             val pdfH = if (pageIdx in 0 until layout.pageHeightsPx.size) layout.pdfHeightsPx[pageIdx] else 1f
             val pageTop = if (pageIdx in tops.indices) tops[pageIdx] else 0f
             if (basePageW > 0f && zoom > 0f) {
                 magnifierState.updatePageCanvasPx(widthPx = basePageW * zoom, heightPx = pdfH * zoom)
             }
-            val centerN = Offset(
-                x = (viewportCenterDocX / basePageW.coerceAtLeast(1f)).coerceIn(0f, 1f),
-                y = ((viewportCenterDocY - pageTop) / pdfH.coerceAtLeast(1f)).coerceIn(0f, 1f),
-            )
+            val centerN =
+                Offset(
+                    x = (viewportCenterDocX / basePageW.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                    y = ((viewportCenterDocY - pageTop) / pdfH.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                )
             magnifierState.enable(
                 onPage = pageIdx,
                 viewportSize = Size(viewportW, viewportH),
@@ -872,11 +921,12 @@ fun EditorPanel(
         }
     }
     val onCycleScrollMode: () -> Unit = {
-        pdfViewerState.scrollMode = when (pdfViewerState.scrollMode) {
-            ScrollMode.BOTH -> ScrollMode.VERTICAL
-            ScrollMode.VERTICAL -> ScrollMode.NONE
-            ScrollMode.NONE -> ScrollMode.BOTH
-        }
+        pdfViewerState.scrollMode =
+            when (pdfViewerState.scrollMode) {
+                ScrollMode.BOTH -> ScrollMode.VERTICAL
+                ScrollMode.VERTICAL -> ScrollMode.NONE
+                ScrollMode.NONE -> ScrollMode.BOTH
+            }
     }
 
     if (isFocused) {
@@ -885,6 +935,7 @@ fun EditorPanel(
         // not register a recomposition dependency, so without this read toggling
         // thumbnails would never re-run the effect nor republish PanelControls.
         val thumbnailsVisible = showThumbnails
+        val tocVisible = showToc
         val readingModeVisible = pdfState.readingMode
         // Read scrollMode in composition (not only inside SideEffect) so the
         // composition subscribes to it — toggling it republishes PanelControls.
@@ -899,6 +950,7 @@ fun EditorPanel(
                     isExporting = isExporting,
                     magnifierEnabled = magnifierState.enabled,
                     showThumbnails = thumbnailsVisible,
+                    showToc = tocVisible,
                     readingModeEnabled = readingModeVisible,
                     quickLoupeArmed = quickLoupeArmed.value,
                     scrollMode = currentScrollMode,
@@ -906,7 +958,14 @@ fun EditorPanel(
                     zoomOut = onZoomOut,
                     toggleMagnifier = onMagnifierToggle,
                     export = onExport,
-                    toggleThumbnails = { showThumbnails = !showThumbnails },
+                    toggleThumbnails = {
+                        showThumbnails = !showThumbnails
+                        if (showThumbnails) showToc = false
+                    },
+                    toggleToc = {
+                        showToc = !showToc
+                        if (showToc) showThumbnails = false
+                    },
                     toggleReadingMode = { pdfState.readingMode = !pdfState.readingMode },
                     navigateToPage = { page ->
                         if (pdfState.readingMode) {
@@ -934,10 +993,11 @@ fun EditorPanel(
                 pdfDocument = pdfDocument,
                 pages = pages,
                 renderer = renderer,
-                modifier = Modifier
-                    .fillMaxSize()
-                    .stylusEventSink(tabletController)
-                    .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .stylusEventSink(tabletController)
+                        .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
                 primaryDragPanEnabled = {
                     // Палец/указатель свободен для панорамирования, когда он не
                     // является инструментом рисования: либо инструмент неактивен,
@@ -947,34 +1007,41 @@ fun EditorPanel(
                         !quickLoupeArmed.value &&
                         !openTriggerProvider.value
                 },
-                gestureModifier = Modifier.pdfMultiPageDrawingInput(
-                    key = drawingController,
-                    tablet = tabletController,
-                    palmRejectionActive = palmRejectionActive,
-                    captureGesture = { pos ->
-                        quickLoupeArmed.value ||
-                            openTriggerProvider.value ||
-                            (magnifierState.enabled &&
-                                magnifierTargetGestureController.hitTest(pos) !=
-                                ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE) ||
-                            (!pencilModeProvider.value &&
-                                toolModeProvider.value != ToolMode.NONE &&
-                                drawingController.isInsidePdfPage(pos))
-                    },
-                    onDown = ::routedOnDown,
-                    onMove = ::routedOnMove,
-                    onUp = ::routedOnUp,
-                    onCancel = ::routedOnCancel,
-                ),
+                gestureModifier =
+                    Modifier.pdfMultiPageDrawingInput(
+                        key = drawingController,
+                        tablet = tabletController,
+                        palmRejectionActive = palmRejectionActive,
+                        captureGesture = { pos ->
+                            quickLoupeArmed.value ||
+                                openTriggerProvider.value ||
+                                (
+                                    magnifierState.enabled &&
+                                        magnifierTargetGestureController.hitTest(pos) !=
+                                        ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
+                                ) ||
+                                (
+                                    !pencilModeProvider.value &&
+                                        toolModeProvider.value != ToolMode.NONE &&
+                                        drawingController.isInsidePdfPage(pos)
+                                )
+                        },
+                        onDown = ::routedOnDown,
+                        onMove = ::routedOnMove,
+                        onUp = ::routedOnUp,
+                        onCancel = ::routedOnCancel,
+                    ),
             ) {
                 val bm = bitmap
                 Box(modifier = Modifier.fillMaxSize()) {
                     if (bm != null) {
-                        val pdfDrawingState = remember(pageIndex) {
-                            drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
-                        }
-                        val isMagnifierPage = magnifierState.enabled &&
-                            magnifierState.segments.any { it.pageIndex == pageIndex }
+                        val pdfDrawingState =
+                            remember(pageIndex) {
+                                drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
+                            }
+                        val isMagnifierPage =
+                            magnifierState.enabled &&
+                                magnifierState.segments.any { it.pageIndex == pageIndex }
                         if (isMagnifierPage) {
                             SideEffect { magnifierState.updatePageBitmap(pageIndex, bm) }
                         }
@@ -996,12 +1063,15 @@ fun EditorPanel(
                         )
                     } else {
                         Box(
-                            modifier = Modifier
-                                .size(width = pdfWidth, height = pdfHeight)
-                                .border(
-                                    width = androidx.compose.ui.unit.Dp(0.5f),
-                                    color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
-                                ),
+                            modifier =
+                                Modifier
+                                    .size(width = pdfWidth, height = pdfHeight)
+                                    .border(
+                                        width =
+                                            androidx.compose.ui.unit
+                                                .Dp(0.5f),
+                                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                                    ),
                         )
                     }
                 }
@@ -1021,12 +1091,17 @@ fun EditorPanel(
 
             loupeSelectionController.selectionRect.value?.let { currentSelection ->
                 Canvas(modifier = Modifier.fillMaxSize()) {
-                    val stroke = androidx.compose.ui.graphics.drawscope.Stroke(
-                        width = 2f,
-                        pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(12f, 8f)),
-                    )
+                    val stroke =
+                        androidx.compose.ui.graphics.drawscope.Stroke(
+                            width = 2f,
+                            pathEffect =
+                                androidx.compose.ui.graphics.PathEffect
+                                    .dashPathEffect(floatArrayOf(12f, 8f)),
+                        )
                     drawRect(
-                        color = androidx.compose.ui.graphics.Color(30, 136, 229),
+                        color =
+                            androidx.compose.ui.graphics
+                                .Color(30, 136, 229),
                         topLeft = Offset(currentSelection.left, currentSelection.top),
                         size = Size(currentSelection.width, currentSelection.height),
                         style = stroke,
@@ -1039,10 +1114,11 @@ fun EditorPanel(
                     color = MaterialTheme.colorScheme.errorContainer,
                     contentColor = MaterialTheme.colorScheme.onErrorContainer,
                     shape = MaterialTheme.shapes.small,
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 4.dp)
-                        .fillMaxWidth(0.8f),
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 4.dp)
+                            .fillMaxWidth(0.8f),
                 ) {
                     Text(
                         text = "Оффлайн, $pendingForDoc правок ждут отправки",
@@ -1053,23 +1129,27 @@ fun EditorPanel(
             }
 
             if (magnifierState.enabled) {
-                val magPdfDrawingStateProvider: (Int) -> PdfDrawingState = remember(drawingStates) {
-                    { pageIdx -> drawingStates.getOrPut(pageIdx) { PdfDrawingState() } }
-                }
-                val magOnGestureStart: (Int, List<DrawingPath>) -> Unit = remember(pdfState) {
-                    { pageIdx, snapshot -> pdfState.pushUndoSnapshot(pageIdx, snapshot) }
-                }
+                val magPdfDrawingStateProvider: (Int) -> PdfDrawingState =
+                    remember(drawingStates) {
+                        { pageIdx -> drawingStates.getOrPut(pageIdx) { PdfDrawingState() } }
+                    }
+                val magOnGestureStart: (Int, List<DrawingPath>) -> Unit =
+                    remember(pdfState) {
+                        { pageIdx, snapshot -> pdfState.pushUndoSnapshot(pageIdx, snapshot) }
+                    }
                 val syncEngineRef = rememberUpdatedState(syncEngine)
-                val magOnStrokeFinished: (Int, DrawingPath) -> Unit = remember(drawingStates) {
-                    { pageIdx, path ->
-                        drawingStates[pageIdx]?.let { handlePanelStrokeFinished(it, pageIdx, path, syncEngineRef.value) }
+                val magOnStrokeFinished: (Int, DrawingPath) -> Unit =
+                    remember(drawingStates) {
+                        { pageIdx, path ->
+                            drawingStates[pageIdx]?.let { handlePanelStrokeFinished(it, pageIdx, path, syncEngineRef.value) }
+                        }
                     }
-                }
-                val magOnEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit = remember(drawingStates) {
-                    { pageIdx, before, _ ->
-                        drawingStates[pageIdx]?.let { handlePanelEraseFinished(it, pageIdx, before, syncEngineRef.value) }
+                val magOnEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit =
+                    remember(drawingStates) {
+                        { pageIdx, before, _ ->
+                            drawingStates[pageIdx]?.let { handlePanelEraseFinished(it, pageIdx, before, syncEngineRef.value) }
+                        }
                     }
-                }
                 val magEraserOverrideState = rememberUpdatedState(eraserOverride)
                 val magEraserOverrideProvider = remember { { magEraserOverrideState.value } }
                 val magEraserPos = remember { mutableStateOf<ru.kyamshanov.notepen.drawing.api.EraserPosition?>(null) }
@@ -1077,27 +1157,28 @@ fun EditorPanel(
                 val magPenSettingsProvider = rememberUpdatedState(penSettings)
                 val magMarkerSettingsProvider = rememberUpdatedState(markerSettings)
                 val magEraserSettingsProvider = rememberUpdatedState(eraserSettings)
-                val magnifierInputController = remember(magnifierState) {
-                    ru.kyamshanov.notepen.magnifier.MagnifierInputController(
-                        geometry = magnifierState.asMagnifierGeometry(),
-                        pdfDrawingStateProvider = magPdfDrawingStateProvider,
-                        toolMode = { magToolModeProvider.value },
-                        penSettings = { magPenSettingsProvider.value },
-                        markerSettings = { magMarkerSettingsProvider.value },
-                        eraserSettings = { magEraserSettingsProvider.value },
-                        eraserOverride = magEraserOverrideProvider,
-                        eraserPos = magEraserPos,
-                        onGestureStart = magOnGestureStart,
-                        onStrokeFinished = magOnStrokeFinished,
-                        onEraseFinished = magOnEraseFinished,
-                        scope = coroutineScope,
-                        pageAspect = { pageIndex ->
-                            val layout = pdfViewerState.layout
-                            val h = layout.pdfHeightsPx.getOrNull(pageIndex) ?: 0f
-                            if (h > 0f) layout.basePageWidthPx / h else 1f
-                        },
-                    )
-                }
+                val magnifierInputController =
+                    remember(magnifierState) {
+                        ru.kyamshanov.notepen.magnifier.MagnifierInputController(
+                            geometry = magnifierState.asMagnifierGeometry(),
+                            pdfDrawingStateProvider = magPdfDrawingStateProvider,
+                            toolMode = { magToolModeProvider.value },
+                            penSettings = { magPenSettingsProvider.value },
+                            markerSettings = { magMarkerSettingsProvider.value },
+                            eraserSettings = { magEraserSettingsProvider.value },
+                            eraserOverride = magEraserOverrideProvider,
+                            eraserPos = magEraserPos,
+                            onGestureStart = magOnGestureStart,
+                            onStrokeFinished = magOnStrokeFinished,
+                            onEraseFinished = magOnEraseFinished,
+                            scope = coroutineScope,
+                            pageAspect = { pageIndex ->
+                                val layout = pdfViewerState.layout
+                                val h = layout.pdfHeightsPx.getOrNull(pageIndex) ?: 0f
+                                if (h > 0f) layout.basePageWidthPx / h else 1f
+                            },
+                        )
+                    }
                 magnifierInputControllerHolder.value = magnifierInputController
 
                 MagnifierInputPanel(
@@ -1211,20 +1292,25 @@ private fun handlePanelEraseFinished(
     }
     val ext = pdfDrawingState.extent.value
     val extDto = if (ext != PageExtent.Pdf) RectDto.fromDomain(ext) else null
-    val batch = buildList {
-        for (id in removedOrModified) add(
-            StrokeDelta.Removed(strokeId = id, pageIndex = pageIndex, authorDeviceId = engine.deviceId, clock = 0),
-        )
-        for ((idx, p) in newAdded.withIndex()) add(
-            StrokeDelta.Added(
-                strokeId = p.strokeId,
-                pageIndex = pageIndex,
-                authorDeviceId = engine.deviceId,
-                clock = 0,
-                path = p.toDto(p.strokeId),
-                pageExtent = if (idx == 0) extDto else null,
-            ),
-        )
-    }
+    val batch =
+        buildList {
+            for (id in removedOrModified) {
+                add(
+                    StrokeDelta.Removed(strokeId = id, pageIndex = pageIndex, authorDeviceId = engine.deviceId, clock = 0),
+                )
+            }
+            for ((idx, p) in newAdded.withIndex()) {
+                add(
+                    StrokeDelta.Added(
+                        strokeId = p.strokeId,
+                        pageIndex = pageIndex,
+                        authorDeviceId = engine.deviceId,
+                        clock = 0,
+                        path = p.toDto(p.strokeId),
+                        pageExtent = if (idx == 0) extDto else null,
+                    ),
+                )
+            }
+        }
     engine.applyLocalBatch(batch)
 }

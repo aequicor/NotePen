@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.Flow
+import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
@@ -34,6 +35,13 @@ fun App(
     rootComponent: RootComponent,
     pdfDocumentLoader: PdfDocumentLoader,
     pdfPageRenderer: PdfPageRenderer,
+    /**
+     * Поставщик оглавления документа для сайдбара «Содержание». Платформенные
+     * конвертеры книг ([ru.kyamshanov.notepen.book.JvmEbookToPdfConverter] /
+     * `AndroidEbookToPdfConverter`) реализуют его и отдают главы EPUB/FB2;
+     * для обычных PDF возвращается пустой список.
+     */
+    outlineProvider: DocumentOutlineProvider,
     /**
      * Factory that resolves the [SyncEngine] for a given `documentId`.
      * Wired to [ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry] at the
@@ -73,6 +81,7 @@ fun App(
                 component = rootComponent,
                 pdfDocumentLoader = pdfDocumentLoader,
                 pdfPageRenderer = pdfPageRenderer,
+                outlineProvider = outlineProvider,
                 syncEngineFor = syncEngineFor,
                 peerServer = peerServer,
                 peerClient = peerClient,

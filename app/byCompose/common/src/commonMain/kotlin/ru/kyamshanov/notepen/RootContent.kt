@@ -6,10 +6,11 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import com.arkivanov.decompose.extensions.compose.stack.Children
-import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import com.arkivanov.decompose.extensions.compose.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
+import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import kotlinx.coroutines.flow.Flow
+import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContent
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
@@ -32,6 +33,8 @@ fun RootContent(
     component: RootComponent,
     pdfDocumentLoader: PdfDocumentLoader,
     pdfPageRenderer: PdfPageRenderer,
+    /** Forwarded to [DetailsContent] to populate the TOC sidebar with chapters. */
+    outlineProvider: DocumentOutlineProvider,
     /**
      * Factory that resolves the [SyncEngine] for a given `documentId`.
      * Wired to [ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry] at the
@@ -71,8 +74,9 @@ fun RootContent(
             is RootComponent.Child.MainChild -> {
                 // Safe cast: DefaultRootComponent always creates MainScreenComponent for MainChild.
                 // RootContent lives in :common and may safely reference MainScreenComponent.
-                val mainScreenComponent = child.component as? MainScreenComponent
-                    ?: error("MainChild.component must be MainScreenComponent — check DefaultRootComponent factory")
+                val mainScreenComponent =
+                    child.component as? MainScreenComponent
+                        ?: error("MainChild.component must be MainScreenComponent — check DefaultRootComponent factory")
                 val state by mainScreenComponent.viewModel.state.collectAsState()
 
                 LaunchedEffect(state.navigationTarget) {
@@ -86,9 +90,10 @@ fun RootContent(
                             mainScreenComponent.viewModel.onIntent(
                                 ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent.FilePickerResult(
                                     uri = pickedPath,
-                                    displayName = pickedPath
-                                        ?.let { resolveDocumentDisplayName(it) }
-                                        ?: "",
+                                    displayName =
+                                        pickedPath
+                                            ?.let { resolveDocumentDisplayName(it) }
+                                            ?: "",
                                     fileSize = null,
                                 ),
                             )
@@ -108,11 +113,12 @@ fun RootContent(
                 MainContent(
                     state = state,
                     onIntent = { mainScreenComponent.viewModel.onIntent(it) },
-                    onBack = if (libraryHasBack) {
-                        { component.onBackClicked(toIndex = childStack.backStack.size - 1) }
-                    } else {
-                        null
-                    },
+                    onBack =
+                        if (libraryHasBack) {
+                            { component.onBackClicked(toIndex = childStack.backStack.size - 1) }
+                        } else {
+                            null
+                        },
                     hostQrViewModel = hostQrViewModel,
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
@@ -121,31 +127,35 @@ fun RootContent(
                     modifier = modifier,
                 )
             }
-            is RootComponent.Child.DetailsChild -> DetailsContent(
-                component = child.component,
-                loader = pdfDocumentLoader,
-                renderer = pdfPageRenderer,
-                syncEngineFor = syncEngineFor,
-                peerServer = peerServer,
-                peerClient = peerClient,
-                pendingDeltaCounts = pendingDeltaCounts,
-                hostQrViewModel = hostQrViewModel,
-                clientScanViewModel = clientScanViewModel,
-                manualConnectViewModel = manualConnectViewModel,
-                receivedPdfDir = receivedPdfDir,
-                openDocumentRegistry = openDocumentRegistry,
-                localDocumentIdRegistry = localDocumentIdRegistry,
-                hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
-                modifier = modifier,
-            )
+            is RootComponent.Child.DetailsChild ->
+                DetailsContent(
+                    component = child.component,
+                    loader = pdfDocumentLoader,
+                    renderer = pdfPageRenderer,
+                    outlineProvider = outlineProvider,
+                    syncEngineFor = syncEngineFor,
+                    peerServer = peerServer,
+                    peerClient = peerClient,
+                    pendingDeltaCounts = pendingDeltaCounts,
+                    hostQrViewModel = hostQrViewModel,
+                    clientScanViewModel = clientScanViewModel,
+                    manualConnectViewModel = manualConnectViewModel,
+                    receivedPdfDir = receivedPdfDir,
+                    openDocumentRegistry = openDocumentRegistry,
+                    localDocumentIdRegistry = localDocumentIdRegistry,
+                    hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
+                    modifier = modifier,
+                )
             is RootComponent.Child.PeerCatalogChild -> {
-                val impl = child.component as? PeerCatalogComponentImpl
-                    ?: error("PeerCatalogChild.component must be PeerCatalogComponentImpl — check DefaultRootComponent factory")
+                val impl =
+                    child.component as? PeerCatalogComponentImpl
+                        ?: error("PeerCatalogChild.component must be PeerCatalogComponentImpl — check DefaultRootComponent factory")
                 PeerCatalogContent(component = impl, modifier = modifier)
             }
             is RootComponent.Child.FolderContentsChild -> {
-                val impl = child.component as? FolderContentsComponentImpl
-                    ?: error("FolderContentsChild.component must be FolderContentsComponentImpl — check DefaultRootComponent factory")
+                val impl =
+                    child.component as? FolderContentsComponentImpl
+                        ?: error("FolderContentsChild.component must be FolderContentsComponentImpl — check DefaultRootComponent factory")
                 FolderContent(component = impl, modifier = modifier)
             }
         }

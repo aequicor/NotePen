@@ -1,9 +1,9 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -14,9 +14,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.asPaddingValues
@@ -26,16 +26,20 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.systemBars
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Block
@@ -44,7 +48,6 @@ import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -68,42 +71,38 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusTarget
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.only
-import androidx.compose.foundation.layout.width
-import kotlin.math.roundToInt
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
-import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
+import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
-import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
-import ru.kyamshanov.notepen.ui.glass.GlassSurface
+import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdfviewer.ScrollMode
@@ -123,19 +122,20 @@ import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
-import ru.kyamshanov.notepen.tabs.DocumentId
-import ru.kyamshanov.notepen.tabs.LayoutTemplate
-import ru.kyamshanov.notepen.tabs.WorkspaceLayout
-import ru.kyamshanov.notepen.tabs.PdfDocumentState
-import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
 import ru.kyamshanov.notepen.tabs.DIVIDER_HIT
+import ru.kyamshanov.notepen.tabs.DocumentId
 import ru.kyamshanov.notepen.tabs.GridContainer
 import ru.kyamshanov.notepen.tabs.LayoutPickerOverlay
+import ru.kyamshanov.notepen.tabs.LayoutTemplate
 import ru.kyamshanov.notepen.tabs.PanelId
-import ru.kyamshanov.notepen.tabs.TabCloseResult
+import ru.kyamshanov.notepen.tabs.PdfDocumentState
+import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
+import ru.kyamshanov.notepen.tabs.WorkspaceLayout
 import ru.kyamshanov.notepen.tabs.WorkspaceSnapshot
 import ru.kyamshanov.notepen.tabs.rememberTabSession
 import ru.kyamshanov.notepen.tabs.toSnapshot
+import ru.kyamshanov.notepen.ui.glass.GlassSurface
+import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
 
@@ -166,6 +166,7 @@ fun DetailsContent(
     component: DetailsComponent,
     loader: PdfDocumentLoader,
     renderer: PdfPageRenderer,
+    outlineProvider: DocumentOutlineProvider,
     syncEngineFor: ((documentId: String) -> SyncEngine)? = null,
     peerServer: PeerServer? = null,
     peerClient: SyncClient? = null,
@@ -189,20 +190,22 @@ fun DetailsContent(
     val syncDocumentIdFor: (String) -> String =
         remember(localDocumentIdRegistry, receivedPdfDir) {
             { path ->
-                val fromRegistry = if (receivedPdfDir != null && path.startsWith(receivedPdfDir)) {
-                    localDocumentIdRegistry?.lookup(path)
-                } else {
-                    null
-                }
+                val fromRegistry =
+                    if (receivedPdfDir != null && path.startsWith(receivedPdfDir)) {
+                        localDocumentIdRegistry?.lookup(path)
+                    } else {
+                        null
+                    }
                 fromRegistry ?: documentIdFromFilePath(path)
             }
         }
 
     var savedLayout by rememberSaveable { mutableStateOf("") }
-    val tabSession = rememberTabSession(
-        initialFilePath = initialFilePath,
-        syncDocumentIdFor = syncDocumentIdFor,
-    )
+    val tabSession =
+        rememberTabSession(
+            initialFilePath = initialFilePath,
+            syncDocumentIdFor = syncDocumentIdFor,
+        )
     val layout = tabSession.layout
 
     // Restore the full workspace split (all panels + tabs) saved before the
@@ -249,13 +252,14 @@ fun DetailsContent(
             .distinctUntilChanged()
             .drop(1)
             .collect { newPanelId ->
-                panelToolStates[previousPanelId] = PanelToolSnapshot(
-                    toolMode = toolMode,
-                    penSettings = penSettings,
-                    markerSettings = markerSettings,
-                    eraserSettings = eraserSettings,
-                    markerWidthPinned = markerWidthPinned,
-                )
+                panelToolStates[previousPanelId] =
+                    PanelToolSnapshot(
+                        toolMode = toolMode,
+                        penSettings = penSettings,
+                        markerSettings = markerSettings,
+                        eraserSettings = eraserSettings,
+                        markerWidthPinned = markerWidthPinned,
+                    )
                 previousPanelId = newPanelId
                 panelToolStates[newPanelId]?.let { snapshot ->
                     toolMode = snapshot.toolMode
@@ -374,24 +378,26 @@ fun DetailsContent(
     val isExporting = controls?.isExporting ?: false
     val magnifierEnabled = controls?.magnifierEnabled ?: false
     val showThumbnails = controls?.showThumbnails ?: false
+    val showToc = controls?.showToc ?: false
     val readingModeEnabled = controls?.readingModeEnabled ?: false
 
     // ---- Save helpers (across all panels) ---------------------------------
     val saveTab: suspend (PdfDocumentState) -> Unit = { state ->
         val annotations = state.drawingStates.mapValues { (_, s) -> s.currentPaths.toList() }
         val extents = state.drawingStates.mapValues { (_, s) -> s.extent.value }
-        annotationRepository.save(
-            pdfPath = state.filePath,
-            annotations = annotations,
-            scale = state.pdfViewerState.scalePercent,
-            pen = penSettings,
-            marker = markerSettings,
-            eraser = eraserSettings,
-            currentPage = state.pdfViewerState.firstVisiblePageIndex,
-            currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
-            favoritePageIndices = state.favoritePageIndices.toSet(),
-            pageExtents = extents,
-        ).onFailure { e -> logger.warn { "Save failed for ${state.filePath}: ${e::class.simpleName}" } }
+        annotationRepository
+            .save(
+                pdfPath = state.filePath,
+                annotations = annotations,
+                scale = state.pdfViewerState.scalePercent,
+                pen = penSettings,
+                marker = markerSettings,
+                eraser = eraserSettings,
+                currentPage = state.pdfViewerState.firstVisiblePageIndex,
+                currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
+                favoritePageIndices = state.favoritePageIndices.toSet(),
+                pageExtents = extents,
+            ).onFailure { e -> logger.warn { "Save failed for ${state.filePath}: ${e::class.simpleName}" } }
     }
     val saveAllOpenTabs: suspend () -> Unit = {
         tabSession.layout.panels
@@ -431,7 +437,11 @@ fun DetailsContent(
         pencilModeManuallyTouched = true
     }
     val onBackOrCloseThumbnails: () -> Unit = {
-        if (controls?.showThumbnails == true) controls.toggleThumbnails() else onBackWithSave()
+        when {
+            controls?.showThumbnails == true -> controls.toggleThumbnails()
+            controls?.showToc == true -> controls.toggleToc()
+            else -> onBackWithSave()
+        }
     }
 
     // Top chrome (each panel's tab strip and the toolbar floating just below it)
@@ -440,10 +450,11 @@ fun DetailsContent(
     // notch / punch-hole still occupies the top edge and would otherwise overlap
     // the tab strip. In landscape the cutout moves to a side, so its top is ~0 and
     // this stays equal to the (hidden) status bar inset.
-    val topChromeInset = WindowInsets.statusBars
-        .union(WindowInsets.displayCutout)
-        .asPaddingValues()
-        .calculateTopPadding()
+    val topChromeInset =
+        WindowInsets.statusBars
+            .union(WindowInsets.displayCutout)
+            .asPaddingValues()
+            .calculateTopPadding()
 
     // Measured height of the workspace grid in px. Panel ratios are relative to
     // this — using it (rather than deriving from window size minus the status
@@ -454,26 +465,29 @@ fun DetailsContent(
     // landscape (single-panel FULL layout). Double-tap fit-to-width subtracts it
     // so the page lands beside the rail/menu, not under it. The portrait top bar
     // spans the full width and steals no horizontal room, so the inset is 0 there.
-    val fitWidthStartInset = if (isLandscape && layout.template == LayoutTemplate.FULL) {
-        val sidebar = if (showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true) {
-            SIDEBAR_WIDTH
+    val fitWidthStartInset =
+        if (isLandscape && layout.template == LayoutTemplate.FULL) {
+            val sidebar =
+                if (showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true) {
+                    SIDEBAR_WIDTH
+                } else {
+                    0.dp
+                }
+            sidebar + landscapeToolbarWidthDp + 32.dp
         } else {
             0.dp
         }
-        sidebar + landscapeToolbarWidthDp + 32.dp
-    } else {
-        0.dp
-    }
 
     // Vertical room taken by the page-counter airbar floating at the focused
     // panel's top-centre in landscape. The airbar sits 8.dp below the viewer's
     // top edge; double-tap fit-to-width pushes the page below it (plus a 16.dp
     // gap) so the page top doesn't slide under the counter.
-    val fitWidthTopInset = if (isLandscape && layout.template == LayoutTemplate.FULL) {
-        8.dp + landscapePageCounterHeightDp + 16.dp
-    } else {
-        0.dp
-    }
+    val fitWidthTopInset =
+        if (isLandscape && layout.template == LayoutTemplate.FULL) {
+            8.dp + landscapePageCounterHeightDp + 16.dp
+        } else {
+            0.dp
+        }
 
     Box(
         modifier
@@ -488,8 +502,7 @@ fun DetailsContent(
                 WindowInsets.systemBars
                     .union(WindowInsets.displayCutout)
                     .only(WindowInsetsSides.Horizontal),
-            )
-            .focusRequester(focusRequester)
+            ).focusRequester(focusRequester)
             .focusTarget()
             .onKeyEvent { e ->
                 val isShift = e.key == Key.ShiftLeft || e.key == Key.ShiftRight
@@ -497,10 +510,22 @@ fun DetailsContent(
                 val isAlt = e.key == Key.AltLeft || e.key == Key.AltRight
                 val isMeta = e.key == Key.MetaLeft || e.key == Key.MetaRight
                 when {
-                    isShift -> { shiftHeld = e.type == KeyEventType.KeyDown; false }
-                    isCtrl -> { ctrlHeld = e.type == KeyEventType.KeyDown; false }
-                    isAlt -> { altHeld = e.type == KeyEventType.KeyDown; false }
-                    isMeta -> { metaHeld = e.type == KeyEventType.KeyDown; false }
+                    isShift -> {
+                        shiftHeld = e.type == KeyEventType.KeyDown
+                        false
+                    }
+                    isCtrl -> {
+                        ctrlHeld = e.type == KeyEventType.KeyDown
+                        false
+                    }
+                    isAlt -> {
+                        altHeld = e.type == KeyEventType.KeyDown
+                        false
+                    }
+                    isMeta -> {
+                        metaHeld = e.type == KeyEventType.KeyDown
+                        false
+                    }
                     e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && !shiftHeld -> {
                         tabSession.focusedActiveState?.let { st ->
                             if (st.undoStack.isNotEmpty()) {
@@ -553,6 +578,7 @@ fun DetailsContent(
                     isFocused = panel.id == layout.focusedPanelId,
                     loader = loader,
                     renderer = renderer,
+                    outlineProvider = outlineProvider,
                     toolMode = toolMode,
                     penSettings = penSettings,
                     markerSettings = markerSettings,
@@ -582,35 +608,40 @@ fun DetailsContent(
                         // A restored width is the user's own choice — don't override it.
                         markerWidthPinned = true
                         eraserSettings = eraser
-                        panelToolStates[panel.id] = PanelToolSnapshot(
-                            toolMode = toolMode,
-                            penSettings = pen,
-                            markerSettings = marker,
-                            eraserSettings = eraser,
-                            markerWidthPinned = true,
-                        )
+                        panelToolStates[panel.id] =
+                            PanelToolSnapshot(
+                                toolMode = toolMode,
+                                penSettings = pen,
+                                markerSettings = marker,
+                                eraserSettings = eraser,
+                                markerWidthPinned = true,
+                            )
                     },
                     onAddTab = { onAddTabToPanel(panel.id) },
                     onAllTabsClosed = onBackWithSave,
-                    onOpenPanelPicker = if (templates.isNotEmpty() && panel.tabs.tabs.size > 1) {
-                        { tabId ->
-                            tabSession.focusPanel(panel.id)
-                            pendingPanelMove = panel.id to tabId
-                        }
-                    } else {
-                        null
-                    },
-                    onClosePanel = if (layout.panels.size > 1) {
-                        {
-                            val anyTab = panel.tabs.tabs.firstOrNull()
-                            if (anyTab != null) {
-                                // Close every tab in this panel → panel is removed.
-                                panel.tabs.tabs.toList().forEach { tabSession.closeTab(panel.id, it.id) }
+                    onOpenPanelPicker =
+                        if (templates.isNotEmpty() && panel.tabs.tabs.size > 1) {
+                            { tabId ->
+                                tabSession.focusPanel(panel.id)
+                                pendingPanelMove = panel.id to tabId
                             }
-                        }
-                    } else {
-                        null
-                    },
+                        } else {
+                            null
+                        },
+                    onClosePanel =
+                        if (layout.panels.size > 1) {
+                            {
+                                val anyTab = panel.tabs.tabs.firstOrNull()
+                                if (anyTab != null) {
+                                    // Close every tab in this panel → panel is removed.
+                                    panel.tabs.tabs
+                                        .toList()
+                                        .forEach { tabSession.closeTab(panel.id, it.id) }
+                                }
+                            }
+                        } else {
+                            null
+                        },
                     onControlsChanged = { c -> if (panel.id == layout.focusedPanelId) focusedControls = c },
                     fitWidthStartInset = fitWidthStartInset,
                     fitWidthTopInset = fitWidthTopInset,
@@ -625,286 +656,332 @@ fun DetailsContent(
                 .consumeWindowInsets(WindowInsets.statusBars)
                 .padding(top = TAB_BAR_HEIGHT + topChromeInset),
         ) {
-        if (isLandscape) {
-            // When the thumbnail sidebar is open at the screen's left edge it would
-            // otherwise sit on top of the back button and tool rail; push them right
-            // by the sidebar width so they sit beside the sidebar instead of under it.
-            val railShift by animateDpAsState(
-                targetValue = if (
-                    showThumbnails &&
-                    tabSession.focusedActiveState?.pages?.isNotEmpty() == true &&
-                    focusedPanelStartXFraction(layout) == 0f
+            if (isLandscape) {
+                // When the thumbnail sidebar is open at the screen's left edge it would
+                // otherwise sit on top of the back button and tool rail; push them right
+                // by the sidebar width so they sit beside the sidebar instead of under it.
+                val railShift by animateDpAsState(
+                    targetValue =
+                        if (
+                            showThumbnails &&
+                            tabSession.focusedActiveState?.pages?.isNotEmpty() == true &&
+                            focusedPanelStartXFraction(layout) == 0f
+                        ) {
+                            SIDEBAR_WIDTH
+                        } else {
+                            0.dp
+                        },
+                    animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS),
+                    label = "railShift",
+                )
+                AnimatedVisibility(
+                    visible = true,
+                    enter = slideInHorizontally { -it } + fadeIn(),
+                    exit = slideOutHorizontally { -it } + fadeOut(),
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .offset(x = railShift)
+                            // Те же инсеты, что и у рельсы ниже — иначе при боковом
+                            // вырезе/системном баре кнопка назад не совпадает с рельсой
+                            // по левому краю.
+                            .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                            .padding(start = 16.dp, top = 8.dp),
                 ) {
-                    SIDEBAR_WIDTH
-                } else {
-                    0.dp
-                },
-                animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS),
-                label = "railShift",
-            )
-            AnimatedVisibility(
-                visible = true,
-                enter = slideInHorizontally { -it } + fadeIn(),
-                exit = slideOutHorizontally { -it } + fadeOut(),
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset(x = railShift)
-                    // Те же инсеты, что и у рельсы ниже — иначе при боковом
-                    // вырезе/системном баре кнопка назад не совпадает с рельсой
-                    // по левому краю.
-                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
-                    .padding(start = 16.dp, top = 8.dp),
-            ) {
-                GlassSurface(
-                    shape = CircleShape,
-                    modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp),
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(CircleShape)
-                            .clickable(onClick = onBackOrCloseThumbnails),
-                        contentAlignment = Alignment.Center,
+                    GlassSurface(
+                        shape = CircleShape,
+                        modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp),
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = BACK_CONTENT_DESCRIPTION,
-                            tint = MaterialTheme.colorScheme.onSurface,
+                        Box(
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    .clip(CircleShape)
+                                    .clickable(onClick = onBackOrCloseThumbnails),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = BACK_CONTENT_DESCRIPTION,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(
+                    visible = true,
+                    enter = slideInHorizontally { -it } + fadeIn(),
+                    exit = slideOutHorizontally { -it } + fadeOut(),
+                    modifier =
+                        Modifier
+                            // Резервируем сверху высоту back-кнопки (чтобы не перекрыть её),
+                            // а ниже занимаем всю высоту и центрируем рельсу по вертикали —
+                            // на десктопе она оказывается посередине, а не прижата к верху.
+                            .align(Alignment.TopStart)
+                            .offset(x = railShift)
+                            // systemBars ∪ displayCutout: в ландшафте вырез/«бровь» уходит
+                            // на боковой край, и без cutout вертикальная рельса налезала
+                            // на него слева.
+                            .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                            .padding(
+                                start = 16.dp,
+                                top = 8.dp + landscapePageCounterHeightDp + 16.dp,
+                                end = 16.dp,
+                                bottom = 16.dp,
+                            ).fillMaxHeight(),
+                ) {
+                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
+                        LandscapeToolRail(
+                            toolMode = toolMode,
+                            onToolModeChange = { toolMode = it },
+                            penSettings = penSettings,
+                            onPenSettingsChange = { penSettings = it },
+                            markerSettings = markerSettings,
+                            onMarkerSettingsChange = {
+                                if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                                markerSettings = it
+                            },
+                            eraserSettings = eraserSettings,
+                            onEraserSettingsChange = { eraserSettings = it },
+                            toolPresets = toolPresets,
+                            onToolPresetsChange = onToolPresetsChange,
+                            onPresetApplied = onPresetApplied,
+                            hasAnnotations = hasAnnotations,
+                            isExporting = isExporting,
+                            onExport = { controls?.export?.invoke() },
+                            scale = scale,
+                            onZoomIn = {
+                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                                }
+                            },
+                            onZoomOut = {
+                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                                }
+                            },
+                            showThumbnails = showThumbnails,
+                            onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                            showToc = showToc,
+                            onToggleToc = { controls?.toggleToc?.invoke() },
+                            readingModeEnabled = readingModeEnabled,
+                            onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
+                            showPencilModeButton = SupportsPencilMode,
+                            pencilModeEnabled = pencilModeEnabled,
+                            onPencilModeChange = onPencilModeChange,
+                            magnifierEnabled = magnifierEnabled,
+                            onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                            onOpenShortcutsSettings = { showShortcutsDialog = true },
+                            onRailWidthChanged = { landscapeToolbarWidthDp = it },
                         )
                     }
                 }
-            }
 
-            AnimatedVisibility(
-                visible = true,
-                enter = slideInHorizontally { -it } + fadeIn(),
-                exit = slideOutHorizontally { -it } + fadeOut(),
-                modifier = Modifier
-                    // Резервируем сверху высоту back-кнопки (чтобы не перекрыть её),
-                    // а ниже занимаем всю высоту и центрируем рельсу по вертикали —
-                    // на десктопе она оказывается посередине, а не прижата к верху.
-                    .align(Alignment.TopStart)
-                    .offset(x = railShift)
-                    // systemBars ∪ displayCutout: в ландшафте вырез/«бровь» уходит
-                    // на боковой край, и без cutout вертикальная рельса налезала
-                    // на него слева.
-                    .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
-                    .padding(
-                        start = 16.dp,
-                        top = 8.dp + landscapePageCounterHeightDp + 16.dp,
-                        end = 16.dp,
-                        bottom = 16.dp,
-                    )
-                    .fillMaxHeight(),
-            ) {
-                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
-                    LandscapeToolRail(
-                    toolMode = toolMode,
-                    onToolModeChange = { toolMode = it },
-                    penSettings = penSettings,
-                    onPenSettingsChange = { penSettings = it },
-                    markerSettings = markerSettings,
-                    onMarkerSettingsChange = {
-                        if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
-                        markerSettings = it
-                    },
-                    eraserSettings = eraserSettings,
-                    onEraserSettingsChange = { eraserSettings = it },
-                    toolPresets = toolPresets,
-                    onToolPresetsChange = onToolPresetsChange,
-                    onPresetApplied = onPresetApplied,
-                    hasAnnotations = hasAnnotations,
-                    isExporting = isExporting,
-                    onExport = { controls?.export?.invoke() },
-                    scale = scale,
-                    onZoomIn = {
-                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                            vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                        }
-                    },
-                    onZoomOut = {
-                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                            vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                        }
-                    },
-                    showThumbnails = showThumbnails,
-                    onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
-                    readingModeEnabled = readingModeEnabled,
-                    onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
-                    showPencilModeButton = SupportsPencilMode,
-                    pencilModeEnabled = pencilModeEnabled,
-                    onPencilModeChange = onPencilModeChange,
-                    magnifierEnabled = magnifierEnabled,
-                    onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
-                    onOpenShortcutsSettings = { showShortcutsDialog = true },
-                    onRailWidthChanged = { landscapeToolbarWidthDp = it },
-                    )
-                }
-            }
-
-            // ---- Page-indicator airbar: slides to the centre of the focused panel ----
-            val airbarCenterFraction by animateFloatAsState(
-                targetValue = focusedPanelCenterXFraction(layout),
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-                label = "airbarCenter",
-            )
-            val dividerPx = with(density) { DIVIDER_HIT.toPx() }
-            val airbarTopPx by animateFloatAsState(
-                targetValue = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioNoBouncy,
-                    stiffness = Spring.StiffnessMediumLow,
-                ),
-                label = "airbarTop",
-            )
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .graphicsLayer {
-                        translationX =
-                            (airbarCenterFraction - 0.5f) * windowSizeInPx.width.toFloat()
-                        // The grid's top sits exactly one tab-strip below this airbar's
-                        // natural position, so translating by the focused panel's top
-                        // offset (relative to the grid) lands it on that panel.
-                        translationY = airbarTopPx
-                    }
-                    .windowInsetsPadding(WindowInsets.statusBars)
-                    .padding(top = 8.dp),
-            ) {
-                AnimatedVisibility(
-                    visible = totalPages > 0,
-                    enter = slideInVertically { -it } + fadeIn(),
-                    exit = slideOutVertically { -it } + fadeOut(),
+                // ---- Page-indicator airbar: slides to the centre of the focused panel ----
+                val airbarCenterFraction by animateFloatAsState(
+                    targetValue = focusedPanelCenterXFraction(layout),
+                    animationSpec =
+                        spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                        ),
+                    label = "airbarCenter",
+                )
+                val dividerPx = with(density) { DIVIDER_HIT.toPx() }
+                val airbarTopPx by animateFloatAsState(
+                    targetValue = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
+                    animationSpec =
+                        spring(
+                            dampingRatio = Spring.DampingRatioNoBouncy,
+                            stiffness = Spring.StiffnessMediumLow,
+                        ),
+                    label = "airbarTop",
+                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .graphicsLayer {
+                                translationX =
+                                    (airbarCenterFraction - 0.5f) * windowSizeInPx.width.toFloat()
+                                // The grid's top sits exactly one tab-strip below this airbar's
+                                // natural position, so translating by the focused panel's top
+                                // offset (relative to the grid) lands it on that panel.
+                                translationY = airbarTopPx
+                            }.windowInsetsPadding(WindowInsets.statusBars)
+                            .padding(top = 8.dp),
                 ) {
-                    PageIndicatorAirbar(
+                    AnimatedVisibility(
+                        visible = totalPages > 0,
+                        enter = slideInVertically { -it } + fadeIn(),
+                        exit = slideOutVertically { -it } + fadeOut(),
+                    ) {
+                        PageIndicatorAirbar(
+                            currentPage = currentPage,
+                            totalPages = totalPages,
+                            onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
+                            modifier =
+                                Modifier.onSizeChanged {
+                                    landscapePageCounterHeightDp = with(density) { it.height.toDp() }
+                                },
+                        )
+                    }
+                }
+
+                // ---- Thumbnail sidebar overlay: above the toolbar rail ----
+                // Rendered here (after LandscapeToolRail) so it draws on top of the toolbar.
+                val focusedState = tabSession.focusedActiveState
+                val focusedStartFraction = focusedPanelStartXFraction(layout)
+                val focusedTopPx = focusedPanelStartYPx(layout, gridHeightPx, dividerPx)
+                val focusedContentHeightPx =
+                    focusedPanelHeightPx(layout, gridHeightPx, dividerPx) - with(density) { TAB_BAR_HEIGHT.toPx() }
+                if (focusedState != null) {
+                    val drawingStates = focusedState.drawingStates
+                    val annotatedPageIndices by remember(drawingStates) {
+                        derivedStateOf {
+                            drawingStates.entries
+                                .filter { it.value.currentPaths.isNotEmpty() }
+                                .map { it.key }
+                                .toSet()
+                        }
+                    }
+                    val pagePaths: (Int) -> List<DrawingPath> =
+                        remember(drawingStates) {
+                            { idx -> drawingStates[idx]?.currentPaths ?: emptyList() }
+                        }
+                    AnimatedVisibility(
+                        visible = showThumbnails && focusedState.pages.isNotEmpty(),
+                        enter =
+                            slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                                fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+                        exit =
+                            slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                                fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .offset {
+                                    IntOffset(
+                                        x =
+                                            focusedPanelStartXPx(
+                                                layout,
+                                                windowSizeInPx.width.toFloat(),
+                                                dividerPx,
+                                            ).roundToInt(),
+                                        y = focusedTopPx.roundToInt(),
+                                    )
+                                }.height(with(density) { focusedContentHeightPx.toDp() }),
+                    ) {
+                        PageThumbnailsSidebar(
+                            pages = focusedState.pages,
+                            pdfDocument = focusedState.pdfDocument,
+                            renderer = renderer,
+                            currentPage = focusedState.pdfViewerState.firstVisiblePageIndex,
+                            onPageClick = { pageIndex ->
+                                // В режиме чтения переход уходит в reflow-ридер (ветка в
+                                // PanelControls.navigateToPage); иначе — обычная прокрутка вьювера.
+                                controls?.navigateToPage?.invoke(pageIndex)
+                                    ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
+                            },
+                            annotatedPageIndices = annotatedPageIndices,
+                            favoritePageIndices = focusedState.favoritePageIndices.toSet(),
+                            onToggleFavorite = { pageIndex ->
+                                if (!focusedState.favoritePageIndices.remove(pageIndex)) {
+                                    focusedState.favoritePageIndices.add(pageIndex)
+                                }
+                            },
+                            pagePaths = pagePaths,
+                        )
+                    }
+                    AnimatedVisibility(
+                        visible = showToc,
+                        enter =
+                            slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                                fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+                        exit =
+                            slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                                fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .offset {
+                                    IntOffset(
+                                        x =
+                                            focusedPanelStartXPx(
+                                                layout,
+                                                windowSizeInPx.width.toFloat(),
+                                                dividerPx,
+                                            ).roundToInt(),
+                                        y = focusedTopPx.roundToInt(),
+                                    )
+                                }.height(with(density) { focusedContentHeightPx.toDp() }),
+                    ) {
+                        TocSidebar(
+                            entries = focusedState.outline,
+                            onEntryClick = { pageIndex ->
+                                controls?.navigateToPage?.invoke(pageIndex)
+                                    ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
+                            },
+                        )
+                    }
+                }
+            } else {
+                Column(
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .fillMaxWidth(),
+                ) {
+                    PortraitTopBar(
                         currentPage = currentPage,
                         totalPages = totalPages,
                         onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
-                        modifier = Modifier.onSizeChanged {
-                            landscapePageCounterHeightDp = with(density) { it.height.toDp() }
+                        toolMode = toolMode,
+                        onToolModeChange = { toolMode = it },
+                        penSettings = penSettings,
+                        onPenSettingsChange = { penSettings = it },
+                        markerSettings = markerSettings,
+                        onMarkerSettingsChange = {
+                            if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                            markerSettings = it
                         },
-                    )
-                }
-            }
-
-            // ---- Thumbnail sidebar overlay: above the toolbar rail ----
-            // Rendered here (after LandscapeToolRail) so it draws on top of the toolbar.
-            val focusedState = tabSession.focusedActiveState
-            val focusedStartFraction = focusedPanelStartXFraction(layout)
-            val focusedTopPx = focusedPanelStartYPx(layout, gridHeightPx, dividerPx)
-            val focusedContentHeightPx =
-                focusedPanelHeightPx(layout, gridHeightPx, dividerPx) - with(density) { TAB_BAR_HEIGHT.toPx() }
-            if (focusedState != null) {
-                val drawingStates = focusedState.drawingStates
-                val annotatedPageIndices by remember(drawingStates) {
-                    derivedStateOf {
-                        drawingStates.entries
-                            .filter { it.value.currentPaths.isNotEmpty() }
-                            .map { it.key }
-                            .toSet()
-                    }
-                }
-                val pagePaths: (Int) -> List<DrawingPath> = remember(drawingStates) {
-                    { idx -> drawingStates[idx]?.currentPaths ?: emptyList() }
-                }
-                AnimatedVisibility(
-                    visible = showThumbnails && focusedState.pages.isNotEmpty(),
-                    enter = slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
-                        fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
-                    exit = slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
-                        fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .offset {
-                            IntOffset(
-                                x = focusedPanelStartXPx(
-                                    layout,
-                                    windowSizeInPx.width.toFloat(),
-                                    dividerPx,
-                                ).roundToInt(),
-                                y = focusedTopPx.roundToInt(),
-                            )
-                        }
-                        .height(with(density) { focusedContentHeightPx.toDp() }),
-                ) {
-                    PageThumbnailsSidebar(
-                        pages = focusedState.pages,
-                        pdfDocument = focusedState.pdfDocument,
-                        renderer = renderer,
-                        currentPage = focusedState.pdfViewerState.firstVisiblePageIndex,
-                        onPageClick = { pageIndex ->
-                            // В режиме чтения переход уходит в reflow-ридер (ветка в
-                            // PanelControls.navigateToPage); иначе — обычная прокрутка вьювера.
-                            controls?.navigateToPage?.invoke(pageIndex)
-                                ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
-                        },
-                        annotatedPageIndices = annotatedPageIndices,
-                        favoritePageIndices = focusedState.favoritePageIndices.toSet(),
-                        onToggleFavorite = { pageIndex ->
-                            if (!focusedState.favoritePageIndices.remove(pageIndex)) {
-                                focusedState.favoritePageIndices.add(pageIndex)
+                        eraserSettings = eraserSettings,
+                        onEraserSettingsChange = { eraserSettings = it },
+                        toolPresets = toolPresets,
+                        onToolPresetsChange = onToolPresetsChange,
+                        onPresetApplied = onPresetApplied,
+                        hasAnnotations = hasAnnotations,
+                        isExporting = isExporting,
+                        onExport = { controls?.export?.invoke() },
+                        scale = scale,
+                        onZoomIn = {
+                            tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
                             }
                         },
-                        pagePaths = pagePaths,
+                        onZoomOut = {
+                            tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                            }
+                        },
+                        showThumbnails = showThumbnails,
+                        onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                        showToc = showToc,
+                        onToggleToc = { controls?.toggleToc?.invoke() },
+                        readingModeEnabled = readingModeEnabled,
+                        onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
+                        showPencilModeButton = SupportsPencilMode,
+                        pencilModeEnabled = pencilModeEnabled,
+                        onPencilModeChange = onPencilModeChange,
+                        magnifierEnabled = magnifierEnabled,
+                        onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                        onOpenShortcutsSettings = { showShortcutsDialog = true },
+                        onBack = onBackOrCloseThumbnails,
                     )
                 }
             }
-        } else {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .fillMaxWidth(),
-            ) {
-                PortraitTopBar(
-                    currentPage = currentPage,
-                    totalPages = totalPages,
-                    onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
-                    toolMode = toolMode,
-                    onToolModeChange = { toolMode = it },
-                    penSettings = penSettings,
-                    onPenSettingsChange = { penSettings = it },
-                    markerSettings = markerSettings,
-                    onMarkerSettingsChange = {
-                        if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
-                        markerSettings = it
-                    },
-                    eraserSettings = eraserSettings,
-                    onEraserSettingsChange = { eraserSettings = it },
-                    toolPresets = toolPresets,
-                    onToolPresetsChange = onToolPresetsChange,
-                    onPresetApplied = onPresetApplied,
-                    hasAnnotations = hasAnnotations,
-                    isExporting = isExporting,
-                    onExport = { controls?.export?.invoke() },
-                    scale = scale,
-                    onZoomIn = {
-                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                            vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                        }
-                    },
-                    onZoomOut = {
-                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                            vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                        }
-                    },
-                    showThumbnails = showThumbnails,
-                    onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
-                    readingModeEnabled = readingModeEnabled,
-                    onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
-                    showPencilModeButton = SupportsPencilMode,
-                    pencilModeEnabled = pencilModeEnabled,
-                    onPencilModeChange = onPencilModeChange,
-                    magnifierEnabled = magnifierEnabled,
-                    onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
-                    onOpenShortcutsSettings = { showShortcutsDialog = true },
-                    onBack = onBackOrCloseThumbnails,
-                )
-            }
-        }
         }
 
         // Floating airbar (bottom-right): the sync button, quick loupe (touch
@@ -919,37 +996,43 @@ fun DetailsContent(
                 (if (showScrollModeButton) 1 else 0)
         if (airbarButtonCount > 0) {
             GlassSurface(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .windowInsetsPadding(WindowInsets.navigationBars)
-                    .padding(bottom = 88.dp, end = 16.dp),
-                shape = if (airbarButtonCount > 1) {
-                    RoundedCornerShape(28.dp)
-                } else {
-                    CircleShape
-                },
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(bottom = 88.dp, end = 16.dp),
+                shape =
+                    if (airbarButtonCount > 1) {
+                        RoundedCornerShape(28.dp)
+                    } else {
+                        CircleShape
+                    },
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     if (syncPaneEnabled) {
-                        val hostPeers = peerServer
-                            ?.connectedPeers
-                            ?.collectAsState(emptySet())
-                            ?.value
-                            ?: emptySet()
-                        val hostLifecycle = peerServer
-                            ?.lifecycle
-                            ?.collectAsState(ServerLifecycleState.Idle)
-                            ?.value
-                        val clientHosts = peerClient
-                            ?.connectedHosts
-                            ?.collectAsState(emptySet())
-                            ?.value
-                            ?: emptySet()
-                        val clientStates = peerClient
-                            ?.pairingStates
-                            ?.collectAsState(emptyMap())
-                            ?.value
-                            ?: emptyMap()
+                        val hostPeers =
+                            peerServer
+                                ?.connectedPeers
+                                ?.collectAsState(emptySet())
+                                ?.value
+                                ?: emptySet()
+                        val hostLifecycle =
+                            peerServer
+                                ?.lifecycle
+                                ?.collectAsState(ServerLifecycleState.Idle)
+                                ?.value
+                        val clientHosts =
+                            peerClient
+                                ?.connectedHosts
+                                ?.collectAsState(emptySet())
+                                ?.value
+                                ?: emptySet()
+                        val clientStates =
+                            peerClient
+                                ?.pairingStates
+                                ?.collectAsState(emptyMap())
+                                ?.value
+                                ?: emptyMap()
                         IconButton(onClick = { showSyncPanel = true }) {
                             Icon(
                                 imageVector = Icons.Default.Sync,
@@ -964,11 +1047,12 @@ fun DetailsContent(
                             Icon(
                                 imageVector = Icons.Default.ZoomIn,
                                 contentDescription = "Быстрая лупа: выделить область",
-                                tint = if (armed) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
+                                tint =
+                                    if (armed) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
                             )
                         }
                     }
@@ -976,21 +1060,24 @@ fun DetailsContent(
                         val mode = controls?.scrollMode ?: ScrollMode.BOTH
                         IconButton(onClick = { controls?.cycleScrollMode?.invoke() }) {
                             Icon(
-                                imageVector = when (mode) {
-                                    ScrollMode.BOTH -> Icons.Default.OpenWith
-                                    ScrollMode.VERTICAL -> Icons.Default.SwapVert
-                                    ScrollMode.NONE -> Icons.Default.Block
-                                },
-                                contentDescription = when (mode) {
-                                    ScrollMode.BOTH -> "Скролл: по обеим осям"
-                                    ScrollMode.VERTICAL -> "Скролл: только по вертикали"
-                                    ScrollMode.NONE -> "Скролл выключен"
-                                },
-                                tint = if (mode == ScrollMode.BOTH) {
-                                    MaterialTheme.colorScheme.onSurface
-                                } else {
-                                    MaterialTheme.colorScheme.primary
-                                },
+                                imageVector =
+                                    when (mode) {
+                                        ScrollMode.BOTH -> Icons.Default.OpenWith
+                                        ScrollMode.VERTICAL -> Icons.Default.SwapVert
+                                        ScrollMode.NONE -> Icons.Default.Block
+                                    },
+                                contentDescription =
+                                    when (mode) {
+                                        ScrollMode.BOTH -> "Скролл: по обеим осям"
+                                        ScrollMode.VERTICAL -> "Скролл: только по вертикали"
+                                        ScrollMode.NONE -> "Скролл выключен"
+                                    },
+                                tint =
+                                    if (mode == ScrollMode.BOTH) {
+                                        MaterialTheme.colorScheme.onSurface
+                                    } else {
+                                        MaterialTheme.colorScheme.primary
+                                    },
                             )
                         }
                     }
@@ -1003,20 +1090,23 @@ fun DetailsContent(
                 Surface(
                     shape = MaterialTheme.shapes.large,
                     tonalElevation = 6.dp,
-                    modifier = Modifier
-                        .widthIn(min = 320.dp, max = 480.dp)
-                        .heightIn(min = 200.dp, max = 720.dp),
+                    modifier =
+                        Modifier
+                            .widthIn(min = 320.dp, max = 480.dp)
+                            .heightIn(min = 200.dp, max = 720.dp),
                 ) {
                     Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(8.dp),
+                        modifier =
+                            Modifier
+                                .fillMaxSize()
+                                .padding(8.dp),
                     ) {
                         if (hostQrViewModel != null) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp, end = 8.dp, top = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
@@ -1038,9 +1128,10 @@ fun DetailsContent(
                         }
                         if (clientScanViewModel != null && manualConnectViewModel != null && peerClient != null) {
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 16.dp, end = 8.dp, top = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
@@ -1070,9 +1161,10 @@ fun DetailsContent(
 
         SnackbarHost(
             hostState = snackbarHostState,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .windowInsetsPadding(WindowInsets.navigationBars),
+            modifier =
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .windowInsetsPadding(WindowInsets.navigationBars),
         )
 
         if (showShortcutsDialog) {
@@ -1117,9 +1209,10 @@ private fun syncIndicatorTint(
 ): Color {
     val anyConnected = hostPeers.isNotEmpty() || clientHosts.isNotEmpty()
     val hostUnstable = hostLifecycle is ServerLifecycleState.Error
-    val anyClientUnstable = clientStates.values.any {
-        it is PairingState.Reconnecting || it is PairingState.Error
-    }
+    val anyClientUnstable =
+        clientStates.values.any {
+            it is PairingState.Reconnecting || it is PairingState.Error
+        }
     return when {
         anyConnected -> SyncConnectedGreen
         hostUnstable || anyClientUnstable -> SyncUnstableYellow
@@ -1139,11 +1232,12 @@ private fun focusedPanelStartXFraction(layout: WorkspaceLayout): Float {
         // Both rows span the full width — sidebar aligns to the left edge either way.
         LayoutTemplate.ROWS_2 -> 0f
         LayoutTemplate.COLUMNS_2 -> if (idx == 0) 0f else r[0]
-        LayoutTemplate.COLUMNS_3 -> when (idx) {
-            0 -> 0f
-            1 -> r[0]
-            else -> r[1]
-        }
+        LayoutTemplate.COLUMNS_3 ->
+            when (idx) {
+                0 -> 0f
+                1 -> r[0]
+                else -> r[1]
+            }
         LayoutTemplate.LEFT_PLUS_STACK -> if (idx == 0) 0f else r[0]
         LayoutTemplate.GRID_2X2 -> if (idx == 0 || idx == 2) 0f else r[0]
     }
@@ -1162,11 +1256,12 @@ private fun focusedPanelCenterXFraction(layout: WorkspaceLayout): Float {
         LayoutTemplate.ROWS_2 -> 0.5f
         LayoutTemplate.COLUMNS_2 ->
             if (idx == 0) r[0] / 2f else r[0] + (1f - r[0]) / 2f
-        LayoutTemplate.COLUMNS_3 -> when (idx) {
-            0 -> r[0] / 2f
-            1 -> r[0] + (r[1] - r[0]) / 2f
-            else -> r[1] + (1f - r[1]) / 2f
-        }
+        LayoutTemplate.COLUMNS_3 ->
+            when (idx) {
+                0 -> r[0] / 2f
+                1 -> r[0] + (r[1] - r[0]) / 2f
+                else -> r[1] + (1f - r[1]) / 2f
+            }
         LayoutTemplate.LEFT_PLUS_STACK ->
             if (idx == 0) r[0] / 2f else r[0] + (1f - r[0]) / 2f
         LayoutTemplate.GRID_2X2 ->
@@ -1184,9 +1279,14 @@ private fun focusedPanelCenterXFraction(layout: WorkspaceLayout): Float {
  * the lower panel got. Used to push the airbar / thumbnail sidebar onto a
  * stacked (lower) focused panel.
  */
-private fun focusedPanelStartYPx(layout: WorkspaceLayout, gridHeightPx: Float, dividerPx: Float): Float {
+private fun focusedPanelStartYPx(
+    layout: WorkspaceLayout,
+    gridHeightPx: Float,
+    dividerPx: Float,
+): Float {
     val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
     val r = layout.ratios
+
     fun belowDivider(topRatio: Float) = topRatio * (gridHeightPx - dividerPx) + dividerPx
     return when (layout.template) {
         // Templates with no horizontal divider — every panel starts at the top.
@@ -1203,7 +1303,11 @@ private fun focusedPanelStartYPx(layout: WorkspaceLayout, gridHeightPx: Float, d
  * columns. Used to position the thumbnail sidebar so it starts exactly at the
  * panel's content edge rather than inside a divider's hit zone.
  */
-private fun focusedPanelStartXPx(layout: WorkspaceLayout, windowWidthPx: Float, dividerPx: Float): Float {
+private fun focusedPanelStartXPx(
+    layout: WorkspaceLayout,
+    windowWidthPx: Float,
+    dividerPx: Float,
+): Float {
     val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
     val r = layout.ratios
     val split1 = windowWidthPx - dividerPx
@@ -1211,11 +1315,12 @@ private fun focusedPanelStartXPx(layout: WorkspaceLayout, windowWidthPx: Float, 
     return when (layout.template) {
         LayoutTemplate.FULL, LayoutTemplate.ROWS_2 -> 0f
         LayoutTemplate.COLUMNS_2 -> if (idx == 0) 0f else split1 * r[0] + dividerPx
-        LayoutTemplate.COLUMNS_3 -> when (idx) {
-            0 -> 0f
-            1 -> split2 * r[0] + dividerPx
-            else -> split2 * r[1] + 2 * dividerPx
-        }
+        LayoutTemplate.COLUMNS_3 ->
+            when (idx) {
+                0 -> 0f
+                1 -> split2 * r[0] + dividerPx
+                else -> split2 * r[1] + 2 * dividerPx
+            }
         LayoutTemplate.LEFT_PLUS_STACK -> if (idx == 0) 0f else split1 * r[0] + dividerPx
         LayoutTemplate.GRID_2X2 -> if (idx == 0 || idx == 2) 0f else split1 * r[0] + dividerPx
     }
@@ -1227,18 +1332,23 @@ private fun focusedPanelStartXPx(layout: WorkspaceLayout, windowWidthPx: Float, 
  * Used to clamp the thumbnail sidebar to the focused panel so it stops at the
  * row divider instead of covering the divider's drag zone and the other panel.
  */
-private fun focusedPanelHeightPx(layout: WorkspaceLayout, gridHeightPx: Float, dividerPx: Float): Float {
+private fun focusedPanelHeightPx(
+    layout: WorkspaceLayout,
+    gridHeightPx: Float,
+    dividerPx: Float,
+): Float {
     val idx = layout.panels.indexOfFirst { it.id == layout.focusedPanelId }
     val r = layout.ratios
     val split = gridHeightPx - dividerPx
     return when (layout.template) {
         LayoutTemplate.FULL, LayoutTemplate.COLUMNS_2, LayoutTemplate.COLUMNS_3 -> gridHeightPx
         LayoutTemplate.ROWS_2 -> if (idx == 0) r[0] * split else (1f - r[0]) * split
-        LayoutTemplate.LEFT_PLUS_STACK -> when (idx) {
-            0 -> gridHeightPx
-            1 -> r[1] * split
-            else -> (1f - r[1]) * split
-        }
+        LayoutTemplate.LEFT_PLUS_STACK ->
+            when (idx) {
+                0 -> gridHeightPx
+                1 -> r[1] * split
+                else -> (1f - r[1]) * split
+            }
         LayoutTemplate.GRID_2X2 -> if (idx >= 2) (1f - r[1]) * split else r[1] * split
     }
 }

@@ -7,33 +7,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.awt.ComposeWindow
 import androidx.compose.ui.unit.dp
-import ru.kyamshanov.notepen.setupJbrTitleBar
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
-import ru.kyamshanov.notepen.titlebar.TitleBarInteraction
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPlacement
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.sun.jna.Native
-import com.sun.jna.Platform
-import com.sun.jna.platform.win32.WinDef.HWND
-import ru.kyamshanov.notepen.tablet.CocoaTabletInputController
-import ru.kyamshanov.notepen.tablet.LocalTabletInputController
-import ru.kyamshanov.notepen.tablet.NoOpTabletInputController
-import ru.kyamshanov.notepen.tablet.TabletInputController
-import ru.kyamshanov.notepen.tablet.WinTabTabletInputController
-import ru.kyamshanov.notepen.tablet.WindowsPenFix
-import ru.kyamshanov.notepen.tablet.WindowsPointerHook
 import com.arkivanov.decompose.DefaultComponentContext
 import com.arkivanov.decompose.extensions.compose.lifecycle.LifecycleController
 import com.arkivanov.essenty.lifecycle.LifecycleRegistry
+import com.sun.jna.Native
+import com.sun.jna.Platform
+import com.sun.jna.platform.win32.WinDef.HWND
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
-import kotlinx.serialization.json.Json
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -43,12 +30,16 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
 import notepen.app.bycompose.desktop.generated.resources.Res
 import notepen.app.bycompose.desktop.generated.resources.app_icon
 import org.jetbrains.compose.resources.painterResource
 import ru.kyamshanov.notepen.App
 import ru.kyamshanov.notepen.DefaultRootComponent
 import ru.kyamshanov.notepen.RootComponent
+import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
+import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
+import ru.kyamshanov.notepen.createAnnotationRepository
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -59,11 +50,9 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesk
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.getAppDataDir
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
-import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
+import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
-import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
-import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmImageDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmImagePageRenderer
@@ -72,7 +61,7 @@ import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
-import ru.kyamshanov.notepen.sync.infrastructure.KtorPeerServer
+import ru.kyamshanov.notepen.setupJbrTitleBar
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
 import ru.kyamshanov.notepen.sync.domain.DocumentTransferRequestHandler
@@ -85,22 +74,32 @@ import ru.kyamshanov.notepen.sync.domain.RemoteCatalogHostCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
+import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.KtorPeerServer
+import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
 import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseJvm
-import ru.kyamshanov.notepen.createAnnotationRepository
-import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
-import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
-import ru.kyamshanov.notepen.sync.domain.model.PairingState
-import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
-import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
-import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
+import ru.kyamshanov.notepen.tablet.CocoaTabletInputController
+import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tablet.NoOpTabletInputController
+import ru.kyamshanov.notepen.tablet.TabletInputController
+import ru.kyamshanov.notepen.tablet.WinTabTabletInputController
+import ru.kyamshanov.notepen.tablet.WindowsPenFix
+import ru.kyamshanov.notepen.tablet.WindowsPointerHook
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
+import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
+import ru.kyamshanov.notepen.titlebar.TitleBarInteraction
 import java.net.InetAddress
 import java.util.UUID
 import kotlin.system.exitProcess
@@ -149,7 +148,8 @@ private val OPENABLE_EXTENSIONS = listOf("pdf", "png", "jpg", "jpeg", "epub", "f
 fun main(args: Array<String>) {
     // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
     // (macOS использует Apple Event "odoc", регистрируем OpenFileHandler ниже.)
-    args.firstOrNull { arg -> OPENABLE_EXTENSIONS.any { arg.endsWith(".$it", ignoreCase = true) } }
+    args
+        .firstOrNull { arg -> OPENABLE_EXTENSIONS.any { arg.endsWith(".$it", ignoreCase = true) } }
         ?.let { OpenFileRouter.submit(java.io.File(it).absolutePath) }
 
     // Must be set BEFORE any AWT class is loaded — Taskbar.isTaskbarSupported() already
@@ -160,7 +160,9 @@ fun main(args: Array<String>) {
         System.setProperty("apple.awt.application.name", "NotePen")
         runCatching {
             val resourcePath = "composeResources/notepen.app.bycompose.desktop.generated.resources/files/app_icon_dock.png"
-            Thread.currentThread().contextClassLoader
+            Thread
+                .currentThread()
+                .contextClassLoader
                 .getResource(resourcePath)
                 ?.takeIf { it.protocol == "file" }
                 ?.let { java.io.File(it.toURI()).absolutePath }
@@ -189,27 +191,35 @@ fun main(args: Array<String>) {
     val selfName = runCatching { InetAddress.getLocalHost().hostName }.getOrDefault("NotePen Desktop")
     val selfInfo = DeviceInfo(id = selfId, name = selfName, host = "", port = 0)
 
-    val pdfDocumentLoader = EbookAwarePdfDocumentLoader(
-        delegate = JvmDocumentLoader(
-            pdfLoader = JvmPdfDocumentLoader(Dispatchers.IO),
-            imageLoader = JvmImageDocumentLoader(Dispatchers.IO),
-        ),
-        converter = JvmEbookToPdfConverter(Dispatchers.IO),
-    )
-    val pdfPageRenderer = JvmPageRenderer(
-        pdfRenderer = JvmPdfPageRenderer(Dispatchers.IO),
-        imageRenderer = JvmImagePageRenderer(Dispatchers.IO),
-    )
+    // Один экземпляр конвертера: он же поставляет оглавление (реализует
+    // DocumentOutlineProvider) для сайдбара «Содержание».
+    val ebookConverter = JvmEbookToPdfConverter(Dispatchers.IO)
+    val pdfDocumentLoader =
+        EbookAwarePdfDocumentLoader(
+            delegate =
+                JvmDocumentLoader(
+                    pdfLoader = JvmPdfDocumentLoader(Dispatchers.IO),
+                    imageLoader = JvmImageDocumentLoader(Dispatchers.IO),
+                ),
+            converter = ebookConverter,
+        )
+    val pdfPageRenderer =
+        JvmPageRenderer(
+            pdfRenderer = JvmPdfPageRenderer(Dispatchers.IO),
+            imageRenderer = JvmImagePageRenderer(Dispatchers.IO),
+        )
 
     val catalogChangeNotifier = InMemoryCatalogChangeNotifier()
-    val historyRepo = NotifyingFileHistoryRepository(
-        delegate = FileHistoryRepositoryDesktop(),
-        notifier = catalogChangeNotifier,
-    )
-    val folderRepo = NotifyingFolderRepository(
-        delegate = FolderRepositoryDesktop(),
-        notifier = catalogChangeNotifier,
-    )
+    val historyRepo =
+        NotifyingFileHistoryRepository(
+            delegate = FileHistoryRepositoryDesktop(),
+            notifier = catalogChangeNotifier,
+        )
+    val folderRepo =
+        NotifyingFolderRepository(
+            delegate = FolderRepositoryDesktop(),
+            notifier = catalogChangeNotifier,
+        )
     val availabilityChecker = FileAvailabilityCheckerDesktop()
     val thumbnailRepo = ThumbnailRepositoryDesktop()
     val thumbnailGenerator = PdfThumbnailGeneratorDesktop()
@@ -217,17 +227,18 @@ fun main(args: Array<String>) {
     val peerServer = KtorPeerServer(selfInfo = selfInfo, ioDispatcher = Dispatchers.IO)
     val serviceRegistrar = JmDnsServiceRegistrar()
     val wsJson = Json { classDiscriminator = "type" }
-    val httpClient = HttpClient(CIO) {
-        install(WebSockets) {
-            contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
+    val httpClient =
+        HttpClient(CIO) {
+            install(WebSockets) {
+                contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
+            }
+            // Bound only the TCP connect/handshake (NOT the long-lived WS session) so
+            // a reconnect to a vanished host fails fast and the reconnect deadline is
+            // honoured instead of hanging in "reconnecting".
+            install(io.ktor.client.plugins.HttpTimeout) {
+                connectTimeoutMillis = 4_000L
+            }
         }
-        // Bound only the TCP connect/handshake (NOT the long-lived WS session) so
-        // a reconnect to a vanished host fails fast and the reconnect deadline is
-        // honoured instead of hanging in "reconnecting".
-        install(io.ktor.client.plugins.HttpTimeout) {
-            connectTimeoutMillis = 4_000L
-        }
-    }
     val syncClient = KtorSyncClient(httpClient)
 
     // Persistent offline buffer (SQLDelight-backed) — survives app restarts so
@@ -235,31 +246,35 @@ fun main(args: Array<String>) {
     val syncDatabasePath = getAppDataDir().resolve("sync.db").absolutePath
     // Lazy: opening SQLite (native lib + first connection) costs seconds cold —
     // defer it off the main thread so it doesn't block the first frame.
-    val pendingDeltaQueue = SqlDelightPendingDeltaQueue(
-        databaseProvider = { createSyncDatabaseJvm(syncDatabasePath) },
-        ioDispatcher = Dispatchers.IO,
-    )
+    val pendingDeltaQueue =
+        SqlDelightPendingDeltaQueue(
+            databaseProvider = { createSyncDatabaseJvm(syncDatabasePath) },
+            ioDispatcher = Dispatchers.IO,
+        )
 
     // One registry per app; each open document is its own SyncEngine.
-    val syncEngineRegistry = SyncEngineRegistry(
-        deviceId = selfId,
-        scope = appScope,
-        server = peerServer,
-        client = syncClient,
-        pendingQueue = pendingDeltaQueue,
-    )
+    val syncEngineRegistry =
+        SyncEngineRegistry(
+            deviceId = selfId,
+            scope = appScope,
+            server = peerServer,
+            client = syncClient,
+            pendingQueue = pendingDeltaQueue,
+        )
 
     // Replay buffered deltas whenever either side (re)connects.
     // Host: trigger on first peer joining (transition `empty → non-empty`).
-    val hostPeerConnected = peerServer.connectedPeers
-        .distinctUntilChanged()
-        .filter { it.isNotEmpty() }
-        .map { }
+    val hostPeerConnected =
+        peerServer.connectedPeers
+            .distinctUntilChanged()
+            .filter { it.isNotEmpty() }
+            .map { }
     // Client: trigger when at least one host enters the connected set.
-    val clientConnected = syncClient.connectedHosts
-        .distinctUntilChanged()
-        .filter { it.isNotEmpty() }
-        .map { }
+    val clientConnected =
+        syncClient.connectedHosts
+            .distinctUntilChanged()
+            .filter { it.isNotEmpty() }
+            .map { }
     PendingDeltaReplayCoordinator(
         registry = syncEngineRegistry,
         connectionEstablished = hostPeerConnected,
@@ -269,20 +284,22 @@ fun main(args: Array<String>) {
         connectionEstablished = clientConnected,
     ).start(scope = appScope)
 
-    val hostQrViewModel = HostQrPairingViewModel(
-        peerServer = peerServer,
-        qrEncoder = ZxingQrEncoder(),
-        hostDeviceName = selfName,
-        scope = appScope,
-    )
+    val hostQrViewModel =
+        HostQrPairingViewModel(
+            peerServer = peerServer,
+            qrEncoder = ZxingQrEncoder(),
+            hostDeviceName = selfName,
+            scope = appScope,
+        )
 
     // Host: build & serve the library catalog to any paired tablet, and
     // respond to on-demand DocumentOpenRequests by streaming the file.
-    val remoteCatalogProvider = RemoteCatalogProvider(
-        hostName = selfName,
-        historyRepository = historyRepo,
-        folderRepository = folderRepo,
-    )
+    val remoteCatalogProvider =
+        RemoteCatalogProvider(
+            hostName = selfName,
+            historyRepository = historyRepo,
+            folderRepository = folderRepo,
+        )
     remoteCatalogProvider.serve(server = peerServer, scope = appScope)
     // Symmetric direction: when this desktop is connected to another host as a
     // client and that host requests our catalog (for its "Подключённые
@@ -305,11 +322,12 @@ fun main(args: Array<String>) {
     // to open the document in DetailsContent. Projection follows mergedDeltas
     // (which now also mirror local edits — see SyncEngine.applyLocal).
     val hostAnnotationRepository = createAnnotationRepository()
-    val hostAnnotationProjection = HostAnnotationProjection(
-        registry = syncEngineRegistry,
-        provider = remoteCatalogProvider,
-        repository = hostAnnotationRepository,
-    )
+    val hostAnnotationProjection =
+        HostAnnotationProjection(
+            registry = syncEngineRegistry,
+            provider = remoteCatalogProvider,
+            repository = hostAnnotationRepository,
+        )
     HostHeadlessAnnotationHandler(
         server = peerServer,
         provider = remoteCatalogProvider,
@@ -328,16 +346,18 @@ fun main(args: Array<String>) {
     // hosts (we are a client of) AND clients (we are a host for) as tiles.
     RemoteCatalogHostCoordinator(server = peerServer, cache = remoteCatalogCache)
         .start(scope = appScope)
-    val localDocumentIdRegistry = JsonLocalDocumentIdRegistry(
-        manifestPath = "$receivedDir/.notepen-doc-ids.json",
-        ioDispatcher = Dispatchers.IO,
-    )
-    val remoteDocumentOpener = RemoteDocumentOpener(
-        client = syncClient,
-        catalogs = remoteCatalogCache.catalogs,
-        destDir = receivedDir,
-        documentIdRegistry = localDocumentIdRegistry,
-    )
+    val localDocumentIdRegistry =
+        JsonLocalDocumentIdRegistry(
+            manifestPath = "$receivedDir/.notepen-doc-ids.json",
+            ioDispatcher = Dispatchers.IO,
+        )
+    val remoteDocumentOpener =
+        RemoteDocumentOpener(
+            client = syncClient,
+            catalogs = remoteCatalogCache.catalogs,
+            destDir = receivedDir,
+            documentIdRegistry = localDocumentIdRegistry,
+        )
     // Track per-document orphan flags as host signals come in.
     val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
     DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
@@ -362,12 +382,13 @@ fun main(args: Array<String>) {
 
     // Union of "online peers" — for desktop, that's hosts we are paired to plus
     // clients paired to us. Drives the offline-marker on Peer tiles.
-    val onlinePeerIds = combine(
-        syncClient.connectedHosts,
-        peerServer.connectedPeers,
-    ) { hosts, peers ->
-        (hosts.map { it.id } + peers.map { it.id }).toSet()
-    }
+    val onlinePeerIds =
+        combine(
+            syncClient.connectedHosts,
+            peerServer.connectedPeers,
+        ) { hosts, peers ->
+            (hosts.map { it.id } + peers.map { it.id }).toSet()
+        }
 
     // Demultiplex incoming stroke deltas by documentId — one engine per doc.
     appScope.launch {
@@ -469,9 +490,10 @@ fun main(args: Array<String>) {
     OpenFileRouter.connect { path -> runOnUiThread { root.openDetailsExternally(path) } }
 
     application {
-        val windowState = rememberWindowState(
-            placement = WindowPlacement.Maximized,
-        )
+        val windowState =
+            rememberWindowState(
+                placement = WindowPlacement.Maximized,
+            )
 
         LifecycleController(lifecycle, windowState)
 
@@ -487,13 +509,14 @@ fun main(args: Array<String>) {
             title = "NotePen",
             icon = painterResource(Res.drawable.app_icon),
         ) {
-            val tabletController: TabletInputController = remember {
-                when {
-                    Platform.isWindows() -> WinTabTabletInputController()
-                    Platform.isMac() -> CocoaTabletInputController()
-                    else -> NoOpTabletInputController
+            val tabletController: TabletInputController =
+                remember {
+                    when {
+                        Platform.isWindows() -> WinTabTabletInputController()
+                        Platform.isMac() -> CocoaTabletInputController()
+                        else -> NoOpTabletInputController
+                    }
                 }
-            }
             val composeWindow: ComposeWindow = window
 
             var titleBarInteraction by remember { mutableStateOf<TitleBarInteraction?>(null) }
@@ -565,6 +588,7 @@ fun main(args: Array<String>) {
                     rootComponent = root,
                     pdfDocumentLoader = pdfDocumentLoader,
                     pdfPageRenderer = pdfPageRenderer,
+                    outlineProvider = ebookConverter,
                     syncEngineFor = syncEngineRegistry::get,
                     peerServer = peerServer,
                     peerClient = syncClient,

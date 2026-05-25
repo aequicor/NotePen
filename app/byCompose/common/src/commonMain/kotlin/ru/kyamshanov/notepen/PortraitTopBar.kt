@@ -6,17 +6,14 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -94,6 +91,8 @@ fun PortraitTopBar(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showToc: Boolean,
+    onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
@@ -137,16 +136,18 @@ fun PortraitTopBar(
 
     Column(modifier = modifier) {
         GlassSurface(
-            modifier = Modifier
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.statusBars),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars),
             shape = RectangleShape,
             tint = MaterialTheme.colorScheme.surfaceVariant,
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = PORTRAIT_BAR_PADDING_H),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = PORTRAIT_BAR_PADDING_H),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onBack) {
@@ -165,38 +166,41 @@ fun PortraitTopBar(
                 // Инструменты, настройки, пресеты и системные кнопки — в ОДНОМ
                 // горизонтальном колесе (затухание к краям). Так на телефоне всё
                 // помещается без ⋮-меню — лишнее прокручивается.
-                val entries = unifiedToolWheelEntries(
-                    orientation = RailOrientation.HORIZONTAL,
-                    toolMode = toolMode,
-                    onToolModeChange = onToolModeChange,
-                    penSettings = penSettings,
-                    onPenSettingsChange = onPenSettingsChange,
-                    markerSettings = markerSettings,
-                    onMarkerSettingsChange = onMarkerSettingsChange,
-                    eraserSettings = eraserSettings,
-                    onEraserSettingsChange = onEraserSettingsChange,
-                    toolPresets = toolPresets,
-                    onToolPresetsChange = onToolPresetsChange,
-                    onPresetApplied = onPresetApplied,
-                    expandedIndex = expandedIndex,
-                    onSlotToggle = onSlotToggle,
-                    hasAnnotations = hasAnnotations,
-                    isExporting = isExporting,
-                    onExport = onExport,
-                    scale = scale,
-                    onZoomIn = onZoomIn,
-                    onZoomOut = onZoomOut,
-                    showThumbnails = showThumbnails,
-                    onToggleThumbnails = onToggleThumbnails,
-                    readingModeEnabled = readingModeEnabled,
-                    onToggleReadingMode = onToggleReadingMode,
-                    showPencilModeButton = showPencilModeButton,
-                    pencilModeEnabled = pencilModeEnabled,
-                    onPencilModeChange = onPencilModeChange,
-                    magnifierEnabled = magnifierEnabled,
-                    onMagnifierToggle = onMagnifierToggle,
-                    onOpenShortcutsSettings = onOpenShortcutsSettings,
-                )
+                val entries =
+                    unifiedToolWheelEntries(
+                        orientation = RailOrientation.HORIZONTAL,
+                        toolMode = toolMode,
+                        onToolModeChange = onToolModeChange,
+                        penSettings = penSettings,
+                        onPenSettingsChange = onPenSettingsChange,
+                        markerSettings = markerSettings,
+                        onMarkerSettingsChange = onMarkerSettingsChange,
+                        eraserSettings = eraserSettings,
+                        onEraserSettingsChange = onEraserSettingsChange,
+                        toolPresets = toolPresets,
+                        onToolPresetsChange = onToolPresetsChange,
+                        onPresetApplied = onPresetApplied,
+                        expandedIndex = expandedIndex,
+                        onSlotToggle = onSlotToggle,
+                        hasAnnotations = hasAnnotations,
+                        isExporting = isExporting,
+                        onExport = onExport,
+                        scale = scale,
+                        onZoomIn = onZoomIn,
+                        onZoomOut = onZoomOut,
+                        showThumbnails = showThumbnails,
+                        onToggleThumbnails = onToggleThumbnails,
+                        showToc = showToc,
+                        onToggleToc = onToggleToc,
+                        readingModeEnabled = readingModeEnabled,
+                        onToggleReadingMode = onToggleReadingMode,
+                        showPencilModeButton = showPencilModeButton,
+                        pencilModeEnabled = pencilModeEnabled,
+                        onPencilModeChange = onPencilModeChange,
+                        magnifierEnabled = magnifierEnabled,
+                        onMagnifierToggle = onMagnifierToggle,
+                        onOpenShortcutsSettings = onOpenShortcutsSettings,
+                    )
                 WheelStrip(
                     entries = entries,
                     orientation = RailOrientation.HORIZONTAL,
@@ -207,18 +211,22 @@ fun PortraitTopBar(
         }
         AnimatedVisibility(
             visible = toolActive && expandedIndex != null,
-            enter = expandVertically(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS), expandFrom = Alignment.Top) +
-                fadeIn(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS)),
-            exit = shrinkVertically(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS), shrinkTowards = Alignment.Top) +
-                fadeOut(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS)),
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = PORTRAIT_EXPANSION_TOP_PADDING),
+            enter =
+                expandVertically(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS), expandFrom = Alignment.Top) +
+                    fadeIn(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS)),
+            exit =
+                shrinkVertically(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS), shrinkTowards = Alignment.Top) +
+                    fadeOut(animationSpec = tween(PORTRAIT_PANEL_ANIM_MS)),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(top = PORTRAIT_EXPANSION_TOP_PADDING),
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(end = PORTRAIT_BAR_PADDING_H),
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(end = PORTRAIT_BAR_PADDING_H),
                 horizontalArrangement = Arrangement.End,
             ) {
                 GlassSurface(tint = MaterialTheme.colorScheme.secondaryContainer) {
@@ -287,25 +295,36 @@ private fun PortraitPageCounter(
                                 fieldValue = new
                             }
                         },
-                        textStyle = MaterialTheme.typography.labelLarge.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        ),
+                        textStyle =
+                            MaterialTheme.typography.labelLarge.copy(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            ),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Go,
-                        ),
+                        keyboardOptions =
+                            KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Go,
+                            ),
                         keyboardActions = KeyboardActions(onGo = { confirm() }),
-                        modifier = Modifier.matchParentSize()
-                            .focusRequester(focusRequester)
-                            .onFocusChanged { state ->
-                                if (state.isFocused) everFocused = true
-                                else if (everFocused) cancel()
-                            }
-                            .onKeyEvent { event ->
-                                if (event.key == Key.Escape) { cancel(); true } else false
-                            },
+                        modifier =
+                            Modifier
+                                .matchParentSize()
+                                .focusRequester(focusRequester)
+                                .onFocusChanged { state ->
+                                    if (state.isFocused) {
+                                        everFocused = true
+                                    } else if (everFocused) {
+                                        cancel()
+                                    }
+                                }.onKeyEvent { event ->
+                                    if (event.key == Key.Escape) {
+                                        cancel()
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                },
                     )
                 }
             } else {
@@ -313,13 +332,15 @@ private fun PortraitPageCounter(
                     text = currentPage.toString(),
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.clickable {
-                        fieldValue = TextFieldValue(
-                            text = currentPage.toString(),
-                            selection = TextRange(0, currentPage.toString().length),
-                        )
-                        editing = true
-                    },
+                    modifier =
+                        Modifier.clickable {
+                            fieldValue =
+                                TextFieldValue(
+                                    text = currentPage.toString(),
+                                    selection = TextRange(0, currentPage.toString().length),
+                                )
+                            editing = true
+                        },
                 )
             }
         } else {

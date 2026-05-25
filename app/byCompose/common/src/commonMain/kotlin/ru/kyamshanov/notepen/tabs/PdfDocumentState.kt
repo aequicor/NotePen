@@ -11,6 +11,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import ru.kyamshanov.notepen.PdfDrawingState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.book.TocEntry
 import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
@@ -74,7 +75,6 @@ class PdfDocumentState internal constructor(
      */
     sharedAnnotationsLoaded: MutableState<Boolean> = mutableStateOf(false),
 ) {
-
     private val pdfDocumentState = mutableStateOf<PdfDocument?>(null)
 
     /** Currently loaded PDF, or `null` while loading / on load failure. */
@@ -86,6 +86,20 @@ class PdfDocumentState internal constructor(
 
     /** Pages of the loaded [pdfDocument], or empty until it loads. */
     val pages by derivedStateOf { pdfDocument?.info?.pages.orEmpty() }
+
+    private val outlineState = mutableStateOf<List<TocEntry>>(emptyList())
+
+    /**
+     * Оглавление документа (главы EPUB/FB2), загружаемое асинхронно через
+     * [ru.kyamshanov.notepen.book.DocumentOutlineProvider] после открытия. Для
+     * обычных PDF и комиксов остаётся пустым. Наблюдаемое — обновление перерисует
+     * сайдбар оглавления.
+     */
+    var outline: List<TocEntry>
+        get() = outlineState.value
+        set(value) {
+            outlineState.value = value
+        }
 
     /** Ink and per-page state, keyed by page index. */
     val drawingStates: SnapshotStateMap<Int, PdfDrawingState> = sharedDrawingStates
@@ -149,7 +163,10 @@ class PdfDocumentState internal constructor(
      * gesture (mirrors the previous `onGestureStart` body in
      * `DetailsContent`).
      */
-    fun pushUndoSnapshot(pageIndex: Int, snapshot: List<DrawingPath>) {
+    fun pushUndoSnapshot(
+        pageIndex: Int,
+        snapshot: List<DrawingPath>,
+    ) {
         undoStack.addLast(UndoEntry(pageIndex, snapshot))
         redoStack.clear()
     }
@@ -175,7 +192,10 @@ class PdfDocumentState internal constructor(
          * Creates a [PdfDocumentState] with fresh annotation state. Used by
          * [TabSession] when opening the first tab for a file.
          */
-        internal fun create(filePath: String, documentId: String): PdfDocumentState =
+        internal fun create(
+            filePath: String,
+            documentId: String,
+        ): PdfDocumentState =
             PdfDocumentState(
                 filePath = filePath,
                 documentId = documentId,
@@ -194,15 +214,16 @@ class PdfDocumentState internal constructor(
             filePath: String,
             documentId: String,
             from: PdfDocumentState,
-        ): PdfDocumentState = PdfDocumentState(
-            filePath = filePath,
-            documentId = documentId,
-            pdfViewerState = createPdfViewerState(),
-            sharedDrawingStates = from.drawingStates,
-            sharedFavoritePageIndices = from.favoritePageIndices,
-            sharedUndoStack = from.undoStack,
-            sharedRedoStack = from.redoStack,
-            sharedAnnotationsLoaded = from.annotationsLoadedState,
-        ).also { it.skipPageRestore = true }
+        ): PdfDocumentState =
+            PdfDocumentState(
+                filePath = filePath,
+                documentId = documentId,
+                pdfViewerState = createPdfViewerState(),
+                sharedDrawingStates = from.drawingStates,
+                sharedFavoritePageIndices = from.favoritePageIndices,
+                sharedUndoStack = from.undoStack,
+                sharedRedoStack = from.redoStack,
+                sharedAnnotationsLoaded = from.annotationsLoadedState,
+            ).also { it.skipPageRestore = true }
     }
 }

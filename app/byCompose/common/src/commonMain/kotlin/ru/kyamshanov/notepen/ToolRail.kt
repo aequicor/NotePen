@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
@@ -48,12 +49,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
-import kotlin.math.roundToInt
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.ui.glass.GlassSurface
+import kotlin.math.roundToInt
 
 /**
  * Tool toggles (Pen / Marker / Eraser) as a list of [WheelEntry] for the unified
@@ -62,43 +63,45 @@ import ru.kyamshanov.notepen.ui.glass.GlassSurface
 internal fun toolSelectorEntries(
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
-): List<WheelEntry> = listOf(
-    WheelEntry(TOOL_PEN_KEY) {
-        ToolToggleButton(
-            icon = NotePenIcons.Brush,
-            contentDescription = "Перо",
-            selected = toolMode == ToolMode.PEN,
-            onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN)) },
-            showSelectionBackground = false,
-        )
-    },
-    WheelEntry(TOOL_MARKER_KEY) {
-        ToolToggleButton(
-            icon = NotePenIcons.Highlighter,
-            contentDescription = "Маркер",
-            selected = toolMode == ToolMode.MARKER,
-            onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER)) },
-            showSelectionBackground = false,
-        )
-    },
-    WheelEntry(TOOL_ERASER_KEY) {
-        ToolToggleButton(
-            icon = NotePenIcons.Eraser,
-            contentDescription = "Ластик",
-            selected = toolMode == ToolMode.ERASER,
-            onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER)) },
-            showSelectionBackground = false,
-        )
-    },
-)
+): List<WheelEntry> =
+    listOf(
+        WheelEntry(TOOL_PEN_KEY) {
+            ToolToggleButton(
+                icon = NotePenIcons.Brush,
+                contentDescription = "Перо",
+                selected = toolMode == ToolMode.PEN,
+                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.PEN)) },
+                showSelectionBackground = false,
+            )
+        },
+        WheelEntry(TOOL_MARKER_KEY) {
+            ToolToggleButton(
+                icon = NotePenIcons.Highlighter,
+                contentDescription = "Маркер",
+                selected = toolMode == ToolMode.MARKER,
+                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.MARKER)) },
+                showSelectionBackground = false,
+            )
+        },
+        WheelEntry(TOOL_ERASER_KEY) {
+            ToolToggleButton(
+                icon = NotePenIcons.Eraser,
+                contentDescription = "Ластик",
+                selected = toolMode == ToolMode.ERASER,
+                onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.ERASER)) },
+                showSelectionBackground = false,
+            )
+        },
+    )
 
 /** Wheel-entry key of the currently selected drawing tool, or `null` for [ToolMode.NONE]. */
-internal fun selectedToolWheelKey(toolMode: ToolMode): Any? = when (toolMode) {
-    ToolMode.PEN -> TOOL_PEN_KEY
-    ToolMode.MARKER -> TOOL_MARKER_KEY
-    ToolMode.ERASER -> TOOL_ERASER_KEY
-    ToolMode.NONE -> null
-}
+internal fun selectedToolWheelKey(toolMode: ToolMode): Any? =
+    when (toolMode) {
+        ToolMode.PEN -> TOOL_PEN_KEY
+        ToolMode.MARKER -> TOOL_MARKER_KEY
+        ToolMode.ERASER -> TOOL_ERASER_KEY
+        ToolMode.NONE -> null
+    }
 
 private const val TOOL_PEN_KEY = "tool_pen"
 private const val TOOL_MARKER_KEY = "tool_marker"
@@ -136,6 +139,8 @@ internal fun unifiedToolWheelEntries(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showToc: Boolean,
+    onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
@@ -146,48 +151,53 @@ internal fun unifiedToolWheelEntries(
     onOpenShortcutsSettings: () -> Unit,
     expandedButtonModifier: Modifier = Modifier,
 ): List<WheelEntry> {
-    val settings = toolSettingsSlotEntries(
-        toolMode = toolMode,
-        penSettings = penSettings,
-        onPenSettingsChange = onPenSettingsChange,
-        markerSettings = markerSettings,
-        onMarkerSettingsChange = onMarkerSettingsChange,
-        eraserSettings = eraserSettings,
-        onEraserSettingsChange = onEraserSettingsChange,
-        expandedIndex = expandedIndex,
-        onToggle = onSlotToggle,
-        expandedButtonModifier = expandedButtonModifier,
-    )
-    val presets = toolPresetEntries(
-        toolMode = toolMode,
-        penSettings = penSettings,
-        onPenSettingsChange = onPenSettingsChange,
-        markerSettings = markerSettings,
-        onMarkerSettingsChange = onMarkerSettingsChange,
-        eraserSettings = eraserSettings,
-        onEraserSettingsChange = onEraserSettingsChange,
-        presets = toolPresets,
-        onPresetsChange = onToolPresetsChange,
-        onPresetApplied = onPresetApplied,
-    )
-    val system = systemControlEntries(
-        hasAnnotations = hasAnnotations,
-        isExporting = isExporting,
-        onExport = onExport,
-        scale = scale,
-        onZoomIn = onZoomIn,
-        onZoomOut = onZoomOut,
-        showThumbnails = showThumbnails,
-        onToggleThumbnails = onToggleThumbnails,
-        readingModeEnabled = readingModeEnabled,
-        onToggleReadingMode = onToggleReadingMode,
-        showPencilModeButton = showPencilModeButton,
-        pencilModeEnabled = pencilModeEnabled,
-        onPencilModeChange = onPencilModeChange,
-        magnifierEnabled = magnifierEnabled,
-        onMagnifierToggle = onMagnifierToggle,
-        onOpenShortcutsSettings = onOpenShortcutsSettings,
-    )
+    val settings =
+        toolSettingsSlotEntries(
+            toolMode = toolMode,
+            penSettings = penSettings,
+            onPenSettingsChange = onPenSettingsChange,
+            markerSettings = markerSettings,
+            onMarkerSettingsChange = onMarkerSettingsChange,
+            eraserSettings = eraserSettings,
+            onEraserSettingsChange = onEraserSettingsChange,
+            expandedIndex = expandedIndex,
+            onToggle = onSlotToggle,
+            expandedButtonModifier = expandedButtonModifier,
+        )
+    val presets =
+        toolPresetEntries(
+            toolMode = toolMode,
+            penSettings = penSettings,
+            onPenSettingsChange = onPenSettingsChange,
+            markerSettings = markerSettings,
+            onMarkerSettingsChange = onMarkerSettingsChange,
+            eraserSettings = eraserSettings,
+            onEraserSettingsChange = onEraserSettingsChange,
+            presets = toolPresets,
+            onPresetsChange = onToolPresetsChange,
+            onPresetApplied = onPresetApplied,
+        )
+    val system =
+        systemControlEntries(
+            hasAnnotations = hasAnnotations,
+            isExporting = isExporting,
+            onExport = onExport,
+            scale = scale,
+            onZoomIn = onZoomIn,
+            onZoomOut = onZoomOut,
+            showThumbnails = showThumbnails,
+            onToggleThumbnails = onToggleThumbnails,
+            showToc = showToc,
+            onToggleToc = onToggleToc,
+            readingModeEnabled = readingModeEnabled,
+            onToggleReadingMode = onToggleReadingMode,
+            showPencilModeButton = showPencilModeButton,
+            pencilModeEnabled = pencilModeEnabled,
+            onPencilModeChange = onPencilModeChange,
+            magnifierEnabled = magnifierEnabled,
+            onMagnifierToggle = onMagnifierToggle,
+            onOpenShortcutsSettings = onOpenShortcutsSettings,
+        )
     return buildList {
         addAll(toolSelectorEntries(toolMode, onToolModeChange))
         if (settings.isNotEmpty()) {
@@ -212,20 +222,22 @@ internal fun unifiedToolWheelEntries(
 internal fun RailDivider(orientation: RailOrientation) {
     val color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = WHEEL_DIVIDER_ALPHA)
     when (orientation) {
-        RailOrientation.HORIZONTAL -> Spacer(
-            Modifier
-                .padding(horizontal = WHEEL_DIVIDER_SPACING)
-                .height(WHEEL_DIVIDER_LENGTH)
-                .width(WHEEL_DIVIDER_THICKNESS)
-                .background(color),
-        )
-        RailOrientation.VERTICAL -> Spacer(
-            Modifier
-                .padding(vertical = WHEEL_DIVIDER_SPACING)
-                .width(WHEEL_DIVIDER_LENGTH)
-                .height(WHEEL_DIVIDER_THICKNESS)
-                .background(color),
-        )
+        RailOrientation.HORIZONTAL ->
+            Spacer(
+                Modifier
+                    .padding(horizontal = WHEEL_DIVIDER_SPACING)
+                    .height(WHEEL_DIVIDER_LENGTH)
+                    .width(WHEEL_DIVIDER_THICKNESS)
+                    .background(color),
+            )
+        RailOrientation.VERTICAL ->
+            Spacer(
+                Modifier
+                    .padding(vertical = WHEEL_DIVIDER_SPACING)
+                    .width(WHEEL_DIVIDER_LENGTH)
+                    .height(WHEEL_DIVIDER_THICKNESS)
+                    .background(color),
+            )
     }
 }
 
@@ -243,6 +255,8 @@ internal fun systemControlEntries(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showToc: Boolean,
+    onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
@@ -268,6 +282,14 @@ internal fun systemControlEntries(
             contentDescription = "Миниатюры страниц",
             selected = showThumbnails,
             onClick = onToggleThumbnails,
+        )
+    }
+    val tocButton: @Composable () -> Unit = {
+        ToolToggleButton(
+            icon = Icons.AutoMirrored.Filled.List,
+            contentDescription = "Содержание",
+            selected = showToc,
+            onClick = onToggleToc,
         )
     }
     val readingModeButton: @Composable () -> Unit = {
@@ -303,11 +325,12 @@ internal fun systemControlEntries(
                 Icon(
                     imageVector = Icons.Default.PictureAsPdf,
                     contentDescription = "Экспортировать в PDF",
-                    tint = if (hasAnnotations) {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SYSTEM_DISABLED_ALPHA)
-                    },
+                    tint =
+                        if (hasAnnotations) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SYSTEM_DISABLED_ALPHA)
+                        },
                 )
             }
         }
@@ -356,6 +379,7 @@ internal fun systemControlEntries(
         if (showPencilModeButton) add(WheelEntry("sys_pencil") { pencilModeButton() })
         add(WheelEntry("sys_magnifier") { magnifierButton() })
         add(WheelEntry("sys_thumbnails") { thumbnailsButton() })
+        add(WheelEntry("sys_toc") { tocButton() })
         add(WheelEntry("sys_reading") { readingModeButton() })
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
         add(WheelEntry("sys_export") { exportButton() })
@@ -399,6 +423,8 @@ fun LandscapeToolRail(
     onZoomOut: () -> Unit,
     showThumbnails: Boolean,
     onToggleThumbnails: () -> Unit,
+    showToc: Boolean,
+    onToggleToc: () -> Unit,
     readingModeEnabled: Boolean,
     onToggleReadingMode: () -> Unit,
     showPencilModeButton: Boolean,
@@ -457,46 +483,52 @@ fun LandscapeToolRail(
         // Инструменты, настройки, пресеты и системные кнопки — в ОДНОМ
         // вертикальном колесе (затухание к краям). Колесо подгоняется по высоте
         // под содержимое и прокручивается, если оно не помещается.
-        val entries = unifiedToolWheelEntries(
-            orientation = RailOrientation.VERTICAL,
-            toolMode = toolMode,
-            onToolModeChange = onToolModeChange,
-            penSettings = penSettings,
-            onPenSettingsChange = onPenSettingsChange,
-            markerSettings = markerSettings,
-            onMarkerSettingsChange = onMarkerSettingsChange,
-            eraserSettings = eraserSettings,
-            onEraserSettingsChange = onEraserSettingsChange,
-            toolPresets = toolPresets,
-            onToolPresetsChange = onToolPresetsChange,
-            onPresetApplied = onPresetApplied,
-            expandedIndex = expandedIndex,
-            onSlotToggle = onSlotToggle,
-            hasAnnotations = hasAnnotations,
-            isExporting = isExporting,
-            onExport = onExport,
-            scale = scale,
-            onZoomIn = onZoomIn,
-            onZoomOut = onZoomOut,
-            showThumbnails = showThumbnails,
-            onToggleThumbnails = onToggleThumbnails,
-            readingModeEnabled = readingModeEnabled,
-            onToggleReadingMode = onToggleReadingMode,
-            showPencilModeButton = showPencilModeButton,
-            pencilModeEnabled = pencilModeEnabled,
-            onPencilModeChange = onPencilModeChange,
-            magnifierEnabled = magnifierEnabled,
-            onMagnifierToggle = onMagnifierToggle,
-            onOpenShortcutsSettings = onOpenShortcutsSettings,
-            expandedButtonModifier = Modifier.onGloballyPositioned { btn ->
-                railCoords?.let { row ->
-                    buttonCenterY = row.localPositionOf(
-                        btn,
-                        Offset(0f, btn.size.height / 2f),
-                    ).y
-                }
-            },
-        )
+        val entries =
+            unifiedToolWheelEntries(
+                orientation = RailOrientation.VERTICAL,
+                toolMode = toolMode,
+                onToolModeChange = onToolModeChange,
+                penSettings = penSettings,
+                onPenSettingsChange = onPenSettingsChange,
+                markerSettings = markerSettings,
+                onMarkerSettingsChange = onMarkerSettingsChange,
+                eraserSettings = eraserSettings,
+                onEraserSettingsChange = onEraserSettingsChange,
+                toolPresets = toolPresets,
+                onToolPresetsChange = onToolPresetsChange,
+                onPresetApplied = onPresetApplied,
+                expandedIndex = expandedIndex,
+                onSlotToggle = onSlotToggle,
+                hasAnnotations = hasAnnotations,
+                isExporting = isExporting,
+                onExport = onExport,
+                scale = scale,
+                onZoomIn = onZoomIn,
+                onZoomOut = onZoomOut,
+                showThumbnails = showThumbnails,
+                onToggleThumbnails = onToggleThumbnails,
+                showToc = showToc,
+                onToggleToc = onToggleToc,
+                readingModeEnabled = readingModeEnabled,
+                onToggleReadingMode = onToggleReadingMode,
+                showPencilModeButton = showPencilModeButton,
+                pencilModeEnabled = pencilModeEnabled,
+                onPencilModeChange = onPencilModeChange,
+                magnifierEnabled = magnifierEnabled,
+                onMagnifierToggle = onMagnifierToggle,
+                onOpenShortcutsSettings = onOpenShortcutsSettings,
+                expandedButtonModifier =
+                    Modifier.onGloballyPositioned { btn ->
+                        railCoords?.let { row ->
+                            buttonCenterY =
+                                row
+                                    .localPositionOf(
+                                        btn,
+                                        Offset(0f, btn.size.height / 2f),
+                                    ).y
+                        }
+                    },
+            )
         GlassSurface(
             modifier = Modifier.onSizeChanged { onRailWidthChanged(with(density) { it.width.toDp() }) },
         ) {
@@ -509,17 +541,20 @@ fun LandscapeToolRail(
         }
         AnimatedVisibility(
             visible = toolActive && expandedIndex != null,
-            enter = expandHorizontally(animationSpec = tween(PANEL_ANIM_MS), expandFrom = Alignment.Start) +
-                fadeIn(animationSpec = tween(PANEL_ANIM_MS)) +
-                scaleIn(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
-            exit = shrinkHorizontally(animationSpec = tween(PANEL_ANIM_MS), shrinkTowards = Alignment.Start) +
-                fadeOut(animationSpec = tween(PANEL_ANIM_MS)) +
-                scaleOut(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
-            modifier = Modifier
-                .align(Alignment.Top)
-                .offset {
-                    IntOffset(0, (buttonCenterY - panelHeightPx / 2f).roundToInt().coerceAtLeast(0))
-                },
+            enter =
+                expandHorizontally(animationSpec = tween(PANEL_ANIM_MS), expandFrom = Alignment.Start) +
+                    fadeIn(animationSpec = tween(PANEL_ANIM_MS)) +
+                    scaleIn(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
+            exit =
+                shrinkHorizontally(animationSpec = tween(PANEL_ANIM_MS), shrinkTowards = Alignment.Start) +
+                    fadeOut(animationSpec = tween(PANEL_ANIM_MS)) +
+                    scaleOut(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
+            modifier =
+                Modifier
+                    .align(Alignment.Top)
+                    .offset {
+                        IntOffset(0, (buttonCenterY - panelHeightPx / 2f).roundToInt().coerceAtLeast(0))
+                    },
         ) {
             Row(verticalAlignment = Alignment.Top) {
                 Spacer(Modifier.width(ISLAND_GAP))
