@@ -432,7 +432,16 @@ fun DetailsContent(
         if (controls?.showThumbnails == true) controls.toggleThumbnails() else onBackWithSave()
     }
 
-    val statusBarsTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    // Top chrome (each panel's tab strip and the toolbar floating just below it)
+    // must clear the status bar AND the display cutout: ImmersiveEditorMode hides
+    // the system bars, so WindowInsets.statusBars collapses to 0 — yet the camera
+    // notch / punch-hole still occupies the top edge and would otherwise overlap
+    // the tab strip. In landscape the cutout moves to a side, so its top is ~0 and
+    // this stays equal to the (hidden) status bar inset.
+    val topChromeInset = WindowInsets.statusBars
+        .union(WindowInsets.displayCutout)
+        .asPaddingValues()
+        .calculateTopPadding()
 
     // Measured height of the workspace grid in px. Panel ratios are relative to
     // this — using it (rather than deriving from window size minus the status
@@ -512,12 +521,12 @@ fun DetailsContent(
                 }
             },
     ) {
-        // Workspace grid. Each panel draws its own tab strip at its top; the
-        // grid only clears the status bar so the top-row tab strips sit below it.
+        // Workspace grid. Each panel draws its own tab strip at its top; the grid
+        // clears the status bar / display cutout so the top-row tab strips sit below them.
         Box(
             Modifier
                 .fillMaxSize()
-                .padding(top = statusBarsTop)
+                .padding(top = topChromeInset)
                 .onSizeChanged { gridHeightPx = it.height.toFloat() },
         ) {
             GridContainer(
@@ -602,7 +611,7 @@ fun DetailsContent(
             Modifier
                 .fillMaxSize()
                 .consumeWindowInsets(WindowInsets.statusBars)
-                .padding(top = TAB_BAR_HEIGHT + statusBarsTop),
+                .padding(top = TAB_BAR_HEIGHT + topChromeInset),
         ) {
         if (isLandscape) {
             // When the thumbnail sidebar is open at the screen's left edge it would
