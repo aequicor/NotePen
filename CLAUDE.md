@@ -98,6 +98,19 @@ presentation/ui  →  application (use cases)  →  domain (entities, ports)
 Инструменты: `search_docs`, `write_doc`, `update_doc`, `get_doc`, `list_docs`.
 Запускается через `knowledge-docker-compose.yml` в корне проекта (`docker compose -f knowledge-docker-compose.yml up -d`).
 
+## Mobile MCP (claude-in-mobile)
+
+Доступен MCP-сервер `mobile` ([claude-in-mobile](https://github.com/AlexGladkov/claude-in-mobile)) — управление мобильными устройствами и эмуляторами на естественном языке. NotePen — KMP-приложение с `androidMain`/`iosMain`, поэтому **используй его, чтобы запускать и проверять приложение на устройстве/эмуляторе**, а не полагаться только на тесты: прогоняй UI-изменения на реальном Android-эмуляторе или iOS Simulator (скриншот, инспекция дерева, тап/свайп, проверка состояния).
+
+Когда использовать:
+- убедиться, что UI-правка реально работает в приложении;
+- воспроизвести баг на устройстве, снять скриншот/логи, проверить разрешения;
+- прогнать сценарий из нескольких шагов (`flow_batch` / `flow_run`).
+
+Мета-инструменты: `device` (список/выбор устройств, модули), `input` (tap/swipe/text/key/long_press), `screen` (скриншот, аннотация), `ui` (дерево, find, tap_text, ассершены, wait), `app` (launch/stop/install/list), `system` (shell, logs, permissions, clipboard, files, metrics), `flow_batch`, `flow_run`. Опциональные модули по запросу: `browser`, `desktop`, `store`.
+
+Требования: Android — установленный `adb` + запущенный эмулятор/устройство с USB-debugging; iOS — macOS с Xcode и загруженным Simulator. Проверка окружения: `npx claude-in-mobile doctor`.
+
 ## Доступные субагенты
 
 - **kotlin-specialist** — глубокий Kotlin: корутины, KMP, Compose, Arrow.kt, type-safe builders. Делегируй нетривиальные задачи с асинхронностью или multiplatform-кодом.

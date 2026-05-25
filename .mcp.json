@@ -18,6 +18,14 @@
                 "--project-dir",
                 "."
             ]
+        },
+        "mobile": {
+            "transport": "stdio",
+            "command": "npx",
+            "args": [
+                "-y",
+                "claude-in-mobile"
+            ]
         }
     }
 }
