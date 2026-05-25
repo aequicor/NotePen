@@ -1,110 +1,132 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.draw.drawWithContent
-import kotlinx.coroutines.delay
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
+import ru.kyamshanov.notepen.reflow.api.ProgressFormat
+import ru.kyamshanov.notepen.reflow.api.ReaderAlign
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
+import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
 
 /**
- * Reflow-ридер: рендерит [ReflowDocument] в одну прокручиваемую колонку
- * ограниченной ширины с типографикой [settings].
+ * Reflow-ридер: рендерит [ReflowDocument] колонкой ограниченной ширины с
+ * типографикой из [stored]. Все настройки оформления приходят сериализуемыми
+ * [StoredReaderSettings]; ридер разворачивает их в Compose-модель
+ * ([ReflowReaderSettings]) и применяет — шрифт, кегль, воздух, цвет/тема,
+ * яркость, выравнивание, переносы, интервалы, bionic, подсветку строки,
+ * страничный/скролл-режим и индикатор прогресса.
  *
- * Выделения [highlights] подсвечиваются прямо в потоке текста (фон через
- * [SpanStyle]) — поэтому они «текут» вместе с переверстанным текстом, в отличие
- * от привязанных к координатам страницы штрихов. Обычно [highlights] получают
- * из `StrokeTextMapper.anchorsFor` по рукописным аннотациям документа.
+ * Настройки живут в нижнем «airbar» по центру ([ReaderAirbar]); по тапу по
+ * тексту он скрывается/возвращается ([barVisible]/[onBarVisibleChange]) — этим
+ * же механизмом вызывающий слой связывает видимость airbar с фокусом панели.
  *
- * Картинки ([ReflowBlock.Figure]) рендерятся как кроп исходной страницы, если
- * передан [renderPage]; иначе — плейсхолдер.
+ * Выделения [highlights] подсвечиваются прямо в потоке текста, поэтому «текут»
+ * вместе с переверстанным текстом. Картинки ([ReflowBlock.Figure]) рендерятся
+ * кропом исходной страницы через [renderPage], иначе — плейсхолдер.
  *
  * @param document документ для отображения
+ * @param stored настройки + пресеты + личный пресет «Моё»
+ * @param onStoredChange применить новое состояние настроек
+ * @param barVisible показывать ли нижний airbar
+ * @param onBarVisibleChange запрос смены видимости airbar (тап/автоскрытие)
  * @param modifier модификатор корневого контейнера
  * @param highlights диапазоны-выделения по блокам
- * @param settings типографика и палитра
- * @param listState состояние прокрутки списка блоков (для перехода к нужному блоку)
- * @param renderPage растеризатор страницы в [ImageBitmap] по нулевому индексу
- *   (для отрисовки врезок-картинок); `null` — показывать плейсхолдер
+ * @param listState состояние прокрутки (скролл-режим)
+ * @param renderPage растеризатор страницы для врезок-картинок; `null` — плейсхолдер
  */
 @Composable
 public fun ReflowReader(
     document: ReflowDocument,
+    stored: StoredReaderSettings,
+    onStoredChange: (StoredReaderSettings) -> Unit,
+    barVisible: Boolean,
+    onBarVisibleChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     highlights: List<TextAnchor> = emptyList(),
-    settings: ReflowReaderSettings = ReflowReaderSettings(),
     listState: LazyListState = rememberLazyListState(),
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)? = null,
 ) {
+    val settings = remember(stored.current) { stored.current.toRenderSettings() }
     val anchorsByBlock = remember(highlights) { highlights.groupBy { it.blockIndex } }
 
-    // Выключка по ширине — переключаемая в нижней панели ридера настройка;
-    // стартует из [settings], дальше живёт как состояние ридера (без сброса при
-    // смене документа, чтобы выбор пользователя сохранялся).
-    var justify by remember { mutableStateOf(settings.justify) }
-
-    // Сессия чтения: тиканье времени → напоминание 20-20-20 и адаптивное тёплое
-    // затемнение на долгой сессии. Сбрасывается при смене документа.
+    // Сессия чтения тикает всегда: нужна и для эргономики, и для контекстного
+    // предложения «режим долгого чтения» через ~45 минут.
     var elapsedMs by remember(document) { mutableStateOf(0L) }
+    LaunchedEffect(document) {
+        while (true) {
+            delay(ERGO_TICK_MS)
+            elapsedMs += ERGO_TICK_MS
+        }
+    }
+
     var breakPrompt by remember(document) { mutableStateOf(false) }
     if (settings.ergonomicsEnabled) {
-        LaunchedEffect(document) {
-            while (true) {
-                delay(ERGO_TICK_MS)
-                elapsedMs += ERGO_TICK_MS
-            }
-        }
         LaunchedEffect(document) {
             while (true) {
                 delay(BREAK_INTERVAL_MS)
@@ -114,56 +136,237 @@ public fun ReflowReader(
             }
         }
     }
-    val nightDim = if (settings.ergonomicsEnabled) {
-        ReadingErgonomics.dimAlpha(elapsedMs, NIGHT_AFTER_MS, NIGHT_RAMP_MS, NIGHT_MAX_DIM)
-    } else {
-        0f
-    }
+    val nightDim =
+        if (settings.ergonomicsEnabled) {
+            ReadingErgonomics.dimAlpha(elapsedMs, NIGHT_AFTER_MS, NIGHT_RAMP_MS, NIGHT_MAX_DIM)
+        } else {
+            0f
+        }
+    val brightnessDim = (1f - settings.brightness).coerceIn(0f, 1f)
+
+    // «Теплеть после заката»: без геопозиции — приближение по вечерним часам.
+    // Час берём от тика сессии, чтобы переоценивать без отдельного таймера.
+    val sunsetWarmth =
+        if (settings.sunsetWarm) {
+            val hour = remember(elapsedMs) { currentLocalHour() }
+            if (hour >= SUNSET_START_HOUR || hour < SUNRISE_HOUR) SUNSET_EXTRA_WARMTH else 0f
+        } else {
+            0f
+        }
+    val effectiveBackground =
+        if (sunsetWarmth > 0f) warmShift(settings.background, sunsetWarmth) else settings.background
+
+    // Первый видимый блок: из прокрутки (скролл) либо из текущей страницы (paged).
+    var pagedFirstBlock by remember(document) { mutableStateOf(0) }
+    val firstVisibleBlock = if (settings.paged) pagedFirstBlock else listState.firstVisibleItemIndex
+    val progressLabel =
+        remember(settings.progress, firstVisibleBlock, document) {
+            progressLabel(settings.progress, firstVisibleBlock, document)
+        }
+
+    // Контекстное предложение долгого чтения — мягко, один раз за сессию, и
+    // только если пользователь ещё не на этом пресете.
+    var longPromptDismissed by remember(document) { mutableStateOf(false) }
+    val showLongPrompt =
+        !longPromptDismissed &&
+            elapsedMs >= LONG_READING_AFTER_MS &&
+            stored.activePresetId != BuiltinReaderPresets.longReading.id
 
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(settings.background)
-            .drawWithContent {
-                drawContent()
-                if (nightDim > 0f) drawRect(color = NIGHT_TINT.copy(alpha = nightDim))
-            },
+        modifier =
+            modifier
+                .fillMaxSize()
+                .background(effectiveBackground)
+                .pointerInput(barVisible) {
+                    detectTapGestures { onBarVisibleChange(!barVisible) }
+                },
     ) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier
+        if (settings.paged) {
+            PagedReflowContent(
+                document = document,
+                anchorsByBlock = anchorsByBlock,
+                settings = settings,
+                renderPage = renderPage,
+                onVisibleBlockChange = { pagedFirstBlock = it },
+            )
+        } else {
+            ScrollReflowContent(
+                document = document,
+                anchorsByBlock = anchorsByBlock,
+                settings = settings,
+                listState = listState,
+                renderPage = renderPage,
+            )
+        }
+
+        // Затемнение «внутренней яркости» и тёплый ночной тинт — оверлеем поверх
+        // текста, но под панелью/линейкой, чтобы контролы оставались читаемыми.
+        if (brightnessDim > 0f || nightDim > 0f) {
+            Box(
+                Modifier.matchParentSize().drawBehind {
+                    if (brightnessDim > 0f) drawRect(color = Color.Black.copy(alpha = brightnessDim))
+                    if (nightDim > 0f) drawRect(color = NIGHT_TINT.copy(alpha = nightDim))
+                },
+            )
+        }
+
+        if (settings.readingRuler) {
+            ReadingRuler(settings, Modifier.align(Alignment.Center))
+        }
+
+        if (barVisible) {
+            ReaderAirbar(
+                stored = stored,
+                onStoredChange = onStoredChange,
+                background = effectiveBackground,
+                textColor = settings.textColor,
+                progressLabel = progressLabel,
+                autoHideMs = settings.autoHideMs,
+                onRequestHide = { onBarVisibleChange(false) },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
+
+        if (showLongPrompt) {
+            LongReadingPrompt(
+                settings = settings,
+                onApply = {
+                    longPromptDismissed = true
+                    onStoredChange(
+                        ru.kyamshanov.notepen.reflow.api.ReaderSettingsReducer
+                            .applyPreset(stored, BuiltinReaderPresets.longReading),
+                    )
+                },
+                onDismiss = { longPromptDismissed = true },
+                modifier = Modifier.align(Alignment.TopCenter),
+            )
+        }
+
+        if (breakPrompt) {
+            BreakReminderBar(settings, Modifier.align(Alignment.BottomCenter))
+        }
+    }
+}
+
+/** Скролл-режим: одна прокручиваемая колонка с ритм-паузами. */
+@Composable
+private fun BoxScope.ScrollReflowContent(
+    document: ReflowDocument,
+    anchorsByBlock: Map<Int, List<TextAnchor>>,
+    settings: ReflowReaderSettings,
+    listState: LazyListState,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+) {
+    LazyColumn(
+        state = listState,
+        modifier =
+            Modifier
                 .align(Alignment.TopCenter)
                 .widthIn(max = settings.maxContentWidth)
                 .fillMaxWidth(),
-            // нижний отступ — чтобы последний блок не прятался под панель настроек
-            contentPadding = PaddingValues(
+        contentPadding =
+            PaddingValues(
                 start = settings.contentPadding,
                 top = settings.contentPadding,
                 end = settings.contentPadding,
-                bottom = settings.contentPadding + READER_BAR_HEIGHT,
+                bottom = settings.contentPadding + READER_BAR_RESERVE,
             ),
-            verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
-        ) {
-            itemsIndexed(document.blocks) { index, block ->
-                Column {
-                    ReflowBlockView(block, anchorsByBlock[index].orEmpty(), settings, justify, renderPage)
-                    if (settings.ergonomicsEnabled &&
-                        index < document.blocks.lastIndex &&
-                        ReadingErgonomics.isRhythmBreak(index, RHYTHM_EVERY_BLOCKS)
-                    ) {
-                        RhythmPause(settings)
-                    }
+        verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
+    ) {
+        itemsIndexed(document.blocks) { index, block ->
+            Column {
+                ReflowBlockView(block, anchorsByBlock[index].orEmpty(), settings, renderPage)
+                if (settings.ergonomicsEnabled &&
+                    index < document.blocks.lastIndex &&
+                    ReadingErgonomics.isRhythmBreak(index, RHYTHM_EVERY_BLOCKS)
+                ) {
+                    RhythmPause(settings)
                 }
             }
         }
-        ReaderSettingsBar(
-            justify = justify,
-            onToggleJustify = { justify = !justify },
-            settings = settings,
-            modifier = Modifier.align(Alignment.BottomCenter),
-        )
-        if (breakPrompt) {
-            BreakReminderBar(settings, Modifier.align(Alignment.BottomCenter))
+    }
+}
+
+/**
+ * Страничный режим: измеряет высоты блоков при текущей ширине колонки, раскладывает
+ * их по страницам ([ReaderPagination]) и листает [VerticalPager]. Пока высоты не
+ * измерены — невидимый проход рендерит блоки и снимает их высоты.
+ */
+@Composable
+private fun PagedReflowContent(
+    document: ReflowDocument,
+    anchorsByBlock: Map<Int, List<TextAnchor>>,
+    settings: ReflowReaderSettings,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+    onVisibleBlockChange: (Int) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        val pageHeightPx =
+            with(density) {
+                (maxHeight - settings.contentPadding * 2 - READER_BAR_RESERVE).toPx().coerceAtLeast(1f)
+            }
+        val spacingPx = with(density) { settings.blockSpacing.toPx() }
+        val heights = remember(document) { mutableStateMapOf<Int, Int>() }
+        val measured = document.blocks.isEmpty() || heights.size >= document.blocks.size
+
+        if (!measured) {
+            Box(Modifier.fillMaxSize().clipToBounds().alpha(0f)) {
+                Column(
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .widthIn(max = settings.maxContentWidth)
+                            .fillMaxWidth()
+                            .padding(horizontal = settings.contentPadding),
+                ) {
+                    document.blocks.forEachIndexed { index, block ->
+                        Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }) {
+                            ReflowBlockView(block, anchorsByBlock[index].orEmpty(), settings, renderPage)
+                        }
+                    }
+                }
+            }
+            return@BoxWithConstraints
+        }
+
+        val pages =
+            remember(document, pageHeightPx, spacingPx, heights.size) {
+                ReaderPagination.paginate(
+                    blockHeightsPx = document.blocks.indices.map { heights[it]?.toFloat() ?: 0f },
+                    pageHeightPx = pageHeightPx,
+                    spacingPx = spacingPx,
+                )
+            }
+        if (pages.isEmpty()) return@BoxWithConstraints
+
+        val pagerState = rememberPagerState(pageCount = { pages.size })
+        LaunchedEffect(pagerState, pages) {
+            snapshotFlow { pagerState.currentPage }
+                .collect { page -> onVisibleBlockChange(pages.getOrNull(page)?.firstOrNull() ?: 0) }
+        }
+        VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
+            Column(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .widthIn(max = settings.maxContentWidth)
+                        .padding(
+                            start = settings.contentPadding,
+                            end = settings.contentPadding,
+                            top = settings.contentPadding,
+                        ),
+                verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
+            ) {
+                pages[pageIndex].forEach { blockIndex ->
+                    ReflowBlockView(
+                        document.blocks[blockIndex],
+                        anchorsByBlock[blockIndex].orEmpty(),
+                        settings,
+                        renderPage,
+                    )
+                }
+            }
         }
     }
 }
@@ -173,25 +376,27 @@ private fun ReflowBlockView(
     block: ReflowBlock,
     anchors: List<TextAnchor>,
     settings: ReflowReaderSettings,
-    justify: Boolean,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
 ) {
     when (block) {
-        is ReflowBlock.Heading -> BasicText(
-            text = styledText(block.text, block.source, anchors, settings),
-            style = settings.headingStyle(block.level),
-        )
+        is ReflowBlock.Heading ->
+            BasicText(
+                text = styledText(block.text, block.source, anchors, settings),
+                style = settings.headingStyle(block.level),
+            )
 
-        is ReflowBlock.Paragraph -> BasicText(
-            text = styledText(block.text, block.source, anchors, settings),
-            style = settings.paragraphStyle(justify),
-        )
+        is ReflowBlock.Paragraph ->
+            BasicText(
+                text = styledText(block.text, block.source, anchors, settings),
+                style = settings.paragraphStyle(),
+            )
 
-        is ReflowBlock.ListItem -> BasicText(
-            text = styledText(block.text, block.source, anchors, settings),
-            style = settings.paragraphStyle(justify),
-            modifier = Modifier.padding(start = settings.contentPadding),
-        )
+        is ReflowBlock.ListItem ->
+            BasicText(
+                text = styledText(block.text, block.source, anchors, settings),
+                style = settings.paragraphStyle(),
+                modifier = Modifier.padding(start = settings.contentPadding),
+            )
 
         is ReflowBlock.Table -> TableView(block, settings)
 
@@ -202,24 +407,26 @@ private fun ReflowBlockView(
 /**
  * Рендерит [ReflowBlock.Table] сеткой: каждая строка — [Row] ячеек равной
  * ширины, ячейки с тонкой рамкой и общей высотой строки ([IntrinsicSize.Min]).
- * Полужирность заголовка приходит из провенанса ячеек (см. [styledText]).
  */
 @Composable
-private fun TableView(table: ReflowBlock.Table, settings: ReflowReaderSettings) {
+private fun TableView(
+    table: ReflowBlock.Table,
+    settings: ReflowReaderSettings,
+) {
     val borderColor = settings.textColor.copy(alpha = TABLE_BORDER_ALPHA)
     Column(modifier = Modifier.fillMaxWidth()) {
         table.rows.forEachIndexed { rowIndex, row ->
             Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
                 row.cells.forEach { cell ->
                     Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .border(TABLE_BORDER_WIDTH, borderColor)
-                            .background(
-                                if (rowIndex == 0) settings.textColor.copy(alpha = TABLE_HEADER_ALPHA) else Color.Transparent,
-                            )
-                            .padding(TABLE_CELL_PADDING),
+                        modifier =
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .border(TABLE_BORDER_WIDTH, borderColor)
+                                .background(
+                                    if (rowIndex == 0) settings.textColor.copy(alpha = TABLE_HEADER_ALPHA) else Color.Transparent,
+                                ).padding(TABLE_CELL_PADDING),
                     ) {
                         BasicText(
                             text = styledText(cell.text, cell.source, emptyList(), settings),
@@ -234,9 +441,7 @@ private fun TableView(table: ReflowBlock.Table, settings: ReflowReaderSettings) 
 
 /**
  * Рисует врезку-картинку как кроп исходной страницы: лениво растеризует страницу
- * через [renderPage] (только когда блок попал во вьюпорт LazyColumn) и рисует её
- * подобласть по [ReflowBlock.Figure.bounds]. Пока грузится / без [renderPage] —
- * плейсхолдер.
+ * через [renderPage] и рисует её подобласть по [ReflowBlock.Figure.bounds].
  */
 @Composable
 private fun FigureView(
@@ -248,7 +453,7 @@ private fun FigureView(
         FigurePlaceholder(settings)
         return
     }
-    val pageBitmap by produceState<ImageBitmap?>(initialValue = null, figure.pageIndex) {
+    val pageBitmap by androidx.compose.runtime.produceState<ImageBitmap?>(initialValue = null, figure.pageIndex) {
         value = renderPage(figure.pageIndex)
     }
     val bitmap = pageBitmap
@@ -271,9 +476,97 @@ private fun FigureView(
     }
 }
 
+/** Reading ruler: тонкая горизонтальная подсветка строки по центру вьюпорта. */
+@Composable
+private fun ReadingRuler(
+    settings: ReflowReaderSettings,
+    modifier: Modifier = Modifier,
+) {
+    val bandHeight = (settings.fontSize.value * settings.lineHeightMultiplier * RULER_BAND_LINES).dp
+    Box(
+        modifier =
+            modifier
+                .fillMaxWidth()
+                .height(bandHeight)
+                .background(settings.textColor.copy(alpha = RULER_BAND_ALPHA)),
+    ) {
+        Box(
+            Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(settings.textColor.copy(alpha = RULER_LINE_ALPHA)),
+        )
+        Box(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(settings.textColor.copy(alpha = RULER_LINE_ALPHA)),
+        )
+    }
+}
+
+/** Мягкое предложение перейти в режим долгого чтения после длительной сессии. */
+@Composable
+private fun LongReadingPrompt(
+    settings: ReflowReaderSettings,
+    onApply: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier =
+            modifier
+                .padding(top = 12.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(settings.textColor.copy(alpha = 0.9f))
+                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        BasicText(
+            text = "Читаете уже долго. Включить режим долгого чтения?",
+            style = TextStyle(color = settings.background, fontSize = 13.sp),
+        )
+        PromptButton("Включить", filled = true, settings = settings, onClick = onApply)
+        PromptButton("Позже", filled = false, settings = settings, onClick = onDismiss)
+    }
+}
+
+@Composable
+private fun PromptButton(
+    label: String,
+    filled: Boolean,
+    settings: ReflowReaderSettings,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(14.dp))
+                .background(settings.background.copy(alpha = if (filled) 1f else 0.18f))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        BasicText(
+            text = label,
+            style =
+                TextStyle(
+                    color = if (filled) settings.textColor else settings.background,
+                    fontSize = 13.sp,
+                    fontWeight = if (filled) FontWeight.SemiBold else FontWeight.Normal,
+                ),
+        )
+    }
+}
+
 /** Тонкая «дышащая» полоска снизу: напоминание по правилу 20-20-20 (не модалка). */
 @Composable
-private fun BreakReminderBar(settings: ReflowReaderSettings, modifier: Modifier = Modifier) {
+private fun BreakReminderBar(
+    settings: ReflowReaderSettings,
+    modifier: Modifier = Modifier,
+) {
     val transition = rememberInfiniteTransition(label = "break-breath")
     val breath by transition.animateFloat(
         initialValue = BREAK_BREATH_MIN,
@@ -290,63 +583,6 @@ private fun BreakReminderBar(settings: ReflowReaderSettings, modifier: Modifier 
     }
 }
 
-/**
- * Нижняя панель ридера: набор переключателей оформления, не мешающий чтению
- * (полупрозрачная «бумага»). Пока несёт выключку по ширине; сюда же лягут
- * будущие настройки (кегль, тема и т. п.).
- */
-@Composable
-private fun ReaderSettingsBar(
-    justify: Boolean,
-    onToggleJustify: () -> Unit,
-    settings: ReflowReaderSettings,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(READER_BAR_HEIGHT)
-            .background(settings.background.copy(alpha = READER_BAR_ALPHA))
-            .padding(horizontal = settings.contentPadding),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.End,
-    ) {
-        ReaderToggleChip(
-            label = "По ширине",
-            checked = justify,
-            onClick = onToggleJustify,
-            settings = settings,
-        )
-    }
-}
-
-/** Компактный чип-переключатель: ярче и полужирнее во включённом состоянии. */
-@Composable
-private fun ReaderToggleChip(
-    label: String,
-    checked: Boolean,
-    onClick: () -> Unit,
-    settings: ReflowReaderSettings,
-) {
-    val backgroundAlpha = if (checked) READER_CHIP_ON_ALPHA else READER_CHIP_OFF_ALPHA
-    Box(
-        modifier = Modifier
-            .clip(RoundedCornerShape(READER_CHIP_RADIUS))
-            .background(settings.textColor.copy(alpha = backgroundAlpha))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-    ) {
-        BasicText(
-            text = label,
-            style = TextStyle(
-                color = settings.textColor.copy(alpha = if (checked) 1f else READER_CHIP_OFF_TEXT_ALPHA),
-                fontSize = 14.sp,
-                fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Normal,
-            ),
-        )
-    }
-}
-
 /** Лёгкая визуальная пауза-«вдох» между блоками: отступ + короткая тонкая линия по центру. */
 @Composable
 private fun RhythmPause(settings: ReflowReaderSettings) {
@@ -355,10 +591,11 @@ private fun RhythmPause(settings: ReflowReaderSettings) {
         contentAlignment = Alignment.Center,
     ) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth(RHYTHM_LINE_FRACTION)
-                .height(1.dp)
-                .background(settings.textColor.copy(alpha = RHYTHM_LINE_ALPHA)),
+            modifier =
+                Modifier
+                    .fillMaxWidth(RHYTHM_LINE_FRACTION)
+                    .height(1.dp)
+                    .background(settings.textColor.copy(alpha = RHYTHM_LINE_ALPHA)),
         )
     }
 }
@@ -366,9 +603,10 @@ private fun RhythmPause(settings: ReflowReaderSettings) {
 @Composable
 private fun FigurePlaceholder(settings: ReflowReaderSettings) {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(settings.textColor.copy(alpha = FIGURE_PLACEHOLDER_ALPHA)),
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .background(settings.textColor.copy(alpha = FIGURE_PLACEHOLDER_ALPHA)),
     ) {
         BasicText(
             text = "[ изображение ]",
@@ -378,23 +616,28 @@ private fun FigurePlaceholder(settings: ReflowReaderSettings) {
     }
 }
 
-private fun ReflowReaderSettings.paragraphStyle(justify: Boolean = false): TextStyle =
+private fun ReflowReaderSettings.paragraphStyle(): TextStyle =
     TextStyle(
         color = textColor,
+        fontFamily = resolveReaderFontFamily(fontFamily),
         fontSize = fontSize,
         lineHeight = (fontSize.value * lineHeightMultiplier).sp,
-        textAlign = if (justify) TextAlign.Justify else TextAlign.Unspecified,
+        letterSpacing = letterSpacing,
+        textAlign = if (align == ReaderAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start,
+        hyphens = if (hyphenation) Hyphens.Auto else Hyphens.None,
     )
 
 private fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
-    val scale = when (level) {
-        1 -> HEADING_SCALE_1
-        2 -> HEADING_SCALE_2
-        else -> HEADING_SCALE_3
-    }
+    val scale =
+        when (level) {
+            1 -> HEADING_SCALE_1
+            2 -> HEADING_SCALE_2
+            else -> HEADING_SCALE_3
+        }
     val size = fontSize.value * scale
     return TextStyle(
         color = textColor,
+        fontFamily = resolveReaderFontFamily(fontFamily),
         fontSize = size.sp,
         lineHeight = (size * HEADING_LINE_HEIGHT_MULTIPLIER).sp,
         fontWeight = FontWeight.SemiBold,
@@ -402,9 +645,9 @@ private fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
 }
 
 /**
- * Собирает оформленный текст блока: полужирные/моноширинные фрагменты по
- * провенансу [source] и фон-подсветку по диапазонам [anchors]. Подсветка
- * накладывается последней, поэтому перекрывает фон inline-кода.
+ * Собирает оформленный текст блока: полужирные/моноширинные фрагменты по провенансу
+ * [source], межсловный трекинг, bionic-выделение начал слов и фон-подсветку
+ * [anchors]. Подсветка накладывается последней, поэтому перекрывает фон inline-кода.
  */
 private fun styledText(
     text: String,
@@ -412,7 +655,10 @@ private fun styledText(
     anchors: List<TextAnchor>,
     settings: ReflowReaderSettings,
 ): AnnotatedString {
-    if (source.isEmpty() && anchors.isEmpty()) return AnnotatedString(text)
+    val needsWordSpacing = settings.wordSpacing.value > 0f && text.contains(' ')
+    if (source.isEmpty() && anchors.isEmpty() && !settings.bionic && !needsWordSpacing) {
+        return AnnotatedString(text)
+    }
     return buildAnnotatedString {
         append(text)
         source.forEach { span ->
@@ -424,6 +670,18 @@ private fun styledText(
                 addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = settings.codeBackground), start, end)
             }
         }
+        if (needsWordSpacing) {
+            var i = text.indexOf(' ')
+            while (i >= 0) {
+                addStyle(SpanStyle(letterSpacing = settings.wordSpacing), i, i + 1)
+                i = text.indexOf(' ', i + 1)
+            }
+        }
+        if (settings.bionic) {
+            ReaderBionic.boldRanges(text).forEach { range ->
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold), range.first, range.last + 1)
+            }
+        }
         anchors.forEach { anchor ->
             val start = anchor.charStart.coerceIn(0, text.length)
             val end = anchor.charEnd.coerceIn(start, text.length)
@@ -431,6 +689,47 @@ private fun styledText(
         }
     }
 }
+
+/** Готовая строка индикатора прогресса под выбранный формат, либо `null`. */
+private fun progressLabel(
+    format: ProgressFormat,
+    firstVisibleBlock: Int,
+    document: ReflowDocument,
+): String? =
+    when (format) {
+        ProgressFormat.NONE -> null
+        ProgressFormat.PERCENT -> "${ReaderProgress.percent(firstVisibleBlock, document.blocks.size)}%"
+        ProgressFormat.CHAPTER -> currentChapterTitle(document, firstVisibleBlock)
+        ProgressFormat.TIME_LEFT -> {
+            val remaining = document.blocks.drop(firstVisibleBlock).sumOf { blockTextLength(it) }
+            "~${ReaderProgress.minutesLeft(remaining)} мин"
+        }
+    }
+
+/** Заголовок ближайшего предшествующего раздела (для индикатора «Глава»). */
+private fun currentChapterTitle(
+    document: ReflowDocument,
+    firstVisibleBlock: Int,
+): String? {
+    val upTo = firstVisibleBlock.coerceIn(0, document.blocks.lastIndex.coerceAtLeast(0))
+    for (i in upTo downTo 0) {
+        val block = document.blocks.getOrNull(i)
+        if (block is ReflowBlock.Heading) {
+            return block.text.take(CHAPTER_TITLE_MAX_CHARS)
+        }
+    }
+    return null
+}
+
+/** Длина текста блока в символах (для оценки времени чтения). */
+private fun blockTextLength(block: ReflowBlock): Int =
+    when (block) {
+        is ReflowBlock.Heading -> block.text.length
+        is ReflowBlock.Paragraph -> block.text.length
+        is ReflowBlock.ListItem -> block.text.length
+        is ReflowBlock.Table -> block.rows.sumOf { row -> row.cells.sumOf { it.text.length } }
+        is ReflowBlock.Figure -> 0
+    }
 
 private const val HEADING_SCALE_1 = 1.6f
 private const val HEADING_SCALE_2 = 1.35f
@@ -445,20 +744,23 @@ private const val BREAK_SHOWN_MS = 20_000L
 private const val NIGHT_AFTER_MS = 20 * 60 * 1000L
 private const val NIGHT_RAMP_MS = 10 * 60 * 1000L
 private const val NIGHT_MAX_DIM = 0.12f
+private const val LONG_READING_AFTER_MS = 45 * 60 * 1000L
+private const val SUNSET_START_HOUR = 18
+private const val SUNRISE_HOUR = 6
+private const val SUNSET_EXTRA_WARMTH = 0.3f
 private const val RHYTHM_EVERY_BLOCKS = 10
 private const val BREAK_BREATH_MIN = 0.5f
 private const val BREAK_BREATH_MAX = 0.9f
 private const val BREAK_BREATH_MS = 1600
 private const val RHYTHM_LINE_FRACTION = 0.18f
 private const val RHYTHM_LINE_ALPHA = 0.25f
+private const val CHAPTER_TITLE_MAX_CHARS = 28
+private const val RULER_BAND_LINES = 1.7f
+private const val RULER_BAND_ALPHA = 0.06f
+private const val RULER_LINE_ALPHA = 0.18f
 private val NIGHT_TINT = Color(0xFFFF7A1A)
 
-private val READER_BAR_HEIGHT = 52.dp
-private const val READER_BAR_ALPHA = 0.92f
-private val READER_CHIP_RADIUS = 18.dp
-private const val READER_CHIP_ON_ALPHA = 0.16f
-private const val READER_CHIP_OFF_ALPHA = 0.06f
-private const val READER_CHIP_OFF_TEXT_ALPHA = 0.6f
+private val READER_BAR_RESERVE = 96.dp
 
 private val TABLE_BORDER_WIDTH = 1.dp
 private val TABLE_CELL_PADDING = 8.dp

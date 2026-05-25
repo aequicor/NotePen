@@ -111,6 +111,7 @@ import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingPanel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
+import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
 import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
@@ -243,6 +244,10 @@ fun DetailsContent(
     var eraserSettings by remember { mutableStateOf(EraserSettings()) }
     var pencilModeEnabled by remember { mutableStateOf(false) }
     var pencilModeManuallyTouched by remember { mutableStateOf(false) }
+
+    // Настройки ридера — глобальные (на все документы и панели); видимость самого
+    // airbar — per-tab. Персист между запусками пока в памяти сессии.
+    var readerStored by remember { mutableStateOf(StoredReaderSettings()) }
 
     // Per-panel tool state: save on lose-focus, restore on gain-focus.
     val panelToolStates = remember { mutableStateMapOf<PanelId, PanelToolSnapshot>() }
@@ -595,6 +600,8 @@ fun DetailsContent(
                     annotationRepository = annotationRepository,
                     pdfExporter = pdfExporter,
                     reflowExtractor = reflowExtractor,
+                    readerStored = readerStored,
+                    onReaderStoredChange = { readerStored = it },
                     syncEngineFor = syncEngineFor,
                     peerClient = peerClient,
                     pendingDeltaCounts = pendingDeltaCounts,

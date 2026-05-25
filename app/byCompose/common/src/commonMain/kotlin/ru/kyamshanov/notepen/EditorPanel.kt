@@ -71,6 +71,7 @@ import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
 import ru.kyamshanov.notepen.reflow.ReflowPageLocator
 import ru.kyamshanov.notepen.reflow.ReflowReading
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
+import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.ui.ReflowReader
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
@@ -175,6 +176,8 @@ fun EditorPanel(
     annotationRepository: AnnotationRepository,
     pdfExporter: PdfExporter,
     reflowExtractor: PdfReflowExtractor,
+    readerStored: StoredReaderSettings,
+    onReaderStoredChange: (StoredReaderSettings) -> Unit,
     syncEngineFor: ((documentId: String) -> SyncEngine)?,
     peerClient: SyncClient?,
     pendingDeltaCounts: kotlinx.coroutines.flow.Flow<Map<String, Int>>?,
@@ -1203,6 +1206,12 @@ fun EditorPanel(
                 if (reading != null) {
                     ReflowReader(
                         document = reading.document,
+                        stored = readerStored,
+                        onStoredChange = onReaderStoredChange,
+                        barVisible = isFocused && pdfState.readerBarVisible,
+                        onBarVisibleChange = { visible ->
+                            if (isFocused) pdfState.readerBarVisible = visible
+                        },
                         modifier = Modifier.fillMaxSize(),
                         highlights = reading.highlights,
                         listState = reflowListState,

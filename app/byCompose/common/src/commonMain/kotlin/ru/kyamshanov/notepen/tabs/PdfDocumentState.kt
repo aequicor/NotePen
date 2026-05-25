@@ -126,6 +126,14 @@ class PdfDocumentState internal constructor(
      */
     var readingMode: Boolean by mutableStateOf(false)
 
+    /**
+     * Видны ли настройки ридера (нижний «airbar») для этого таба. Per-tab: тап по
+     * тексту скрывает/возвращает их, а слой панели гасит их ещё и при потере
+     * фокуса, поэтому при переключении на другую панель airbar исчезает, а при
+     * возврате восстанавливает запомненное состояние (см. `EditorPanel`).
+     */
+    var readerBarVisible: Boolean by mutableStateOf(true)
+
     private val annotationsLoadedState: MutableState<Boolean> = sharedAnnotationsLoaded
 
     /**
