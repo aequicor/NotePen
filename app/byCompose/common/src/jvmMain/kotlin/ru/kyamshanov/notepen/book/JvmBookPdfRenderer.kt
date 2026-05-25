@@ -9,6 +9,11 @@ import org.apache.pdfbox.pdmodel.common.PDRectangle
 import org.apache.pdfbox.pdmodel.font.PDFont
 import org.apache.pdfbox.pdmodel.font.PDType0Font
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory
+import ru.kyamshanov.notepen.reflow.api.PdfContentKind
+import ru.kyamshanov.notepen.reflow.api.ReflowBlock
+import ru.kyamshanov.notepen.reflow.api.ReflowDocument
+import ru.kyamshanov.notepen.reflow.api.ReflowRect
+import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import java.awt.Color
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -94,11 +99,12 @@ object JvmBookPdfRenderer {
     /**
      * @param book книга для верстки
      * @param output файл назначения PDF (создаётся/перезаписывается)
+     * @return оглавление + reflow-документ, собранные в этом же проходе верстки
      */
     fun render(
         book: BookContent,
         output: File,
-    ): List<TocEntry> {
+    ): BookRenderResult {
         PDDocument().use { doc ->
             // Коллекция граней PT Serif должна оставаться открытой до doc.save():
             // subset граней встраивается именно при сохранении (PDFBox не закрывает
@@ -112,17 +118,23 @@ object JvmBookPdfRenderer {
                     )
                 book.metadata.title
                     ?.takeIf { it.isNotBlank() }
-                    ?.let { composer.heading(level = 1, text = it) }
+                    ?.let { title ->
+                        val laid = composer.heading(level = 1, text = title)
+                        composer.add(ReflowBlock.Heading(text = laid.text, level = 1, source = laid.spans))
+                    }
                 book.metadata.author
                     ?.takeIf { it.isNotBlank() }
-                    ?.let { composer.paragraph(listOf(InlineSpan(it)), italic = true) }
+                    ?.let { author ->
+                        val laid = composer.paragraph(listOf(InlineSpan(author)), italic = true)
+                        composer.add(ReflowBlock.Paragraph(text = laid.text, source = laid.spans))
+                    }
                 for (block in book.blocks) composer.render(block)
                 composer.finish()
 
                 if (doc.numberOfPages == 0) doc.addPage(PDPage(PDRectangle.A4))
                 output.parentFile?.mkdirs()
                 doc.save(output)
-                return composer.outline()
+                return BookRenderResult(toc = composer.outline(), reflow = composer.reflow())
             }
         }
     }
@@ -221,6 +233,8 @@ object JvmBookPdfRenderer {
         val size: Float,
         val rise: Float,
         val underline: Boolean,
+        val bold: Boolean,
+        val monospace: Boolean,
     )
 
     /** Накопитель страниц с курсором верстки сверху вниз (в «пикселях» A4 @150dpi). */
@@ -236,6 +250,13 @@ object JvmBookPdfRenderer {
         private var stream: PDPageContentStream? = null
         private var cursorY = MARGIN
 
+        // Параллельно растровой верстке копим reflow-блоки: их .text и провенанс
+        // ([SourceSpan]) рождаются из той же раскладки слов по строкам, поэтому
+        // координаты совпадают со штрихами editor'а и пере-извлечение из PDF не нужно.
+        private val reflowBlocks = mutableListOf<ReflowBlock>()
+        private var blockText = StringBuilder()
+        private var blockSpans = mutableListOf<SourceSpan>()
+
         init {
             newPage()
         }
@@ -247,16 +268,58 @@ object JvmBookPdfRenderer {
 
         fun outline(): List<TocEntry> = tocEntries.toList()
 
+        /** Готовый reflow-документ, собранный из тех же блоков, что легли в PDF. */
+        fun reflow(): ReflowDocument = ReflowDocument(kind = PdfContentKind.TEXT_BASED, blocks = reflowBlocks.toList())
+
+        /** Добавляет блок в reflow-поток в порядке верстки. */
+        fun add(block: ReflowBlock) {
+            reflowBlocks.add(block)
+        }
+
+        /** Текст блока и его провенанс, накопленные при верстке (для reflow). */
+        data class BlockLayout(
+            val text: String,
+            val spans: List<SourceSpan>,
+        )
+
         fun render(block: ContentBlock) {
             when (block) {
-                is ContentBlock.Heading -> heading(block.level, block.text)
-                is ContentBlock.Paragraph -> paragraph(block.text, firstLineIndent = PARAGRAPH_FIRST_LINE_INDENT)
-                is ContentBlock.Blockquote -> paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
-                is ContentBlock.ListItem ->
-                    paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
-                is ContentBlock.Table -> block.rows.forEach { row -> paragraph(listOf(InlineSpan(row.joinToString("   |   ")))) }
-                is ContentBlock.Image -> image(block)
-                ContentBlock.HorizontalRule -> rule()
+                is ContentBlock.Heading -> {
+                    val laid = heading(block.level, block.text)
+                    add(ReflowBlock.Heading(text = laid.text, level = block.level, source = laid.spans))
+                }
+                is ContentBlock.Paragraph -> {
+                    val laid = paragraph(block.text, firstLineIndent = PARAGRAPH_FIRST_LINE_INDENT)
+                    add(ReflowBlock.Paragraph(text = laid.text, source = laid.spans))
+                }
+                is ContentBlock.Blockquote -> {
+                    val laid = paragraph(block.text, italic = true, indent = BLOCKQUOTE_INDENT)
+                    add(ReflowBlock.Blockquote(text = laid.text, source = laid.spans))
+                }
+                is ContentBlock.ListItem -> {
+                    val laid =
+                        paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)
+                    add(ReflowBlock.ListItem(text = laid.text, source = laid.spans))
+                }
+                is ContentBlock.Table -> {
+                    // На PDF таблица кладётся построчно абзацами (геометрия для editor);
+                    // в reflow отдаём настоящую сетку — её ячейки без провенанса
+                    // (ре-анкоринг штрихов в таблицы пока не поддержан, см. StrokeTextMapper).
+                    block.rows.forEach { row -> paragraph(listOf(InlineSpan(row.joinToString("   |   ")))) }
+                    add(
+                        ReflowBlock.Table(
+                            rows =
+                                block.rows.map { row ->
+                                    ReflowBlock.TableRow(cells = row.map { ReflowBlock.TableCell(text = it) })
+                                },
+                        ),
+                    )
+                }
+                is ContentBlock.Image -> image(block)?.let { add(it) }
+                ContentBlock.HorizontalRule -> {
+                    rule()
+                    add(ReflowBlock.Divider)
+                }
                 ContentBlock.PageBreak -> if (cursorY > MARGIN) newPage()
             }
         }
@@ -264,7 +327,8 @@ object JvmBookPdfRenderer {
         fun heading(
             level: Int,
             text: String,
-        ) {
+        ): BlockLayout {
+            beginBlock()
             cursorY += HEADING_GAP_BEFORE
             val size = HEADING_SIZES[(level - 1).coerceIn(0, HEADING_SIZES.lastIndex)]
             val lineHeight = (size * LINE_FACTOR).toInt()
@@ -273,6 +337,7 @@ object JvmBookPdfRenderer {
             val chunks = chunksFor(listOf(InlineSpan(text, bold = true)), size, Color.BLACK, italicBase = false)
             drawChunks(chunks, indent = 0, firstLineIndent = 0)
             cursorY += HEADING_GAP_AFTER
+            return finishBlock()
         }
 
         /**
@@ -285,12 +350,21 @@ object JvmBookPdfRenderer {
             italic: Boolean = false,
             indent: Int = 0,
             firstLineIndent: Int = 0,
-        ) {
+        ): BlockLayout {
+            beginBlock()
             val color = if (italic) QUOTE_COLOR else Color.BLACK
             val chunks = chunksFor(spans, BODY_SIZE, color, italicBase = italic)
             drawChunks(chunks, indent, firstLineIndent)
             cursorY += PARAGRAPH_GAP
+            return finishBlock()
         }
+
+        private fun beginBlock() {
+            blockText = StringBuilder()
+            blockSpans = mutableListOf()
+        }
+
+        private fun finishBlock(): BlockLayout = BlockLayout(text = blockText.toString(), spans = blockSpans.toList())
 
         /**
          * Разбивает [RichText] на «слова» ([StyledChunk]) с уже выбранной гранью,
@@ -337,6 +411,8 @@ object JvmBookPdfRenderer {
                             size = size,
                             rise = rise,
                             underline = span.link,
+                            bold = span.bold,
+                            monospace = span.code,
                         ),
                     )
                 }
@@ -413,7 +489,51 @@ object JvmBookPdfRenderer {
             }
             cs.endText()
             drawUnderlines(cs, line, lineLeft, baselinePt)
+            recordSpans(line, lineLeft, lineTop = cursorY, lineHeight = lineHeight)
             cursorY += lineHeight
+        }
+
+        /**
+         * Накапливает текст строки в [blockText] и эмитит по [SourceSpan] на каждое
+         * слово: нормализованные `[0..1]` границы слова на текущей странице
+         * (та же система, что у штрихов editor'а) + диапазон символов в тексте блока.
+         * Перо двигается по тем же ширинам слов, что и `showText`, поэтому границы
+         * совпадают с нарисованным текстом (ср. [drawUnderlines]).
+         */
+        private fun recordSpans(
+            line: List<StyledChunk>,
+            lineLeft: Float,
+            lineTop: Int,
+            lineHeight: Int,
+        ) {
+            var penPx = lineLeft
+            val top = lineTop.toFloat() / PAGE_HEIGHT
+            val bottom = (lineTop + lineHeight).toFloat() / PAGE_HEIGHT
+            for (chunk in line) {
+                val width = widthOf(chunk)
+                val start = blockText.length
+                blockText.append(chunk.text)
+                val end = blockText.length
+                if (chunk.text.isNotBlank()) {
+                    blockSpans.add(
+                        SourceSpan(
+                            pageIndex = pageIndex,
+                            charStart = start,
+                            charEnd = end,
+                            bounds =
+                                ReflowRect(
+                                    left = penPx / PAGE_WIDTH,
+                                    top = top,
+                                    right = (penPx + width) / PAGE_WIDTH,
+                                    bottom = bottom,
+                                ),
+                            bold = chunk.bold,
+                            monospace = chunk.monospace,
+                        ),
+                    )
+                }
+                penPx += width
+            }
         }
 
         /** Подчёркивает ссылочные слова строки тонкой линией под базовой. */
@@ -477,8 +597,8 @@ object JvmBookPdfRenderer {
             return sb.toString()
         }
 
-        private fun image(block: ContentBlock.Image) {
-            val decoded = runCatching { ImageIO.read(ByteArrayInputStream(block.data)) }.getOrNull() ?: return
+        private fun image(block: ContentBlock.Image): ReflowBlock.Figure? {
+            val decoded = runCatching { ImageIO.read(ByteArrayInputStream(block.data)) }.getOrNull() ?: return null
             val maxHeight = contentBottom - MARGIN
             var width = decoded.width
             var height = decoded.height
@@ -491,13 +611,28 @@ object JvmBookPdfRenderer {
                 height = maxHeight
             }
             if (cursorY + height > contentBottom) newPage()
-            val cs = stream ?: return
-            val xObject = LosslessFactory.createFromImage(doc, decoded)
-            val xPx = MARGIN + (contentWidth - width) / 2
-            // Низ изображения в PDF-координатах (y вверх): верх = cursorY (сверху-вниз).
-            val bottomPt = (PAGE_HEIGHT - (cursorY + height)) * PT_PER_PX
-            cs.drawImage(xObject, xPx * PT_PER_PX, bottomPt, width * PT_PER_PX, height * PT_PER_PX)
-            cursorY += height + IMAGE_GAP
+            return stream?.let { cs ->
+                val xObject = LosslessFactory.createFromImage(doc, decoded)
+                val xPx = MARGIN + (contentWidth - width) / 2
+                // Низ изображения в PDF-координатах (y вверх): верх = cursorY (сверху-вниз).
+                val bottomPt = (PAGE_HEIGHT - (cursorY + height)) * PT_PER_PX
+                cs.drawImage(xObject, xPx * PT_PER_PX, bottomPt, width * PT_PER_PX, height * PT_PER_PX)
+                // Врезка для reflow: тот же прямоугольник, нормализованный к странице —
+                // ридер покажет её кропом запечённой PDF-страницы (см. FigureView).
+                val figure =
+                    ReflowBlock.Figure(
+                        pageIndex = pageIndex,
+                        bounds =
+                            ReflowRect(
+                                left = xPx.toFloat() / PAGE_WIDTH,
+                                top = cursorY.toFloat() / PAGE_HEIGHT,
+                                right = (xPx + width).toFloat() / PAGE_WIDTH,
+                                bottom = (cursorY + height).toFloat() / PAGE_HEIGHT,
+                            ),
+                    )
+                cursorY += height + IMAGE_GAP
+                figure
+            }
         }
 
         private fun rule() {
