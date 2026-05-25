@@ -259,6 +259,12 @@ compose.desktop {
         jvmArgs +=
             listOf(
                 "-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG",
+                // PDFBox печатает WARN на каждый незашитый в PDF шрифт/глиф (подстановка
+                // fallback-шрифта — штатное поведение при рендере чужих PDF, чинить нечего).
+                // Поднимаем порог его логгеров до ERROR, чтобы не засорять вывод; настоящие
+                // ошибки PDFBox по-прежнему видны. slf4j-simple ищет уровень вверх по точкам,
+                // поэтому одной записи на org.apache.pdfbox хватает для всего поддерева.
+                "-Dorg.slf4j.simpleLogger.log.org.apache.pdfbox=error",
                 // In dev (:run), compose.application.resources.dir may not be set,
                 // so JNA won't find dylibs in assets/ automatically. Point it there
                 // explicitly; in packaged builds CocoaTabletInputController.addComposeResourcesToJnaPath()
