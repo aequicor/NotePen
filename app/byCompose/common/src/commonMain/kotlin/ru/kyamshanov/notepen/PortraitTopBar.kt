@@ -217,12 +217,17 @@ fun PortraitTopBar(
                         onOpenSync = onOpenSync,
                         onOpenShortcutsSettings = onOpenShortcutsSettings,
                     )
-                WheelStrip(
-                    entries = entries,
-                    orientation = RailOrientation.HORIZONTAL,
-                    modifier = Modifier.weight(1f),
-                    selectedKey = selectedToolWheelKey(toolMode),
-                )
+                // `weight` снимаем в RowScope; [MaterialTheme] не создаёт layout-узел,
+                // поэтому вес доходит до Row и сквозь обёртку перекраски.
+                val wheelModifier = Modifier.weight(1f)
+                MaterialTheme(colorScheme = railSelectionColorScheme(MaterialTheme.colorScheme, readerContentColor)) {
+                    WheelStrip(
+                        entries = entries,
+                        orientation = RailOrientation.HORIZONTAL,
+                        modifier = wheelModifier,
+                        selectedKey = selectedToolWheelKey(toolMode),
+                    )
+                }
             }
         }
         AnimatedVisibility(

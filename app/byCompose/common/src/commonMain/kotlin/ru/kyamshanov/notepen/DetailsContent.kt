@@ -871,6 +871,7 @@ fun DetailsContent(
                             onOpenSync = { showSyncPanel = true },
                             onOpenShortcutsSettings = { showShortcutsDialog = true },
                             readerBackground = readerBackground,
+                            readerContentColor = readerContentColor,
                             onRailWidthChanged = { landscapeToolbarWidthDp = it },
                         )
                     }

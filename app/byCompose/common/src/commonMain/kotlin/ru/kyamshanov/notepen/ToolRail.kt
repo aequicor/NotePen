@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -116,6 +117,31 @@ internal fun selectedToolWheelKey(toolMode: ToolMode): Any? =
         ToolMode.MARKER -> TOOL_MARKER_KEY
         ToolMode.ERASER -> TOOL_ERASER_KEY
         ToolMode.NONE -> null
+    }
+
+/**
+ * В режиме чтения перекрашивает «слоты выбора» колеса инструментов под тему
+ * читалки: [ColorScheme.primaryContainer] — заливка индикатора активной кнопки
+ * (и общей «таблетки» пера/маркера/ластика в [WheelStrip]),
+ * [ColorScheme.onPrimaryContainer] — значок активной кнопки. Так выбранный
+ * инструмент совпадает с выбранной темой ридера, а не с акцентом приложения.
+ *
+ * Цвета повторяют визуальный язык выбора панели ридера (выбранный чип): заливка
+ * [readerContentColor] с прозрачностью [READER_SELECTION_FILL_ALPHA] и значок
+ * полной насыщенности. Вне режима чтения ([readerContentColor] `null`) возвращает
+ * [base] без изменений.
+ */
+internal fun railSelectionColorScheme(
+    base: ColorScheme,
+    readerContentColor: Color?,
+): ColorScheme =
+    if (readerContentColor == null) {
+        base
+    } else {
+        base.copy(
+            primaryContainer = readerContentColor.copy(alpha = READER_SELECTION_FILL_ALPHA),
+            onPrimaryContainer = readerContentColor,
+        )
     }
 
 private const val TOOL_PEN_KEY = "tool_pen"
@@ -509,6 +535,12 @@ fun LandscapeToolRail(
     modifier: Modifier = Modifier,
     /** Фон активной темы ридера для стекла рельсы; `null` — цвет [MaterialTheme]. */
     readerBackground: Color? = null,
+    /**
+     * Цвет контента активной темы ридера; в режиме чтения перекрашивает индикатор
+     * выбранного инструмента под тему читалки (см. [railSelectionColorScheme]).
+     * `null` — индикатор сохраняет акцент [MaterialTheme].
+     */
+    readerContentColor: Color? = null,
     onRailWidthChanged: (Dp) -> Unit = {},
 ) {
     val density = LocalDensity.current
@@ -613,12 +645,14 @@ fun LandscapeToolRail(
             tint = readerBackground ?: MaterialTheme.colorScheme.surface,
             modifier = Modifier.onSizeChanged { onRailWidthChanged(with(density) { it.width.toDp() }) },
         ) {
-            WheelStrip(
-                entries = entries,
-                orientation = RailOrientation.VERTICAL,
-                modifier = Modifier.padding(ISLAND_PADDING),
-                selectedKey = selectedToolWheelKey(toolMode),
-            )
+            MaterialTheme(colorScheme = railSelectionColorScheme(MaterialTheme.colorScheme, readerContentColor)) {
+                WheelStrip(
+                    entries = entries,
+                    orientation = RailOrientation.VERTICAL,
+                    modifier = Modifier.padding(ISLAND_PADDING),
+                    selectedKey = selectedToolWheelKey(toolMode),
+                )
+            }
         }
         AnimatedVisibility(
             visible = toolActive && expandedIndex != null,
@@ -659,6 +693,13 @@ fun LandscapeToolRail(
 
 /** Open/close duration of the budding panel; the slot-switch delay matches it. */
 private const val PANEL_ANIM_MS = 180
+
+/**
+ * Прозрачность заливки индикатора выбора в теме ридера — как у выбранного чипа
+ * панели ридера (`CHIP_SELECTED_FILL_ALPHA` в `ReaderAirbar`), чтобы рельса и
+ * панель читалки говорили на одном визуальном языке выбора.
+ */
+private const val READER_SELECTION_FILL_ALPHA = 0.22f
 
 private val WHEEL_DIVIDER_SPACING = 6.dp
 private val WHEEL_DIVIDER_LENGTH = 28.dp
