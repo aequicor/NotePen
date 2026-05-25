@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,8 +47,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
@@ -55,6 +65,8 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -258,47 +270,160 @@ private fun CollapsedPill(
                 style = TextStyle(color = textColor.copy(alpha = 0.7f), fontSize = 12.sp),
             )
         }
-        LazyRow(
-            modifier =
-                Modifier
-                    .weight(1f, fill = false)
-                    .fadingEdges(
-                        RailOrientation.HORIZONTAL,
-                        READER_WHEEL_FADE_EDGE,
-                        fadeStart = listState.canScrollBackward,
-                        fadeEnd = listState.canScrollForward,
-                    ),
-            state = listState,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            contentPadding = PaddingValues(horizontal = 4.dp),
+        // Колесо пресетов + наложенные на края указатели «есть ещё» (см. ScrollChevron).
+        // Указатели — только над краем, в который ещё можно прокрутить (canScroll*),
+        // поэтому у границы прокрутки сторона остаётся чистой.
+        Box(
+            modifier = Modifier.weight(1f, fill = false),
+            contentAlignment = Alignment.Center,
         ) {
-            itemsIndexed(elements, key = { _, e -> e.key }) { index, element ->
-                when (element) {
-                    is ReaderWheelElement.Preset ->
-                        Box(Modifier.wheelItem(listState, index, RailOrientation.HORIZONTAL)) {
-                            PresetWheelChip(
-                                preset = element.preset,
-                                selected = stored.activePresetId == element.preset.id,
-                                deletable = element.deletable,
-                                textColor = textColor,
-                                background = background,
-                                onApply = { onApplyPreset(element.preset) },
-                                onDelete = { onDeletePreset(element.preset.id) },
-                                onRename = { newName -> onRenamePreset(element.preset.id, newName) },
-                            )
-                        }
+            LazyRow(
+                modifier =
+                    Modifier
+                        .fadingEdges(
+                            RailOrientation.HORIZONTAL,
+                            READER_WHEEL_FADE_EDGE,
+                            fadeStart = listState.canScrollBackward,
+                            fadeEnd = listState.canScrollForward,
+                        ),
+                state = listState,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                contentPadding = PaddingValues(horizontal = 4.dp),
+            ) {
+                itemsIndexed(elements, key = { _, e -> e.key }) { index, element ->
+                    when (element) {
+                        is ReaderWheelElement.Preset ->
+                            Box(Modifier.wheelItem(listState, index, RailOrientation.HORIZONTAL)) {
+                                PresetWheelChip(
+                                    preset = element.preset,
+                                    selected = stored.activePresetId == element.preset.id,
+                                    deletable = element.deletable,
+                                    textColor = textColor,
+                                    background = background,
+                                    onApply = { onApplyPreset(element.preset) },
+                                    onDelete = { onDeletePreset(element.preset.id) },
+                                    onRename = { newName -> onRenamePreset(element.preset.id, newName) },
+                                )
+                            }
+                    }
                 }
+            }
+            if (listState.canScrollBackward) {
+                ScrollChevron(pointsForward = false, tint = textColor, modifier = Modifier.align(Alignment.CenterStart))
+            }
+            if (listState.canScrollForward) {
+                ScrollChevron(pointsForward = true, tint = textColor, modifier = Modifier.align(Alignment.CenterEnd))
             }
         }
         // Тюнер закреплён вне прокрутки — справа от колеса, всегда видим.
-        Chip(
-            label = TUNER_LABEL,
-            selected = expanded,
+        TunerGearButton(
+            expanded = expanded,
             textColor = textColor,
             onClick = onToggleExpanded,
         )
     }
+}
+
+/**
+ * Декоративный указатель «есть ещё пресеты в эту сторону»: маленькая «галочка»-каретка
+ * поверх растворяющегося края колеса. Делает скрытый контент очевидным там, где одной
+ * fade-кромки мало. Кладётся вызывающим только на ту сторону, в которую ещё есть запас
+ * прокрутки ([androidx.compose.foundation.lazy.LazyListState.canScrollForward] /
+ * `canScrollBackward`), поэтому у границы прокрутки сторона остаётся пустой.
+ *
+ * Не перехватывает ввод (рисунок поверх колеса) — скролл/тап по пресетам под ним
+ * работают как обычно. Цвет — [tint] темы ридера, как остальной airbar.
+ *
+ * @param pointsForward `true` — каретка `›` (к концу списка), `false` — `‹` (к началу).
+ */
+@Composable
+private fun ScrollChevron(
+    pointsForward: Boolean,
+    tint: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier.size(width = CHEVRON_WIDTH, height = CHEVRON_HEIGHT)) {
+        val strokePx = CHEVRON_STROKE.toPx()
+        // Кончик каретки смотрит в сторону прокрутки; основание — у края колеса.
+        val tipX = if (pointsForward) size.width - strokePx else strokePx
+        val baseX = if (pointsForward) strokePx else size.width - strokePx
+        val tip = Offset(tipX, size.height / 2f)
+        val top = Offset(baseX, strokePx)
+        val bottom = Offset(baseX, size.height - strokePx)
+        val color = tint.copy(alpha = CHEVRON_ALPHA)
+        drawLine(color, top, tip, strokeWidth = strokePx, cap = StrokeCap.Round)
+        drawLine(color, tip, bottom, strokeWidth = strokePx, cap = StrokeCap.Round)
+    }
+}
+
+/**
+ * Закреплённая справа кнопка-тюнер: круглая «таблетка»-цель с глифом-шестерёнкой
+ * (тот же смысл, что у шестерёнки настроек в редакторе), открывает/сворачивает
+ * [TuneSheet]. Тап-цель и подсветка — как у [Chip] (оттенок [textColor] темы);
+ * сама шестерёнка рисуется на foundation [Canvas] (модуль `reflow/impl` без
+ * material3 — иконки material недоступны), поэтому глиф не зависит от шрифта и
+ * рисуется одинаково на всех таргетах.
+ */
+@Composable
+private fun TunerGearButton(
+    expanded: Boolean,
+    textColor: Color,
+    onClick: () -> Unit,
+) {
+    val glyphAlpha = if (expanded) CHIP_SELECTED_TEXT_ALPHA else CHIP_TEXT_ALPHA
+    Box(
+        modifier =
+            Modifier
+                .clip(CircleShape)
+                .background(textColor.copy(alpha = if (expanded) CHIP_SELECTED_FILL_ALPHA else CHIP_FILL_ALPHA))
+                .clickable(onClick = onClick)
+                .semantics { contentDescription = TUNER_LABEL }
+                .padding(GEAR_BUTTON_PADDING),
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(
+            Modifier
+                .size(GEAR_ICON_SIZE)
+                // Шестерёнка рисуется в собственном слое: отверстие-бор пробивается
+                // BlendMode.Clear (как в fadingEdges) — иначе Clear стёр бы и фон под
+                // кнопкой, а не только тело шестерёнки.
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen },
+        ) {
+            drawGear(tint = textColor.copy(alpha = glyphAlpha))
+        }
+    }
+}
+
+/**
+ * Рисует силуэт шестерёнки настроек, вписанный в квадрат [DrawScope.size]: [GEAR_TEETH]
+ * скруглённых зубцов по кругу + тело-диск, с прозрачным отверстием по центру
+ * (пробивается [BlendMode.Clear] — требует offscreen-слоя у вызывающего [Canvas]).
+ * Всё [tint]-цветом; контур повторяет `Settings`-иконку редактора, но без material.
+ */
+private fun DrawScope.drawGear(tint: Color) {
+    val center = Offset(size.width / 2f, size.height / 2f)
+    val radius = size.minDimension / 2f
+    val toothTipR = radius
+    val bodyR = radius * GEAR_BODY_RADIUS_FRACTION
+    val boreR = radius * GEAR_BORE_RADIUS_FRACTION
+    val toothHalfWidth = radius * GEAR_TOOTH_HALF_WIDTH_FRACTION
+    // Зубец перекрывает тело, чтобы у основания не было щели между ним и диском.
+    val toothLength = toothTipR - bodyR * GEAR_TOOTH_OVERLAP_FRACTION
+    val toothCorner = CornerRadius(toothHalfWidth * GEAR_TOOTH_CORNER_FRACTION)
+
+    repeat(GEAR_TEETH) { i ->
+        rotate(degrees = i * (360f / GEAR_TEETH), pivot = center) {
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(center.x - toothHalfWidth, center.y - toothTipR),
+                size = Size(toothHalfWidth * 2f, toothLength),
+                cornerRadius = toothCorner,
+            )
+        }
+    }
+    drawCircle(color = tint, radius = bodyR, center = center)
+    drawCircle(color = Color.Black, radius = boreR, center = center, blendMode = BlendMode.Clear)
 }
 
 /**
@@ -339,7 +464,10 @@ private fun PresetWheelChip(
                 modifier =
                     Modifier
                         .clip(RoundedCornerShape(AIRBAR_CHIP_RADIUS))
-                        .background(textColor.copy(alpha = if (selected) 0.18f else 0.06f))
+                        // Подсветка активного пресета — из самой темы ридера (оттенок
+                        // textColor), чтобы чип жил в той же палитре, что и airbar в
+                        // светлой/сепии/ночной теме. Невыбранные — без изменений.
+                        .background(textColor.copy(alpha = if (selected) CHIP_SELECTED_FILL_ALPHA else CHIP_FILL_ALPHA))
                         .combinedClickable(
                             onClick = onApply,
                             onLongClick = if (deletable) ({ menuOpen = true }) else null,
@@ -351,7 +479,7 @@ private fun PresetWheelChip(
                     maxLines = 1,
                     style =
                         TextStyle(
-                            color = textColor.copy(alpha = if (selected) 1f else 0.65f),
+                            color = textColor.copy(alpha = if (selected) CHIP_SELECTED_TEXT_ALPHA else CHIP_TEXT_ALPHA),
                             fontSize = 13.sp,
                             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                         ),
@@ -401,13 +529,17 @@ private fun RenameField(
                 .widthIn(min = RENAME_FIELD_MIN_WIDTH)
                 .width(IntrinsicSize.Min)
                 .clip(RoundedCornerShape(AIRBAR_CHIP_RADIUS))
-                .background(textColor.copy(alpha = 0.18f))
+                .background(textColor.copy(alpha = CHIP_SELECTED_FILL_ALPHA))
                 .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
         BasicTextField(
             value = value,
-            onValueChange = { value = it },
+            // Кап длины — зеркалит лимит редьюсера ([ReaderSettingsReducer.renamePreset]):
+            // правку, переполняющую его, не принимаем, чтобы поле не росло бесконечно.
+            onValueChange = { next ->
+                if (next.text.length <= ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH) value = next
+            },
             singleLine = true,
             textStyle = TextStyle(color = textColor, fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
             cursorBrush = SolidColor(textColor),
@@ -861,7 +993,7 @@ private fun Chip(
         modifier =
             Modifier
                 .clip(RoundedCornerShape(AIRBAR_CHIP_RADIUS))
-                .background(textColor.copy(alpha = if (selected) 0.18f else 0.06f))
+                .background(textColor.copy(alpha = if (selected) CHIP_SELECTED_FILL_ALPHA else CHIP_FILL_ALPHA))
                 .clickable(onClick = onClick)
                 .padding(horizontal = 14.dp, vertical = 7.dp),
         contentAlignment = Alignment.Center,
@@ -871,7 +1003,7 @@ private fun Chip(
             maxLines = 1,
             style =
                 TextStyle(
-                    color = textColor.copy(alpha = if (selected) 1f else 0.65f),
+                    color = textColor.copy(alpha = if (selected) CHIP_SELECTED_TEXT_ALPHA else CHIP_TEXT_ALPHA),
                     fontSize = 13.sp,
                     fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 ),
@@ -926,6 +1058,35 @@ private fun formatOneDecimal(value: Float): String {
 private val AIRBAR_RADIUS = 22.dp
 private val AIRBAR_CHIP_RADIUS = 16.dp
 
+/**
+ * Прозрачности чипа поверх [textColor] темы ридера: выбранный заметно плотнее
+ * невыбранного, но оба — оттенок одного цвета темы, поэтому подсветка совпадает с
+ * палитрой airbar в любой теме (бумага/сепия/ночь). Текст выбранного — полным
+ * [textColor], невыбранного — приглушён.
+ */
+private const val CHIP_FILL_ALPHA = 0.06f
+private const val CHIP_SELECTED_FILL_ALPHA = 0.22f
+private const val CHIP_TEXT_ALPHA = 0.65f
+private const val CHIP_SELECTED_TEXT_ALPHA = 1f
+
+/** Размер каретки-указателя «есть ещё» у края колеса и толщина её штриха. См. [ScrollChevron]. */
+private val CHEVRON_WIDTH = 7.dp
+private val CHEVRON_HEIGHT = 13.dp
+private val CHEVRON_STROKE = 1.5.dp
+private const val CHEVRON_ALPHA = 0.55f
+
+/** Сторона глифа-шестерёнки тюнера и внутренний отступ круглой тап-цели вокруг неё. */
+private val GEAR_ICON_SIZE = 18.dp
+private val GEAR_BUTTON_PADDING = 7.dp
+
+/** Геометрия шестерёнки (доли радиуса): зубцы, тело-диск, отверстие. См. [drawGear]. */
+private const val GEAR_TEETH = 8
+private const val GEAR_BODY_RADIUS_FRACTION = 0.62f
+private const val GEAR_BORE_RADIUS_FRACTION = 0.30f
+private const val GEAR_TOOTH_HALF_WIDTH_FRACTION = 0.17f
+private const val GEAR_TOOTH_OVERLAP_FRACTION = 0.85f
+private const val GEAR_TOOTH_CORNER_FRACTION = 0.5f
+
 /** Минимальная ширина инлайн-поля переименования кастомного пресета. */
 private val RENAME_FIELD_MIN_WIDTH = 96.dp
 private val AIRBAR_MAX_WIDTH = 560.dp
@@ -937,7 +1098,11 @@ private val READER_WHEEL_FADE_EDGE = 32.dp
 private const val AIRBAR_ALPHA = 0.92f
 private const val AIRBAR_SHEET_ALPHA = 0.96f
 
-/** Подпись тюнера в колесе — открывает/сворачивает панель тонких настроек. */
+/**
+ * Доступностная подпись кнопки-тюнера (шестерёнки): сам глиф безтекстовый, поэтому
+ * имя задаётся через `contentDescription` (см. [TunerGearButton]). Открывает/сворачивает
+ * панель тонких настроек.
+ */
 private const val TUNER_LABEL = "Настроить"
 
 /** Подпись действия удаления кастомного пресета в поповере. */

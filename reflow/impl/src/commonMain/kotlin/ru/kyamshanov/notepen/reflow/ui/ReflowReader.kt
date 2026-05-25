@@ -9,6 +9,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,11 +36,14 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -65,6 +70,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
@@ -102,6 +108,12 @@ import ru.kyamshanov.notepen.reflow.api.TextAnchor
  * @param highlights диапазоны-выделения по блокам
  * @param listState состояние прокрутки (скролл-режим)
  * @param renderPage растеризатор страницы для врезок-картинок; `null` — плейсхолдер
+ * @param onPageDeltaReady публикует наружу императивный обработчик «листнуть на ±N
+ *   страниц» (или `null`, пока контент не готов / при выходе из композиции). В
+ *   страничном режиме делегирует [VerticalPager.animateScrollToPage]; в скролл-режиме
+ *   — прокрутке на дельту экранов ([listState]). Нужен, чтобы аппаратные клавиши
+ *   (стрелки/громкость/Space), приходящие в общий key-sink выше по дереву, могли
+ *   листать ридер. Горизонтальный свайп вызывает тот же обработчик локально.
  */
 @Composable
 public fun ReflowReader(
@@ -115,6 +127,7 @@ public fun ReflowReader(
     highlights: List<TextAnchor> = emptyList(),
     listState: LazyListState = rememberLazyListState(),
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)? = null,
+    onPageDeltaReady: (((Int) -> Unit)?) -> Unit = {},
 ) {
     val settings = remember(stored.current) { stored.current.toRenderSettings() }
     val anchorsByBlock = remember(highlights) { highlights.groupBy { it.blockIndex } }
@@ -176,13 +189,73 @@ public fun ReflowReader(
             elapsedMs >= LONG_READING_AFTER_MS &&
             stored.activePresetId != BuiltinReaderPresets.longReading.id
 
+    val scope = rememberCoroutineScope()
+
+    // Высота вьюпорта ридера в px — шаг «листнуть страницу» в скролл-режиме (paged
+    // меряет страницу сам). Меряем корневой Box, а не внутренний LazyColumn, чтобы
+    // дельта не зависела от contentPadding/резерва под airbar.
+    var viewportHeightPx by remember { mutableStateOf(0) }
+
+    // Активный обработчик «листнуть на ±N»: им пользуется и горизонтальный свайп
+    // (локально), и аппаратные клавиши (через [onPageDeltaReady] выше по дереву).
+    // Заполняется активным режимом (paged — пейджером, scroll — прокруткой) и
+    // обнуляется, пока контент не готов либо при выходе из композиции.
+    var pageDelta by remember(document) { mutableStateOf<((Int) -> Unit)?>(null) }
+    val latestOnPageDeltaReady by rememberUpdatedState(onPageDeltaReady)
+    val setPageDelta: (((Int) -> Unit)?) -> Unit = { handler ->
+        pageDelta = handler
+        latestOnPageDeltaReady(handler)
+    }
+    DisposableEffect(Unit) { onDispose { latestOnPageDeltaReady(null) } }
+
+    // Скролл-режим: «страница» = дельта экранов (с лёгким нахлёстом, чтобы строка
+    // на стыке не терялась). animateScrollBy сам клампится на краях списка.
+    if (!settings.paged) {
+        val scrollPageDelta: (Int) -> Unit =
+            remember(listState, scope) {
+                { delta ->
+                    val step = viewportHeightPx * PAGE_SCROLL_OVERLAP_FRACTION
+                    if (step > 0f) scope.launch { listState.animateScrollBy(delta * step) }
+                }
+            }
+        DisposableEffect(scrollPageDelta) {
+            setPageDelta(scrollPageDelta)
+            onDispose { setPageDelta(null) }
+        }
+    }
+
+    // Свайп влево → следующая страница (+1), вправо → предыдущая (-1) — как
+    // перелистывание печатной книги. Отдельный pointerInput: detectHorizontalDrag
+    // забирает указатель только после горизонтального slop, поэтому вертикальный
+    // скролл пейджера/списка и тап-по-тексту (соседний pointerInput) не глотаются.
+    val latestPageDelta by rememberUpdatedState(pageDelta)
+    val swipeThresholdPx = with(LocalDensity.current) { SWIPE_DISTANCE_THRESHOLD_DP.toPx() }
+
     Box(
         modifier =
             modifier
                 .fillMaxSize()
                 .background(effectiveBackground)
+                .onSizeChanged { viewportHeightPx = it.height }
                 .pointerInput(barVisible) {
                     detectTapGestures { onBarVisibleChange(!barVisible) }
+                }.pointerInput(swipeThresholdPx) {
+                    var dragX = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragX = 0f },
+                        onDragEnd = {
+                            if (dragX <= -swipeThresholdPx) {
+                                latestPageDelta?.invoke(1)
+                            } else if (dragX >= swipeThresholdPx) {
+                                latestPageDelta?.invoke(-1)
+                            }
+                            dragX = 0f
+                        },
+                        onDragCancel = { dragX = 0f },
+                    ) { change, dragAmount ->
+                        dragX += dragAmount
+                        change.consume()
+                    }
                 },
     ) {
         if (settings.paged) {
@@ -192,6 +265,7 @@ public fun ReflowReader(
                 settings = settings,
                 renderPage = renderPage,
                 onVisibleBlockChange = { pagedFirstBlock = it },
+                onPageDeltaReady = setPageDelta,
             )
         } else {
             ScrollReflowContent(
@@ -304,6 +378,7 @@ private fun PagedReflowContent(
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
     onVisibleBlockChange: (Int) -> Unit,
+    onPageDeltaReady: (((Int) -> Unit)?) -> Unit,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -349,6 +424,24 @@ private fun PagedReflowContent(
         LaunchedEffect(pagerState, pages) {
             snapshotFlow { pagerState.currentPage }
                 .collect { page -> onVisibleBlockChange(pages.getOrNull(page)?.firstOrNull() ?: 0) }
+        }
+
+        // «Листнуть на ±N» = плавный переход к соседней странице пейджера (клампим
+        // в границы списка страниц). Публикуем наружу, пока пейджер жив.
+        val scope = rememberCoroutineScope()
+        val lastPage = pages.lastIndex
+        val pagerPageDelta: (Int) -> Unit =
+            remember(pagerState, scope, lastPage) {
+                { delta ->
+                    val target = (pagerState.currentPage + delta).coerceIn(0, lastPage)
+                    if (target != pagerState.currentPage) {
+                        scope.launch { pagerState.animateScrollToPage(target) }
+                    }
+                }
+            }
+        DisposableEffect(pagerPageDelta) {
+            onPageDeltaReady(pagerPageDelta)
+            onDispose { onPageDeltaReady(null) }
         }
         VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
             Column(
@@ -735,6 +828,15 @@ private fun blockTextLength(block: ReflowBlock): Int =
         is ReflowBlock.Table -> block.rows.sumOf { row -> row.cells.sumOf { it.text.length } }
         is ReflowBlock.Figure -> 0
     }
+
+// Свайп засчитывается как перелистывание после ~64dp горизонтального смещения —
+// заметно больше touch-slop, чтобы случайные диагональные движения при скролле не
+// листали страницу, но без необходимости «бросать» через весь экран.
+private val SWIPE_DISTANCE_THRESHOLD_DP = 64.dp
+
+// В скролл-режиме «страница» прокручивает ~90% вьюпорта: нахлёст в одну-две строки
+// сохраняет контекст на стыке (как Page Down в читалках), а не прыгает ровно на экран.
+private const val PAGE_SCROLL_OVERLAP_FRACTION = 0.9f
 
 private const val HEADING_SCALE_1 = 1.6f
 private const val HEADING_SCALE_2 = 1.35f

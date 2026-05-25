@@ -498,6 +498,14 @@ fun DetailsContent(
 
     ImmersiveEditorMode()
 
+    // Громкость листает ридер только в режиме чтения; перехват снимается, едва он
+    // выключится, чтобы клавиши громкости в остальном работали штатно. На десктопе
+    // — no-op. Стрелки/PageUp-Down/Space обрабатываются общим onKeyEvent ниже.
+    ReaderVolumeKeyHandler(
+        enabled = readingModeEnabled,
+        onPageDelta = { delta -> controls?.readerPageDelta?.invoke(delta) },
+    )
+
     val onPencilModeChange: (Boolean) -> Unit = { enabled ->
         pencilModeEnabled = enabled
         pencilModeManuallyTouched = true
@@ -576,6 +584,12 @@ fun DetailsContent(
                 val isCtrl = e.key == Key.CtrlLeft || e.key == Key.CtrlRight
                 val isAlt = e.key == Key.AltLeft || e.key == Key.AltRight
                 val isMeta = e.key == Key.MetaLeft || e.key == Key.MetaRight
+                val readerPageTurn =
+                    if (readingModeEnabled && e.type == KeyEventType.KeyDown) {
+                        readerPageTurnDelta(e.key, shiftHeld)
+                    } else {
+                        null
+                    }
                 when {
                     isShift -> {
                         shiftHeld = e.type == KeyEventType.KeyDown
@@ -612,6 +626,15 @@ fun DetailsContent(
                                 st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
                             }
                         }
+                        true
+                    }
+                    // Перелистывание ридера хардварными клавишами — только в режиме
+                    // чтения (см. readerPageTurn выше), иначе стрелки/Space/PageUp-Down
+                    // остаются свободны. Клавиши громкости тут — запасной путь (на
+                    // Android их раньше съедает оконный перехват ReaderVolumeKeyHandler;
+                    // на десктопе их нет).
+                    readerPageTurn != null -> {
+                        controls?.readerPageDelta?.invoke(readerPageTurn)
                         true
                     }
                     else -> {
@@ -1408,3 +1431,23 @@ private fun focusedPanelHeightPx(
         LayoutTemplate.GRID_2X2 -> if (idx >= 2) (1f - r[1]) * split else r[1] * split
     }
 }
+
+/**
+ * Сопоставляет нажатую клавишу [key] перелистыванию ридера: `+1` — следующая
+ * страница, `-1` — предыдущая, `null` — клавиша не про листание.
+ *
+ * Раскладка (как в десктопных читалках): влево/PageDown/Space → дальше;
+ * вправо/PageUp/Shift+Space → назад. Клавиши громкости (Android) тоже учитываем —
+ * вниз листает вперёд, вверх назад, — на случай если событие дойдёт сюда мимо
+ * оконного перехвата.
+ */
+private fun readerPageTurnDelta(
+    key: Key,
+    shiftHeld: Boolean,
+): Int? =
+    when (key) {
+        Key.DirectionLeft, Key.PageDown, Key.VolumeDown -> 1
+        Key.DirectionRight, Key.PageUp, Key.VolumeUp -> -1
+        Key.Spacebar -> if (shiftHeld) -1 else 1
+        else -> null
+    }

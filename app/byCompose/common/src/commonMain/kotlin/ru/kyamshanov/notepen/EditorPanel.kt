@@ -164,6 +164,13 @@ class PanelControls(
     val toggleToc: () -> Unit,
     val toggleReadingMode: () -> Unit,
     val navigateToPage: (Int) -> Unit,
+    /**
+     * Листает ридер на ±N страниц в режиме чтения (хардварные клавиши:
+     * стрелки/PageUp-Down/Space, на Android — громкость). No-op вне режима чтения
+     * или пока ридер не готов. Реализацию поставляет [ReflowReader] (paged —
+     * пейджером, scroll — прокруткой на дельту экранов).
+     */
+    val readerPageDelta: (Int) -> Unit,
     val toggleQuickLoupe: () -> Unit,
     val cycleScrollMode: () -> Unit,
 )
@@ -259,6 +266,10 @@ fun EditorPanel(
     // ---- Reading (reflow) mode -------------------------------------------
     val reflowReadingUseCase = remember(reflowExtractor) { BuildReflowReadingUseCase(reflowExtractor) }
     val reflowListState = remember(pdfState) { LazyListState() }
+    // Императивный «листнуть на ±N», который публикует ReflowReader, когда контент
+    // готов. Через него хардварные клавиши (общий key-sink в DetailsContent →
+    // PanelControls.readerPageDelta) и Android-громкость листают страницы.
+    val reflowPageDelta = remember(pdfState) { mutableStateOf<((Int) -> Unit)?>(null) }
     // Кэш растеризованных страниц для врезок-картинок reflow (одна страница — много фигур).
     val figurePageCache = remember(pdfState) { mutableMapOf<Int, ImageBitmap>() }
     val renderFigurePage: suspend (Int) -> ImageBitmap? = renderFig@{ pageIndex ->
@@ -1050,6 +1061,7 @@ fun EditorPanel(
                             pdfViewerState.scrollToPage(page, 0)
                         }
                     },
+                    readerPageDelta = { delta -> reflowPageDelta.value?.invoke(delta) },
                     toggleQuickLoupe = onToggleQuickLoupe,
                     cycleScrollMode = onCycleScrollMode,
                 ),
@@ -1292,6 +1304,7 @@ fun EditorPanel(
                         highlights = reading.highlights,
                         listState = reflowListState,
                         renderPage = renderFigurePage,
+                        onPageDeltaReady = { reflowPageDelta.value = it },
                     )
                 } else {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {

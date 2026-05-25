@@ -163,6 +163,18 @@ class ReaderSettingsReducerTest {
     }
 
     @Test
+    fun renamePreset_overlongName_isCappedToMaxLength() {
+        val custom = ReaderPreset(id = "c1", name = "Старое", settings = ReaderSettings())
+        val stored = StoredReaderSettings(userPresets = listOf(custom))
+
+        val tooLong = "x".repeat(ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH + 50)
+        val next = ReaderSettingsReducer.renamePreset(stored, "c1", tooLong)
+
+        assertEquals(ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH, next.userPresets.first().name.length)
+        assertEquals("x".repeat(ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH), next.userPresets.first().name)
+    }
+
+    @Test
     fun renamePreset_blankName_isNoOp() {
         val custom = ReaderPreset(id = "c1", name = "Старое", settings = ReaderSettings())
         val stored = StoredReaderSettings(userPresets = listOf(custom))

@@ -86,8 +86,9 @@ public object ReaderSettingsReducer {
      * Переименовывает кастомный пресет [id] в [newName]. Переход чистый:
      * - встроенные пресеты не переименовываются (см. [isBuiltinReaderPresetId]) —
      *   состояние возвращается без изменений;
-     * - [newName] обрезается по краям; пустое после обрезки имя игнорируется
-     *   (возврат без изменений) — у пресета всегда есть видимое имя;
+     * - [newName] обрезается по краям и по длине ([MAX_PRESET_NAME_LENGTH]); пустое
+     *   после обрезки имя игнорируется (возврат без изменений) — у пресета всегда
+     *   есть видимое имя, но оно не может раздуться неограниченно;
      * - если такое имя уже носит другой кастом, оно дополняется числовым суффиксом
      *   `-N` ([uniqueAmong]), чтобы имена в колесе оставались различимыми.
      *
@@ -101,7 +102,7 @@ public object ReaderSettingsReducer {
     ): StoredReaderSettings {
         if (isBuiltinReaderPresetId(id)) return stored
         val target = stored.userPresets.firstOrNull { it.id == id } ?: return stored
-        val trimmed = newName.trim()
+        val trimmed = newName.take(MAX_PRESET_NAME_LENGTH).trim()
         if (trimmed.isEmpty()) return stored
         val others = stored.userPresets.filterNot { it.id == id }
         val resolved = uniqueAmong(trimmed, others)
@@ -178,4 +179,11 @@ public object ReaderSettingsReducer {
 
     /** Имя-основа форка, когда нет активного встроенного пресета. */
     private const val FALLBACK_FORK_BASE = "Моё"
+
+    /**
+     * Потолок длины имени кастомного пресета (символов). Имя приходит из свободного
+     * поля ввода — кап защищает персист и вёрстку колеса от неограниченно длинной
+     * строки. Обрезка идёт до [String.trim], чтобы хвостовые пробелы не «съедали» лимит.
+     */
+    public const val MAX_PRESET_NAME_LENGTH: Int = 64
 }
