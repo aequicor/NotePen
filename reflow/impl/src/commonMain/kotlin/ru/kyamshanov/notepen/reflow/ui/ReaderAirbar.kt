@@ -262,7 +262,10 @@ private fun CollapsedPill(
                 .clip(RoundedCornerShape(AIRBAR_RADIUS))
                 .background(background.copy(alpha = AIRBAR_ALPHA))
                 .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(AIRBAR_RADIUS))
-                .widthIn(max = AIRBAR_MAX_WIDTH)
+                // Свёрнутую таблетку шириной 560dp не ограничиваем: колесо пресетов берёт всю
+                // доступную ширину (в портрете её больше), поэтому плашки помещаются без скролла
+                // и «барабанного» затемнения краёв. Развёрнутую держим сведённой с TuneSheet.
+                .then(if (expanded) Modifier.widthIn(max = AIRBAR_MAX_WIDTH) else Modifier)
                 .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -292,12 +295,13 @@ private fun CollapsedPill(
                 style = progressStyle,
             )
         }
-        // Колесо пресетов: «барабанный» эффект (wheelItem) ужимает и притеняет
-        // плашки к краям, в которые ещё можно прокрутить, но НЕ до полного
-        // исчезновения — крайняя плашка остаётся читаемой (READER_WHEEL_MIN_ALPHA),
-        // пока для неё есть место. Тонкая fade-кромка (fadingEdges) лишь сглаживает
-        // срез у самого края.
-        Box(modifier = Modifier.weight(1f, fill = false)) {
+        // Колесо пресетов: «барабан» (wheelItem) ужимает и притеняет крайние плашки к краям,
+        // в которые ещё можно прокрутить (READER_WHEEL_MIN_ALPHA — не до полного исчезновения).
+        // Вьюпорт колеса фиксирован по доступной ширине (weight(1f), fill=true), а НЕ следует
+        // за контентом — иначе ужатие слотов меняло бы ширину контента → таблетки → пересчёт
+        // барабана, и колесо дёргалось. Когда всё помещается, плашки идут по центру в полный
+        // размер (барабан/скролл неактивны); при переполнении — скролл с барабаном у краёв.
+        Box(modifier = Modifier.weight(1f)) {
             LazyRow(
                 modifier =
                     Modifier
@@ -309,7 +313,9 @@ private fun CollapsedPill(
                             fadeEnd = listState.canScrollForward,
                         ),
                 state = listState,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                // Центрируем плашки, когда они помещаются (короткий список не липнет к левому
+                // краю широкого вьюпорта); при переполнении выравнивание не мешает прокрутке.
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically,
                 contentPadding = PaddingValues(horizontal = 4.dp),
             ) {
@@ -675,12 +681,28 @@ private fun TuneSheet(
                 onChange = { onChange(settings.copy(columnChars = it.roundToInt())) },
             )
             LabeledSlider(
-                label = "Поля",
+                label = "Поля по бокам",
                 value = settings.marginDp,
                 range = ReaderSettings.MIN_MARGIN_DP..ReaderSettings.MAX_MARGIN_DP,
                 valueText = "${settings.marginDp.roundToInt()}",
                 textColor = textColor,
                 onChange = { onChange(settings.copy(marginDp = it)) },
+            )
+            LabeledSlider(
+                label = "Поле сверху",
+                value = settings.topMarginDp,
+                range = ReaderSettings.MIN_VERTICAL_MARGIN_DP..ReaderSettings.MAX_VERTICAL_MARGIN_DP,
+                valueText = "${settings.topMarginDp.roundToInt()}",
+                textColor = textColor,
+                onChange = { onChange(settings.copy(topMarginDp = it)) },
+            )
+            LabeledSlider(
+                label = "Поле снизу",
+                value = settings.bottomMarginDp,
+                range = ReaderSettings.MIN_VERTICAL_MARGIN_DP..ReaderSettings.MAX_VERTICAL_MARGIN_DP,
+                valueText = "${settings.bottomMarginDp.roundToInt()}",
+                textColor = textColor,
+                onChange = { onChange(settings.copy(bottomMarginDp = it)) },
             )
             LabeledChoice(
                 label = "Выравнивание",

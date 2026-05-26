@@ -137,6 +137,7 @@ internal fun selectedToolWheelKey(toolMode: ToolMode): Any? =
 internal fun railSelectionColorScheme(
     base: ColorScheme,
     readerContentColor: Color?,
+    readerBackground: Color? = null,
 ): ColorScheme =
     if (readerContentColor == null) {
         base
@@ -144,6 +145,11 @@ internal fun railSelectionColorScheme(
         base.copy(
             primaryContainer = readerContentColor.copy(alpha = READER_SELECTION_FILL_ALPHA),
             onPrimaryContainer = readerContentColor,
+            // В режиме чтения колесо инструментов держим в палитре ридера: стрелки прокрутки
+            // ([WheelScrollButtons]) и разделители красятся onSurfaceVariant/surfaceVariant —
+            // без подмены они остаются цветами темы приложения и выбиваются из «бумажного» фона.
+            onSurfaceVariant = readerContentColor,
+            surfaceVariant = readerBackground ?: base.surfaceVariant,
         )
     }
 
@@ -642,7 +648,14 @@ fun LandscapeToolRail(
             tint = readerTheme.background ?: MaterialTheme.colorScheme.surface,
             modifier = Modifier.onSizeChanged { onRailWidthChanged(with(density) { it.width.toDp() }) },
         ) {
-            MaterialTheme(colorScheme = railSelectionColorScheme(MaterialTheme.colorScheme, readerTheme.contentColor)) {
+            MaterialTheme(
+                colorScheme =
+                    railSelectionColorScheme(
+                        MaterialTheme.colorScheme,
+                        readerTheme.contentColor,
+                        readerTheme.background,
+                    ),
+            ) {
                 WheelStrip(
                     entries = entries,
                     orientation = RailOrientation.VERTICAL,

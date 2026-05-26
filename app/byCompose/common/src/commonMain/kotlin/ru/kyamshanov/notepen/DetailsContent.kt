@@ -14,7 +14,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -150,6 +152,9 @@ internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
 private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
+
+/** Прозрачность затемнения позади модальной боковой шторки (портретный режим). */
+private const val PORTRAIT_SCRIM_ALPHA = 0.4f
 
 /** Debounce for the crash-survival session autosave; collapses a scroll storm to one write. */
 private const val SESSION_AUTOSAVE_DEBOUNCE_MS = 750L
@@ -835,6 +840,7 @@ fun DetailsContent(
                 .consumeWindowInsets(WindowInsets.statusBars)
                 .padding(top = TAB_BAR_HEIGHT + topChromeInset),
         ) {
+            val dividerPx = with(density) { DIVIDER_HIT.toPx() }
             if (isLandscape) {
                 // When a left-edge sidebar is open it would otherwise sit on top of the
                 // back button and tool rail; push them right by the sidebar's width so
@@ -986,7 +992,6 @@ fun DetailsContent(
                         ),
                     label = "airbarCenter",
                 )
-                val dividerPx = with(density) { DIVIDER_HIT.toPx() }
                 val airbarTopPx by animateFloatAsState(
                     targetValue = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
                     animationSpec =
@@ -1026,110 +1031,6 @@ fun DetailsContent(
                                 Modifier.onSizeChanged {
                                     landscapePageCounterHeightDp = with(density) { it.height.toDp() }
                                 },
-                        )
-                    }
-                }
-
-                // ---- Thumbnail sidebar overlay: above the toolbar rail ----
-                // Rendered here (after LandscapeToolRail) so it draws on top of the toolbar.
-                val focusedState = tabSession.focusedActiveState
-                val focusedStartFraction = focusedPanelStartXFraction(layout)
-                val focusedTopPx = focusedPanelStartYPx(layout, gridHeightPx, dividerPx)
-                val focusedContentHeightPx =
-                    focusedPanelHeightPx(layout, gridHeightPx, dividerPx) - with(density) { TAB_BAR_HEIGHT.toPx() }
-                if (focusedState != null) {
-                    val drawingStates = focusedState.drawingStates
-                    val annotatedPageIndices by remember(drawingStates) {
-                        derivedStateOf {
-                            val withStrokes =
-                                drawingStates.entries
-                                    .filter { it.value.currentPaths.isNotEmpty() }
-                                    .map { it.key }
-                            val withHighlights =
-                                focusedState.highlights.entries
-                                    .filter { it.value.isNotEmpty() }
-                                    .map { it.key }
-                            (withStrokes + withHighlights).toSet()
-                        }
-                    }
-                    val pagePaths: (Int) -> List<DrawingPath> =
-                        remember(drawingStates) {
-                            { idx -> drawingStates[idx]?.currentPaths ?: emptyList() }
-                        }
-                    AnimatedVisibility(
-                        visible = showThumbnails && focusedState.pages.isNotEmpty(),
-                        enter =
-                            slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
-                                fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
-                        exit =
-                            slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
-                                fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
-                        modifier =
-                            Modifier
-                                .align(Alignment.TopStart)
-                                .offset {
-                                    IntOffset(
-                                        x =
-                                            focusedPanelStartXPx(
-                                                layout,
-                                                windowSizeInPx.width.toFloat(),
-                                                dividerPx,
-                                            ).roundToInt(),
-                                        y = focusedTopPx.roundToInt(),
-                                    )
-                                }.height(with(density) { focusedContentHeightPx.toDp() }),
-                    ) {
-                        PageThumbnailsSidebar(
-                            pages = focusedState.pages,
-                            pdfDocument = focusedState.pdfDocument,
-                            renderer = renderer,
-                            currentPage = focusedState.pdfViewerState.firstVisiblePageIndex,
-                            onPageClick = { pageIndex ->
-                                // В режиме чтения переход уходит в reflow-ридер (ветка в
-                                // PanelControls.navigateToPage); иначе — обычная прокрутка вьювера.
-                                controls?.navigateToPage?.invoke(pageIndex)
-                                    ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
-                            },
-                            annotatedPageIndices = annotatedPageIndices,
-                            favoritePageIndices = focusedState.favoritePageIndices.toSet(),
-                            onToggleFavorite = { pageIndex ->
-                                if (!focusedState.favoritePageIndices.remove(pageIndex)) {
-                                    focusedState.favoritePageIndices.add(pageIndex)
-                                }
-                            },
-                            pagePaths = pagePaths,
-                            pageHighlights = { idx -> focusedState.highlights[idx] ?: emptyList() },
-                        )
-                    }
-                    AnimatedVisibility(
-                        visible = showToc,
-                        enter =
-                            slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
-                                fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
-                        exit =
-                            slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
-                                fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
-                        modifier =
-                            Modifier
-                                .align(Alignment.TopStart)
-                                .offset {
-                                    IntOffset(
-                                        x =
-                                            focusedPanelStartXPx(
-                                                layout,
-                                                windowSizeInPx.width.toFloat(),
-                                                dividerPx,
-                                            ).roundToInt(),
-                                        y = focusedTopPx.roundToInt(),
-                                    )
-                                }.height(with(density) { focusedContentHeightPx.toDp() }),
-                    ) {
-                        TocSidebar(
-                            entries = focusedState.outline,
-                            onEntryClick = { pageIndex ->
-                                controls?.navigateToPage?.invoke(pageIndex)
-                                    ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
-                            },
                         )
                     }
                 }
@@ -1200,6 +1101,27 @@ fun DetailsContent(
                         )
                     }
                 }
+            }
+
+            // Меню страниц/оглавления поверх контента. В портрете — модальная боковая
+            // шторка слева с затемнением (тап по фону закрывает); в ландшафте рельса
+            // отъезжает вправо (railShift выше), затемнения нет.
+            val sideMenuState = tabSession.focusedActiveState
+            if (sideMenuState != null) {
+                FocusedPanelMenus(
+                    focusedState = sideMenuState,
+                    renderer = renderer,
+                    controls = controls,
+                    showThumbnails = showThumbnails,
+                    showToc = showToc,
+                    scrim = !isLandscape,
+                    offsetXPx = focusedPanelStartXPx(layout, windowSizeInPx.width.toFloat(), dividerPx),
+                    offsetYPx = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
+                    heightPx =
+                        focusedPanelHeightPx(layout, gridHeightPx, dividerPx) -
+                            with(density) { TAB_BAR_HEIGHT.toPx() },
+                    onClose = onBackOrCloseThumbnails,
+                )
             }
         }
 
@@ -1453,6 +1375,125 @@ private fun focusedPanelCenterXFraction(layout: WorkspaceLayout): Float {
             if (idx == 0) r[0] / 2f else r[0] + (1f - r[0]) / 2f
         LayoutTemplate.GRID_2X2 ->
             if (idx == 0 || idx == 2) r[0] / 2f else r[0] + (1f - r[0]) / 2f
+    }
+}
+
+/**
+ * Боковые шторки фокусного PDF-документа: миниатюры страниц и оглавление, выезжающие
+ * слева поверх контента. В портрете ([scrim] = `true`) подложку затемняем и тап по ней
+ * закрывает шторку; в ландшафте затемнения нет — там рельса инструментов отъезжает вправо,
+ * освобождая место. Видна максимум одна шторка за раз (тогглы взаимоисключающие).
+ *
+ * @param offsetXPx левый край шторки (px); в портрете 0, в ландшафте — старт фокусной панели
+ * @param offsetYPx верх шторки (px) — верх фокусной панели
+ * @param heightPx высота шторки (px) — высота панели за вычетом полосы вкладок
+ */
+@Composable
+private fun BoxScope.FocusedPanelMenus(
+    focusedState: PdfDocumentState,
+    renderer: PdfPageRenderer,
+    controls: PanelControls?,
+    showThumbnails: Boolean,
+    showToc: Boolean,
+    scrim: Boolean,
+    offsetXPx: Float,
+    offsetYPx: Float,
+    heightPx: Float,
+    onClose: () -> Unit,
+) {
+    val density = LocalDensity.current
+    val drawingStates = focusedState.drawingStates
+    val annotatedPageIndices by remember(drawingStates) {
+        derivedStateOf {
+            val withStrokes =
+                drawingStates.entries
+                    .filter { it.value.currentPaths.isNotEmpty() }
+                    .map { it.key }
+            val withHighlights =
+                focusedState.highlights.entries
+                    .filter { it.value.isNotEmpty() }
+                    .map { it.key }
+            (withStrokes + withHighlights).toSet()
+        }
+    }
+    val pagePaths: (Int) -> List<DrawingPath> =
+        remember(drawingStates) {
+            { idx -> drawingStates[idx]?.currentPaths ?: emptyList() }
+        }
+    val sideMenuModifier: Modifier =
+        Modifier
+            .align(Alignment.TopStart)
+            .offset { IntOffset(offsetXPx.roundToInt(), offsetYPx.roundToInt()) }
+            .height(with(density) { heightPx.toDp() })
+
+    if (scrim) {
+        AnimatedVisibility(
+            visible = (showThumbnails && focusedState.pages.isNotEmpty()) || showToc,
+            enter = fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+            exit = fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+            modifier = Modifier.matchParentSize(),
+        ) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = PORTRAIT_SCRIM_ALPHA))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClose,
+                    ),
+            )
+        }
+    }
+    AnimatedVisibility(
+        visible = showThumbnails && focusedState.pages.isNotEmpty(),
+        enter =
+            slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+        exit =
+            slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+        modifier = sideMenuModifier,
+    ) {
+        PageThumbnailsSidebar(
+            pages = focusedState.pages,
+            pdfDocument = focusedState.pdfDocument,
+            renderer = renderer,
+            currentPage = focusedState.pdfViewerState.firstVisiblePageIndex,
+            onPageClick = { pageIndex ->
+                // В режиме чтения переход уходит в reflow-ридер (ветка в
+                // PanelControls.navigateToPage); иначе — обычная прокрутка вьювера.
+                controls?.navigateToPage?.invoke(pageIndex)
+                    ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
+            },
+            annotatedPageIndices = annotatedPageIndices,
+            favoritePageIndices = focusedState.favoritePageIndices.toSet(),
+            onToggleFavorite = { pageIndex ->
+                if (!focusedState.favoritePageIndices.remove(pageIndex)) {
+                    focusedState.favoritePageIndices.add(pageIndex)
+                }
+            },
+            pagePaths = pagePaths,
+            pageHighlights = { idx -> focusedState.highlights[idx] ?: emptyList() },
+        )
+    }
+    AnimatedVisibility(
+        visible = showToc,
+        enter =
+            slideInHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                fadeIn(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+        exit =
+            slideOutHorizontally(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)) { -it } +
+                fadeOut(animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS)),
+        modifier = sideMenuModifier,
+    ) {
+        TocSidebar(
+            entries = focusedState.outline,
+            onEntryClick = { pageIndex ->
+                controls?.navigateToPage?.invoke(pageIndex)
+                    ?: focusedState.pdfViewerState.scrollToPage(pageIndex, 0)
+            },
+        )
     }
 }
 

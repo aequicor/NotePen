@@ -1,57 +1,113 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import ru.kyamshanov.notepen.reflow.ui.ReaderPagination.BlockLayout
+import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ReaderPaginationTest {
+    /** Делимый текстовый блок из [lines] строк высотой [lineHeight] каждая. */
+    private fun splittable(
+        lines: Int,
+        lineHeight: Float,
+        breakAfter: Boolean = true,
+    ) = BlockLayout(
+        heightPx = lines * lineHeight,
+        lineBottomsPx = (1..lines).map { it * lineHeight },
+        breakAfter = breakAfter,
+    )
+
+    /** Неделимый блок (картинка/таблица/заголовок). */
+    private fun atomic(
+        height: Float,
+        breakAfter: Boolean = true,
+    ) = BlockLayout(heightPx = height, lineBottomsPx = emptyList(), breakAfter = breakAfter)
+
     @Test
-    fun greedyPackingWithoutKeepWithNext() {
-        val pages =
-            ReaderPagination.paginate(
-                blockHeightsPx = listOf(40f, 40f, 40f, 40f),
-                pageHeightPx = 100f,
+    fun fillsPageToLineBoundary() {
+        // Длинный абзац рвётся по строкам: каждая страница заполнена доверху, без пустот.
+        val windows =
+            ReaderPagination.pageWindows(
+                blocks = listOf(splittable(lines = 10, lineHeight = 10f)),
+                pageHeightPx = 30f,
                 spacingPx = 0f,
             )
-        assertEquals(listOf(listOf(0, 1), listOf(2, 3)), pages)
+        assertEquals(listOf(0f, 30f, 60f, 90f), windows.map { it.startPx })
+        assertEquals(listOf(30f, 30f, 30f, 10f), windows.map { it.heightPx })
+        assertTrue(windows.all { it.firstBlock == 0 }, "один блок тянется через все страницы")
+        assertEquals(listOf(0, 30, 60, 90), windows.map { it.firstBlockOffsetPx })
     }
 
     @Test
-    fun headingIsNotLeftOrphanAtPageBottom() {
-        // para(60) + heading(20) fit page 0 (80<=100); para(60) overflows → without keep the
-        // heading (index 1) would be the last block on page 0. keepWithNext must push it down.
-        val pages =
-            ReaderPagination.paginate(
-                blockHeightsPx = listOf(60f, 20f, 60f),
-                pageHeightPx = 100f,
+    fun exactFitProducesSinglePage() {
+        val windows =
+            ReaderPagination.pageWindows(
+                blocks = listOf(splittable(lines = 3, lineHeight = 10f)),
+                pageHeightPx = 30f,
                 spacingPx = 0f,
-                keepWithNext = listOf(false, true, false),
             )
-        val headingPage = pages.indexOfFirst { 1 in it }
-        assertTrue(pages[headingPage].last() != 1, "heading must not be orphaned at page bottom")
-        assertTrue(2 in pages[headingPage], "heading must travel with its following block")
-        assertEquals(listOf(0, 1, 2), pages.flatten(), "no block dropped or duplicated")
+        assertEquals(1, windows.size, "ровно влезает — без лишней пустой страницы")
+        assertEquals(0f, windows.single().startPx)
+        assertEquals(30f, windows.single().heightPx)
     }
 
     @Test
-    fun fallsBackWhenKeptPairExceedsAPage() {
-        // heading(20) + para(200): the pair can't fit even on a fresh page — accept the split,
-        // don't loop forever moving the heading.
-        val pages =
-            ReaderPagination.paginate(
-                blockHeightsPx = listOf(20f, 200f),
-                pageHeightPx = 100f,
-                spacingPx = 0f,
-                keepWithNext = listOf(true, false),
+    fun headingIsNotOrphanedAtPageBottom() {
+        // para(20) на 0..20; heading(15, breakAfter=false) на 20..35; para(50) на 35..85; страница 40.
+        val blocks =
+            listOf(
+                splittable(lines = 2, lineHeight = 10f),
+                atomic(height = 15f, breakAfter = false),
+                splittable(lines = 5, lineHeight = 10f),
             )
-        assertEquals(listOf(0, 1), pages.flatten())
+        val windows = ReaderPagination.pageWindows(blocks, pageHeightPx = 40f, spacingPx = 0f)
+        // Страница 0 кончается до заголовка — он не повисает сиротой внизу.
+        val page0End = windows[0].startPx + windows[0].heightPx
+        assertTrue(page0End <= 20.5f, "страница 0 кончается у верха заголовка")
+        // Заголовок открывает следующую страницу вместе с началом своего абзаца.
+        assertEquals(1, windows[1].firstBlock, "заголовок ведёт страницу 1")
     }
 
     @Test
-    fun everyBlockAppearsExactlyOnce() {
-        val heights = List(20) { (it % 5 + 1) * 18f }
-        val keep = List(20) { it % 4 == 0 }
-        val flat = ReaderPagination.paginate(heights, 130f, 6f, keep).flatten()
-        assertEquals(heights.indices.toList(), flat)
+    fun oversizedAtomicBlockIsTiledNotLost() {
+        // Картинка выше страницы: показывается срезами по страницам, прогресс гарантирован,
+        // текст/контент не теряется (старое поведение обрезало и теряло остаток).
+        val windows =
+            ReaderPagination.pageWindows(
+                blocks = listOf(atomic(height = 100f)),
+                pageHeightPx = 30f,
+                spacingPx = 0f,
+            )
+        assertEquals(listOf(0f, 30f, 60f, 90f), windows.map { it.startPx })
+        assertEquals(100f, windows.last().startPx + windows.last().heightPx, "покрывает весь блок")
+    }
+
+    @Test
+    fun windowsTileContentContinuously() {
+        val blocks =
+            listOf(
+                splittable(lines = 4, lineHeight = 12f),
+                atomic(height = 40f),
+                splittable(lines = 6, lineHeight = 12f),
+            )
+        val spacing = 6f
+        val windows = ReaderPagination.pageWindows(blocks, pageHeightPx = 50f, spacingPx = spacing)
+        val contentHeight =
+            blocks.sumOf { it.heightPx.toDouble() }.toFloat() + spacing * (blocks.size - 1)
+        assertEquals(0f, windows.first().startPx, "начинается сверху")
+        assertTrue(
+            abs(windows.last().let { it.startPx + it.heightPx } - contentHeight) <= 0.5f,
+            "последняя страница доходит до конца контента",
+        )
+        windows.zipWithNext().forEach { (a, b) ->
+            assertTrue(a.heightPx <= 50.5f, "страница не выше полезной высоты")
+            assertTrue(b.startPx >= a.startPx + a.heightPx - 0.5f, "контент не показан дважды")
+        }
+    }
+
+    @Test
+    fun emptyDocumentHasNoPages() {
+        assertTrue(ReaderPagination.pageWindows(emptyList(), 100f, 0f).isEmpty())
     }
 }

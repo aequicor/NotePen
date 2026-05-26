@@ -125,7 +125,9 @@ public enum class PageTransition {
  * @property fontSizeSp кегль основного текста в sp ([MIN_FONT_SP]..[MAX_FONT_SP])
  * @property lineHeight межстрочный как множитель кегля ([MIN_LINE_HEIGHT]..[MAX_LINE_HEIGHT])
  * @property columnChars целевая длина строки в символах ([MIN_COLUMN_CHARS]..[MAX_COLUMN_CHARS])
- * @property marginDp поля колонки в dp ([MIN_MARGIN_DP]..[MAX_MARGIN_DP])
+ * @property marginDp боковые поля колонки в dp ([MIN_MARGIN_DP]..[MAX_MARGIN_DP])
+ * @property topMarginDp верхнее поле в dp ([MIN_VERTICAL_MARGIN_DP]..[MAX_VERTICAL_MARGIN_DP])
+ * @property bottomMarginDp нижнее поле в dp ([MIN_VERTICAL_MARGIN_DP]..[MAX_VERTICAL_MARGIN_DP])
  * @property align выравнивание абзацев
  * @property hyphenation переносы слов
  * @property letterSpacingSp межбуквенный интервал в sp ([MIN_LETTER_SPACING_SP]..[MAX_LETTER_SPACING_SP])
@@ -152,6 +154,8 @@ public data class ReaderSettings(
     public val lineHeight: Float = 1.6f,
     public val columnChars: Int = 66,
     public val marginDp: Float = 24f,
+    public val topMarginDp: Float = 16f,
+    public val bottomMarginDp: Float = 16f,
     public val align: ReaderAlign = ReaderAlign.START,
     public val hyphenation: Boolean = false,
     public val letterSpacingSp: Float = 0f,
@@ -177,6 +181,8 @@ public data class ReaderSettings(
             lineHeight = lineHeight.coerceIn(MIN_LINE_HEIGHT, MAX_LINE_HEIGHT),
             columnChars = columnChars.coerceIn(MIN_COLUMN_CHARS, MAX_COLUMN_CHARS),
             marginDp = marginDp.coerceIn(MIN_MARGIN_DP, MAX_MARGIN_DP),
+            topMarginDp = topMarginDp.coerceIn(MIN_VERTICAL_MARGIN_DP, MAX_VERTICAL_MARGIN_DP),
+            bottomMarginDp = bottomMarginDp.coerceIn(MIN_VERTICAL_MARGIN_DP, MAX_VERTICAL_MARGIN_DP),
             letterSpacingSp = letterSpacingSp.coerceIn(MIN_LETTER_SPACING_SP, MAX_LETTER_SPACING_SP),
             wordSpacingSp = wordSpacingSp.coerceIn(MIN_WORD_SPACING_SP, MAX_WORD_SPACING_SP),
             brightness = brightness.coerceIn(MIN_BRIGHTNESS, 1f),
@@ -204,11 +210,17 @@ public data class ReaderSettings(
         /** Максимальная длина строки в символах. */
         public const val MAX_COLUMN_CHARS: Int = 90
 
-        /** Минимальные поля, dp. */
+        /** Минимальные боковые поля, dp. */
         public const val MIN_MARGIN_DP: Float = 8f
 
-        /** Максимальные поля, dp. */
+        /** Максимальные боковые поля, dp. */
         public const val MAX_MARGIN_DP: Float = 48f
+
+        /** Минимальное верхнее/нижнее поле, dp (0 — текст вплотную к краю). */
+        public const val MIN_VERTICAL_MARGIN_DP: Float = 0f
+
+        /** Максимальное верхнее/нижнее поле, dp. */
+        public const val MAX_VERTICAL_MARGIN_DP: Float = 48f
 
         /** Минимальный межбуквенный интервал, sp. */
         public const val MIN_LETTER_SPACING_SP: Float = 0f

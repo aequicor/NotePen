@@ -23,7 +23,9 @@ import ru.kyamshanov.notepen.reflow.api.ReaderTheme
  * @property lineHeightMultiplier межстрочный интервал как множитель кегля
  * @property columnChars целевая длина строки в символах (ширину колонки рендер
  *   считает из неё и кегля)
- * @property contentPadding поля колонки от краёв
+ * @property contentPadding боковые поля колонки от краёв
+ * @property topMargin верхнее поле страницы/колонки
+ * @property bottomMargin нижнее поле страницы/колонки
  * @property blockSpacing вертикальный зазор между блоками (производный от кегля)
  * @property align выравнивание абзацев
  * @property hyphenation переносы слов
@@ -52,6 +54,8 @@ public data class ReflowReaderSettings(
     public val lineHeightMultiplier: Float = 1.6f,
     public val columnChars: Int = 66,
     public val contentPadding: Dp = 24.dp,
+    public val topMargin: Dp = 16.dp,
+    public val bottomMargin: Dp = 16.dp,
     public val blockSpacing: Dp = 14.dp,
     public val align: ReaderAlign = ReaderAlign.START,
     public val hyphenation: Boolean = false,
@@ -125,6 +129,8 @@ public fun ReaderSettings.toRenderSettings(): ReflowReaderSettings {
         lineHeightMultiplier = s.lineHeight,
         columnChars = s.columnChars,
         contentPadding = s.marginDp.dp,
+        topMargin = s.topMarginDp.dp,
+        bottomMargin = s.bottomMarginDp.dp,
         blockSpacing = (s.fontSizeSp * BLOCK_SPACING_RATIO).dp,
         align = s.align,
         hyphenation = s.hyphenation,

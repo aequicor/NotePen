@@ -220,7 +220,14 @@ fun PortraitTopBar(
                 // `weight` снимаем в RowScope; [MaterialTheme] не создаёт layout-узел,
                 // поэтому вес доходит до Row и сквозь обёртку перекраски.
                 val wheelModifier = Modifier.weight(1f)
-                MaterialTheme(colorScheme = railSelectionColorScheme(MaterialTheme.colorScheme, readerContentColor)) {
+                MaterialTheme(
+                    colorScheme =
+                        railSelectionColorScheme(
+                            MaterialTheme.colorScheme,
+                            readerContentColor,
+                            readerBackground,
+                        ),
+                ) {
                     WheelStrip(
                         entries = entries,
                         orientation = RailOrientation.HORIZONTAL,
