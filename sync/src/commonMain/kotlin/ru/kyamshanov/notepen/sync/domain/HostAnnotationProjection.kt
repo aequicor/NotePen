@@ -7,11 +7,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import ru.kyamshanov.notepen.annotation.domain.model.AnnotationFilter
+import ru.kyamshanov.notepen.annotation.domain.model.AnnotationLayer
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.UnionAllPolicy
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.sync.domain.model.RectDto
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
@@ -201,7 +204,11 @@ class HostAnnotationProjection(
                 state.currentPageOffset = bundle.currentPageOffset
                 state.favoritePageIndices = bundle.favoritePageIndices
                 bundle.pages.forEach { (page, paths) ->
-                    state.pages.getOrPut(page) { mutableListOf() }.addAll(paths)
+                    // Legacy on-disk strokes have no author → the reserved host layer.
+                    state.layers
+                        .getOrPut(AnnotationLayer.HOST) { linkedMapOf() }
+                        .getOrPut(page) { mutableListOf() }
+                        .addAll(paths)
                 }
                 bundle.pageExtents.forEach { (page, ext) ->
                     state.pageExtents[page] = ext
@@ -221,9 +228,12 @@ class HostAnnotationProjection(
     ) {
         mutex.withLock {
             val state = states.getOrPut(documentId) { MutableDocumentState() }
-            val page = state.pages.getOrPut(delta.pageIndex) { mutableListOf() }
             when (delta) {
                 is StrokeDelta.Added -> {
+                    val page =
+                        state.layers
+                            .getOrPut(delta.authorDeviceId) { linkedMapOf() }
+                            .getOrPut(delta.pageIndex) { mutableListOf() }
                     if (page.none { it.strokeId == delta.strokeId }) {
                         page.add(delta.path.toDomain())
                     }
@@ -233,49 +243,61 @@ class HostAnnotationProjection(
                     }
                 }
                 is StrokeDelta.Removed -> {
-                    page.removeAll { it.strokeId == delta.strokeId }
+                    // The eraser (delta.authorDeviceId) may target another device's
+                    // stroke, so remove the id from whichever layer holds it.
+                    state.layers.values.forEach { layerPages ->
+                        layerPages[delta.pageIndex]?.removeAll { it.strokeId == delta.strokeId }
+                    }
                 }
             }
         }
     }
 
-    /** Snapshot of every stroke currently held for [documentId], as wire-DTOs. */
+    /**
+     * Snapshot of every stroke currently held for [documentId], as wire-DTOs —
+     * each carrying its real authoring device, so provenance survives the round
+     * trip (peers' strokes are no longer relabelled as the host's).
+     */
     suspend fun snapshotDtos(documentId: String): List<StrokeDelta.Added>? {
-        val s = stateOf(documentId) ?: return null
-        val deviceId = "host"
-        val out = mutableListOf<StrokeDelta.Added>()
-        for ((pageIndex, paths) in s.pages) {
-            // Поле extent передаём только в первом штрихе каждой страницы —
-            // повторять в каждом нет смысла, получатель всё равно union'ит.
-            val extDto =
-                s.pageExtents[pageIndex]
-                    ?.takeIf { it != PageExtent.Pdf }
-                    ?.let { RectDto.fromDomain(it) }
-            var attachedExtent = false
-            for (path in paths) {
-                val id = path.strokeId.ifEmpty { "$deviceId#legacy-$pageIndex-${out.size}" }
-                val ext = if (!attachedExtent) extDto else null
-                if (ext != null) attachedExtent = true
-                out.add(
-                    StrokeDelta.Added(
-                        strokeId = id,
-                        pageIndex = pageIndex,
-                        authorDeviceId = deviceId,
-                        clock = 0,
-                        path = path.toDto(id),
-                        pageExtent = ext,
-                    ),
-                )
+        ensureLoaded(documentId) ?: return null
+        return mutex.withLock {
+            val state = states[documentId] ?: return@withLock null
+            val out = mutableListOf<StrokeDelta.Added>()
+            val pageIndices = state.layers.values.flatMap { it.keys }.distinct().sorted()
+            for (pageIndex in pageIndices) {
+                // Page extent is document-level: attach it to the first stroke
+                // emitted for the page; the receiver unions extents anyway.
+                val extDto =
+                    state.pageExtents[pageIndex]
+                        ?.takeIf { it != PageExtent.Pdf }
+                        ?.let { RectDto.fromDomain(it) }
+                var attachedExtent = false
+                for ((ownerDeviceId, layerPages) in state.layers) {
+                    val paths = layerPages[pageIndex] ?: continue
+                    for (path in paths) {
+                        val id = path.strokeId.ifEmpty { "$ownerDeviceId#legacy-$pageIndex-${out.size}" }
+                        val ext = if (!attachedExtent) extDto else null
+                        if (ext != null) attachedExtent = true
+                        out.add(
+                            StrokeDelta.Added(
+                                strokeId = id,
+                                pageIndex = pageIndex,
+                                authorDeviceId = ownerDeviceId,
+                                clock = 0,
+                                path = path.toDto(id),
+                                pageExtent = ext,
+                            ),
+                        )
+                    }
+                }
             }
-            // Если страница пустая, но extent не дефолтный — отправлять нечего
-            // в snapshot'е (snapshot — это только Added). Сжатие через snapshot
-            // out of scope.
+            out
         }
-        return out
     }
 
     private class MutableDocumentState {
-        val pages: MutableMap<Int, MutableList<DrawingPath>> = mutableMapOf()
+        /** Strokes per author device id (the layer key), then per page index. */
+        val layers: MutableMap<String, MutableMap<Int, MutableList<DrawingPath>>> = linkedMapOf()
         val pageExtents: MutableMap<Int, PageExtent> = mutableMapOf()
         var scale: Int = 100
         var pen: PenSettings = PenSettings()
@@ -288,7 +310,8 @@ class HostAnnotationProjection(
 
     private fun MutableDocumentState.toImmutable() =
         DocumentAnnotationState(
-            pages = pages.mapValues { it.value.toList() },
+            // Default composition: union of all layers (= pre-layer behaviour).
+            pages = UnionAllPolicy.compose(toAnnotationLayers(), AnnotationFilter.All),
             scale = scale,
             pen = pen,
             marker = marker,
@@ -298,4 +321,12 @@ class HostAnnotationProjection(
             pageExtents = pageExtents.toMap(),
             favoritePageIndices = favoritePageIndices,
         )
+
+    private fun MutableDocumentState.toAnnotationLayers(): List<AnnotationLayer> =
+        layers.map { (deviceId, layerPages) ->
+            AnnotationLayer(
+                ownerDeviceId = deviceId,
+                pages = layerPages.mapValues { it.value.toList() },
+            )
+        }
 }
