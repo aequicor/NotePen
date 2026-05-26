@@ -143,6 +143,7 @@ public enum class PageTransition {
  * @property readingRuler подсветка текущей строки (reading ruler)
  * @property bionic выделение первых букв слов (bionic reading)
  * @property ergonomics забота о глазах по времени сессии (20-20-20, затемнение, ритм)
+ * @property keepScreenOn не гасить экран во время чтения (always-on display; Android)
  */
 @Serializable
 public data class ReaderSettings(
@@ -167,6 +168,7 @@ public data class ReaderSettings(
     public val readingRuler: Boolean = false,
     public val bionic: Boolean = false,
     public val ergonomics: Boolean = true,
+    public val keepScreenOn: Boolean = true,
 ) {
     /** Возвращает копию с зажатыми в допустимые диапазоны числовыми полями. */
     public fun coerced(): ReaderSettings =
