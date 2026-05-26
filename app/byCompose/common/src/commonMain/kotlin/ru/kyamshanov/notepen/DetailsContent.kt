@@ -335,7 +335,6 @@ fun DetailsContent(
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     var showShortcutsDialog by remember { mutableStateOf(false) }
-    var showSessionsDialog by remember { mutableStateOf(false) }
     // Tab pending a "move into a new panel" once the user picks a layout.
     var pendingPanelMove by remember { mutableStateOf<Pair<PanelId, DocumentId>?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -712,7 +711,20 @@ fun DetailsContent(
                 EditorPanel(
                     panel = panel,
                     tabSession = tabSession,
-                    onOpenSessions = { showSessionsDialog = true },
+                    sessionsMenu = { expanded, onDismiss ->
+                        SessionsMenu(
+                            expanded = expanded,
+                            onDismiss = onDismiss,
+                            sessionRepository = sessionRepository,
+                            lastSession = lastSession,
+                            onCaptureCurrent = { tabSession.captureSession() },
+                            onRestore = { data ->
+                                tabSession.restoreSession(data)
+                                // Keep the in-process layout snapshot consistent with the restored split.
+                                savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
+                            },
+                        )
+                    },
                     isFocused = panel.id == layout.focusedPanelId,
                     loader = loader,
                     renderer = renderer,
@@ -923,7 +935,6 @@ fun DetailsContent(
                             syncTint = syncStatusTint,
                             onOpenSync = { showSyncPanel = true },
                             onOpenShortcutsSettings = { showShortcutsDialog = true },
-                            onOpenSessions = { showSessionsDialog = true },
                             readerBackground = readerBackground,
                             readerContentColor = readerContentColor,
                             onRailWidthChanged = { landscapeToolbarWidthDp = it },
@@ -1143,7 +1154,6 @@ fun DetailsContent(
                             syncTint = syncStatusTint,
                             onOpenSync = { showSyncPanel = true },
                             onOpenShortcutsSettings = { showShortcutsDialog = true },
-                            onOpenSessions = { showSessionsDialog = true },
                             onBack = onBackOrCloseThumbnails,
                             readerBackground = readerBackground,
                             readerContentColor = readerContentColor,
@@ -1310,20 +1320,6 @@ fun DetailsContent(
                 onChange = { shortcutsSettingsState.value = it },
                 onDismiss = { showShortcutsDialog = false },
                 penButtons = tabletController.penButtons,
-            )
-        }
-
-        if (showSessionsDialog) {
-            SessionsDialog(
-                sessionRepository = sessionRepository,
-                lastSession = lastSession,
-                onCaptureCurrent = { tabSession.captureSession() },
-                onRestore = { data ->
-                    tabSession.restoreSession(data)
-                    // Keep the in-process layout snapshot consistent with the restored split.
-                    savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
-                },
-                onDismiss = { showSessionsDialog = false },
             )
         }
 

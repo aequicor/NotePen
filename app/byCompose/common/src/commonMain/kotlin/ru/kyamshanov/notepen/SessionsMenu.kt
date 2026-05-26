@@ -1,21 +1,17 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,7 +24,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.mainscreen.domain.model.generateUuid
 import ru.kyamshanov.notepen.mainscreen.ui.viewmodel.currentTimeMillis
@@ -37,21 +32,28 @@ import ru.kyamshanov.notepen.session.SessionData
 import ru.kyamshanov.notepen.session.SessionRepository
 
 /**
- * Диалог управления сессиями редактора. Открывается из колеса настроек (см.
- * кнопку «Сессии» в [systemControlEntries]) и позволяет пользователю:
+ * Меню управления сессиями редактора. Раскрывается из кнопки «Сессии» в левом
+ * крае полосы вкладок (см. [ru.kyamshanov.notepen.tabs.TabBar]) и позволяет:
  * 1. **восстановить последнюю** сессию — автосохранённый (в т.ч. уцелевший после
  *    сбоя) рабочий стол; кнопка активна только когда автосейв существует;
  * 2. **сохранить текущую** под именем — текстовое поле + кнопка;
  * 3. управлять **списком именованных сессий** — у каждой строки действия
  *    «Восстановить» и «Удалить».
  *
- * Диалог сам владеет персистентностью ([sessionRepository]): читает список
+ * Меню само владеет персистентностью ([sessionRepository]): читает список
  * именованных сессий, сохраняет и удаляет их, обновляя список после каждой
  * записи. Автосейв он не перечитывает — последнюю сессию получает готовой через
  * [lastSession]. Живой рабочий стол он не трогает — захват текущего
  * состояния и его восстановление делегируются вызывающему через [onCaptureCurrent]
  * и [onRestore], которые работают с активной `TabSession`.
  *
+ * В отличие от модального диалога, [DropdownMenu] всплывает поверх редактора без
+ * отдельного окна (на desktop модальный `Dialog` поднимал нативное окно и
+ * подтормаживал на открытии) и закрывается тапом мимо — отдельной кнопки
+ * «Закрыть» нет. Содержимое прокручивается самим меню, поэтому список сессий не
+ * заворачивается в собственный скролл.
+ *
+ * @param expanded раскрыто ли меню; `false` — меню скрыто (контент не виден).
  * @param sessionRepository хранилище сессий: источник списка именованных сессий
  *   и операций сохранения/удаления.
  * @param lastSession рабочий стол на момент открытия редактора (в т.ч. уцелевший
@@ -61,12 +63,13 @@ import ru.kyamshanov.notepen.session.SessionRepository
  * @param onCaptureCurrent снимок текущего рабочего стола для сохранения новой
  *   именованной сессии (обычно `tabSession.captureSession()`).
  * @param onRestore применяет выбранную сессию к живому рабочему столу; вызывается
- *   при восстановлении последней или именованной сессии, после чего диалог
+ *   при восстановлении последней или именованной сессии, после чего меню
  *   закрывается.
- * @param onDismiss закрыть диалог без действия.
+ * @param onDismiss закрыть меню (тап мимо или после действия).
  */
 @Composable
-fun SessionsDialog(
+fun SessionsMenu(
+    expanded: Boolean,
     sessionRepository: SessionRepository,
     lastSession: SessionData?,
     onCaptureCurrent: () -> SessionData,
@@ -80,64 +83,50 @@ fun SessionsDialog(
         value = sessionRepository.listNamed()
     }
 
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = MaterialTheme.shapes.large,
-            tonalElevation = 6.dp,
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        Column(
             modifier =
                 Modifier
-                    .widthIn(min = 320.dp, max = 480.dp)
-                    .heightIn(min = 200.dp, max = 720.dp),
+                    .width(SESSIONS_MENU_WIDTH)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
         ) {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-            ) {
-                Text(text = "Сессии", style = MaterialTheme.typography.titleLarge)
-                Spacer(Modifier.height(16.dp))
+            Text(text = "Сессии", style = MaterialTheme.typography.titleLarge)
+            Spacer(Modifier.height(16.dp))
 
-                RestoreLastSessionButton(lastSession) { data ->
+            RestoreLastSessionButton(lastSession) { data ->
+                onRestore(data)
+                onDismiss()
+            }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(16.dp))
+
+            SaveSessionSection(
+                sessionRepository = sessionRepository,
+                onCaptureCurrent = onCaptureCurrent,
+                onSaved = { refreshKey++ },
+            )
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+
+            NamedSessionsSection(
+                sessions = namedSessions,
+                sessionRepository = sessionRepository,
+                onRestore = { data ->
                     onRestore(data)
                     onDismiss()
-                }
-
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(16.dp))
-
-                SaveSessionSection(
-                    sessionRepository = sessionRepository,
-                    onCaptureCurrent = onCaptureCurrent,
-                    onSaved = { refreshKey++ },
-                )
-
-                Spacer(Modifier.height(16.dp))
-                HorizontalDivider()
-                Spacer(Modifier.height(8.dp))
-
-                NamedSessionsSection(
-                    sessions = namedSessions,
-                    sessionRepository = sessionRepository,
-                    onRestore = { data ->
-                        onRestore(data)
-                        onDismiss()
-                    },
-                    onDeleted = { refreshKey++ },
-                )
-
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    TextButton(onClick = onDismiss) { Text("Закрыть") }
-                }
-            }
+                },
+                onDeleted = { refreshKey++ },
+            )
         }
     }
 }
+
+/** Width of the sessions dropdown content (the menu itself wraps to it). */
+private val SESSIONS_MENU_WIDTH = 320.dp
 
 /** Restores the pre-session workspace (the crash survivor); disabled when none exists. */
 @Composable
@@ -195,7 +184,13 @@ private fun SaveSessionSection(
     }
 }
 
-/** The list of saved named sessions, or a placeholder when none exist. */
+/**
+ * The list of saved named sessions, or a placeholder when none exist.
+ *
+ * No own [androidx.compose.foundation.verticalScroll]: the enclosing [DropdownMenu]
+ * already scrolls its content, so the rows are emitted directly and the whole menu
+ * (header + sections + this list) scrolls as one when the history is long.
+ */
 @Composable
 private fun NamedSessionsSection(
     sessions: List<NamedSession>,
@@ -212,7 +207,7 @@ private fun NamedSessionsSection(
             modifier = Modifier.padding(vertical = 8.dp),
         )
     } else {
-        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+        Column {
             sessions.forEach { session ->
                 NamedSessionRow(
                     session = session,

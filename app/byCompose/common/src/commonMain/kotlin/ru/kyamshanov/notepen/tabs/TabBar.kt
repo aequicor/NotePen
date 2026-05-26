@@ -95,10 +95,12 @@ fun TabBar(
      */
     onClosePanel: (() -> Unit)?,
     /**
-     * Invoked by the left-edge «Сессии» button that opens the sessions dialog
-     * (save / restore the workspace). `null` hides the button.
+     * Content of the dropdown anchored to the left-edge «Сессии» button (save /
+     * restore the workspace). Invoked with the menu's `expanded` flag and an
+     * `onDismiss` to close it; the bar owns the open/close state and toggles it
+     * on the button. `null` hides the button entirely.
      */
-    onOpenSessions: (() -> Unit)? = null,
+    sessionsMenu: (@Composable (expanded: Boolean, onDismiss: () -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier,
     /**
      * Glass tint of the strip; `null` keeps the default `surfaceContainerLow`.
@@ -125,18 +127,23 @@ fun TabBar(
         fillAlpha = 0.35f,
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = startInset, end = endInset)) {
-            onOpenSessions?.let { open ->
+            sessionsMenu?.let { menu ->
                 // Yandex-style: a sessions button anchored at the left edge of the strip.
+                // The Box anchors the dropdown to the button (mirrors TabChip's menu).
+                var sessionsExpanded by remember { mutableStateOf(false) }
                 val sessionsBtnModifier = Modifier.size(TAB_BAR_HEIGHT).padding(2.dp)
-                IconButton(
-                    onClick = open,
-                    modifier = titleBarInteraction?.interactive(sessionsBtnModifier) ?: sessionsBtnModifier,
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Layers,
-                        contentDescription = "Сессии",
-                        tint = contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                Box {
+                    IconButton(
+                        onClick = { sessionsExpanded = true },
+                        modifier = titleBarInteraction?.interactive(sessionsBtnModifier) ?: sessionsBtnModifier,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Layers,
+                            contentDescription = "Сессии",
+                            tint = contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    menu(sessionsExpanded) { sessionsExpanded = false }
                 }
             }
             BoxWithConstraints(

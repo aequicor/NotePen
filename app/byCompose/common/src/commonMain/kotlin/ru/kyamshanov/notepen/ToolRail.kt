@@ -21,7 +21,6 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
@@ -196,7 +195,6 @@ internal fun unifiedToolWheelEntries(
     syncTint: Color,
     onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
-    onOpenSessions: () -> Unit,
     expandedButtonModifier: Modifier = Modifier,
 ): List<WheelEntry> {
     // В режиме чтения свободное рисование пером бессмысленно, но выделять текст
@@ -264,7 +262,6 @@ internal fun unifiedToolWheelEntries(
             syncTint = syncTint,
             onOpenSync = onOpenSync,
             onOpenShortcutsSettings = onOpenShortcutsSettings,
-            onOpenSessions = onOpenSessions,
         )
     return buildList {
         // В чтении перо скрыто, но маркер/ластик остаются (см. includePen).
@@ -348,7 +345,6 @@ internal fun systemControlEntries(
     syncTint: Color,
     onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
-    onOpenSessions: () -> Unit,
 ): List<WheelEntry> {
     val pencilModeButton: @Composable () -> Unit = {
         if (showPencilModeButton) {
@@ -398,15 +394,6 @@ internal fun systemControlEntries(
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = "Шорткаты",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
-    val sessionsButton: @Composable () -> Unit = {
-        IconButton(onClick = onOpenSessions, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
-            Icon(
-                imageVector = Icons.Default.Layers,
-                contentDescription = "Сессии",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -489,7 +476,6 @@ internal fun systemControlEntries(
         if (readingModeAvailable || readingModeEnabled) add(WheelEntry("sys_reading") { readingModeButton() })
         if (showSyncButton) add(WheelEntry("sys_sync") { syncButton() })
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
-        add(WheelEntry("sys_sessions") { sessionsButton() })
         if (!readingModeEnabled) add(WheelEntry("sys_export") { exportButton() })
         add(WheelEntry("sys_zoom_in") { zoomInButton() })
         add(WheelEntry("sys_zoom_label", WHEEL_LABEL_ENTRY_SIZE) { zoomLabel() })
@@ -546,7 +532,6 @@ fun LandscapeToolRail(
     syncTint: Color,
     onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
-    onOpenSessions: () -> Unit,
     modifier: Modifier = Modifier,
     /** Фон активной темы ридера для стекла рельсы; `null` — цвет [MaterialTheme]. */
     readerBackground: Color? = null,
@@ -644,7 +629,6 @@ fun LandscapeToolRail(
                 syncTint = syncTint,
                 onOpenSync = onOpenSync,
                 onOpenShortcutsSettings = onOpenShortcutsSettings,
-                onOpenSessions = onOpenSessions,
                 expandedButtonModifier =
                     Modifier.onGloballyPositioned { btn ->
                         railCoords?.let { row ->
