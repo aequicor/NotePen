@@ -45,14 +45,19 @@ import ru.kyamshanov.notepen.session.SessionRepository
  * 3. управлять **списком именованных сессий** — у каждой строки действия
  *    «Восстановить» и «Удалить».
  *
- * Диалог сам владеет персистентностью ([sessionRepository]): читает список и
- * наличие автосейва, сохраняет и удаляет именованные сессии, обновляя список
- * после каждой записи. Живой рабочий стол он не трогает — захват текущего
+ * Диалог сам владеет персистентностью ([sessionRepository]): читает список
+ * именованных сессий, сохраняет и удаляет их, обновляя список после каждой
+ * записи. Автосейв он не перечитывает — последнюю сессию получает готовой через
+ * [lastSession]. Живой рабочий стол он не трогает — захват текущего
  * состояния и его восстановление делегируются вызывающему через [onCaptureCurrent]
  * и [onRestore], которые работают с активной `TabSession`.
  *
- * @param sessionRepository хранилище сессий: источник списка, автосейва и
- *   операций сохранения/удаления.
+ * @param sessionRepository хранилище сессий: источник списка именованных сессий
+ *   и операций сохранения/удаления.
+ * @param lastSession рабочий стол на момент открытия редактора (в т.ч. уцелевший
+ *   после сбоя автосейв), снятый ДО того, как живой автосейв начал перезаписывать
+ *   файл; `null`, если автосейва не было. С ним работает кнопка «восстановить
+ *   последнюю».
  * @param onCaptureCurrent снимок текущего рабочего стола для сохранения новой
  *   именованной сессии (обычно `tabSession.captureSession()`).
  * @param onRestore применяет выбранную сессию к живому рабочему столу; вызывается
@@ -63,6 +68,7 @@ import ru.kyamshanov.notepen.session.SessionRepository
 @Composable
 fun SessionsDialog(
     sessionRepository: SessionRepository,
+    lastSession: SessionData?,
     onCaptureCurrent: () -> SessionData,
     onRestore: (SessionData) -> Unit,
     onDismiss: () -> Unit,
@@ -74,9 +80,6 @@ fun SessionsDialog(
     var refreshKey by remember { mutableStateOf(0) }
     val namedSessions by produceState(initialValue = emptyList<NamedSession>(), refreshKey) {
         value = sessionRepository.listNamed()
-    }
-    val restoreLastEnabled by produceState(initialValue = false, refreshKey) {
-        value = sessionRepository.loadAutosave() != null
     }
 
     var newSessionName by remember { mutableStateOf("") }
@@ -104,14 +107,12 @@ fun SessionsDialog(
 
                 Button(
                     onClick = {
-                        coroutineScope.launch {
-                            sessionRepository.loadAutosave()?.let { data ->
-                                onRestore(data)
-                                onDismiss()
-                            }
+                        lastSession?.let { data ->
+                            onRestore(data)
+                            onDismiss()
                         }
                     },
-                    enabled = restoreLastEnabled,
+                    enabled = lastSession != null,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text("Восстановить последнюю")

@@ -62,6 +62,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -112,6 +113,7 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingPanel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
+import ru.kyamshanov.notepen.session.SessionData
 import ru.kyamshanov.notepen.session.captureSession
 import ru.kyamshanov.notepen.session.createSessionRepository
 import ru.kyamshanov.notepen.session.restoreSession
@@ -328,6 +330,14 @@ fun DetailsContent(
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
     val sessionRepository = remember { createSessionRepository() }
+
+    // The workspace as it was when this editor session began — including an
+    // autosave that survived a crash. Loaded once, before the autosave below
+    // starts overwriting it, so "restore last" recovers the pre-session state
+    // rather than the workspace just reopened.
+    val lastSession by produceState<SessionData?>(initialValue = null, sessionRepository) {
+        value = sessionRepository.loadAutosave()
+    }
 
     // Crash-survival autosave: mirror the live workspace (layout + per-tab view
     // positions) to disk, debounced so a scroll storm collapses to a single write.
@@ -1282,6 +1292,7 @@ fun DetailsContent(
         if (showSessionsDialog) {
             SessionsDialog(
                 sessionRepository = sessionRepository,
+                lastSession = lastSession,
                 onCaptureCurrent = { tabSession.captureSession() },
                 onRestore = { data ->
                     tabSession.restoreSession(data)
