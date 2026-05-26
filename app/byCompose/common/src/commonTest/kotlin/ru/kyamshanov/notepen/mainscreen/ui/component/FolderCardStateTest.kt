@@ -60,7 +60,8 @@ class FolderCardStateTest {
         val isHovered = computeLocalHoverState(entered = true, exited = false)
         assertTrue(
             isHovered,
-            "isHovered must be true immediately after onDragEntered — the 400ms visual persistence is handled by Compose DragAndDropTarget, not this state machine",
+            "isHovered must be true immediately after onDragEntered — the 400ms visual persistence " +
+                "is handled by Compose DragAndDropTarget, not this state machine",
         )
     }
 

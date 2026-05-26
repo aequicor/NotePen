@@ -10,11 +10,17 @@ import kotlinx.serialization.Serializable
  *
  * [strokeWidth] is the line width as a fraction of the PDF page width
  * (DPI / zoom / device-independent). On A4 (210 mm wide) `0.025` ≈ 5.25 mm.
+ *
+ * [sticky] enables the "sticky marker": over a text-based PDF the freehand swipe
+ * snaps to the words it covers and is stored as a [StickyHighlight] instead of a
+ * raw stroke. On by default; falls back to a plain marker where there's no text
+ * under the swipe. Defaults to `true` so legacy data deserialises with it enabled.
  */
 @Serializable
 data class MarkerSettings(
     val colorArgb: Long = PRESET_COLORS[0],
     val strokeWidth: Float = DEFAULT_STROKE_WIDTH,
+    val sticky: Boolean = true,
 ) {
     companion object {
         /** ≈ 5.25 mm on A4 — typical highlighter swath. */
@@ -40,6 +46,9 @@ data class MarkerSettings(
 
 /** Switch to a preset colour (alpha is part of the preset value). */
 fun MarkerSettings.applyPreset(presetArgb: Long): MarkerSettings = copy(colorArgb = presetArgb)
+
+/** Toggle the sticky (snap-to-text) behaviour. */
+fun MarkerSettings.applySticky(enabled: Boolean): MarkerSettings = copy(sticky = enabled)
 
 /**
  * Apply a new stroke width; clamped to [[MIN_STROKE_WIDTH]..[MAX_STROKE_WIDTH]].

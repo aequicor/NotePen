@@ -3,6 +3,8 @@ package ru.kyamshanov.notepen.annotation.domain.model
 /** In-memory result of loading annotations for a document. */
 data class AnnotationBundle(
     val pages: Map<Int, List<DrawingPath>> = emptyMap(),
+    /** Sticky-marker highlights per zero-based page index (see [StickyHighlight]). */
+    val highlights: Map<Int, List<StickyHighlight>> = emptyMap(),
     val scale: Int = 100,
     val pen: PenSettings = PenSettings(),
     val marker: MarkerSettings = MarkerSettings(),

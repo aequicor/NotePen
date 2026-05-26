@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -48,11 +49,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -60,6 +65,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -95,6 +101,7 @@ fun PageThumbnailsSidebar(
     favoritePageIndices: Set<Int> = emptySet(),
     onToggleFavorite: (Int) -> Unit = {},
     pagePaths: (Int) -> List<DrawingPath> = { emptyList() },
+    pageHighlights: (Int) -> List<StickyHighlight> = { emptyList() },
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -258,6 +265,7 @@ fun PageThumbnailsSidebar(
                             isCurrentPage = page.pageIndex == displayedCurrentPage,
                             isFavorite = page.pageIndex in favoritePageIndices,
                             paths = pagePaths(page.pageIndex),
+                            highlights = pageHighlights(page.pageIndex),
                             cachedBitmap = bitmapCache[page.pageIndex],
                             onBitmapRendered = { bm -> bitmapCache[page.pageIndex] = bm },
                             pdfIdle = pdfIdle,
@@ -321,27 +329,27 @@ private fun FilterModeChip(
             border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
             tonalElevation = if (active) 2.dp else 0.dp,
         ) {
-            Box(
+            Row(
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Icon(
+                    imageVector = currentChip.icon,
+                    contentDescription = "Фильтр: ${currentChip.label}",
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
                 Text(
                     text = currentChip.label,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                Icon(
-                    imageVector = currentChip.icon,
-                    contentDescription = "Фильтр: ${currentChip.label}",
-                    modifier =
-                        Modifier
-                            .align(Alignment.CenterStart)
-                            .size(16.dp),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
@@ -393,6 +401,7 @@ private fun ThumbnailItem(
     isCurrentPage: Boolean,
     isFavorite: Boolean,
     paths: List<DrawingPath>,
+    highlights: List<StickyHighlight>,
     cachedBitmap: ImageBitmap?,
     onBitmapRendered: (ImageBitmap) -> Unit,
     pdfIdle: State<Boolean>,
@@ -470,8 +479,21 @@ private fun ThumbnailItem(
                     modifier = Modifier.matchParentSize(),
                 )
             }
-            if (paths.isNotEmpty()) {
+            if (paths.isNotEmpty() || highlights.isNotEmpty()) {
                 Canvas(modifier = Modifier.matchParentSize()) {
+                    // Подсветки рисуем под штрихами полупрозрачной заливкой (alpha из цвета).
+                    // Multiply тут не годится: битмап страницы — отдельный слой Image выше,
+                    // и blend в этом Canvas смешивался бы с пустотой, а не со страницей.
+                    highlights.forEach { highlight ->
+                        val highlightColor = Color(highlight.colorArgb.toInt())
+                        highlight.rects.forEach { r ->
+                            drawRect(
+                                color = highlightColor,
+                                topLeft = Offset(r.left * size.width, r.top * size.height),
+                                size = Size((r.right - r.left) * size.width, (r.bottom - r.top) * size.height),
+                            )
+                        }
+                    }
                     paths.forEach { path ->
                         drawStrokeWithPressure(
                             stroke = path,

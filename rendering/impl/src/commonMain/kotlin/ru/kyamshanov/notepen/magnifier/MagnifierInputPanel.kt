@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,12 +13,15 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material3.Icon
@@ -50,6 +54,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -73,6 +78,7 @@ import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
+import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 
 private const val FRAME_FILL_ALPHA = 0.10f
@@ -130,87 +136,78 @@ fun MagnifierInputPanel(
         if (toolMode != ToolMode.ERASER) eraserPos.value = null
     }
 
-    val panelOffsetDp =
-        with(density) {
-            IntOffset(state.panelTopLeft.x.toInt(), state.panelTopLeft.y.toInt())
-        }
     val panelWidthDp = with(density) { state.panelSize.width.toDp() }
     val panelHeightDp = with(density) { state.panelSize.height.toDp() }
-    val titleBarHeight = 32.dp
 
+    // Цвет грипа-ресайза резолвим здесь: внутри Canvas-лямбды темы нет.
+    val resizeGripColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+
+    // Позиционирование панели (panelTopLeft) выполняет хост через offset
+    // Popup'а в `EditorPanel`; здесь задаётся только размер. Так панель
+    // рисуется в Popup-слое поверх тулрейла, а не под ним.
     Box(
-        Modifier
-            .offset { panelOffsetDp }
-            .size(panelWidthDp, panelHeightDp + titleBarHeight + RESIZE_HANDLE_DP),
+        Modifier.size(panelWidthDp, panelHeightDp + HEADER_HEIGHT + FOOTER_HEIGHT),
     ) {
         Surface(
             modifier = Modifier.fillMaxSize(),
-            shape = RoundedCornerShape(12.dp),
-            tonalElevation = 6.dp,
+            shape = RoundedCornerShape(18.dp),
+            tonalElevation = 2.dp,
+            shadowElevation = 10.dp,
             color = MaterialTheme.colorScheme.surface,
         ) {
             Column(Modifier.fillMaxSize()) {
-                // Title bar — drag → перемещение всей панели; кнопки авто-скролла и закрытия.
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .height(titleBarHeight)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .pointerInput(state) {
-                                detectDragGestures(onDrag = { change, drag ->
-                                    state.movePanel(drag)
-                                    change.consume()
-                                })
-                            },
-                    verticalAlignment = Alignment.CenterVertically,
+                // ── Шапка: drag → перемещение панели; закрепление и авто-скролл.
+                //    Граббер-пилюля подсказывает, что за шапку можно тащить. ──
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(HEADER_HEIGHT)
+                        .pointerInput(state) {
+                            detectDragGestures(onDrag = { change, drag ->
+                                state.movePanel(drag)
+                                change.consume()
+                            })
+                        },
                 ) {
-                    Spacer(Modifier.size(8.dp))
-                    Text(
-                        text = "Лупа",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.weight(1f),
+                    Box(
+                        Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 6.dp)
+                            .size(width = 32.dp, height = 4.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                                shape = RoundedCornerShape(2.dp),
+                            ),
                     )
-                    val pinned = state.attachment == MagnifierAttachment.SCREEN
-                    IconButton(onClick = { state.toggleAttachment() }) {
-                        Icon(
-                            imageVector =
-                                if (pinned) {
-                                    Icons.Filled.PushPin
-                                } else {
-                                    Icons.Outlined.PushPin
-                                },
-                            contentDescription =
-                                if (pinned) {
-                                    "Открепить от экрана"
-                                } else {
-                                    "Закрепить на экране"
-                                },
-                            tint =
-                                if (pinned) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
+                    Row(
+                        modifier =
+                            Modifier
+                                .fillMaxSize()
+                                .padding(start = 14.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = "Лупа",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
                         )
-                    }
-                    IconButton(onClick = { state.toggleAutoScroll() }) {
-                        Icon(
-                            imageVector = Icons.Default.SwapHoriz,
-                            contentDescription =
-                                if (state.autoScrollEnabled) {
-                                    "Авто-прокрутка включена"
-                                } else {
-                                    "Авто-прокрутка выключена"
-                                },
-                            tint =
-                                if (state.autoScrollEnabled) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                        )
+                        val pinned = state.attachment == MagnifierAttachment.SCREEN
+                        IconButton(onClick = { state.toggleAttachment() }) {
+                            Icon(
+                                imageVector = if (pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
+                                contentDescription = if (pinned) "Открепить от экрана" else "Закрепить на экране",
+                                tint = if (pinned) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { state.toggleAutoScroll() }) {
+                            Icon(
+                                imageVector = Icons.Default.SwapHoriz,
+                                contentDescription =
+                                    if (state.autoScrollEnabled) "Авто-прокрутка включена" else "Авто-прокрутка выключена",
+                                tint = if (state.autoScrollEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
 
@@ -237,47 +234,95 @@ fun MagnifierInputPanel(
                             .clipToBounds(),
                 )
 
-                // Resize-handle (drag → ресайз).
-                Box(
-                    Modifier
-                        .align(Alignment.End)
-                        .size(RESIZE_HANDLE_DP)
-                        .background(MaterialTheme.colorScheme.outline)
-                        .pointerInput(state) {
-                            detectDragGestures(onDrag = { change, drag ->
-                                state.resizePanel(
-                                    Size(
-                                        state.panelSize.width + drag.x,
-                                        state.panelSize.height + drag.y,
-                                    ),
-                                )
-                                change.consume()
-                            })
-                        },
-                )
+                // ── Нижний блок увеличения: кратность лупы (−/+), индикатор ×N
+                //    и крестик. Крестик здесь, а не поверх превью: на планшете
+                //    до низа дотянуться удобнее, и он не липнет к контенту. ──
+                Row(
+                    modifier =
+                        Modifier
+                            .fillMaxWidth()
+                            .height(FOOTER_HEIGHT)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(start = 8.dp, end = RESIZE_HANDLE_DP + 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                ) {
+                    IconButton(onClick = { state.magnifyBy(1f / ZOOM_STEP) }) {
+                        Icon(
+                            imageVector = Icons.Default.Remove,
+                            contentDescription = "Уменьшить кратность",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    val zf = zoomFactor(state.panelSize, state.targetRect, state.pageCanvasWidthPx)
+                    Text(
+                        // Дробное значение (1 знак): целочисленное округление
+                        // показывало «×1» почти всегда и вводило в заблуждение.
+                        text = if (zf > 0f) "×${(zf * 10f).roundToInt() / 10f}" else "",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.widthIn(min = 48.dp),
+                    )
+                    IconButton(onClick = { state.magnifyBy(ZOOM_STEP) }) {
+                        Icon(
+                            imageVector = Icons.Default.Add,
+                            contentDescription = "Увеличить кратность",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    IconButton(onClick = onClose) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Закрыть лупу",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
             }
         }
 
-        // Кнопка закрытия — плавающая в правом нижнем углу панели (удобнее
-        // дотягиваться большим пальцем, чем до титул-бара сверху). Отодвинута
-        // вверх от resize-хэндла, чтобы тач-таргеты не пересекались.
-        IconButton(
-            onClick = onClose,
+        // Resize-уголок — правый нижний угол (тонкий диагональный грип). Лежит
+        // над зарезервированным end-отступом нижнего блока, поэтому не
+        // пересекается с крестиком.
+        Canvas(
             modifier =
                 Modifier
                     .align(Alignment.BottomEnd)
-                    .offset(x = (-4).dp, y = -(RESIZE_HANDLE_DP + 4.dp)),
+                    .size(RESIZE_HANDLE_DP)
+                    .pointerInput(state) {
+                        detectDragGestures(onDrag = { change, drag ->
+                            state.resizePanel(
+                                Size(
+                                    state.panelSize.width + drag.x,
+                                    state.panelSize.height + drag.y,
+                                ),
+                            )
+                            change.consume()
+                        })
+                    },
         ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Закрыть лупу",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            val s = size.minDimension
+            val stroke = s * 0.08f
+            listOf(0.45f, 0.75f).forEach { f ->
+                drawLine(
+                    color = resizeGripColor,
+                    start = Offset(s * f, s),
+                    end = Offset(s, s * f),
+                    strokeWidth = stroke,
+                )
+            }
         }
     }
 }
 
 private val RESIZE_HANDLE_DP = 16.dp
+private val HEADER_HEIGHT = 36.dp
+private val FOOTER_HEIGHT = 52.dp
+
+/** Шаг изменения кратности лупы кнопками −/+ в нижнем блоке. */
+private const val ZOOM_STEP = 1.25f
 
 @Composable
 private fun MagnifierContent(
