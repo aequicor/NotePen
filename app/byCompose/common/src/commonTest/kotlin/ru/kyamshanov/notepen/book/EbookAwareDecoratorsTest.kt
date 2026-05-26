@@ -11,16 +11,24 @@ import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertSame
 
 /**
  * Декораторы должны подменять путь EPUB на путь сконвертированного PDF и
  * проксировать всё остальное без изменений.
  */
 class EpubAwareDecoratorsTest {
-    private class FakeConverter(private val epub: Boolean) : EbookToPdfConverter {
+    private class FakeConverter(
+        private val epub: Boolean,
+        private val reflowDoc: ReflowDocument? = null,
+    ) : EbookToPdfConverter,
+        BookReflowProvider {
         override fun canConvert(path: String): Boolean = epub
 
         override suspend fun ensurePdf(path: String): String = "$path#pdf"
+
+        override suspend fun reflowFor(path: String): ReflowDocument? = reflowDoc
     }
 
     private class RecordingLoader : PdfDocumentLoader {
@@ -89,10 +97,31 @@ class EpubAwareDecoratorsTest {
         }
 
     @Test
-    fun extractor_converts_epub_path() =
+    fun extractor_uses_book_reflow_when_available() =
         runTest {
             val delegate = RecordingExtractor()
-            EbookAwarePdfReflowExtractor(delegate, FakeConverter(epub = true)).extract("/a/x.epub")
+            val doc = ReflowDocument(kind = PdfContentKind.TEXT_BASED, blocks = emptyList())
+            val converter = FakeConverter(epub = true, reflowDoc = doc)
+            val result = EbookAwarePdfReflowExtractor(delegate, converter, converter).extract("/a/x.epub")
+            assertSame(doc, result)
+            assertNull(delegate.seen) // структура из книги — PDF не выскребается
+        }
+
+    @Test
+    fun extractor_falls_back_to_pdf_when_no_sidecar() =
+        runTest {
+            val delegate = RecordingExtractor()
+            val converter = FakeConverter(epub = true, reflowDoc = null)
+            EbookAwarePdfReflowExtractor(delegate, converter, converter).extract("/a/x.epub")
             assertEquals("/a/x.epub#pdf", delegate.seen)
+        }
+
+    @Test
+    fun extractor_passes_non_ebook_through() =
+        runTest {
+            val delegate = RecordingExtractor()
+            val converter = FakeConverter(epub = false)
+            EbookAwarePdfReflowExtractor(delegate, converter, converter).extract("/a/x.pdf")
+            assertEquals("/a/x.pdf", delegate.seen)
         }
 }

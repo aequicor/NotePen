@@ -88,6 +88,49 @@ class StrokeTextMapperTest {
         assertTrue(spans.all { it.bounds.left in 0f..1f && it.bounds.top in 0f..1f })
     }
 
+    @Test
+    fun `snapToWords over one word produces one line rect re-anchoring to that word`() {
+        val doc = helloWorld()
+        val rects = StrokeTextMapper.snapToWords(doc, pageIndex = 0, path = stroke(norm(52f, 103f), norm(78f, 107f)))
+        assertEquals(1, rects.size)
+        assertEquals(listOf(TextAnchor(0, 0, 5)), StrokeTextMapper.anchorsForRects(doc, pageIndex = 0, rects = rects))
+    }
+
+    @Test
+    fun `snapToWords merges two adjacent words into a single line rect`() {
+        val doc = helloWorld()
+        val rects = StrokeTextMapper.snapToWords(doc, pageIndex = 0, path = stroke(norm(52f, 103f), norm(114f, 107f)))
+        assertEquals(1, rects.size)
+        assertEquals(listOf(TextAnchor(0, 0, 11)), StrokeTextMapper.anchorsForRects(doc, pageIndex = 0, rects = rects))
+    }
+
+    @Test
+    fun `snapToWords produces one rect per text line`() {
+        val doc = ReflowAssembler.assemble(listOf(page(line("alpha", top = 100f) + line("beta", top = 200f))))
+        val rects = StrokeTextMapper.snapToWords(doc, pageIndex = 0, path = stroke(norm(50f, 103f), norm(82f, 205f)))
+        assertEquals(2, rects.size)
+        assertEquals(listOf(0, 1), StrokeTextMapper.anchorsForRects(doc, pageIndex = 0, rects = rects).map { it.blockIndex })
+    }
+
+    @Test
+    fun `snapToWords away from text returns nothing so the marker stays freehand`() {
+        val rects = StrokeTextMapper.snapToWords(helloWorld(), pageIndex = 0, path = stroke(norm(52f, 700f), norm(78f, 720f)))
+        assertTrue(rects.isEmpty())
+    }
+
+    @Test
+    fun `anchorsForRects with no rects anchors nothing`() {
+        assertTrue(StrokeTextMapper.anchorsForRects(helloWorld(), pageIndex = 0, rects = emptyList()).isEmpty())
+    }
+
+    @Test
+    fun `stored rects re-anchor only on their own page`() {
+        val doc = helloWorld()
+        val rects = StrokeTextMapper.snapToWords(doc, pageIndex = 0, path = stroke(norm(52f, 103f), norm(78f, 107f)))
+        assertTrue(rects.isNotEmpty())
+        assertTrue(StrokeTextMapper.anchorsForRects(doc, pageIndex = 1, rects = rects).isEmpty())
+    }
+
     private fun helloWorld(): ReflowDocument = ReflowAssembler.assemble(listOf(page(line("hello world", top = 100f))))
 
     private fun substringOf(
@@ -99,8 +142,10 @@ class StrokeTextMapperTest {
                 is ReflowBlock.Paragraph -> block.text
                 is ReflowBlock.Heading -> block.text
                 is ReflowBlock.ListItem -> block.text
+                is ReflowBlock.Blockquote -> block.text
                 is ReflowBlock.Table -> ""
                 is ReflowBlock.Figure -> ""
+                ReflowBlock.Divider -> ""
             }
         return text.substring(anchor.charStart, anchor.charEnd)
     }

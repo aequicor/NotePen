@@ -18,12 +18,12 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Size as CanvasSize
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.annotation.domain.model.sliderPositionToStrokeWidth
 import ru.kyamshanov.notepen.annotation.domain.model.strokeWidthToSliderPosition
+import androidx.compose.ui.geometry.Size as CanvasSize
 
 /** Axis along which a tool rail / settings strip lays out its items. */
 public enum class RailOrientation { VERTICAL, HORIZONTAL }
@@ -63,15 +64,17 @@ public fun ColorPresets(
     orientation: RailOrientation,
 ) {
     when (orientation) {
-        RailOrientation.HORIZONTAL -> Row(horizontalArrangement = Arrangement.spacedBy(PRESET_GAP)) {
-            presets.forEach { ColorPresetDot(it, isSelected(it)) { onPick(it) } }
-        }
-        RailOrientation.VERTICAL -> Column(
-            verticalArrangement = Arrangement.spacedBy(PRESET_GAP),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            presets.forEach { ColorPresetDot(it, isSelected(it)) { onPick(it) } }
-        }
+        RailOrientation.HORIZONTAL ->
+            Row(horizontalArrangement = Arrangement.spacedBy(PRESET_GAP)) {
+                presets.forEach { ColorPresetDot(it, isSelected(it)) { onPick(it) } }
+            }
+        RailOrientation.VERTICAL ->
+            Column(
+                verticalArrangement = Arrangement.spacedBy(PRESET_GAP),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                presets.forEach { ColorPresetDot(it, isSelected(it)) { onPick(it) } }
+            }
     }
 }
 
@@ -81,19 +84,24 @@ private fun ColorPresetDot(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val borderColor = if (selected) MaterialTheme.colorScheme.primary
-                       else MaterialTheme.colorScheme.outlineVariant
+    val borderColor =
+        if (selected) {
+            MaterialTheme.colorScheme.primary
+        } else {
+            MaterialTheme.colorScheme.outlineVariant
+        }
     Spacer(
-        modifier = Modifier
-            .size(PRESET_SIZE)
-            .clip(CircleShape)
-            .background(Color(presetArgb.toInt()))
-            .border(
-                width = if (selected) PRESET_BORDER_SELECTED else PRESET_BORDER_DEFAULT,
-                color = borderColor,
-                shape = CircleShape,
-            )
-            .clickable(onClick = onClick),
+        modifier =
+            Modifier
+                .size(PRESET_SIZE)
+                .clip(CircleShape)
+                .background(Color(presetArgb.toInt()))
+                .border(
+                    width = if (selected) PRESET_BORDER_SELECTED else PRESET_BORDER_DEFAULT,
+                    color = borderColor,
+                    shape = CircleShape,
+                )
+                .clickable(onClick = onClick),
     )
 }
 
@@ -127,18 +135,20 @@ public fun OrientedSlider(
     valueRange: ClosedFloatingPointRange<Float>,
 ) {
     when (orientation) {
-        RailOrientation.HORIZONTAL -> HorizontalAdjustableSlider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = valueRange,
-            width = SLIDER_LENGTH,
-        )
-        RailOrientation.VERTICAL -> VerticalAdjustableSlider(
-            value = value,
-            onValueChange = onValueChange,
-            valueRange = valueRange,
-            length = SLIDER_LENGTH,
-        )
+        RailOrientation.HORIZONTAL ->
+            HorizontalAdjustableSlider(
+                value = value,
+                onValueChange = onValueChange,
+                valueRange = valueRange,
+                width = SLIDER_LENGTH,
+            )
+        RailOrientation.VERTICAL ->
+            VerticalAdjustableSlider(
+                value = value,
+                onValueChange = onValueChange,
+                valueRange = valueRange,
+                length = SLIDER_LENGTH,
+            )
     }
 }
 
@@ -167,14 +177,18 @@ private fun HorizontalAdjustableSlider(
         onValueChange = onValueChange,
         valueRange = valueRange,
         modifier = Modifier.width(width),
-        colors = SliderDefaults.colors(
-            thumbColor = activeColor,
-            activeTrackColor = activeColor,
-            inactiveTrackColor = inactiveColor,
-        ),
+        colors =
+            SliderDefaults.colors(
+                thumbColor = activeColor,
+                activeTrackColor = activeColor,
+                inactiveTrackColor = inactiveColor,
+            ),
         track = { state ->
-            val fraction = ((state.value - state.valueRange.start) /
-                (state.valueRange.endInclusive - state.valueRange.start)).coerceIn(0f, 1f)
+            val fraction =
+                (
+                    (state.value - state.valueRange.start) /
+                        (state.valueRange.endInclusive - state.valueRange.start)
+                ).coerceIn(0f, 1f)
             Canvas(Modifier.fillMaxWidth().height(SLIDER_TRACK_HEIGHT)) {
                 val r = CornerRadius(size.height / 2f)
                 drawRoundRect(color = inactiveColor, cornerRadius = r)
@@ -219,14 +233,18 @@ private fun VerticalAdjustableSlider(
             value = value,
             onValueChange = onValueChange,
             valueRange = valueRange,
-            colors = SliderDefaults.colors(
-                thumbColor = activeColor,
-                activeTrackColor = activeColor,
-                inactiveTrackColor = inactiveColor,
-            ),
+            colors =
+                SliderDefaults.colors(
+                    thumbColor = activeColor,
+                    activeTrackColor = activeColor,
+                    inactiveTrackColor = inactiveColor,
+                ),
             track = { state ->
-                val fraction = ((state.value - state.valueRange.start) /
-                    (state.valueRange.endInclusive - state.valueRange.start)).coerceIn(0f, 1f)
+                val fraction =
+                    (
+                        (state.value - state.valueRange.start) /
+                            (state.valueRange.endInclusive - state.valueRange.start)
+                    ).coerceIn(0f, 1f)
                 Canvas(Modifier.fillMaxWidth().height(SLIDER_TRACK_HEIGHT)) {
                     val r = CornerRadius(size.height / 2f)
                     drawRoundRect(color = inactiveColor, cornerRadius = r)
@@ -239,26 +257,37 @@ private fun VerticalAdjustableSlider(
                     }
                 }
             },
-            modifier = Modifier
-                .graphicsLayer {
-                    rotationZ = 270f
-                    transformOrigin = TransformOrigin(0f, 0f)
-                }
-                .layout { measurable, constraints ->
-                    val placeable = measurable.measure(
-                        Constraints(
-                            minWidth = constraints.minHeight,
-                            maxWidth = constraints.maxHeight,
-                            minHeight = constraints.minWidth,
-                            maxHeight = constraints.maxWidth,
-                        ),
-                    )
-                    layout(placeable.height, placeable.width) {
-                        placeable.place(-placeable.width, 0)
+            modifier =
+                Modifier
+                    .graphicsLayer {
+                        rotationZ = 270f
+                        transformOrigin = TransformOrigin(0f, 0f)
                     }
-                },
+                    .layout { measurable, constraints ->
+                        val placeable =
+                            measurable.measure(
+                                Constraints(
+                                    minWidth = constraints.minHeight,
+                                    maxWidth = constraints.maxHeight,
+                                    minHeight = constraints.minWidth,
+                                    maxHeight = constraints.maxWidth,
+                                ),
+                            )
+                        layout(placeable.height, placeable.width) {
+                            placeable.place(-placeable.width, 0)
+                        }
+                    },
         )
     }
+}
+
+/** On/off [Switch] for a boolean tool setting; orientation-agnostic (a switch is compact). */
+@Composable
+public fun BooleanToggle(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Switch(checked = enabled, onCheckedChange = onToggle)
 }
 
 private val SLIDER_LENGTH = 140.dp

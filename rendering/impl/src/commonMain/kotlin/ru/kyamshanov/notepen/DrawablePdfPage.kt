@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
@@ -48,6 +49,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
@@ -198,6 +200,8 @@ fun DrawablePdfPage(
     penSettings: PenSettings,
     markerSettings: MarkerSettings,
     eraserSettings: EraserSettings,
+    /** Sticky-marker highlights for this page; rendered as filled word-aligned rects. */
+    highlights: List<StickyHighlight> = emptyList(),
     /**
      * Ширина PDF-битмапа в Dp (без учёта extent-полей). Берётся вызывающим
      * из [ru.kyamshanov.notepen.pdfviewer.PdfPageScope.pdfWidth] — это значение
@@ -409,6 +413,23 @@ fun DrawablePdfPage(
                 size = Size(pdfDstSize.width.toFloat(), pdfDstSize.height.toFloat()),
                 style = Stroke(width = 0.5.dp.toPx()),
             )
+
+            // Sticky-marker highlights — filled word-aligned rects over the PDF,
+            // multiply-blended like the marker so text stays readable. Stored geometry
+            // is the source of truth, so this pass never depends on text extraction.
+            for (h in highlights) {
+                val hColor = Color(h.colorArgb.toInt())
+                for (r in h.rects) {
+                    val x0 = (r.left - ext.left) * pdfW
+                    val y0 = (r.top - ext.top) * pdfH
+                    drawRect(
+                        color = hColor,
+                        topLeft = Offset(x0, y0),
+                        size = Size((r.right - r.left) * pdfW, (r.bottom - r.top) * pdfH),
+                        blendMode = BlendMode.Multiply,
+                    )
+                }
+            }
 
             val paths = pdfDrawingState.currentPaths
 

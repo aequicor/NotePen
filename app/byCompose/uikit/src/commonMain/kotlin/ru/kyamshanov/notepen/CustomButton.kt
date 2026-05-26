@@ -9,12 +9,12 @@ import androidx.compose.ui.Modifier
 fun CustomButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit
+    content: @Composable RowScope.() -> Unit,
 ) {
     Button(
         shape = AppTheme.shapes.component,
         onClick = onClick,
         modifier = modifier,
-        content = content
+        content = content,
     )
 }

@@ -612,8 +612,12 @@ fun DetailsContent(
                             if (st.undoStack.isNotEmpty()) {
                                 val entry = st.undoStack.removeLast()
                                 val current = st.drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
-                                st.redoStack.addLast(PdfDocumentState.UndoEntry(entry.pageIndex, current))
+                                val currentHighlights = st.highlights[entry.pageIndex].orEmpty()
+                                st.redoStack.addLast(
+                                    PdfDocumentState.UndoEntry(entry.pageIndex, current, currentHighlights),
+                                )
                                 st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+                                st.highlights[entry.pageIndex] = entry.highlights
                             }
                         }
                         true
@@ -622,8 +626,11 @@ fun DetailsContent(
                         tabSession.focusedActiveState?.let { st ->
                             if (st.redoStack.isNotEmpty()) {
                                 val entry = st.redoStack.removeLast()
-                                st.undoStack.addLast(PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths))
+                                st.undoStack.addLast(
+                                    PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths, entry.highlights),
+                                )
                                 st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+                                st.highlights[entry.pageIndex] = entry.highlights
                             }
                         }
                         true
@@ -825,53 +832,65 @@ fun DetailsContent(
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
                         LandscapeToolRail(
-                            toolMode = toolMode,
-                            onToolModeChange = { toolMode = it },
-                            penSettings = penSettings,
-                            onPenSettingsChange = { penSettings = it },
-                            markerSettings = markerSettings,
-                            onMarkerSettingsChange = {
-                                if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
-                                markerSettings = it
-                            },
-                            eraserSettings = eraserSettings,
-                            onEraserSettingsChange = { eraserSettings = it },
-                            toolPresets = toolPresets,
-                            onToolPresetsChange = onToolPresetsChange,
-                            onPresetApplied = onPresetApplied,
-                            hasAnnotations = hasAnnotations,
-                            isExporting = isExporting,
-                            onExport = { controls?.export?.invoke() },
-                            scale = scale,
-                            onZoomIn = {
-                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                                }
-                            },
-                            onZoomOut = {
-                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                                }
-                            },
-                            showThumbnails = showThumbnails,
-                            onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
-                            showTocButton = hasToc,
-                            showToc = showToc,
-                            onToggleToc = { controls?.toggleToc?.invoke() },
-                            readingModeEnabled = readingModeEnabled,
-                            readingModeAvailable = readingModeAvailable,
-                            onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
-                            showPencilModeButton = SupportsPencilMode,
-                            pencilModeEnabled = pencilModeEnabled,
-                            onPencilModeChange = onPencilModeChange,
-                            magnifierEnabled = magnifierEnabled,
-                            onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
-                            showSyncButton = syncPaneEnabled,
-                            syncTint = syncStatusTint,
-                            onOpenSync = { showSyncPanel = true },
-                            onOpenShortcutsSettings = { showShortcutsDialog = true },
-                            readerBackground = readerBackground,
-                            readerContentColor = readerContentColor,
+                            tools =
+                                ToolRailTools(
+                                    toolMode = toolMode,
+                                    onToolModeChange = { toolMode = it },
+                                    penSettings = penSettings,
+                                    onPenSettingsChange = { penSettings = it },
+                                    markerSettings = markerSettings,
+                                    onMarkerSettingsChange = {
+                                        if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                                        markerSettings = it
+                                    },
+                                    eraserSettings = eraserSettings,
+                                    onEraserSettingsChange = { eraserSettings = it },
+                                    toolPresets = toolPresets,
+                                    onToolPresetsChange = onToolPresetsChange,
+                                    onPresetApplied = onPresetApplied,
+                                ),
+                            system =
+                                ToolRailSystem(
+                                    hasAnnotations = hasAnnotations,
+                                    isExporting = isExporting,
+                                    onExport = { controls?.export?.invoke() },
+                                    scale = scale,
+                                    onZoomIn = {
+                                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                            vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                                        }
+                                    },
+                                    onZoomOut = {
+                                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                            vs.zoomBy(
+                                                TOOLBAR_ZOOM_STEP_OUT,
+                                                Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f),
+                                            )
+                                        }
+                                    },
+                                    showThumbnails = showThumbnails,
+                                    onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                                    showTocButton = hasToc,
+                                    showToc = showToc,
+                                    onToggleToc = { controls?.toggleToc?.invoke() },
+                                    readingModeEnabled = readingModeEnabled,
+                                    readingModeAvailable = readingModeAvailable,
+                                    onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
+                                    showPencilModeButton = SupportsPencilMode,
+                                    pencilModeEnabled = pencilModeEnabled,
+                                    onPencilModeChange = onPencilModeChange,
+                                    magnifierEnabled = magnifierEnabled,
+                                    onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                                    showSyncButton = syncPaneEnabled,
+                                    syncTint = syncStatusTint,
+                                    onOpenSync = { showSyncPanel = true },
+                                    onOpenShortcutsSettings = { showShortcutsDialog = true },
+                                ),
+                            readerTheme =
+                                ToolRailReaderTheme(
+                                    background = readerBackground,
+                                    contentColor = readerContentColor,
+                                ),
                             onRailWidthChanged = { landscapeToolbarWidthDp = it },
                         )
                     }
@@ -1102,7 +1121,9 @@ fun DetailsContent(
         // scroll-mode toggle stacked into one glass island. The sync entry now
         // lives in the settings wheel (see systemControlEntries); its panel and
         // status tint are owned higher up so the wheel can reach them too.
-        val showScrollModeButton = controls != null
+        // В режиме чтения прокрутка только вертикальная (reflow-поток), поэтому
+        // переключатель режима скролла бессмысленен — прячем его.
+        val showScrollModeButton = controls != null && !readingModeEnabled
         val airbarButtonCount =
             (if (SupportsQuickLoupe) 1 else 0) +
                 (if (showScrollModeButton) 1 else 0)
