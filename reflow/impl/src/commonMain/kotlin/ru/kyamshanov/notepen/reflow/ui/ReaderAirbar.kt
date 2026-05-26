@@ -774,6 +774,12 @@ private fun TuneSheet(
                 textColor = textColor,
                 onChange = { onChange(settings.copy(ergonomics = it)) },
             )
+            ToggleRow(
+                label = "Не гасить экран",
+                checked = settings.keepScreenOn,
+                textColor = textColor,
+                onChange = { onChange(settings.copy(keepScreenOn = it)) },
+            )
         }
         Group("Доступность", textColor) {
             LabeledSlider(
