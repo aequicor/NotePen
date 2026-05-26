@@ -1,7 +1,6 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -1182,14 +1181,16 @@ fun EditorPanel(
     }
 
     // ---- UI ---------------------------------------------------------------
-    // Резерв места под полосу вкладок схлопываем в такт её скрытию, чтобы ридер
-    // дотянулся до самого верха панели (анимация совпадает со слайдом TabBar ниже).
-    val tabStripReserve by animateDpAsState(
-        targetValue = if (tabStripHidden) 0.dp else TAB_BAR_HEIGHT,
-        label = "tabStripReserve",
-    )
+    // Полосу вкладок резервируем постоянно — и в режиме чтения тоже. Её показ/скрытие лишь
+    // проявляет/прячет саму полосу в этом поле (слайд TabBar ниже), но НЕ двигает контент:
+    // иначе скрытие нижней панели настроек в чтении дёргало бы текст вверх на TAB_BAR_HEIGHT.
+    val tabStripReserve = TAB_BAR_HEIGHT
+    // Под (скрываемой) полосой вкладок поле красим фоном темы ридера, чтобы в режиме чтения
+    // оно не мигало системным фоном на тёмных темах.
+    val readingChromeBg =
+        if (pdfState.readingMode) readerStored.current.toRenderSettings().background else Color.Transparent
     Box(modifier.fillMaxSize().onSizeChanged { panelSizePx = it }) {
-        Box(Modifier.fillMaxSize().padding(top = tabStripReserve)) {
+        Box(Modifier.fillMaxSize().background(readingChromeBg).padding(top = tabStripReserve)) {
             PdfPagesViewer(
                 state = pdfViewerState,
                 pdfDocument = pdfDocument,

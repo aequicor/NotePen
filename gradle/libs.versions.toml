@@ -29,6 +29,7 @@ mlkit-barcode = "17.3.0"
 androidx-camera = "1.4.1"
 jsoup = "1.18.1"
 junrar = "7.5.5"
+roborazzi = "1.58.0"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activityCompose" }
@@ -77,6 +78,8 @@ androidx-camera-view = { module = "androidx.camera:camera-view", version.ref = "
 jsoup = { module = "org.jsoup:jsoup", version.ref = "jsoup" }
 junrar = { module = "com.github.junrar:junrar", version.ref = "junrar" }
 ktlint-cli = { module = "com.pinterest.ktlint:ktlint-cli", version.ref = "ktlint" }
+roborazzi = { module = "io.github.takahirom.roborazzi:roborazzi", version.ref = "roborazzi" }
+roborazzi-compose-desktop = { module = "io.github.takahirom.roborazzi:roborazzi-compose-desktop", version.ref = "roborazzi" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
@@ -88,3 +91,4 @@ kotlinSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", versio
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
 ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-plugin" }
+roborazzi = { id = "io.github.takahirom.roborazzi", version.ref = "roborazzi" }

@@ -12,6 +12,7 @@ plugins {
     alias(libs.plugins.kotlinSerialization) apply false
     alias(libs.plugins.detekt) apply false
     alias(libs.plugins.ktlint) apply false
+    alias(libs.plugins.roborazzi) apply false
     kotlin("jvm") version "2.1.0" apply false
 }
 
