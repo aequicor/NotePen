@@ -91,6 +91,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -111,6 +112,9 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingPanel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
+import ru.kyamshanov.notepen.session.captureSession
+import ru.kyamshanov.notepen.session.createSessionRepository
+import ru.kyamshanov.notepen.session.restoreSession
 import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
 import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
@@ -144,6 +148,9 @@ internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
 private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
+
+/** Debounce for the crash-survival session autosave; collapses a scroll storm to one write. */
+private const val SESSION_AUTOSAVE_DEBOUNCE_MS = 750L
 
 /** Tool state snapshot saved per panel when it loses focus. */
 private data class PanelToolSnapshot(
@@ -314,11 +321,23 @@ fun DetailsContent(
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
     var showShortcutsDialog by remember { mutableStateOf(false) }
+    var showSessionsDialog by remember { mutableStateOf(false) }
     // Tab pending a "move into a new panel" once the user picks a layout.
     var pendingPanelMove by remember { mutableStateOf<Pair<PanelId, DocumentId>?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
+    val sessionRepository = remember { createSessionRepository() }
+
+    // Crash-survival autosave: mirror the live workspace (layout + per-tab view
+    // positions) to disk, debounced so a scroll storm collapses to a single write.
+    // Never auto-loaded on launch — recovered only on explicit user action.
+    LaunchedEffect(tabSession) {
+        snapshotFlow { tabSession.captureSession() }
+            .distinctUntilChanged()
+            .debounce(SESSION_AUTOSAVE_DEBOUNCE_MS)
+            .collect { sessionRepository.saveAutosave(it) }
+    }
     val pdfExporter = remember { createPdfExporter() }
     val reflowExtractor = remember { createPdfReflowExtractor() }
 
@@ -870,6 +889,7 @@ fun DetailsContent(
                             syncTint = syncStatusTint,
                             onOpenSync = { showSyncPanel = true },
                             onOpenShortcutsSettings = { showShortcutsDialog = true },
+                            onOpenSessions = { showSessionsDialog = true },
                             readerBackground = readerBackground,
                             readerContentColor = readerContentColor,
                             onRailWidthChanged = { landscapeToolbarWidthDp = it },
@@ -1089,6 +1109,7 @@ fun DetailsContent(
                             syncTint = syncStatusTint,
                             onOpenSync = { showSyncPanel = true },
                             onOpenShortcutsSettings = { showShortcutsDialog = true },
+                            onOpenSessions = { showSessionsDialog = true },
                             onBack = onBackOrCloseThumbnails,
                             readerBackground = readerBackground,
                             readerContentColor = readerContentColor,
@@ -1255,6 +1276,19 @@ fun DetailsContent(
                 onChange = { shortcutsSettingsState.value = it },
                 onDismiss = { showShortcutsDialog = false },
                 penButtons = tabletController.penButtons,
+            )
+        }
+
+        if (showSessionsDialog) {
+            SessionsDialog(
+                sessionRepository = sessionRepository,
+                onCaptureCurrent = { tabSession.captureSession() },
+                onRestore = { data ->
+                    tabSession.restoreSession(data)
+                    // Keep the in-process layout snapshot consistent with the restored split.
+                    savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
+                },
+                onDismiss = { showSessionsDialog = false },
             )
         }
 

@@ -572,15 +572,30 @@ fun EditorPanel(
 
     // ---- Annotation load --------------------------------------------------
     LaunchedEffect(pdfState) {
+        // Session restore positions a tab via [PdfDocumentState.pendingViewOverride].
+        // Applied first and independently of the shared annotation load, so even a
+        // second tab of the same file (whose annotations are already loaded by its
+        // sibling) still gets its own restored scroll / zoom.
+        val viewOverride = pdfState.pendingViewOverride
+        pdfState.pendingViewOverride = null
+        if (viewOverride != null) {
+            pdfViewerState.applyInitialState(
+                scalePercent = viewOverride.scalePercent,
+                pageIndex = viewOverride.pageIndex,
+                pageOffsetPx = viewOverride.pageOffsetPx,
+            )
+        }
         if (pdfState.annotationsLoaded) return@LaunchedEffect
         pdfState.annotationsLoaded = true
         val restoredView =
             annotationRepository.loadViewState(filePath).getOrNull()?.also { view ->
-                pdfViewerState.applyInitialState(
-                    scalePercent = view.scale,
-                    pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
-                    pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
-                )
+                if (viewOverride == null) {
+                    pdfViewerState.applyInitialState(
+                        scalePercent = view.scale,
+                        pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
+                        pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
+                    )
+                }
                 // Вторичный таб того же файла открываем в обычном (не reading) режиме —
                 // как и позицию, режим чтения для него не восстанавливаем.
                 pdfState.readingMode = if (pdfState.skipPageRestore) false else view.readingMode
@@ -595,7 +610,7 @@ fun EditorPanel(
                 }.orEmpty()
 
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
-            if (restoredView == null) {
+            if (restoredView == null && viewOverride == null) {
                 pdfViewerState.applyInitialState(
                     scalePercent = bundle.scale,
                     pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,

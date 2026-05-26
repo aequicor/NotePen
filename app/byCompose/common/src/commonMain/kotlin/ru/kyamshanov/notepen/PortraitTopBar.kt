@@ -107,6 +107,7 @@ fun PortraitTopBar(
     syncTint: Color,
     onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
+    onOpenSessions: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /** Фон активной темы ридера для стекла бара; `null` — цвет [MaterialTheme]. */
@@ -216,6 +217,7 @@ fun PortraitTopBar(
                         syncTint = syncTint,
                         onOpenSync = onOpenSync,
                         onOpenShortcutsSettings = onOpenShortcutsSettings,
+                        onOpenSessions = onOpenSessions,
                     )
                 // `weight` снимаем в RowScope; [MaterialTheme] не создаёт layout-узел,
                 // поэтому вес доходит до Row и сквозь обёртку перекраски.
