@@ -961,10 +961,15 @@ fun DetailsContent(
                     val drawingStates = focusedState.drawingStates
                     val annotatedPageIndices by remember(drawingStates) {
                         derivedStateOf {
-                            drawingStates.entries
-                                .filter { it.value.currentPaths.isNotEmpty() }
-                                .map { it.key }
-                                .toSet()
+                            val withStrokes =
+                                drawingStates.entries
+                                    .filter { it.value.currentPaths.isNotEmpty() }
+                                    .map { it.key }
+                            val withHighlights =
+                                focusedState.highlights.entries
+                                    .filter { it.value.isNotEmpty() }
+                                    .map { it.key }
+                            (withStrokes + withHighlights).toSet()
                         }
                     }
                     val pagePaths: (Int) -> List<DrawingPath> =
@@ -1013,6 +1018,7 @@ fun DetailsContent(
                                 }
                             },
                             pagePaths = pagePaths,
+                            pageHighlights = { idx -> focusedState.highlights[idx] ?: emptyList() },
                         )
                     }
                     AnimatedVisibility(
