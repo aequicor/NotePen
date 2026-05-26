@@ -53,6 +53,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -151,6 +152,8 @@ public fun ReflowReader(
     listState: LazyListState = rememberLazyListState(),
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)? = null,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit = {},
+    navigateToBlock: MutableState<Int?> = remember { mutableStateOf(null) },
+    onFirstBlockChange: (Int) -> Unit = {},
 ) {
     val settings = remember(stored.current) { stored.current.toRenderSettings() }
     val anchorsByBlock = remember(highlights) { highlights.groupBy { it.blockIndex } }
@@ -199,6 +202,8 @@ public fun ReflowReader(
     // Первый видимый блок: из прокрутки (скролл) либо из текущей страницы (paged).
     var pagedFirstBlock by remember(document) { mutableStateOf(0) }
     val firstVisibleBlock = if (settings.paged) pagedFirstBlock else listState.firstVisibleItemIndex
+    val latestOnFirstBlockChange = rememberUpdatedState(onFirstBlockChange)
+    LaunchedEffect(firstVisibleBlock) { latestOnFirstBlockChange.value(firstVisibleBlock) }
     val progressLabel =
         remember(settings.progress, firstVisibleBlock, document) {
             progressLabel(settings.progress, firstVisibleBlock, document)
@@ -245,6 +250,12 @@ public fun ReflowReader(
         DisposableEffect(scrollPageDelta) {
             setPageDelta(scrollPageDelta)
             onDispose { setPageDelta(null) }
+        }
+        val scrollBlockTarget by navigateToBlock
+        LaunchedEffect(scrollBlockTarget) {
+            val block = scrollBlockTarget ?: return@LaunchedEffect
+            listState.animateScrollToItem(block)
+            navigateToBlock.value = null
         }
     }
 
@@ -296,6 +307,7 @@ public fun ReflowReader(
                         renderPage = renderPage,
                         onVisibleBlockChange = { pagedFirstBlock = it },
                         onPageDeltaReady = setPageDelta,
+                        navigateToBlock = navigateToBlock,
                     )
                 } else {
                     ScrollReflowContent(
@@ -478,6 +490,7 @@ private fun PagedReflowContent(
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
     onVisibleBlockChange: (Int) -> Unit,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit,
+    navigateToBlock: MutableState<Int?>,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -535,6 +548,13 @@ private fun PagedReflowContent(
         var currentPage by remember(document) { mutableStateOf(0) }
         LaunchedEffect(lastPage) {
             if (currentPage > lastPage) currentPage = lastPage
+        }
+        val pagedBlockTarget by navigateToBlock
+        LaunchedEffect(pagedBlockTarget) {
+            val block = pagedBlockTarget ?: return@LaunchedEffect
+            val target = pages.indexOfFirst { block in it }.takeIf { it >= 0 } ?: return@LaunchedEffect
+            currentPage = target
+            navigateToBlock.value = null
         }
         LaunchedEffect(currentPage, pages) {
             onVisibleBlockChange(pages.getOrNull(currentPage)?.firstOrNull() ?: 0)

@@ -322,7 +322,7 @@ private fun PortraitPageCounter(
                             MaterialTheme.typography.labelLarge.copy(
                                 color = labelColor,
                             ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        cursorBrush = SolidColor(labelColor),
                         singleLine = true,
                         keyboardOptions =
                             KeyboardOptions(
@@ -354,7 +354,7 @@ private fun PortraitPageCounter(
                 Text(
                     text = currentPage.toString(),
                     style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = labelColor,
                     modifier =
                         Modifier.clickable {
                             fieldValue =

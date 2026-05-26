@@ -25,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -289,6 +290,7 @@ fun EditorPanel(
     // готов. Через него хардварные клавиши (общий key-sink в DetailsContent →
     // PanelControls.readerPageDelta) и Android-громкость листают страницы.
     val reflowPageDelta = remember(pdfState) { mutableStateOf<((Int) -> Unit)?>(null) }
+    val reflowNavigateToBlock: MutableState<Int?> = remember(pdfState) { mutableStateOf(null) }
     // Кэш растеризованных страниц для врезок-картинок reflow (одна страница — много фигур).
     val figurePageCache = remember(pdfState) { mutableMapOf<Int, ImageBitmap>() }
     val renderFigurePage: suspend (Int) -> ImageBitmap? = renderFig@{ pageIndex ->
@@ -327,17 +329,8 @@ fun EditorPanel(
             if (reflowDocCacheState.value == null) reflowDocCacheState.value = reading.document
             ReflowPageLocator
                 .blockIndexForPage(reading.document, targetPage)
-                ?.let { reflowListState.scrollToItem(it) }
+                ?.let { reflowNavigateToBlock.value = it }
         }
-    }
-    // В режиме чтения держим текущую страницу (счётчик + позиция при выходе) в
-    // синхроне с прокруткой ридера: первый видимый блок → его исходная страница.
-    LaunchedEffect(pdfState.readingMode, pdfState) {
-        if (!pdfState.readingMode) return@LaunchedEffect
-        snapshotFlow { reflowListState.firstVisibleItemIndex }
-            .mapNotNull { index -> reflowReading?.let { ReflowPageLocator.pageForBlock(it.document, index) } }
-            .distinctUntilChanged()
-            .collect { page -> pdfViewerState.scrollToPage(page, 0) }
     }
 
     // Фоновое извлечение reflow-текста для снаппинга «липкого маркера» в редакторе:
@@ -1173,9 +1166,8 @@ fun EditorPanel(
                     navigateToPage = { page ->
                         if (pdfState.readingMode) {
                             reflowReading?.let { reading ->
-                                ReflowPageLocator.blockIndexForPage(reading.document, page)?.let { blockIndex ->
-                                    coroutineScope.launch { reflowListState.animateScrollToItem(blockIndex) }
-                                }
+                                ReflowPageLocator.blockIndexForPage(reading.document, page)
+                                    ?.let { reflowNavigateToBlock.value = it }
                             }
                         } else {
                             pdfViewerState.scrollToPage(page, 0)
@@ -1516,6 +1508,13 @@ fun EditorPanel(
                             listState = reflowListState,
                             renderPage = renderFigurePage,
                             onPageDeltaReady = { reflowPageDelta.value = it },
+                            navigateToBlock = reflowNavigateToBlock,
+                            onFirstBlockChange = { block ->
+                                reflowReading?.let { reading ->
+                                    ReflowPageLocator.pageForBlock(reading.document, block)
+                                        ?.let { page -> pdfViewerState.scrollToPage(page, 0) }
+                                }
+                            },
                         )
                     }
                 } else {
