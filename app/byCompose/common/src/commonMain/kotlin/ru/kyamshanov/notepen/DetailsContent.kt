@@ -612,8 +612,12 @@ fun DetailsContent(
                             if (st.undoStack.isNotEmpty()) {
                                 val entry = st.undoStack.removeLast()
                                 val current = st.drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
-                                st.redoStack.addLast(PdfDocumentState.UndoEntry(entry.pageIndex, current))
+                                val currentHighlights = st.highlights[entry.pageIndex].orEmpty()
+                                st.redoStack.addLast(
+                                    PdfDocumentState.UndoEntry(entry.pageIndex, current, currentHighlights),
+                                )
                                 st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+                                st.highlights[entry.pageIndex] = entry.highlights
                             }
                         }
                         true
@@ -622,8 +626,11 @@ fun DetailsContent(
                         tabSession.focusedActiveState?.let { st ->
                             if (st.redoStack.isNotEmpty()) {
                                 val entry = st.redoStack.removeLast()
-                                st.undoStack.addLast(PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths))
+                                st.undoStack.addLast(
+                                    PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths, entry.highlights),
+                                )
                                 st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+                                st.highlights[entry.pageIndex] = entry.highlights
                             }
                         }
                         true

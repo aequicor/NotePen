@@ -60,6 +60,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
@@ -78,8 +80,10 @@ import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
 import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
 import ru.kyamshanov.notepen.reflow.ReflowPageLocator
 import ru.kyamshanov.notepen.reflow.ReflowReading
+import ru.kyamshanov.notepen.reflow.StrokeTextMapper
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
+import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.ui.ReflowReader
 import ru.kyamshanov.notepen.reflow.ui.toRenderSettings
@@ -282,6 +286,10 @@ fun EditorPanel(
             .getOrNull()
             ?.also { figurePageCache[pageIndex] = it }
     }
+    // Кэш извлечённого reflow-текста для синхронного снаппинга «липкого маркера» в
+    // редакторе: extract асинхронный, на каждый штрих его дёргать нельзя. Заполняется
+    // фоном при наличии текстового слоя и липком маркере; переиспользуется режимом чтения.
+    val reflowDocCacheState = remember(pdfState) { mutableStateOf<ReflowDocument?>(null) }
     var reflowReading by remember(pdfState) { mutableStateOf<ReflowReading?>(null) }
     LaunchedEffect(pdfState.readingMode, pdfState) {
         if (!pdfState.readingMode) {
@@ -292,12 +300,16 @@ fun EditorPanel(
         // чтения сразу встать на соответствующий абзац.
         val targetPage = pdfViewerState.firstVisiblePageIndex
         val strokesByPage = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
+        val highlightsByPage = pdfState.highlights.toMap()
         val reading =
-            runCatching { reflowReadingUseCase(filePath, strokesByPage) }
+            runCatching {
+                reflowReadingUseCase(filePath, strokesByPage, highlightsByPage, reflowDocCacheState.value)
+            }
                 .onFailure { e -> panelLogger.warn { "Reflow reading build failed: ${e::class.simpleName}" } }
                 .getOrNull()
         reflowReading = reading
         if (reading != null) {
+            if (reflowDocCacheState.value == null) reflowDocCacheState.value = reading.document
             ReflowPageLocator
                 .blockIndexForPage(reading.document, targetPage)
                 ?.let { reflowListState.scrollToItem(it) }
@@ -311,6 +323,18 @@ fun EditorPanel(
             .mapNotNull { index -> reflowReading?.let { ReflowPageLocator.pageForBlock(it.document, index) } }
             .distinctUntilChanged()
             .collect { page -> pdfViewerState.scrollToPage(page, 0) }
+    }
+
+    // Фоновое извлечение reflow-текста для снаппинга «липкого маркера» в редакторе:
+    // запускается, когда у документа есть текстовый слой (readingModeAvailable) и маркер
+    // липкий. Один раз на документ; результат переиспользуется режимом чтения.
+    LaunchedEffect(pdfState, readingModeAvailable, markerSettings.sticky, filePath) {
+        if (reflowDocCacheState.value != null) return@LaunchedEffect
+        if (!readingModeAvailable || !markerSettings.sticky) return@LaunchedEffect
+        reflowDocCacheState.value =
+            runCatching { reflowExtractor.extract(filePath) }
+                .onFailure { e -> panelLogger.warn { "Sticky-marker text extract failed: ${e::class.simpleName}" } }
+                .getOrNull()
     }
 
     val hasAnnotations by remember {
@@ -449,6 +473,7 @@ fun EditorPanel(
                 currentPageOffset = currentPageOffsetPx,
                 favoritePageIndices = favoritePageIndices.toSet(),
                 pageExtents = extents,
+                highlights = pdfState.highlights.toMap(),
             )
         showSnackbar(if (result.isSuccess) message else "Ошибка локального сохранения")
     }
@@ -617,6 +642,9 @@ fun EditorPanel(
             bundle.pageExtents.forEach { (pageIndex, ext) ->
                 drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.setExtent(ext)
             }
+            // Липкие выделения не синхронизируются дельтами — грузим с диска всегда,
+            // независимо от projection-штрихов.
+            bundle.highlights.forEach { (pageIndex, hs) -> pdfState.highlights[pageIndex] = hs }
             favoritePageIndices.clear()
             favoritePageIndices.addAll(bundle.favoritePageIndices)
         }
@@ -648,6 +676,7 @@ fun EditorPanel(
                 currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
                 favoritePageIndices = state.favoritePageIndices.toSet(),
                 pageExtents = extents,
+                highlights = state.highlights.toMap(),
             ).onFailure { e -> panelLogger.warn { "Auto-save failed for ${state.filePath}: ${e::class.simpleName}" } }
     }
     val requestRemoteSaveIfConnected: suspend () -> Unit = {
@@ -709,6 +738,34 @@ fun EditorPanel(
     val eraserOverrideProvider = rememberUpdatedState(eraserOverride)
     val pencilModeProvider = rememberUpdatedState(pencilModeEnabled)
     val syncEngineProvider = rememberUpdatedState(syncEngine)
+    // Снаппинг «липкого маркера»: завершённый маркер-штрих превращаем в выделение по словам
+    // под ним и убираем сам штрих. true — штрих стал выделением; false — обычный путь
+    // (не маркер / не липкий / нет текстового кэша / под штрихом нет текста).
+    val trySnapStroke =
+        remember(pdfState, drawingStates) {
+            fun(
+                pageIndex: Int,
+                path: DrawingPath,
+            ): Boolean {
+                val doc = reflowDocCacheState.value
+                val state = drawingStates[pageIndex]
+                val markerSticky = path.toolType == ToolKind.MARKER && markerSettingsProvider.value.sticky
+                val rects =
+                    if (markerSticky && doc != null && state != null) {
+                        StrokeTextMapper.snapToWords(doc, pageIndex, path)
+                    } else {
+                        emptyList()
+                    }
+                if (rects.isEmpty() || state == null) return false
+                val lastIndex = state.currentPaths.lastIndex
+                if (lastIndex >= 0) state.currentPaths.removeAt(lastIndex)
+                pdfState.highlights[pageIndex] =
+                    pdfState.highlights[pageIndex].orEmpty() +
+                    StickyHighlight(rects = rects, colorArgb = path.colorArgb)
+                state.markHistoryChanged()
+                return true
+            }
+        }
     val drawingController =
         remember(pdfViewerState, drawingStates, magnifierState) {
             MultiPageDrawingController(
@@ -722,8 +779,10 @@ fun EditorPanel(
                 skipPage = { magnifierState.enabled },
                 onGestureStart = { pageIndex, snapshot -> pdfState.pushUndoSnapshot(pageIndex, snapshot) },
                 onStrokeFinished = { pageIndex, path ->
-                    val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
-                    handlePanelStrokeFinished(state, pageIndex, path, syncEngineProvider.value)
+                    if (!trySnapStroke(pageIndex, path)) {
+                        val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
+                        handlePanelStrokeFinished(state, pageIndex, path, syncEngineProvider.value)
+                    }
                 },
                 onEraseFinished = { pageIndex, before, _ ->
                     val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
@@ -1142,6 +1201,7 @@ fun EditorPanel(
                             penSettings = penSettings,
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
+                            highlights = pdfState.highlights[pageIndex].orEmpty(),
                             pdfWidth = pdfWidth,
                             pdfHeight = pdfHeight,
                             pageExtent = extent,
@@ -1231,7 +1291,11 @@ fun EditorPanel(
                 val magOnStrokeFinished: (Int, DrawingPath) -> Unit =
                     remember(drawingStates) {
                         { pageIdx, path ->
-                            drawingStates[pageIdx]?.let { handlePanelStrokeFinished(it, pageIdx, path, syncEngineRef.value) }
+                            if (!trySnapStroke(pageIdx, path)) {
+                                drawingStates[pageIdx]?.let {
+                                    handlePanelStrokeFinished(it, pageIdx, path, syncEngineRef.value)
+                                }
+                            }
                         }
                     }
                 val magOnEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit =

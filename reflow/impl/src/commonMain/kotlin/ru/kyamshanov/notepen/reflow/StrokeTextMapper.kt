@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.reflow
 
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
@@ -67,6 +68,58 @@ public object StrokeTextMapper {
         return block.sourceSpans().filter { it.charStart < anchor.charEnd && it.charEnd > anchor.charStart }
     }
 
+    /**
+     * Снаппинг штриха к словам: какие слово-выровненные области перекрывает
+     * штрих [path], нарисованный на странице [pageIndex]. Это геометрия, которую
+     * «липкий маркер» сохраняет как истину (см. [NormalizedRect]).
+     *
+     * Берёт перекрытые [SourceSpan]-ы (как [anchorsFor]) и сливает их по строкам в
+     * непрерывные полосы (по одной на строку текста), чтобы выделение легло ровно.
+     *
+     * @return нормализованные области выделения; пусто, если штрих ничего не задел
+     */
+    public fun snapToWords(
+        document: ReflowDocument,
+        pageIndex: Int,
+        path: DrawingPath,
+    ): List<NormalizedRect> {
+        val box = boundingBox(path.points) ?: return emptyList()
+        val covered =
+            document.blocks
+                .flatMap { it.sourceSpans() }
+                .filter { it.pageIndex == pageIndex && intersects(box, it.bounds) }
+                .map { it.bounds }
+        return mergeIntoLines(covered).map { NormalizedRect(it.left, it.top, it.right, it.bottom) }
+    }
+
+    /**
+     * Обратное сопоставление для сохранённого выделения: какие диапазоны текста
+     * перекрывают области [rects] на странице [pageIndex]. Пересчитывается на лету
+     * при входе в режим чтения — поэтому всегда согласовано с текущей экстракцией
+     * (хранимого индекса блока, который мог бы «уехать», нет).
+     *
+     * @return перекрытые диапазоны текста, упорядоченные по блоку и началу диапазона
+     */
+    public fun anchorsForRects(
+        document: ReflowDocument,
+        pageIndex: Int,
+        rects: List<NormalizedRect>,
+    ): List<TextAnchor> {
+        if (rects.isEmpty()) return emptyList()
+        val boxes = rects.map { ReflowRect(it.left, it.top, it.right, it.bottom) }
+        val anchors = mutableListOf<TextAnchor>()
+        document.blocks.forEachIndexed { blockIndex, block ->
+            val covered =
+                block.sourceSpans()
+                    .filter { span -> span.pageIndex == pageIndex && boxes.any { intersects(it, span.bounds) } }
+                    .map { it.charStart to it.charEnd }
+            mergeRanges(covered).forEach { (start, end) ->
+                anchors += TextAnchor(blockIndex, start, end)
+            }
+        }
+        return anchors
+    }
+
     private fun ReflowBlock.sourceSpans(): List<SourceSpan> =
         when (this) {
             is ReflowBlock.Paragraph -> source
@@ -118,5 +171,39 @@ public object StrokeTextMapper {
         }
         merged += currentStart to currentEnd
         return merged
+    }
+
+    /**
+     * Сливает области слов в полосы по строкам: области, чьи вертикальные диапазоны
+     * пересекаются, считаются одной строкой и объединяются в один прямоугольник
+     * (от левого края первого слова до правого края последнего). Даёт ровную полосу
+     * на строку вместо набора отдельных слов-прямоугольников.
+     */
+    private fun mergeIntoLines(rects: List<ReflowRect>): List<ReflowRect> {
+        if (rects.isEmpty()) return emptyList()
+        val sorted = rects.sortedWith(compareBy({ it.top }, { it.left }))
+        val lines = mutableListOf<ReflowRect>()
+        var left = sorted.first().left
+        var top = sorted.first().top
+        var right = sorted.first().right
+        var bottom = sorted.first().bottom
+        for (i in 1 until sorted.size) {
+            val r = sorted[i]
+            val sameLine = r.top < bottom && r.bottom > top
+            if (sameLine) {
+                if (r.left < left) left = r.left
+                if (r.top < top) top = r.top
+                if (r.right > right) right = r.right
+                if (r.bottom > bottom) bottom = r.bottom
+            } else {
+                lines += ReflowRect(left, top, right, bottom)
+                left = r.left
+                top = r.top
+                right = r.right
+                bottom = r.bottom
+            }
+        }
+        lines += ReflowRect(left, top, right, bottom)
+        return lines
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import ru.kyamshanov.notepen.PdfDrawingState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.book.TocEntry
 import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -74,6 +75,11 @@ class PdfDocumentState internal constructor(
      * state. Shared so the second tab does not redundantly reload from disk.
      */
     sharedAnnotationsLoaded: MutableState<Boolean> = mutableStateOf(false),
+    /**
+     * Sticky-marker highlights keyed by page index. Shared across same-file tabs
+     * like [sharedDrawingStates] so a highlight made in one tab shows in the other.
+     */
+    sharedHighlights: SnapshotStateMap<Int, List<StickyHighlight>> = mutableStateMapOf(),
 ) {
     private val pdfDocumentState = mutableStateOf<PdfDocument?>(null)
 
@@ -106,6 +112,9 @@ class PdfDocumentState internal constructor(
 
     /** Page indices marked as favourites; persisted to the annotation bundle. */
     val favoritePageIndices: SnapshotStateList<Int> = sharedFavoritePageIndices
+
+    /** Sticky-marker highlights per page index; persisted to the annotation bundle. */
+    val highlights: SnapshotStateMap<Int, List<StickyHighlight>> = sharedHighlights
 
     /**
      * Undo stack: each entry is a snapshot of strokes on a specific page
@@ -175,14 +184,19 @@ class PdfDocumentState internal constructor(
         pageIndex: Int,
         snapshot: List<DrawingPath>,
     ) {
-        undoStack.addLast(UndoEntry(pageIndex, snapshot))
+        undoStack.addLast(UndoEntry(pageIndex, snapshot, highlights[pageIndex].orEmpty()))
         redoStack.clear()
     }
 
-    /** Snapshot of one page's strokes that can be re-applied via [PdfDrawingState.restoreSnapshot]. */
+    /**
+     * Snapshot of one page's strokes (re-applied via [PdfDrawingState.restoreSnapshot])
+     * plus its sticky-marker [highlights] — captured together so undo/redo of a
+     * sticky-marker swipe (stroke removed, highlight added) reverts as one step.
+     */
     data class UndoEntry(
         val pageIndex: Int,
         val paths: List<DrawingPath>,
+        val highlights: List<StickyHighlight> = emptyList(),
     )
 
     /**
@@ -232,6 +246,7 @@ class PdfDocumentState internal constructor(
                 sharedUndoStack = from.undoStack,
                 sharedRedoStack = from.redoStack,
                 sharedAnnotationsLoaded = from.annotationsLoadedState,
+                sharedHighlights = from.highlights,
             ).also { it.skipPageRestore = true }
     }
 }

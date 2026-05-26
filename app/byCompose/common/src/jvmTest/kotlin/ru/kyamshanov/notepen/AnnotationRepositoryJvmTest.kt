@@ -8,7 +8,10 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
+import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -325,6 +328,67 @@ class AnnotationRepositoryJvmTest {
             repo.save(pdfPath, emptyMap(), scale = 100, currentPage = 1)
 
             assertEquals(true, repo.loadViewState(pdfPath).getOrThrow()?.readingMode)
+        }
+
+    @Test
+    fun save_roundTrip_stickyHighlights() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_hl_rt")
+            val pdfPath = dir.resolve("doc.pdf").toString()
+            val highlights =
+                mapOf(
+                    1 to
+                        listOf(
+                            StickyHighlight(
+                                rects = listOf(NormalizedRect(0.1f, 0.2f, 0.5f, 0.24f)),
+                                colorArgb = 0x80FFEB3BL,
+                            ),
+                        ),
+                )
+
+            repo.save(pdfPath, emptyMap(), scale = 100, highlights = highlights)
+            val bundle = repo.load(pdfPath).getOrThrow()
+
+            val hl = bundle.highlights[1]?.single()
+            assertEquals(0x80FFEB3BL, hl?.colorArgb, "highlight ARGB Long round-trip")
+            assertEquals(NormalizedRect(0.1f, 0.2f, 0.5f, 0.24f), hl?.rects?.single())
+        }
+
+    @Test
+    fun load_legacyJsonWithoutHighlights_returnsEmptyMap() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_hl_legacy")
+            val pdfPath = dir.resolve("legacy.pdf").toString()
+            java.io.File("$pdfPath.notepen.json").writeText("""{"pages":{},"scale":100}""")
+
+            val bundle = repo.load(pdfPath).getOrThrow()
+
+            assertTrue(bundle.highlights.isEmpty(), "missing highlights key must yield empty map")
+        }
+
+    @Test
+    fun save_defaultMarker_persistsStickyTrue() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_marker_sticky")
+            val pdfPath = dir.resolve("doc.pdf").toString()
+            repo.save(pdfPath, emptyMap(), scale = 100, marker = MarkerSettings())
+
+            val bundle = repo.load(pdfPath).getOrThrow()
+
+            assertTrue(bundle.marker.sticky, "default marker must persist sticky = true")
+        }
+
+    @Test
+    fun load_legacyMarkerWithoutSticky_defaultsTrue() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_marker_legacy")
+            val pdfPath = dir.resolve("legacy.pdf").toString()
+            java.io.File("$pdfPath.notepen.json")
+                .writeText("""{"pages":{},"scale":100,"marker":{"colorArgb":255,"strokeWidth":0.025}}""")
+
+            val bundle = repo.load(pdfPath).getOrThrow()
+
+            assertTrue(bundle.marker.sticky, "legacy marker without sticky field must default to true")
         }
 
     // TC-19 surrogate: JSON produced by save/load round-trip is valid (same schema across platforms)
