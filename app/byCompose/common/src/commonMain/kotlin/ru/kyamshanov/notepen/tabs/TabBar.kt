@@ -132,10 +132,14 @@ fun TabBar(
                 // The Box anchors the dropdown to the button (mirrors TabChip's menu).
                 var sessionsExpanded by remember { mutableStateOf(false) }
                 val sessionsBtnModifier = Modifier.size(TAB_BAR_HEIGHT).padding(2.dp)
-                Box {
+                // Mark the whole anchoring Box as a non-drag (interactive) zone for the
+                // custom title bar. Marking only the inner IconButton left the OS treating
+                // presses here as a window-drag, so the click resolved only after the
+                // pointer moved off — register the stable outer Box region instead.
+                Box(modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier) {
                     IconButton(
                         onClick = { sessionsExpanded = true },
-                        modifier = titleBarInteraction?.interactive(sessionsBtnModifier) ?: sessionsBtnModifier,
+                        modifier = sessionsBtnModifier,
                     ) {
                         Icon(
                             imageVector = Icons.Default.Layers,

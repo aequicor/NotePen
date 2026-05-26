@@ -143,7 +143,12 @@ private fun RestoreLastSessionButton(
     }
 }
 
-/** Name field + button that saves the current workspace as a named session. */
+/**
+ * Saving UI for the current workspace. The name field is revealed **lazily** (only
+ * after «Сохранить текущую…» is tapped): composing an `OutlinedTextField` is costly
+ * on Compose Desktop and a [DropdownMenu] re-composes its content on every open, so
+ * keeping the field out of the default content makes the menu open instantly.
+ */
 @Composable
 private fun SaveSessionSection(
     sessionRepository: SessionRepository,
@@ -151,36 +156,48 @@ private fun SaveSessionSection(
     onSaved: () -> Unit,
 ) {
     val coroutineScope = rememberCoroutineScope()
-    var newSessionName by remember { mutableStateOf("") }
-    OutlinedTextField(
-        value = newSessionName,
-        onValueChange = { newSessionName = it },
-        singleLine = true,
-        label = { Text("Название сессии") },
-        modifier = Modifier.fillMaxWidth(),
-    )
-    Spacer(Modifier.height(8.dp))
-    Button(
-        onClick = {
-            val name = newSessionName.trim()
-            if (name.isEmpty()) return@Button
-            coroutineScope.launch {
-                sessionRepository.saveNamed(
-                    NamedSession(
-                        id = generateUuid(),
-                        name = name,
-                        savedAtEpochMs = currentTimeMillis(),
-                        data = onCaptureCurrent(),
-                    ),
-                )
-                newSessionName = ""
-                onSaved()
+    var entering by remember { mutableStateOf(false) }
+    if (!entering) {
+        Button(onClick = { entering = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Сохранить текущую…")
+        }
+    } else {
+        var newSessionName by remember { mutableStateOf("") }
+        OutlinedTextField(
+            value = newSessionName,
+            onValueChange = { newSessionName = it },
+            singleLine = true,
+            label = { Text("Название сессии") },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Button(
+                onClick = {
+                    val name = newSessionName.trim()
+                    if (name.isEmpty()) return@Button
+                    coroutineScope.launch {
+                        sessionRepository.saveNamed(
+                            NamedSession(
+                                id = generateUuid(),
+                                name = name,
+                                savedAtEpochMs = currentTimeMillis(),
+                                data = onCaptureCurrent(),
+                            ),
+                        )
+                        newSessionName = ""
+                        entering = false
+                        onSaved()
+                    }
+                },
+                enabled = newSessionName.isNotBlank(),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("Сохранить")
             }
-        },
-        enabled = newSessionName.isNotBlank(),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Text("Сохранить текущую")
+            Spacer(Modifier.width(8.dp))
+            TextButton(onClick = { entering = false }) { Text("Отмена") }
+        }
     }
 }
 
