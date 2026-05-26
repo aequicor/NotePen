@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -93,6 +94,13 @@ fun TabBar(
      * only one panel is open, hiding the menu item.
      */
     onClosePanel: (() -> Unit)?,
+    /**
+     * Content of the dropdown anchored to the left-edge «Сессии» button (save /
+     * restore the workspace). Invoked with the menu's `expanded` flag and an
+     * `onDismiss` to close it; the bar owns the open/close state and toggles it
+     * on the button. `null` hides the button entirely.
+     */
+    sessionsMenu: (@Composable (expanded: Boolean, onDismiss: () -> Unit) -> Unit)? = null,
     modifier: Modifier = Modifier,
     /**
      * Glass tint of the strip; `null` keeps the default `surfaceContainerLow`.
@@ -119,6 +127,29 @@ fun TabBar(
         fillAlpha = 0.35f,
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = startInset, end = endInset)) {
+            sessionsMenu?.let { menu ->
+                // Yandex-style: a sessions button anchored at the left edge of the strip.
+                // The Box anchors the dropdown to the button (mirrors TabChip's menu).
+                var sessionsExpanded by remember { mutableStateOf(false) }
+                val sessionsBtnModifier = Modifier.size(TAB_BAR_HEIGHT).padding(2.dp)
+                // Mark the whole anchoring Box as a non-drag (interactive) zone for the
+                // custom title bar. Marking only the inner IconButton left the OS treating
+                // presses here as a window-drag, so the click resolved only after the
+                // pointer moved off — register the stable outer Box region instead.
+                Box(modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier) {
+                    IconButton(
+                        onClick = { sessionsExpanded = true },
+                        modifier = sessionsBtnModifier,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Layers,
+                            contentDescription = "Сессии",
+                            tint = contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    menu(sessionsExpanded) { sessionsExpanded = false }
+                }
+            }
             BoxWithConstraints(
                 modifier =
                     Modifier

@@ -98,6 +98,23 @@ public enum class ProgressFormat {
 }
 
 /**
+ * Стиль перехода между страницами в страничном режиме ([ReaderSettings.paged]).
+ * В скролл-режиме не применяется. При системном «уменьшить движение» слой
+ * отображения форсит [NONE] независимо от выбора.
+ */
+@Serializable
+public enum class PageTransition {
+    /** Книжный горизонтальный слайд: вперёд страница уезжает влево. */
+    SLIDE,
+
+    /** Мягкое перекрёстное затухание без движения. */
+    FADE,
+
+    /** Без анимации: мгновенная смена страницы. */
+    NONE,
+}
+
+/**
  * Полный набор пользовательских настроек ридера — сериализуемый, на примитивах
  * (без Compose-типов), чтобы его можно было персистить и переносить между
  * платформами. Слой отображения (`reflow/impl`) маппит это в свою Compose-модель.
@@ -117,7 +134,10 @@ public enum class ProgressFormat {
  * @property backgroundWarmth теплота фона `0..1` (0 — как в теме, 1 — теплее всего)
  * @property brightness внутренняя яркость `[MIN_BRIGHTNESS]..1` (1 — без затемнения)
  * @property sunsetWarm плавно теплеть после захода солнца (по локальному времени)
- * @property paged страничный режим вместо скролла
+ * @property paged страничный режим (по умолчанию) вместо непрерывного скролла
+ * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право); при `false`
+ *   тап в любом месте лишь показывает/прячет панель — защита от случайных перелистываний
  * @property autoHideSec автоскрытие панелей через N секунд (0 — не скрывать)
  * @property progress формат индикатора прогресса
  * @property readingRuler подсветка текущей строки (reading ruler)
@@ -139,7 +159,9 @@ public data class ReaderSettings(
     public val backgroundWarmth: Float = 0f,
     public val brightness: Float = 1f,
     public val sunsetWarm: Boolean = false,
-    public val paged: Boolean = false,
+    public val paged: Boolean = true,
+    public val pageTransition: PageTransition = PageTransition.SLIDE,
+    public val tapToTurn: Boolean = true,
     public val autoHideSec: Int = 0,
     public val progress: ProgressFormat = ProgressFormat.PERCENT,
     public val readingRuler: Boolean = false,

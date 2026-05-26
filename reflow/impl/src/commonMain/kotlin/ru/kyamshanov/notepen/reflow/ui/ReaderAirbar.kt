@@ -83,6 +83,7 @@ import ru.kyamshanov.notepen.WHEEL_EDGE_BAND_WIDE
 import ru.kyamshanov.notepen.WheelScrollButtons
 import ru.kyamshanov.notepen.fadingEdges
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
+import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
 import ru.kyamshanov.notepen.reflow.api.ReaderFontFamily
@@ -737,6 +738,20 @@ private fun TuneSheet(
                 textColor = textColor,
                 onSelect = { onChange(settings.copy(paged = it)) },
             )
+            LabeledChoice(
+                label = "Переход",
+                options = PageTransition.entries,
+                selected = settings.pageTransition,
+                labelOf = ::transitionName,
+                textColor = textColor,
+                onSelect = { onChange(settings.copy(pageTransition = it)) },
+            )
+            ToggleRow(
+                label = "Тап для листания",
+                checked = settings.tapToTurn,
+                textColor = textColor,
+                onChange = { onChange(settings.copy(tapToTurn = it)) },
+            )
             LabeledSlider(
                 label = "Автоскрытие панели",
                 value = settings.autoHideSec.toFloat(),
@@ -1042,6 +1057,13 @@ private fun progressName(format: ProgressFormat): String =
         ProgressFormat.PERCENT -> "Процент"
         ProgressFormat.CHAPTER -> "Глава"
         ProgressFormat.TIME_LEFT -> "Время"
+    }
+
+private fun transitionName(transition: PageTransition): String =
+    when (transition) {
+        PageTransition.SLIDE -> "Слайд"
+        PageTransition.FADE -> "Затухание"
+        PageTransition.NONE -> "Нет"
     }
 
 private fun percentText(value: Float): String = "${(value * 100).roundToInt()}%"

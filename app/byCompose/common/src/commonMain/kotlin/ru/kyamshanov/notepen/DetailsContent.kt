@@ -62,6 +62,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -91,6 +92,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -111,6 +113,10 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingPanel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
+import ru.kyamshanov.notepen.session.SessionData
+import ru.kyamshanov.notepen.session.captureSession
+import ru.kyamshanov.notepen.session.createSessionRepository
+import ru.kyamshanov.notepen.session.restoreSession
 import ru.kyamshanov.notepen.shortcuts.ShortcutsSettingsDialog
 import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
@@ -145,8 +151,11 @@ private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
 private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
 
-/** Tool state snapshot saved per panel when it loses focus. */
-private data class PanelToolSnapshot(
+/** Debounce for the crash-survival session autosave; collapses a scroll storm to one write. */
+private const val SESSION_AUTOSAVE_DEBOUNCE_MS = 750L
+
+/** Tool state snapshot saved per document (keyed by file path) when it loses focus. */
+private data class ToolStateSnapshot(
     val toolMode: ToolMode,
     val penSettings: PenSettings,
     val markerSettings: MarkerSettings,
@@ -200,6 +209,11 @@ fun DetailsContent(
             }
         }
 
+    // Declared here (ahead of the layout-restore effect) so that effect can consume
+    // a pending restore stashed by the library's "Сессии" menu before applying the
+    // in-process split. The autosave/SessionsMenu wiring below reuse the same instance.
+    val sessionRepository = remember { createSessionRepository() }
+
     var savedLayout by rememberSaveable { mutableStateOf("") }
     val tabSession =
         rememberTabSession(
@@ -212,7 +226,17 @@ fun DetailsContent(
     // editor was torn down — e.g. while the user picked a file in the library.
     // Then keep the snapshot in sync with every layout change.
     LaunchedEffect(tabSession) {
-        WorkspaceSnapshot.decode(savedLayout)?.let { tabSession.restore(it) }
+        // A pending restore is set only by the library's "Сессии" menu (explicit
+        // user action). When present it wins over the in-process split and brings
+        // the whole session back, including per-tab view positions; a normal open
+        // has nothing pending and behaves exactly as before.
+        val pending = sessionRepository.consumePendingRestore()
+        if (pending != null) {
+            tabSession.restoreSession(pending)
+            savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
+        } else {
+            WorkspaceSnapshot.decode(savedLayout)?.let { tabSession.restore(it) }
+        }
         snapshotFlow { tabSession.layout }
             .collect { l -> savedLayout = WorkspaceSnapshot.encode(l.toSnapshot()) }
     }
@@ -244,33 +268,45 @@ fun DetailsContent(
     var pencilModeEnabled by remember { mutableStateOf(false) }
     var pencilModeManuallyTouched by remember { mutableStateOf(false) }
 
+    // Set true right before a programmatic tool restore (the per-document focus
+    // swap below) so the preset effect doesn't overwrite the document's saved
+    // settings with a preset on the synthetic toolMode change.
+    var suppressNextPresetApply by remember { mutableStateOf(false) }
+
     // Настройки ридера — глобальные (на все документы и панели); видимость самого
     // airbar — per-tab. Персист между запусками — через ReaderSettingsRepository (ниже).
     var readerStored by remember { mutableStateOf(StoredReaderSettings()) }
 
-    // Per-panel tool state: save on lose-focus, restore on gain-focus.
-    val panelToolStates = remember { mutableStateMapOf<PanelId, PanelToolSnapshot>() }
+    // Per-document tool state: save on lose-focus, restore on gain-focus. Keyed by
+    // file path, so switching tabs (not just panels) swaps the active tool and two
+    // tabs of the same file share it. A restore suppresses the preset effect below
+    // so the document's saved settings aren't overwritten by a preset.
+    val documentToolStates = remember { mutableStateMapOf<String, ToolStateSnapshot>() }
     LaunchedEffect(tabSession) {
-        var previousPanelId = tabSession.layout.focusedPanelId
-        snapshotFlow { tabSession.layout.focusedPanelId }
+        var previousFilePath = tabSession.focusedActiveState?.filePath
+        snapshotFlow { tabSession.focusedActiveState?.filePath }
             .distinctUntilChanged()
             .drop(1)
-            .collect { newPanelId ->
-                panelToolStates[previousPanelId] =
-                    PanelToolSnapshot(
-                        toolMode = toolMode,
-                        penSettings = penSettings,
-                        markerSettings = markerSettings,
-                        eraserSettings = eraserSettings,
-                        markerWidthPinned = markerWidthPinned,
-                    )
-                previousPanelId = newPanelId
-                panelToolStates[newPanelId]?.let { snapshot ->
-                    toolMode = snapshot.toolMode
-                    penSettings = snapshot.penSettings
-                    markerSettings = snapshot.markerSettings
-                    eraserSettings = snapshot.eraserSettings
-                    markerWidthPinned = snapshot.markerWidthPinned
+            .collect { newFilePath ->
+                previousFilePath?.let { prev ->
+                    documentToolStates[prev] =
+                        ToolStateSnapshot(
+                            toolMode = toolMode,
+                            penSettings = penSettings,
+                            markerSettings = markerSettings,
+                            eraserSettings = eraserSettings,
+                            markerWidthPinned = markerWidthPinned,
+                        )
+                }
+                previousFilePath = newFilePath
+                val restored = newFilePath?.let { documentToolStates[it] }
+                if (restored != null) {
+                    if (restored.toolMode != toolMode) suppressNextPresetApply = true
+                    toolMode = restored.toolMode
+                    penSettings = restored.penSettings
+                    markerSettings = restored.markerSettings
+                    eraserSettings = restored.eraserSettings
+                    markerWidthPinned = restored.markerWidthPinned
                 }
             }
     }
@@ -319,6 +355,24 @@ fun DetailsContent(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
+
+    // The workspace as it was when this editor session began — including an
+    // autosave that survived a crash. Loaded once, before the autosave below
+    // starts overwriting it, so "restore last" recovers the pre-session state
+    // rather than the workspace just reopened.
+    val lastSession by produceState<SessionData?>(initialValue = null, sessionRepository) {
+        value = sessionRepository.loadAutosave()
+    }
+
+    // Crash-survival autosave: mirror the live workspace (layout + per-tab view
+    // positions) to disk, debounced so a scroll storm collapses to a single write.
+    // Never auto-loaded on launch — recovered only on explicit user action.
+    LaunchedEffect(tabSession) {
+        snapshotFlow { tabSession.captureSession() }
+            .distinctUntilChanged()
+            .debounce(SESSION_AUTOSAVE_DEBOUNCE_MS)
+            .collect { sessionRepository.saveAutosave(it) }
+    }
     val pdfExporter = remember { createPdfExporter() }
     val reflowExtractor = remember { createPdfReflowExtractor() }
 
@@ -357,6 +411,12 @@ fun DetailsContent(
     // When a tool becomes active, restore the last chosen preset for it (or the first
     // builtin preset if none has been chosen yet in this session).
     LaunchedEffect(toolMode) {
+        // A per-document restore set the tool programmatically — keep the document's
+        // saved settings instead of snapping to the tool's last preset.
+        if (suppressNextPresetApply) {
+            suppressNextPresetApply = false
+            return@LaunchedEffect
+        }
         when (toolMode) {
             ToolMode.PEN -> {
                 val all = BuiltinToolPresets.pen + toolPresets.pen
@@ -672,6 +732,20 @@ fun DetailsContent(
                 EditorPanel(
                     panel = panel,
                     tabSession = tabSession,
+                    sessionsMenu = { expanded, onDismiss ->
+                        SessionsMenu(
+                            expanded = expanded,
+                            onDismiss = onDismiss,
+                            sessionRepository = sessionRepository,
+                            lastSession = lastSession,
+                            onCaptureCurrent = { tabSession.captureSession() },
+                            onRestore = { data ->
+                                tabSession.restoreSession(data)
+                                // Keep the in-process layout snapshot consistent with the restored split.
+                                savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
+                            },
+                        )
+                    },
                     isFocused = panel.id == layout.focusedPanelId,
                     loader = loader,
                     renderer = renderer,
@@ -707,14 +781,19 @@ fun DetailsContent(
                         // A restored width is the user's own choice — don't override it.
                         markerWidthPinned = true
                         eraserSettings = eraser
-                        panelToolStates[panel.id] =
-                            PanelToolSnapshot(
-                                toolMode = toolMode,
-                                penSettings = pen,
-                                markerSettings = marker,
-                                eraserSettings = eraser,
-                                markerWidthPinned = true,
-                            )
+                        // Seed this document's tool checkpoint with its just-loaded
+                        // settings (keyed by file path), so switching away and back
+                        // restores them.
+                        panel.tabs.activeTab?.filePath?.let { filePath ->
+                            documentToolStates[filePath] =
+                                ToolStateSnapshot(
+                                    toolMode = toolMode,
+                                    penSettings = pen,
+                                    markerSettings = marker,
+                                    eraserSettings = eraser,
+                                    markerWidthPinned = true,
+                                )
+                        }
                     },
                     onAddTab = { onAddTabToPanel(panel.id) },
                     onAllTabsClosed = onBackWithSave,
@@ -1464,18 +1543,18 @@ private fun focusedPanelHeightPx(
  * Сопоставляет нажатую клавишу [key] перелистыванию ридера: `+1` — следующая
  * страница, `-1` — предыдущая, `null` — клавиша не про листание.
  *
- * Раскладка (как в десктопных читалках): влево/PageDown/Space → дальше;
- * вправо/PageUp/Shift+Space → назад. Клавиши громкости (Android) тоже учитываем —
- * вниз листает вперёд, вверх назад, — на случай если событие дойдёт сюда мимо
- * оконного перехвата.
+ * Раскладка под горизонтальное листание: вправо/PageDown/Space → вперёд;
+ * влево/PageUp/Shift+Space → назад (согласовано с тап-зонами и свайпом). Клавиши
+ * громкости (Android) тоже учитываем — вниз листает вперёд, вверх назад, — на
+ * случай если событие дойдёт сюда мимо оконного перехвата.
  */
 private fun readerPageTurnDelta(
     key: Key,
     shiftHeld: Boolean,
 ): Int? =
     when (key) {
-        Key.DirectionLeft, Key.PageDown, Key.VolumeDown -> 1
-        Key.DirectionRight, Key.PageUp, Key.VolumeUp -> -1
+        Key.DirectionRight, Key.PageDown, Key.VolumeDown -> 1
+        Key.DirectionLeft, Key.PageUp, Key.VolumeUp -> -1
         Key.Spacebar -> if (shiftHeld) -1 else 1
         else -> null
     }
