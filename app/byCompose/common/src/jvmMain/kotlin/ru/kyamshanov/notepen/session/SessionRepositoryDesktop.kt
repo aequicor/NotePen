@@ -15,9 +15,10 @@ import java.nio.file.StandardCopyOption
 /**
  * Desktop (JVM) implementation of [SessionRepository].
  *
- * Stores data under a `sessions/` subfolder of [appDataDir] in two files:
+ * Stores data under a `sessions/` subfolder of [appDataDir] in three files:
  * - `sessions/_autosave.json` — the single autosaved [SessionData] (absent when none).
  * - `sessions/named.json` — the `List<NamedSession>`.
+ * - `sessions/pending_restore.json` — the one-shot pending restore (absent when none).
  *
  * Concurrency/atomicity mirror
  * [ru.kyamshanov.notepen.ToolPresetsRepositoryDesktop] and
@@ -39,6 +40,7 @@ class SessionRepositoryDesktop(
     private val sessionsDir get() = File(appDataDir, "sessions")
     private val autosaveFile get() = File(sessionsDir, "_autosave.json")
     private val namedFile get() = File(sessionsDir, "named.json")
+    private val pendingRestoreFile get() = File(sessionsDir, "pending_restore.json")
     private val lockFile get() = File(sessionsDir, ".sessions.lock")
     private val inProcessMutex = Mutex()
 
@@ -78,6 +80,26 @@ class SessionRepositoryDesktop(
             writeNamedUnsafe(readNamedUnsafe().filterNot { it.id == id })
         }
     }
+
+    override suspend fun savePendingRestore(data: SessionData) {
+        withLockedIo {
+            writeAtomic(pendingRestoreFile, json.encodeToString(SessionData.serializer(), data))
+        }
+    }
+
+    override suspend fun consumePendingRestore(): SessionData? =
+        withLockedIo {
+            // Read then clear under the same lock so the slot is consumed atomically.
+            val text = pendingRestoreFile.takeIf { it.exists() }?.readText()
+            pendingRestoreFile.delete()
+            text?.let {
+                try {
+                    json.decodeFromString(SessionData.serializer(), it)
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
 
     /**
      * Two-level lock: [inProcessMutex] then [ioDispatcher] then a cross-process

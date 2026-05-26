@@ -175,7 +175,21 @@ class MainScreenViewModel(
                 _state.update { it.copy(successEvent = null) }
             is MainScreenIntent.OpenPeer -> openPeer(intent.peerId, intent.displayName)
             is MainScreenIntent.OpenFolder -> openFolder(intent.folderId, intent.folderName)
+            is MainScreenIntent.RestoreSession -> restoreSession(intent.seedUri)
         }
+    }
+
+    /**
+     * Открывает редактор на «первичном» документе восстанавливаемой сессии.
+     * Сессия уже сохранена вызывающим как pending-restore — редактор подхватит её
+     * при монтировании. Навигация идёт тем же путём, что и открытие недавнего
+     * файла: целью становится [NavigationTarget.Editor], которую [onNavigationHandled]
+     * сбросит после перехода.
+     */
+    private fun restoreSession(seedUri: String) {
+        if (isNavigating) return
+        isNavigating = true
+        _state.update { it.copy(navigationTarget = NavigationTarget.Editor(seedUri, 0)) }
     }
 
     private fun openPeer(

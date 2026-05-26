@@ -209,6 +209,11 @@ fun DetailsContent(
             }
         }
 
+    // Declared here (ahead of the layout-restore effect) so that effect can consume
+    // a pending restore stashed by the library's "Сессии" menu before applying the
+    // in-process split. The autosave/SessionsMenu wiring below reuse the same instance.
+    val sessionRepository = remember { createSessionRepository() }
+
     var savedLayout by rememberSaveable { mutableStateOf("") }
     val tabSession =
         rememberTabSession(
@@ -221,7 +226,17 @@ fun DetailsContent(
     // editor was torn down — e.g. while the user picked a file in the library.
     // Then keep the snapshot in sync with every layout change.
     LaunchedEffect(tabSession) {
-        WorkspaceSnapshot.decode(savedLayout)?.let { tabSession.restore(it) }
+        // A pending restore is set only by the library's "Сессии" menu (explicit
+        // user action). When present it wins over the in-process split and brings
+        // the whole session back, including per-tab view positions; a normal open
+        // has nothing pending and behaves exactly as before.
+        val pending = sessionRepository.consumePendingRestore()
+        if (pending != null) {
+            tabSession.restoreSession(pending)
+            savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
+        } else {
+            WorkspaceSnapshot.decode(savedLayout)?.let { tabSession.restore(it) }
+        }
         snapshotFlow { tabSession.layout }
             .collect { l -> savedLayout = WorkspaceSnapshot.encode(l.toSnapshot()) }
     }
@@ -340,7 +355,6 @@ fun DetailsContent(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
-    val sessionRepository = remember { createSessionRepository() }
 
     // The workspace as it was when this editor session began — including an
     // autosave that survived a crash. Loaded once, before the autosave below

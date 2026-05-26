@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -41,7 +42,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,6 +55,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.SessionsMenu
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
@@ -71,6 +76,9 @@ import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.qrconnect.SyncPairingButton
+import ru.kyamshanov.notepen.session.SessionData
+import ru.kyamshanov.notepen.session.createSessionRepository
+import ru.kyamshanov.notepen.session.seedFilePath
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
@@ -112,6 +120,16 @@ fun MainContent(
     val windowWidth = LocalWindowInfo.current.containerSize.width
     val isWide = with(LocalDensity.current) { windowWidth.toDp() >= WIDE_SCREEN_THRESHOLD }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Sessions menu (restore-only on the library). The repository is owned here so
+    // the menu can read the named list and save the pending restore; lastSession is
+    // the crash-survivor autosave for the "restore last" button.
+    val coroutineScope = rememberCoroutineScope()
+    val sessionRepository = remember { createSessionRepository() }
+    val lastSession by produceState<SessionData?>(initialValue = null, sessionRepository) {
+        value = sessionRepository.loadAutosave()
+    }
+    var sessionsExpanded by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) { onIntent(MainScreenIntent.ScreenVisible) }
 
@@ -189,6 +207,33 @@ fun MainContent(
                         modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
                     ) {
                         Icon(Icons.Default.CreateNewFolder, contentDescription = "Новая папка")
+                    }
+                    Box {
+                        IconButton(
+                            onClick = { sessionsExpanded = true },
+                            modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                        ) {
+                            Icon(Icons.Default.Layers, contentDescription = "Сессии")
+                        }
+                        // Restore-only: the library has no live workspace, so onCaptureCurrent is null
+                        // (the save section is hidden). Picking a session stashes it as a pending
+                        // restore, then opens the editor on its primary document, which consumes it.
+                        SessionsMenu(
+                            expanded = sessionsExpanded,
+                            sessionRepository = sessionRepository,
+                            lastSession = lastSession,
+                            onCaptureCurrent = null,
+                            onRestore = { data ->
+                                sessionsExpanded = false
+                                coroutineScope.launch {
+                                    sessionRepository.savePendingRestore(data)
+                                    data.seedFilePath()?.let {
+                                        onIntent(MainScreenIntent.RestoreSession(it))
+                                    }
+                                }
+                            },
+                            onDismiss = { sessionsExpanded = false },
+                        )
                     }
                     SyncPairingButton(
                         hostQrViewModel = hostQrViewModel,

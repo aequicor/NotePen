@@ -47,6 +47,12 @@ import ru.kyamshanov.notepen.session.SessionRepository
  * состояния и его восстановление делегируются вызывающему через [onCaptureCurrent]
  * и [onRestore], которые работают с активной `TabSession`.
  *
+ * **Режим «только восстановление».** Когда [onCaptureCurrent] равен `null` (как на
+ * библиотеке/главном экране, где нет открытого рабочего стола, который можно
+ * сохранить), секция «Сохранить текущую…» и окружающий её разделитель не
+ * отрисовываются — остаются только «восстановить последнюю» и список именованных
+ * сессий.
+ *
  * В отличие от модального диалога, [DropdownMenu] всплывает поверх редактора без
  * отдельного окна (на desktop модальный `Dialog` поднимал нативное окно и
  * подтормаживал на открытии) и закрывается тапом мимо — отдельной кнопки
@@ -61,7 +67,8 @@ import ru.kyamshanov.notepen.session.SessionRepository
  *   файл; `null`, если автосейва не было. С ним работает кнопка «восстановить
  *   последнюю».
  * @param onCaptureCurrent снимок текущего рабочего стола для сохранения новой
- *   именованной сессии (обычно `tabSession.captureSession()`).
+ *   именованной сессии (обычно `tabSession.captureSession()`); `null` включает
+ *   режим «только восстановление» — секция сохранения не показывается.
  * @param onRestore применяет выбранную сессию к живому рабочему столу; вызывается
  *   при восстановлении последней или именованной сессии, после чего меню
  *   закрывается.
@@ -72,9 +79,9 @@ fun SessionsMenu(
     expanded: Boolean,
     sessionRepository: SessionRepository,
     lastSession: SessionData?,
-    onCaptureCurrent: () -> SessionData,
     onRestore: (SessionData) -> Unit,
     onDismiss: () -> Unit,
+    onCaptureCurrent: (() -> SessionData)? = null,
 ) {
     // Версия-триггер перечитывания списка: инкремент после сохранения/удаления
     // заставляет produceState перезапросить listNamed().
@@ -98,15 +105,19 @@ fun SessionsMenu(
                 onDismiss()
             }
 
-            Spacer(Modifier.height(16.dp))
-            HorizontalDivider()
-            Spacer(Modifier.height(16.dp))
+            // The save section is omitted in restore-only mode (onCaptureCurrent == null),
+            // e.g. on the library screen, where there is no live workspace to save.
+            if (onCaptureCurrent != null) {
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider()
+                Spacer(Modifier.height(16.dp))
 
-            SaveSessionSection(
-                sessionRepository = sessionRepository,
-                onCaptureCurrent = onCaptureCurrent,
-                onSaved = { refreshKey++ },
-            )
+                SaveSessionSection(
+                    sessionRepository = sessionRepository,
+                    onCaptureCurrent = onCaptureCurrent,
+                    onSaved = { refreshKey++ },
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider()

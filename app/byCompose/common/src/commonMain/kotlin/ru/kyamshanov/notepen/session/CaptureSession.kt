@@ -51,3 +51,15 @@ fun TabSession.restoreSession(data: SessionData) {
         }
     }
 }
+
+/**
+ * The session's "primary" document path: the file in the focused panel's active
+ * tab, falling back to the very first tab of the first panel. Used by the library
+ * to decide which file to open the editor on before the full session is restored.
+ *
+ * Returns `null` for an empty session (no panels, or a panel with no tabs).
+ */
+fun SessionData.seedFilePath(): String? =
+    layout.panels.getOrNull(layout.focusedPanelIndex)
+        ?.let { it.tabs.getOrNull(it.activeTabIndex)?.filePath }
+        ?: layout.panels.firstOrNull()?.tabs?.firstOrNull()?.filePath

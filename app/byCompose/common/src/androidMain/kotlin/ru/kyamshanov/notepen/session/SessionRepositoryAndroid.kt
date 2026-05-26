@@ -13,9 +13,10 @@ import java.io.File
 /**
  * Android implementation of [SessionRepository].
  *
- * Stores data under `context.filesDir/sessions` in two files:
+ * Stores data under `context.filesDir/sessions` in three files:
  * - `_autosave.json` — the single autosaved [SessionData] (absent when none).
  * - `named.json` — the `List<NamedSession>`.
+ * - `pending_restore.json` — the one-shot pending restore (absent when none).
  *
  * Mirrors [ru.kyamshanov.notepen.mainscreen.infrastructure.FileHistoryRepositoryAndroid]:
  * an in-process [Mutex] guards writes, each of which is atomic via a temp file +
@@ -34,6 +35,7 @@ class SessionRepositoryAndroid(
     private val sessionsDir get() = File(context.filesDir, "sessions")
     private val autosaveFile get() = File(sessionsDir, "_autosave.json")
     private val namedFile get() = File(sessionsDir, "named.json")
+    private val pendingRestoreFile get() = File(sessionsDir, "pending_restore.json")
     private val mutex = Mutex()
 
     override suspend fun loadAutosave(): SessionData? =
@@ -76,6 +78,29 @@ class SessionRepositoryAndroid(
             mutex.withLock {
                 val remaining = readNamed().filterNot { it.id == id }
                 writeAtomic(namedFile, json.encodeToString(NAMED_SERIALIZER, remaining))
+            }
+        }
+
+    override suspend fun savePendingRestore(data: SessionData) =
+        withContext(ioDispatcher) {
+            mutex.withLock {
+                writeAtomic(pendingRestoreFile, json.encodeToString(SessionData.serializer(), data))
+            }
+        }
+
+    override suspend fun consumePendingRestore(): SessionData? =
+        withContext(ioDispatcher) {
+            mutex.withLock {
+                // Read then clear under the same lock so the slot is consumed atomically.
+                val text = pendingRestoreFile.takeIf { it.exists() }?.readText()
+                pendingRestoreFile.delete()
+                text?.let {
+                    try {
+                        json.decodeFromString(SessionData.serializer(), it)
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
             }
         }
 

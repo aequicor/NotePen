@@ -143,6 +143,22 @@ class SessionRepositoryDesktopTest {
         }
 
     @Test
+    fun `consumePendingRestore returns the saved session then null`() =
+        runTest(dispatcher) {
+            val data = sessionData("pending")
+            repository.savePendingRestore(data)
+
+            assertEquals(data, repository.consumePendingRestore(), "First consume returns the pending session")
+            assertNull(repository.consumePendingRestore(), "Pending restore is cleared after being consumed")
+        }
+
+    @Test
+    fun `consumePendingRestore returns null before any save`() =
+        runTest(dispatcher) {
+            assertNull(repository.consumePendingRestore())
+        }
+
+    @Test
     fun `named sessions persist across reinstantiation`() =
         runTest(dispatcher) {
             repository.saveNamed(named("s1", "First"))

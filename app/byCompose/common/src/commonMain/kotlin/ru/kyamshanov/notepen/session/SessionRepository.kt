@@ -28,6 +28,23 @@ interface SessionRepository {
 
     /** Removes the named session with the given [id]; no-op when absent. */
     suspend fun deleteNamed(id: String)
+
+    /**
+     * Stores [data] as the single pending restore — a session the library asked
+     * the editor to open. Overwrites any previously pending session.
+     *
+     * This is a one-shot hand-off slot (separate from the autosave): the library
+     * screen has no live workspace to restore into, so it persists the chosen
+     * session here and opens the editor, which picks it up via [consumePendingRestore].
+     */
+    suspend fun savePendingRestore(data: SessionData)
+
+    /**
+     * Atomically reads **and clears** the pending restore, returning it (or `null`
+     * when none is pending / it is unreadable). Reading consumes it, so a normal
+     * editor open that follows finds nothing pending and behaves as before.
+     */
+    suspend fun consumePendingRestore(): SessionData?
 }
 
 /** Creates the platform [SessionRepository] backing the Sessions store. */
