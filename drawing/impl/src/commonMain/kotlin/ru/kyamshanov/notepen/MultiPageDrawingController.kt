@@ -38,8 +38,9 @@ private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
  * Эрейзер ведёт себя аналогично: при пересечении границы — `end()` сессии
  * на одной странице и `start()` на соседней.
  *
- * Magnifier-страница пропускается: на ней рисование идёт через
- * `MagnifierInputPanel`, лифтнутый overlay не должен дублировать ввод.
+ * При включённой лупе страница НЕ блокируется: маршрутизация «панель vs
+ * страница» делается выше (в `EditorPanel.routedOnDown`), сюда доходят только
+ * жесты вне панели/рамки лупы, которые должны рисовать на странице как обычно.
  */
 class MultiPageDrawingController(
     private val drawingStates: SnapshotStateMap<Int, PdfDrawingState>,
@@ -49,7 +50,6 @@ class MultiPageDrawingController(
     private val markerSettings: () -> MarkerSettings,
     private val eraserSettings: () -> EraserSettings,
     private val eraserOverride: () -> Boolean,
-    private val skipPage: (Int) -> Boolean,
     private val onGestureStart: (pageIndex: Int, snapshot: List<DrawingPath>) -> Unit,
     private val onStrokeFinished: (pageIndex: Int, path: DrawingPath) -> Unit,
     private val onEraseFinished: (pageIndex: Int, before: List<DrawingPath>, after: List<DrawingPath>) -> Unit,
@@ -96,7 +96,6 @@ class MultiPageDrawingController(
         cancelActive()
         val hit = hitTest(viewportPos) ?: return
         val (pageIndex, nx, ny) = hit
-        if (skipPage(pageIndex)) return
         val tool = toolMode()
         gestureTool = tool
         lastViewportPos = viewportPos
@@ -117,10 +116,6 @@ class MultiPageDrawingController(
         val hit = hitTest(viewportPos) ?: return
         val (pageIndex, nx, ny) = hit
         if (pageIndex != activePageIndex) {
-            if (skipPage(pageIndex)) {
-                lastViewportPos = viewportPos
-                return
-            }
             handBoundary(viewportPos, pageIndex, nx, ny, pressure, tilt)
             lastViewportPos = viewportPos
             return

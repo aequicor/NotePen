@@ -79,6 +79,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 import ru.kyamshanov.notepen.RailOrientation
+import ru.kyamshanov.notepen.WHEEL_EDGE_BAND_WIDE
+import ru.kyamshanov.notepen.WheelScrollButtons
 import ru.kyamshanov.notepen.fadingEdges
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
@@ -90,6 +92,7 @@ import ru.kyamshanov.notepen.reflow.api.ReaderSettingsReducer
 import ru.kyamshanov.notepen.reflow.api.ReaderTheme
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.wheelItem
+import ru.kyamshanov.notepen.wheelScrollButtonGutter
 import kotlin.math.roundToInt
 
 /**
@@ -297,6 +300,7 @@ private fun CollapsedPill(
             LazyRow(
                 modifier =
                     Modifier
+                        .wheelScrollButtonGutter(listState)
                         .fadingEdges(
                             RailOrientation.HORIZONTAL,
                             READER_WHEEL_FADE_EDGE,
@@ -317,6 +321,7 @@ private fun CollapsedPill(
                                     index,
                                     RailOrientation.HORIZONTAL,
                                     minAlpha = READER_WHEEL_MIN_ALPHA,
+                                    edgeBand = WHEEL_EDGE_BAND_WIDE,
                                 ),
                             ) {
                                 PresetWheelChip(
@@ -333,6 +338,11 @@ private fun CollapsedPill(
                     }
                 }
             }
+            WheelScrollButtons(
+                state = listState,
+                tint = textColor.copy(alpha = CHIP_TEXT_ALPHA),
+                background = background,
+            )
         }
         // Тюнер закреплён вне прокрутки — справа от колеса, всегда видим.
         TunerGearButton(

@@ -163,16 +163,20 @@ class MagnifierState {
     // --- mutators -----------------------------------------------------------
 
     /**
-     * Включить лупу из тулбара. Окно — 1/3 viewport (квадрат) в правом нижнем
-     * углу. Рамка — посередине [targetCenterOnPage] (передаётся вызывающим;
-     * обычно центр текущего видимого viewport'а). Aspect рамки выбирается
-     * так, чтобы её page-pixel размер точно совпадал с aspect панели — без
-     * искажений рендеринга.
+     * Включить лупу из тулбара. Окно — квадрат ~1/3 ширины viewport, открывается
+     * слева, но правее тулрейла (см. [startInsetPx]), по центру по вертикали.
+     * Рамка — посередине [targetCenterOnPage] (обычно центр видимого viewport'а).
+     * Aspect рамки подобран так, чтобы её page-pixel размер совпал с aspect панели.
+     *
+     * @param startInsetPx левый инсет (px viewport'а), занятый тулрейлом/сайдбаром
+     *   (`PdfViewerState.fitWidthInsetStartPx`) — панель открывается правее него;
+     *   `0` → дефолтный левый отступ [PANEL_BOTTOM_MARGIN_PX].
      */
     fun enable(
         onPage: Int,
         viewportSize: Size,
         targetCenterOnPage: Offset = Offset(0.5f, 0.5f),
+        startInsetPx: Float = 0f,
     ) {
         // Квадратное окно лупы — комфортнее для письма, и совпадает с
         // квадратной (в page-pixels) дефолтной рамкой.
@@ -180,10 +184,15 @@ class MagnifierState {
             minOf(viewportSize.width * 0.3f, viewportSize.height * 0.5f)
                 .coerceAtLeast(MIN_USABLE_PANEL_W_PX)
         panelSize = Size(panelSide, panelSide)
-        // Слева от PDF, по центру по вертикали.
+        // Правее тулрейла (startInsetPx уже включает его ширину + зазор; при 0 —
+        // дефолтный отступ), по центру по вертикали. Клампим, чтобы панель не
+        // уехала за правый край при широком инсете.
+        val leftX =
+            maxOf(startInsetPx, PANEL_BOTTOM_MARGIN_PX)
+                .coerceAtMost((viewportSize.width - panelSide).coerceAtLeast(0f))
         panelTopLeft =
             Offset(
-                x = PANEL_BOTTOM_MARGIN_PX,
+                x = leftX,
                 y = ((viewportSize.height - panelSide) / 2f).coerceAtLeast(0f),
             )
 
@@ -480,6 +489,19 @@ class MagnifierState {
             )
         segments = listOf(s.copy(targetOnPage = clamped))
         alignTargetAspectToPanel()
+    }
+
+    /**
+     * Изменить кратность лупы вокруг центра окна — для кнопок зума −/+ в
+     * нижнем блоке панели. [scaleFactor] > 1 — крупнее (меньше рамка-цель),
+     * < 1 — мельче. Single-page only; aspect рамки выравнивается под панель.
+     */
+    fun magnifyBy(scaleFactor: Float) {
+        zoomTargetAroundPanelFocus(
+            scaleFactor = scaleFactor,
+            focusPanelLocal = Offset(panelSize.width / 2f, panelSize.height / 2f),
+            panelSize = panelSize,
+        )
     }
 
     /**
