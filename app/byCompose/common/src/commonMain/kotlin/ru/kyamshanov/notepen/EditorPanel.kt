@@ -40,7 +40,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import io.github.oshai.kotlinlogging.KotlinLogging
@@ -776,7 +778,6 @@ fun EditorPanel(
                 markerSettings = { markerSettingsProvider.value },
                 eraserSettings = { eraserSettingsProvider.value },
                 eraserOverride = { eraserOverrideProvider.value },
-                skipPage = { magnifierState.enabled },
                 onGestureStart = { pageIndex, snapshot -> pdfState.pushUndoSnapshot(pageIndex, snapshot) },
                 onStrokeFinished = { pageIndex, path ->
                     if (!trySnapStroke(pageIndex, path)) {
@@ -870,6 +871,13 @@ fun EditorPanel(
             )
         }
     val gestureRoute = remember(pdfState) { mutableStateOf(PanelGestureRoute.NONE) }
+    // Окно-origin gesture-узла viewer'а (его левый-верхний угол в координатах
+    // окна Compose). Нативный pen-stream (`WindowsPointerHook`) репортит позиции
+    // в координатах окна, а Compose pointerInput viewer'а — локально к этому
+    // узлу (смещён вниз на полосу вкладок / reading-инсет). Этим origin'ом
+    // нативные pen-координаты приводятся в ту же viewport-систему, что у мыши
+    // и `pdfViewerState.pan/zoom`, — иначе перо и рамка лупы расходятся.
+    val viewerOriginInWindow = remember { mutableStateOf(Offset.Zero) }
     val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
     val magnifierInputControllerHolder =
         remember(pdfState) {
@@ -882,9 +890,15 @@ fun EditorPanel(
         tilt: Float,
     ) {
         if (magnifierState.enabled) {
+            // `contentBoundsInViewport` хранится в координатах окна Compose
+            // (панель репортит `boundsInWindow()`), а `viewportPos` — локально к
+            // gesture-узлу viewer'а, смещённому вниз на полосу вкладок /
+            // reading-инсет. Поднимаем позицию в координаты окна на origin узла,
+            // иначе hit-тест «внутри панели?» промахивается и рисование/ластик/
+            // выделение вне панели переставали работать на desktop.
             val panelLocal =
                 ru.kyamshanov.notepen.magnifier
-                    .viewportToPanelLocal(magnifierState, viewportPos)
+                    .viewportToPanelLocal(magnifierState, viewportPos + viewerOriginInWindow.value)
             val mc = magnifierInputControllerHolder.value
             if (panelLocal != null && mc != null) {
                 mc.onDown(panelLocal, magnifierState.panelSize, pressure, tilt)
@@ -893,6 +907,15 @@ fun EditorPanel(
             }
             if (magnifierTargetGestureController.onDown(viewportPos)) {
                 gestureRoute.value = PanelGestureRoute.TARGET_RECT
+                return
+            }
+            // Жест начат на странице вне панели/рамки: при зажатом open-триггере
+            // (или armed quick-loupe) это переселекция новой области, иначе —
+            // обычное рисование. Без этой ветки повторное выделение при уже
+            // включённой лупе было недостижимо (ранний return выше).
+            if (openTriggerProvider.value || quickLoupeArmed.value) {
+                loupeSelectionController.onDown(viewportPos)
+                gestureRoute.value = PanelGestureRoute.LOUPE
                 return
             }
             drawingController.onDown(viewportPos, pressure, tilt)
@@ -917,9 +940,11 @@ fun EditorPanel(
             PanelGestureRoute.LOUPE -> loupeSelectionController.onMove(viewportPos)
             PanelGestureRoute.DRAWING -> drawingController.onMove(viewportPos, pressure, tilt)
             PanelGestureRoute.MAGNIFIER -> {
+                // См. routedOnDown: позиция поднимается в координаты окна на
+                // origin узла, чтобы совпасть с window-space contentBounds.
                 val panelLocal =
                     ru.kyamshanov.notepen.magnifier
-                        .viewportToPanelLocal(magnifierState, viewportPos)
+                        .viewportToPanelLocal(magnifierState, viewportPos + viewerOriginInWindow.value)
                 val mc = magnifierInputControllerHolder.value
                 if (panelLocal != null && mc != null) mc.onMove(panelLocal, magnifierState.panelSize, pressure, tilt)
             }
@@ -962,8 +987,12 @@ fun EditorPanel(
         if (!isFocused) return@LaunchedEffect
         tabletController.penPointerEvents.collect { ev ->
             when (ev.type) {
-                PenPointerEventType.DOWN -> routedOnDown(ev.position, ev.pressure, ev.tilt)
-                PenPointerEventType.UPDATE -> routedOnMove(ev.position, ev.pressure, ev.tilt)
+                // Нативные pen-координаты приходят в координатах окна; приводим
+                // их в локальную viewport-систему gesture-узла (как у мыши).
+                PenPointerEventType.DOWN ->
+                    routedOnDown(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
+                PenPointerEventType.UPDATE ->
+                    routedOnMove(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
                 PenPointerEventType.UP -> routedOnUp()
                 PenPointerEventType.CANCEL -> routedOnCancel()
             }
@@ -1145,6 +1174,7 @@ fun EditorPanel(
                 modifier =
                     Modifier
                         .fillMaxSize()
+                        .onGloballyPositioned { viewerOriginInWindow.value = it.positionInWindow() }
                         .stylusEventSink(tabletController)
                         .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
                 primaryDragPanEnabled = {
