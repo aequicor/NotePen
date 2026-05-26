@@ -154,8 +154,8 @@ private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
 /** Debounce for the crash-survival session autosave; collapses a scroll storm to one write. */
 private const val SESSION_AUTOSAVE_DEBOUNCE_MS = 750L
 
-/** Tool state snapshot saved per panel when it loses focus. */
-private data class PanelToolSnapshot(
+/** Tool state snapshot saved per document (keyed by file path) when it loses focus. */
+private data class ToolStateSnapshot(
     val toolMode: ToolMode,
     val penSettings: PenSettings,
     val markerSettings: MarkerSettings,
@@ -253,33 +253,45 @@ fun DetailsContent(
     var pencilModeEnabled by remember { mutableStateOf(false) }
     var pencilModeManuallyTouched by remember { mutableStateOf(false) }
 
+    // Set true right before a programmatic tool restore (the per-document focus
+    // swap below) so the preset effect doesn't overwrite the document's saved
+    // settings with a preset on the synthetic toolMode change.
+    var suppressNextPresetApply by remember { mutableStateOf(false) }
+
     // Настройки ридера — глобальные (на все документы и панели); видимость самого
     // airbar — per-tab. Персист между запусками — через ReaderSettingsRepository (ниже).
     var readerStored by remember { mutableStateOf(StoredReaderSettings()) }
 
-    // Per-panel tool state: save on lose-focus, restore on gain-focus.
-    val panelToolStates = remember { mutableStateMapOf<PanelId, PanelToolSnapshot>() }
+    // Per-document tool state: save on lose-focus, restore on gain-focus. Keyed by
+    // file path, so switching tabs (not just panels) swaps the active tool and two
+    // tabs of the same file share it. A restore suppresses the preset effect below
+    // so the document's saved settings aren't overwritten by a preset.
+    val documentToolStates = remember { mutableStateMapOf<String, ToolStateSnapshot>() }
     LaunchedEffect(tabSession) {
-        var previousPanelId = tabSession.layout.focusedPanelId
-        snapshotFlow { tabSession.layout.focusedPanelId }
+        var previousFilePath = tabSession.focusedActiveState?.filePath
+        snapshotFlow { tabSession.focusedActiveState?.filePath }
             .distinctUntilChanged()
             .drop(1)
-            .collect { newPanelId ->
-                panelToolStates[previousPanelId] =
-                    PanelToolSnapshot(
-                        toolMode = toolMode,
-                        penSettings = penSettings,
-                        markerSettings = markerSettings,
-                        eraserSettings = eraserSettings,
-                        markerWidthPinned = markerWidthPinned,
-                    )
-                previousPanelId = newPanelId
-                panelToolStates[newPanelId]?.let { snapshot ->
-                    toolMode = snapshot.toolMode
-                    penSettings = snapshot.penSettings
-                    markerSettings = snapshot.markerSettings
-                    eraserSettings = snapshot.eraserSettings
-                    markerWidthPinned = snapshot.markerWidthPinned
+            .collect { newFilePath ->
+                previousFilePath?.let { prev ->
+                    documentToolStates[prev] =
+                        ToolStateSnapshot(
+                            toolMode = toolMode,
+                            penSettings = penSettings,
+                            markerSettings = markerSettings,
+                            eraserSettings = eraserSettings,
+                            markerWidthPinned = markerWidthPinned,
+                        )
+                }
+                previousFilePath = newFilePath
+                val restored = newFilePath?.let { documentToolStates[it] }
+                if (restored != null) {
+                    if (restored.toolMode != toolMode) suppressNextPresetApply = true
+                    toolMode = restored.toolMode
+                    penSettings = restored.penSettings
+                    markerSettings = restored.markerSettings
+                    eraserSettings = restored.eraserSettings
+                    markerWidthPinned = restored.markerWidthPinned
                 }
             }
     }
@@ -386,6 +398,12 @@ fun DetailsContent(
     // When a tool becomes active, restore the last chosen preset for it (or the first
     // builtin preset if none has been chosen yet in this session).
     LaunchedEffect(toolMode) {
+        // A per-document restore set the tool programmatically — keep the document's
+        // saved settings instead of snapping to the tool's last preset.
+        if (suppressNextPresetApply) {
+            suppressNextPresetApply = false
+            return@LaunchedEffect
+        }
         when (toolMode) {
             ToolMode.PEN -> {
                 val all = BuiltinToolPresets.pen + toolPresets.pen
@@ -729,14 +747,19 @@ fun DetailsContent(
                         // A restored width is the user's own choice — don't override it.
                         markerWidthPinned = true
                         eraserSettings = eraser
-                        panelToolStates[panel.id] =
-                            PanelToolSnapshot(
-                                toolMode = toolMode,
-                                penSettings = pen,
-                                markerSettings = marker,
-                                eraserSettings = eraser,
-                                markerWidthPinned = true,
-                            )
+                        // Seed this document's tool checkpoint with its just-loaded
+                        // settings (keyed by file path), so switching away and back
+                        // restores them.
+                        panel.tabs.activeTab?.filePath?.let { filePath ->
+                            documentToolStates[filePath] =
+                                ToolStateSnapshot(
+                                    toolMode = toolMode,
+                                    penSettings = pen,
+                                    markerSettings = marker,
+                                    eraserSettings = eraser,
+                                    markerWidthPinned = true,
+                                )
+                        }
                     },
                     onAddTab = { onAddTabToPanel(panel.id) },
                     onAllTabsClosed = onBackWithSave,
