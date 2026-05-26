@@ -1458,18 +1458,18 @@ private fun focusedPanelHeightPx(
  * Сопоставляет нажатую клавишу [key] перелистыванию ридера: `+1` — следующая
  * страница, `-1` — предыдущая, `null` — клавиша не про листание.
  *
- * Раскладка (как в десктопных читалках): влево/PageDown/Space → дальше;
- * вправо/PageUp/Shift+Space → назад. Клавиши громкости (Android) тоже учитываем —
- * вниз листает вперёд, вверх назад, — на случай если событие дойдёт сюда мимо
- * оконного перехвата.
+ * Раскладка под горизонтальное листание: вправо/PageDown/Space → вперёд;
+ * влево/PageUp/Shift+Space → назад (согласовано с тап-зонами и свайпом). Клавиши
+ * громкости (Android) тоже учитываем — вниз листает вперёд, вверх назад, — на
+ * случай если событие дойдёт сюда мимо оконного перехвата.
  */
 private fun readerPageTurnDelta(
     key: Key,
     shiftHeld: Boolean,
 ): Int? =
     when (key) {
-        Key.DirectionLeft, Key.PageDown, Key.VolumeDown -> 1
-        Key.DirectionRight, Key.PageUp, Key.VolumeUp -> -1
+        Key.DirectionRight, Key.PageDown, Key.VolumeDown -> 1
+        Key.DirectionLeft, Key.PageUp, Key.VolumeUp -> -1
         Key.Spacebar -> if (shiftHeld) -1 else 1
         else -> null
     }

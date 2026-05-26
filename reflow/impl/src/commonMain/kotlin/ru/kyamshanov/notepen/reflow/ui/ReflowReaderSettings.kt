@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
 import ru.kyamshanov.notepen.reflow.api.ReaderFontFamily
@@ -37,6 +38,8 @@ import ru.kyamshanov.notepen.reflow.api.ReaderTheme
  * @property highlightColor цвет подсветки выделений
  * @property codeBackground фон inline-кода
  * @property paged страничный режим вместо скролла
+ * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право)
  * @property autoHideMs автоскрытие панелей через N мс (0 — не скрывать)
  * @property progress формат индикатора прогресса
  * @property readingRuler подсветка текущей строки
@@ -63,6 +66,8 @@ public data class ReflowReaderSettings(
     public val highlightColor: Color = Color(0x59FFD24D),
     public val codeBackground: Color = Color(0x14000000),
     public val paged: Boolean = false,
+    public val pageTransition: PageTransition = PageTransition.SLIDE,
+    public val tapToTurn: Boolean = true,
     public val autoHideMs: Long = 0L,
     public val progress: ProgressFormat = ProgressFormat.PERCENT,
     public val readingRuler: Boolean = false,
@@ -134,6 +139,8 @@ public fun ReaderSettings.toRenderSettings(): ReflowReaderSettings {
         highlightColor = palette.highlight,
         codeBackground = palette.code,
         paged = s.paged,
+        pageTransition = s.pageTransition,
+        tapToTurn = s.tapToTurn,
         autoHideMs = s.autoHideSec * 1000L,
         progress = s.progress,
         readingRuler = s.readingRuler,
