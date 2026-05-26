@@ -239,6 +239,12 @@ fun EditorPanel(
     onOpenPanelPicker: ((DocumentId) -> Unit)?,
     onClosePanel: (() -> Unit)?,
     onControlsChanged: (PanelControls?) -> Unit,
+    /**
+     * Dropdown content for the tab strip's left «Сессии» button (save / restore
+     * the workspace). Invoked with the menu's `expanded` flag and an `onDismiss`;
+     * see [TabBar]'s `sessionsMenu`.
+     */
+    sessionsMenu: @Composable (expanded: Boolean, onDismiss: () -> Unit) -> Unit,
     fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
     fitWidthTopInset: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
@@ -606,15 +612,30 @@ fun EditorPanel(
 
     // ---- Annotation load --------------------------------------------------
     LaunchedEffect(pdfState) {
+        // Session restore positions a tab via [PdfDocumentState.pendingViewOverride].
+        // Applied first and independently of the shared annotation load, so even a
+        // second tab of the same file (whose annotations are already loaded by its
+        // sibling) still gets its own restored scroll / zoom.
+        val viewOverride = pdfState.pendingViewOverride
+        pdfState.pendingViewOverride = null
+        if (viewOverride != null) {
+            pdfViewerState.applyInitialState(
+                scalePercent = viewOverride.scalePercent,
+                pageIndex = viewOverride.pageIndex,
+                pageOffsetPx = viewOverride.pageOffsetPx,
+            )
+        }
         if (pdfState.annotationsLoaded) return@LaunchedEffect
         pdfState.annotationsLoaded = true
         val restoredView =
             annotationRepository.loadViewState(filePath).getOrNull()?.also { view ->
-                pdfViewerState.applyInitialState(
-                    scalePercent = view.scale,
-                    pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
-                    pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
-                )
+                if (viewOverride == null) {
+                    pdfViewerState.applyInitialState(
+                        scalePercent = view.scale,
+                        pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
+                        pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
+                    )
+                }
                 // Вторичный таб того же файла открываем в обычном (не reading) режиме —
                 // как и позицию, режим чтения для него не восстанавливаем.
                 pdfState.readingMode = if (pdfState.skipPageRestore) false else view.readingMode
@@ -629,7 +650,7 @@ fun EditorPanel(
                 }.orEmpty()
 
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
-            if (restoredView == null) {
+            if (restoredView == null && viewOverride == null) {
                 pdfViewerState.applyInitialState(
                     scalePercent = bundle.scale,
                     pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,
@@ -1526,6 +1547,7 @@ fun EditorPanel(
                 onAddTab = { onAddTab() },
                 onOpenInNewPanel = onOpenPanelPicker,
                 onClosePanel = onClosePanel,
+                sessionsMenu = sessionsMenu,
                 // В режиме чтения красим полосу вкладок под фон активной темы ридера,
                 // чтобы хром сливался с ридером (как и остальной хром этой панели), а
                 // подписи/иконки — под цвет текста темы, иначе на тёмной теме они

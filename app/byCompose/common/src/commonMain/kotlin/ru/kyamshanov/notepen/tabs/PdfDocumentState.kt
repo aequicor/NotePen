@@ -165,6 +165,16 @@ class PdfDocumentState internal constructor(
     var skipPageRestore: Boolean = false
 
     /**
+     * Set by session restore to force this tab's initial scroll / zoom / page,
+     * overriding the per-file sidecar position. Consumed (cleared) by
+     * `EditorPanel` on first composition — applied independently of the shared
+     * annotation load, so a second tab of the same file restores its own
+     * position even though the file's annotations are already loaded. `null`
+     * outside a restore.
+     */
+    var pendingViewOverride: TabViewState? by mutableStateOf(null)
+
+    /**
      * `true` while [pdfDocument] is being loaded. Guards against two
      * coroutines (the active-tab effect and the background preloader) both
      * calling [ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader.load]

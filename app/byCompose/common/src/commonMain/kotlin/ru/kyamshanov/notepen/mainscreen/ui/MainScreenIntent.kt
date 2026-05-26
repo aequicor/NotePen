@@ -176,4 +176,15 @@ sealed class MainScreenIntent {
      * @property folderName Имя папки для заголовка sub-экрана.
      */
     data class OpenFolder(val folderId: String, val folderName: String) : MainScreenIntent()
+
+    /**
+     * Восстановить сессию, выбранную в меню «Сессии» на библиотеке: открыть
+     * редактор на «первичном» документе сессии. Сама сессия к этому моменту уже
+     * сохранена как pending-restore в хранилище — редактор подхватит её при
+     * монтировании и развернёт полный рабочий стол.
+     *
+     * @property seedUri URI документа, на котором открыть редактор
+     *   (см. `SessionData.seedFilePath()`).
+     */
+    data class RestoreSession(val seedUri: String) : MainScreenIntent()
 }
