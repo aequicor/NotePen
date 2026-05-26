@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -321,27 +323,27 @@ private fun FilterModeChip(
             border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
             tonalElevation = if (active) 2.dp else 0.dp,
         ) {
-            Box(
+            Row(
                 modifier =
                     Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 8.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Icon(
+                    imageVector = currentChip.icon,
+                    contentDescription = "Фильтр: ${currentChip.label}",
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(Modifier.width(4.dp))
                 Text(
                     text = currentChip.label,
                     style = MaterialTheme.typography.labelSmall,
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                Icon(
-                    imageVector = currentChip.icon,
-                    contentDescription = "Фильтр: ${currentChip.label}",
-                    modifier =
-                        Modifier
-                            .align(Alignment.CenterStart)
-                            .size(16.dp),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
                 )
             }
         }
