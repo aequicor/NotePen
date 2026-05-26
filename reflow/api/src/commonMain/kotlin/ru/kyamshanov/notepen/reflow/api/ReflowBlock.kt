@@ -42,6 +42,21 @@ public sealed interface ReflowBlock {
     ) : ReflowBlock
 
     /**
+     * Цитата (`blockquote`): врезка, набранная с отступом и выделением,
+     * семантически отличная от абзаца. Текст уже готов к повторной верстке
+     * (мягкие переносы сняты, слова разделены одиночными пробелами).
+     *
+     * @property text текст цитаты
+     * @property source фрагменты исходного текста с привязкой к странице
+     *   (см. [SourceSpan]); [SourceSpan.charStart]/[SourceSpan.charEnd]
+     *   индексируют [text]
+     */
+    public data class Blockquote(
+        public val text: String,
+        public val source: List<SourceSpan> = emptyList(),
+    ) : ReflowBlock
+
+    /**
      * Элемент маркированного или нумерованного списка.
      *
      * Маркер (`•`, `–`, `1.`…) намеренно сохраняется в начале [text]: так
@@ -103,4 +118,10 @@ public sealed interface ReflowBlock {
         public val pageIndex: Int,
         public val bounds: ReflowRect,
     ) : ReflowBlock
+
+    /**
+     * Горизонтальный разделитель (`hr`) — тематический разрыв в потоке текста.
+     * Не несёт текста и привязки к странице; рендерится тонкой линией.
+     */
+    public data object Divider : ReflowBlock
 }

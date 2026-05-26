@@ -142,8 +142,10 @@ class StrokeTextMapperTest {
                 is ReflowBlock.Paragraph -> block.text
                 is ReflowBlock.Heading -> block.text
                 is ReflowBlock.ListItem -> block.text
+                is ReflowBlock.Blockquote -> block.text
                 is ReflowBlock.Table -> ""
                 is ReflowBlock.Figure -> ""
+                ReflowBlock.Divider -> ""
             }
         return text.substring(anchor.charStart, anchor.charEnd)
     }

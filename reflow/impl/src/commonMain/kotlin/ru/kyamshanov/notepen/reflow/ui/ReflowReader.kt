@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -62,6 +63,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.TextAlign
@@ -496,9 +498,56 @@ private fun ReflowBlockView(
                 modifier = Modifier.padding(start = settings.contentPadding),
             )
 
+        is ReflowBlock.Blockquote -> BlockquoteView(block, anchors, settings)
+
         is ReflowBlock.Table -> TableView(block, settings)
 
         is ReflowBlock.Figure -> FigureView(block, settings, renderPage)
+
+        ReflowBlock.Divider -> DividerView(settings)
+    }
+}
+
+/**
+ * Цитата: тонкая вертикальная линейка слева + втянутый курсивный текст
+ * приглушённого цвета. Подсветка [anchors] течёт вместе с текстом, как в абзаце.
+ */
+@Composable
+private fun BlockquoteView(
+    block: ReflowBlock.Blockquote,
+    anchors: List<TextAnchor>,
+    settings: ReflowReaderSettings,
+) {
+    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Box(
+            modifier =
+                Modifier
+                    .width(BLOCKQUOTE_BAR_WIDTH)
+                    .fillMaxHeight()
+                    .background(settings.textColor.copy(alpha = BLOCKQUOTE_BAR_ALPHA)),
+        )
+        BasicText(
+            text = styledText(block.text, block.source, anchors, settings),
+            style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic),
+            modifier = Modifier.padding(start = settings.contentPadding),
+        )
+    }
+}
+
+/** Тематический разделитель: тонкая короткая линия по центру с воздухом. */
+@Composable
+private fun DividerView(settings: ReflowReaderSettings) {
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = settings.blockSpacing),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxWidth(DIVIDER_LINE_FRACTION)
+                    .height(1.dp)
+                    .background(settings.textColor.copy(alpha = DIVIDER_LINE_ALPHA)),
+        )
     }
 }
 
@@ -825,8 +874,10 @@ private fun blockTextLength(block: ReflowBlock): Int =
         is ReflowBlock.Heading -> block.text.length
         is ReflowBlock.Paragraph -> block.text.length
         is ReflowBlock.ListItem -> block.text.length
+        is ReflowBlock.Blockquote -> block.text.length
         is ReflowBlock.Table -> block.rows.sumOf { row -> row.cells.sumOf { it.text.length } }
         is ReflowBlock.Figure -> 0
+        ReflowBlock.Divider -> 0
     }
 
 // Свайп засчитывается как перелистывание после ~64dp горизонтального смещения —
@@ -873,3 +924,8 @@ private val TABLE_BORDER_WIDTH = 1.dp
 private val TABLE_CELL_PADDING = 8.dp
 private const val TABLE_BORDER_ALPHA = 0.22f
 private const val TABLE_HEADER_ALPHA = 0.06f
+
+private val BLOCKQUOTE_BAR_WIDTH = 3.dp
+private const val BLOCKQUOTE_BAR_ALPHA = 0.3f
+private const val DIVIDER_LINE_FRACTION = 0.2f
+private const val DIVIDER_LINE_ALPHA = 0.25f

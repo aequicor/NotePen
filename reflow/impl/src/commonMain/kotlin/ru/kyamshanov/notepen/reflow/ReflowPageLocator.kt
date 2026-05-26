@@ -59,7 +59,9 @@ public object ReflowPageLocator {
             is ReflowBlock.Paragraph -> source.minOfOrNull { it.pageIndex }
             is ReflowBlock.Heading -> source.minOfOrNull { it.pageIndex }
             is ReflowBlock.ListItem -> source.minOfOrNull { it.pageIndex }
+            is ReflowBlock.Blockquote -> source.minOfOrNull { it.pageIndex }
             is ReflowBlock.Table -> rows.asSequence().flatMap { it.cells }.flatMap { it.source }.minOfOrNull { it.pageIndex }
             is ReflowBlock.Figure -> pageIndex
+            ReflowBlock.Divider -> null
         }
 }

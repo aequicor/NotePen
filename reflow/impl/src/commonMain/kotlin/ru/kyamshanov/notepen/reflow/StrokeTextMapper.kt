@@ -125,10 +125,12 @@ public object StrokeTextMapper {
             is ReflowBlock.Paragraph -> source
             is ReflowBlock.Heading -> source
             is ReflowBlock.ListItem -> source
+            is ReflowBlock.Blockquote -> source
             // Ячейки таблицы индексируют каждая свой текст, не единый .text блока —
             // ре-анкоринг штрихов в таблицы пока не поддержан.
             is ReflowBlock.Table -> emptyList()
             is ReflowBlock.Figure -> emptyList()
+            ReflowBlock.Divider -> emptyList()
         }
 
     private fun boundingBox(points: List<DrawingPoint>): ReflowRect? {
