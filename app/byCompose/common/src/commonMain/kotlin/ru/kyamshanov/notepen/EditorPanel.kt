@@ -41,8 +41,11 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.debounce
@@ -970,6 +973,9 @@ fun EditorPanel(
                 onPage = pageIdx,
                 viewportSize = Size(viewportW, viewportH),
                 targetCenterOnPage = centerN,
+                // Открываем панель правее тулрейла (а не поверх него): инсет уже
+                // включает ширину рейла/сайдбара + зазор.
+                startInsetPx = pdfViewerState.fitWidthInsetStartPx,
             )
         }
     }
@@ -1088,14 +1094,26 @@ fun EditorPanel(
                         .fillMaxSize()
                         .stylusEventSink(tabletController)
                         .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
-                primaryDragPanEnabled = {
+                primaryDragPanEnabled = { pos ->
                     // Палец/указатель свободен для панорамирования, когда он не
                     // является инструментом рисования: либо инструмент неактивен,
                     // либо включён режим стилуса (рисует только перо) — как в
                     // ноут-апах, где палец скроллит, а стилус рисует.
+                    //
+                    // Но если нажатие попало на рамку-цель лупы — pan отклоняем:
+                    // drag должен двигать/ресайзить рамку (TARGET_RECT в
+                    // `routedOnDown`), а не панорамировать страницу из-под неё. На
+                    // десктопе pan-обработчик ловит Press на Initial-проходе раньше
+                    // внутреннего drag-роутера, поэтому без этой проверки страница
+                    // перетаскивалась вместо рамки.
                     (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
                         !quickLoupeArmed.value &&
-                        !openTriggerProvider.value
+                        !openTriggerProvider.value &&
+                        !(
+                            magnifierState.enabled &&
+                                magnifierTargetGestureController.hitTest(pos) !=
+                                ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
+                        )
                 },
                 gestureModifier =
                     Modifier.pdfMultiPageDrawingInput(
@@ -1271,21 +1289,40 @@ fun EditorPanel(
                     }
                 magnifierInputControllerHolder.value = magnifierInputController
 
-                MagnifierInputPanel(
-                    state = magnifierState,
-                    pdfDrawingStateProvider = magPdfDrawingStateProvider,
-                    toolMode = toolMode,
-                    penSettings = penSettings,
-                    markerSettings = markerSettings,
-                    eraserSettings = eraserSettings,
-                    eraserOverride = magEraserOverrideProvider,
-                    pencilModeEnabled = pencilModeEnabled,
-                    onGestureStart = magOnGestureStart,
-                    onStrokeFinished = magOnStrokeFinished,
-                    onEraseFinished = magOnEraseFinished,
-                    onClose = { magnifierState.disable() },
-                    externalInputController = magnifierInputController,
-                )
+                // Панель лупы — плавающее окно поверх всего хрома: рендерим в
+                // Popup, иначе она оказывается под левым тулрейлом (тулрейл —
+                // sibling-Box в `DetailsContent`, отрисованный после grid'а, и
+                // перекрывает панель). Popup-слой рисуется над оконным контентом.
+                // На десктопе Popup живёт в том же окне/scene, поэтому
+                // `boundsInWindow()` панели (→ contentBoundsInViewport) и
+                // маршрутизация нативного пера не меняются. Позиционирование —
+                // через offset Popup'а (panelTopLeft, viewport-px); не focusable,
+                // чтобы Popup не перехватывал клавиатуру/шорткаты.
+                Popup(
+                    alignment = Alignment.TopStart,
+                    offset =
+                        IntOffset(
+                            magnifierState.panelTopLeft.x.toInt(),
+                            magnifierState.panelTopLeft.y.toInt(),
+                        ),
+                    properties = PopupProperties(focusable = false),
+                ) {
+                    MagnifierInputPanel(
+                        state = magnifierState,
+                        pdfDrawingStateProvider = magPdfDrawingStateProvider,
+                        toolMode = toolMode,
+                        penSettings = penSettings,
+                        markerSettings = markerSettings,
+                        eraserSettings = eraserSettings,
+                        eraserOverride = magEraserOverrideProvider,
+                        pencilModeEnabled = pencilModeEnabled,
+                        onGestureStart = magOnGestureStart,
+                        onStrokeFinished = magOnStrokeFinished,
+                        onEraseFinished = magOnEraseFinished,
+                        onClose = { magnifierState.disable() },
+                        externalInputController = magnifierInputController,
+                    )
+                }
             }
 
             if (pdfState.readingMode) {
