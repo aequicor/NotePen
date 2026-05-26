@@ -73,16 +73,12 @@ fun SessionsDialog(
     onRestore: (SessionData) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val coroutineScope = rememberCoroutineScope()
-
     // Версия-триггер перечитывания списка: инкремент после сохранения/удаления
     // заставляет produceState перезапросить listNamed().
     var refreshKey by remember { mutableStateOf(0) }
     val namedSessions by produceState(initialValue = emptyList<NamedSession>(), refreshKey) {
         value = sessionRepository.listNamed()
     }
-
-    var newSessionName by remember { mutableStateOf("") }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -99,90 +95,37 @@ fun SessionsDialog(
                         .fillMaxWidth()
                         .padding(16.dp),
             ) {
-                Text(
-                    text = "Сессии",
-                    style = MaterialTheme.typography.titleLarge,
-                )
+                Text(text = "Сессии", style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(16.dp))
 
-                Button(
-                    onClick = {
-                        lastSession?.let { data ->
-                            onRestore(data)
-                            onDismiss()
-                        }
-                    },
-                    enabled = lastSession != null,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Восстановить последнюю")
+                RestoreLastSessionButton(lastSession) { data ->
+                    onRestore(data)
+                    onDismiss()
                 }
 
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(16.dp))
 
-                OutlinedTextField(
-                    value = newSessionName,
-                    onValueChange = { newSessionName = it },
-                    singleLine = true,
-                    label = { Text("Название сессии") },
-                    modifier = Modifier.fillMaxWidth(),
+                SaveSessionSection(
+                    sessionRepository = sessionRepository,
+                    onCaptureCurrent = onCaptureCurrent,
+                    onSaved = { refreshKey++ },
                 )
-                Spacer(Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        val name = newSessionName.trim()
-                        if (name.isEmpty()) return@Button
-                        coroutineScope.launch {
-                            sessionRepository.saveNamed(
-                                NamedSession(
-                                    id = generateUuid(),
-                                    name = name,
-                                    savedAtEpochMs = currentTimeMillis(),
-                                    data = onCaptureCurrent(),
-                                ),
-                            )
-                            newSessionName = ""
-                            refreshKey++
-                        }
-                    },
-                    enabled = newSessionName.isNotBlank(),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text("Сохранить текущую")
-                }
 
                 Spacer(Modifier.height(16.dp))
                 HorizontalDivider()
                 Spacer(Modifier.height(8.dp))
 
-                if (namedSessions.isEmpty()) {
-                    Text(
-                        text = "Нет сохранённых сессий",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                } else {
-                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                        namedSessions.forEach { session ->
-                            NamedSessionRow(
-                                session = session,
-                                onRestore = {
-                                    onRestore(session.data)
-                                    onDismiss()
-                                },
-                                onDelete = {
-                                    coroutineScope.launch {
-                                        sessionRepository.deleteNamed(session.id)
-                                        refreshKey++
-                                    }
-                                },
-                            )
-                        }
-                    }
-                }
+                NamedSessionsSection(
+                    sessions = namedSessions,
+                    sessionRepository = sessionRepository,
+                    onRestore = { data ->
+                        onRestore(data)
+                        onDismiss()
+                    },
+                    onDeleted = { refreshKey++ },
+                )
 
                 Spacer(Modifier.height(8.dp))
                 Row(
@@ -191,6 +134,96 @@ fun SessionsDialog(
                 ) {
                     TextButton(onClick = onDismiss) { Text("Закрыть") }
                 }
+            }
+        }
+    }
+}
+
+/** Restores the pre-session workspace (the crash survivor); disabled when none exists. */
+@Composable
+private fun RestoreLastSessionButton(
+    lastSession: SessionData?,
+    onRestore: (SessionData) -> Unit,
+) {
+    Button(
+        onClick = { lastSession?.let(onRestore) },
+        enabled = lastSession != null,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Восстановить последнюю")
+    }
+}
+
+/** Name field + button that saves the current workspace as a named session. */
+@Composable
+private fun SaveSessionSection(
+    sessionRepository: SessionRepository,
+    onCaptureCurrent: () -> SessionData,
+    onSaved: () -> Unit,
+) {
+    val coroutineScope = rememberCoroutineScope()
+    var newSessionName by remember { mutableStateOf("") }
+    OutlinedTextField(
+        value = newSessionName,
+        onValueChange = { newSessionName = it },
+        singleLine = true,
+        label = { Text("Название сессии") },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = {
+            val name = newSessionName.trim()
+            if (name.isEmpty()) return@Button
+            coroutineScope.launch {
+                sessionRepository.saveNamed(
+                    NamedSession(
+                        id = generateUuid(),
+                        name = name,
+                        savedAtEpochMs = currentTimeMillis(),
+                        data = onCaptureCurrent(),
+                    ),
+                )
+                newSessionName = ""
+                onSaved()
+            }
+        },
+        enabled = newSessionName.isNotBlank(),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text("Сохранить текущую")
+    }
+}
+
+/** The list of saved named sessions, or a placeholder when none exist. */
+@Composable
+private fun NamedSessionsSection(
+    sessions: List<NamedSession>,
+    sessionRepository: SessionRepository,
+    onRestore: (SessionData) -> Unit,
+    onDeleted: () -> Unit,
+) {
+    val coroutineScope = rememberCoroutineScope()
+    if (sessions.isEmpty()) {
+        Text(
+            text = "Нет сохранённых сессий",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+    } else {
+        Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+            sessions.forEach { session ->
+                NamedSessionRow(
+                    session = session,
+                    onRestore = { onRestore(session.data) },
+                    onDelete = {
+                        coroutineScope.launch {
+                            sessionRepository.deleteNamed(session.id)
+                            onDeleted()
+                        }
+                    },
+                )
             }
         }
     }
