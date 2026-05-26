@@ -147,7 +147,7 @@ private fun EditablePageNumber(
                     MaterialTheme.typography.labelLarge.copy(
                         color = contentColor,
                     ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                cursorBrush = SolidColor(contentColor),
                 singleLine = true,
                 keyboardOptions =
                     KeyboardOptions(
@@ -179,7 +179,7 @@ private fun EditablePageNumber(
         Text(
             text = currentPage.toString(),
             style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.primary,
+            color = contentColor,
             modifier =
                 Modifier.clickable {
                     fieldValue =
