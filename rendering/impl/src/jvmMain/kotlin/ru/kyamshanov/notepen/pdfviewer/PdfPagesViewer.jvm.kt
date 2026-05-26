@@ -298,7 +298,7 @@ actual fun PdfPagesViewer(
     renderer: PdfPageRenderer,
     modifier: Modifier,
     gestureModifier: Modifier,
-    primaryDragPanEnabled: () -> Boolean,
+    primaryDragPanEnabled: (position: Offset) -> Boolean,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
@@ -616,9 +616,11 @@ private data class ImmutablePdfPageScope(
  * Pointer-input десктоп-вьювера: zoom вокруг курсора, скролл колесом,
  * горизонтальный скролл с Shift, pan средней и (опционально) левой кнопкой.
  *
- * [primaryDragPanEnabled] возвращает `true`, когда левая кнопка должна
- * перетаскивать документ (а не рисовать) — передаётся из `DetailsContent`
- * как `{ toolMode == ToolMode.NONE }`.
+ * [primaryDragPanEnabled] принимает позицию нажатия и возвращает `true`, когда
+ * левая кнопка должна перетаскивать документ (а не рисовать или двигать
+ * оверлей). Передаётся из `EditorPanel`; среди прочего отклоняет pan, когда
+ * нажатие попало на рамку-цель лупы (hit-test), чтобы drag уходил в её
+ * move/resize, а не панорамировал страницу из-под рамки.
  */
 
 /**
@@ -707,7 +709,7 @@ private fun Modifier.overscrollGlow(
 private fun Modifier.pdfDesktopPointerInput(
     state: PdfViewerState,
     pendingZoom: PendingZoom,
-    primaryDragPanEnabled: () -> Boolean,
+    primaryDragPanEnabled: (position: Offset) -> Boolean,
 ): Modifier =
     this.pointerInput(state) {
         awaitPointerEventScope {
@@ -747,9 +749,10 @@ private fun Modifier.pdfDesktopPointerInput(
                             change.consume()
                         }
                         val primOrigin = primaryDragOrigin
-                        if (primOrigin != null && event.buttons.isPrimaryPressed &&
-                            primaryDragPanEnabled() && change != null
-                        ) {
+                        // Решение «панорамировать ли левым drag'ом» принято на Press
+                        // (по позиции нажатия) — здесь лишь продолжаем начатый pan.
+                        // `primOrigin != null` гарантирует, что на Press pan был разрешён.
+                        if (primOrigin != null && event.buttons.isPrimaryPressed && change != null) {
                             state.commitPinchGesture()
                             state.panGestureBy(change.position - primOrigin)
                             primaryDragOrigin = change.position
@@ -757,26 +760,30 @@ private fun Modifier.pdfDesktopPointerInput(
                         }
                     }
                     PointerEventType.Press -> {
-                        val dblClick = (event.awtEventOrNull as? java.awt.event.MouseEvent)?.clickCount == 2
-                        if (dblClick && event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
-                            change != null
-                        ) {
-                            // Double-tap-to-zoom: переключает fit-width ↔ приближение,
-                            // точка под курсором остаётся на месте.
-                            state.doubleTapZoom(change.position)
-                            change.consume()
-                        } else if (event.buttons.isTertiaryPressed && change != null) {
-                            state.commitPinchGesture()
-                            state.beginPanGesture()
-                            middleDragOrigin = change.position
-                            change.consume()
-                        } else if (event.buttons.isPrimaryPressed && primaryDragPanEnabled() &&
-                            change != null
-                        ) {
-                            state.commitPinchGesture()
-                            state.beginPanGesture()
-                            primaryDragOrigin = change.position
-                            change.consume()
+                        if (change != null) {
+                            // Pan-разрешение зависит от позиции нажатия: на
+                            // интерактивном оверлее поверх страницы (рамка-цель лупы
+                            // — hit-test в `EditorPanel`) левый drag не панорамирует,
+                            // а уходит в её move/resize. Иначе страница «уезжала» бы
+                            // из-под рамки.
+                            val primaryPanHere = primaryDragPanEnabled(change.position)
+                            val dblClick = (event.awtEventOrNull as? java.awt.event.MouseEvent)?.clickCount == 2
+                            if (dblClick && event.buttons.isPrimaryPressed && primaryPanHere) {
+                                // Double-tap-to-zoom: переключает fit-width ↔ приближение,
+                                // точка под курсором остаётся на месте.
+                                state.doubleTapZoom(change.position)
+                                change.consume()
+                            } else if (event.buttons.isTertiaryPressed) {
+                                state.commitPinchGesture()
+                                state.beginPanGesture()
+                                middleDragOrigin = change.position
+                                change.consume()
+                            } else if (event.buttons.isPrimaryPressed && primaryPanHere) {
+                                state.commitPinchGesture()
+                                state.beginPanGesture()
+                                primaryDragOrigin = change.position
+                                change.consume()
+                            }
                         }
                     }
                     PointerEventType.Release -> {

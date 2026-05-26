@@ -1,15 +1,25 @@
 package ru.kyamshanov.notepen
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
@@ -18,15 +28,18 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -34,15 +47,20 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -339,6 +357,11 @@ public fun WheelStrip(
         listOriginMain = if (orientation == RailOrientation.VERTICAL) origin.y else origin.x
     }
 
+    // Items start shrinking close to the centre on both axes: a short rail with
+    // only a few items visible otherwise reads as a static strip. The drum tapers
+    // toward whichever end still has hidden items, so an unscrollable rail stays
+    // full-size — the taper only appears when there is actually somewhere to scroll.
+    val edgeBand = WHEEL_EDGE_BAND_WIDE
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
         val itemBox: @Composable LazyItemScope.(Int, WheelEntry) -> Unit = { index, entry ->
             val reportModifier =
@@ -361,7 +384,7 @@ public fun WheelStrip(
                     // Масштаб/альфа + ужатый след по главной оси (соседи
                     // подтягиваются). report-модификатор последним: индикатор
                     // отслеживает фактические (уже ужатые) границы элемента.
-                    .wheelItem(state, index, orientation, falloffPx, minScale, minAlpha)
+                    .wheelItem(state, index, orientation, falloffPx, minScale, minAlpha, edgeBand)
                     .then(reportModifier),
             ) { entry.content() }
         }
@@ -401,5 +424,129 @@ public fun WheelStrip(
                     itemsIndexed(entries, key = { _, e -> e.key }) { index, entry -> itemBox(index, entry) }
                 }
         }
+        if (orientation == RailOrientation.HORIZONTAL) {
+            WheelScrollButtons(
+                state = state,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                background = MaterialTheme.colorScheme.surfaceVariant,
+            )
+        }
     }
 }
+
+/**
+ * Leading/trailing scroll chevrons overlaid on a horizontally scrolling wheel,
+ * shown only on desktop ([isDesktopPlatform]). A horizontal scroll gesture
+ * (trackpad / shift-wheel) isn't available to every PC user, so these give an
+ * explicit way to advance the rail; on touch the drag gesture is the affordance and
+ * this composes nothing. Each chevron is shown only while [state] can still scroll
+ * that way (and fades with that ability), so a rail resting against either stop
+ * shows only the button that does something. Tapping nudges the list by
+ * [pageFraction] of its viewport.
+ *
+ * Call inside the wheel's [Box] after the list, so the buttons align to its
+ * start/end edges and sit above the items. [tint]/[background] come from the
+ * surrounding surface so the buttons match the wheel's palette.
+ */
+@Composable
+public fun BoxScope.WheelScrollButtons(
+    state: LazyListState,
+    tint: Color,
+    background: Color,
+    pageFraction: Float = WHEEL_SCROLL_PAGE_FRACTION,
+) {
+    if (!isDesktopPlatform) return
+    val scope = rememberCoroutineScope()
+    val nudge: (Float) -> Unit = { direction ->
+        scope.launch {
+            val viewport = (state.layoutInfo.viewportEndOffset - state.layoutInfo.viewportStartOffset).toFloat()
+            if (viewport > 0f) state.animateScrollBy(direction * viewport * pageFraction)
+        }
+    }
+    AnimatedVisibility(
+        visible = state.canScrollBackward,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.align(Alignment.CenterStart),
+    ) {
+        ChevronButton(pointsForward = false, tint = tint, background = background, onClick = { nudge(-1f) })
+    }
+    AnimatedVisibility(
+        visible = state.canScrollForward,
+        enter = fadeIn(),
+        exit = fadeOut(),
+        modifier = Modifier.align(Alignment.CenterEnd),
+    ) {
+        ChevronButton(pointsForward = true, tint = tint, background = background, onClick = { nudge(1f) })
+    }
+}
+
+/**
+ * Reserves a horizontal gutter on each side of a scrolling rail so [WheelScrollButtons]
+ * sit beside its items instead of over them — without it the chevrons overlay the edge
+ * items and the end item can't be scrolled clear of the arrow. Apply to the list itself.
+ * No-op on touch (no buttons) and when [state] can't scroll (no buttons shown), so a
+ * rail that already fits keeps its full width.
+ */
+public fun Modifier.wheelScrollButtonGutter(state: LazyListState): Modifier =
+    if (isDesktopPlatform && (state.canScrollForward || state.canScrollBackward)) {
+        padding(horizontal = WHEEL_SCROLL_BUTTON_SIZE)
+    } else {
+        this
+    }
+
+/** A round, tinted scroll button drawing a chevron pointing forward (end) or back (start). */
+@Composable
+private fun ChevronButton(
+    pointsForward: Boolean,
+    tint: Color,
+    background: Color,
+    onClick: () -> Unit,
+) {
+    Box(
+        Modifier
+            .size(WHEEL_SCROLL_BUTTON_SIZE)
+            .clip(CircleShape)
+            .background(background)
+            .clickable(onClick = onClick)
+            .semantics {
+                contentDescription = if (pointsForward) WHEEL_SCROLL_FORWARD_LABEL else WHEEL_SCROLL_BACK_LABEL
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.size(WHEEL_SCROLL_BUTTON_SIZE * CHEVRON_FRACTION)) { drawChevron(tint, pointsForward) }
+    }
+}
+
+/** Draws a `>` (or mirrored `<`) chevron filling [DrawScope.size], tinted [tint]. */
+private fun DrawScope.drawChevron(
+    tint: Color,
+    pointsForward: Boolean,
+) {
+    val stroke = (size.minDimension * CHEVRON_STROKE_FRACTION).coerceAtLeast(1f)
+    val near = size.width * 0.34f
+    val far = size.width * 0.66f
+    val mid = size.height * 0.5f
+    val tipX = if (pointsForward) far else near
+    val baseX = if (pointsForward) near else far
+    drawLine(tint, Offset(baseX, size.height * 0.22f), Offset(tipX, mid), strokeWidth = stroke, cap = StrokeCap.Round)
+    drawLine(tint, Offset(baseX, size.height * 0.78f), Offset(tipX, mid), strokeWidth = stroke, cap = StrokeCap.Round)
+}
+
+/** True on desktop (JVM), false on touch — gates the on-screen [WheelScrollButtons]. */
+internal expect val isDesktopPlatform: Boolean
+
+/**
+ * [wheelItem] edge band for [WheelStrip] (both orientations): the flat full-size
+ * centre shrinks to almost nothing, so items begin scaling down close to the
+ * centre. On a short rail showing only a few items this is what makes the drum read
+ * as rotating rather than a static strip.
+ */
+public const val WHEEL_EDGE_BAND_WIDE: Float = 0.85f
+
+private val WHEEL_SCROLL_BUTTON_SIZE = 22.dp
+private const val WHEEL_SCROLL_PAGE_FRACTION = 0.7f
+private const val CHEVRON_FRACTION = 0.46f
+private const val CHEVRON_STROKE_FRACTION = 0.18f
+private const val WHEEL_SCROLL_FORWARD_LABEL = "Прокрутить вперёд"
+private const val WHEEL_SCROLL_BACK_LABEL = "Прокрутить назад"

@@ -18,6 +18,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -278,6 +279,15 @@ private fun VerticalAdjustableSlider(
                     },
         )
     }
+}
+
+/** On/off [Switch] for a boolean tool setting; orientation-agnostic (a switch is compact). */
+@Composable
+public fun BooleanToggle(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+) {
+    Switch(checked = enabled, onCheckedChange = onToggle)
 }
 
 private val SLIDER_LENGTH = 140.dp

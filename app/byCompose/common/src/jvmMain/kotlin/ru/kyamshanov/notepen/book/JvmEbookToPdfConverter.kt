@@ -4,6 +4,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -21,7 +22,8 @@ import java.security.MessageDigest
 class JvmEbookToPdfConverter(
     private val ioDispatcher: CoroutineDispatcher,
 ) : EbookToPdfConverter,
-    DocumentOutlineProvider {
+    DocumentOutlineProvider,
+    BookReflowProvider {
     private val cacheDir = File(System.getProperty("java.io.tmpdir"), "notepen-books")
     private val mutex = Mutex()
 
@@ -41,16 +43,17 @@ class JvmEbookToPdfConverter(
                 cacheDir.mkdirs()
                 val tmp = File.createTempFile("book", ".pdf.tmp", cacheDir)
                 try {
-                    val outline =
+                    val rendered =
                         when (val parsed = readBookSource(source.readBytes(), format)) {
                             is BookSource.Text -> JvmBookPdfRenderer.render(parsed.content, tmp)
                             is BookSource.Comic -> {
                                 JvmComicPdfRenderer.render(parsed.images, tmp)
-                                emptyList<TocEntry>()
+                                null
                             }
                         }
                     Files.move(tmp.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
-                    OutlineSidecar.write(target.absolutePath, outline)
+                    OutlineSidecar.write(target.absolutePath, rendered?.toc ?: emptyList())
+                    rendered?.reflow?.let { ReflowSidecar.write(target.absolutePath, it) }
                 } finally {
                     tmp.delete()
                 }
@@ -62,6 +65,12 @@ class JvmEbookToPdfConverter(
         if (!canConvert(path)) return emptyList()
         val pdfPath = ensurePdf(path)
         return withContext(ioDispatcher) { OutlineSidecar.read(pdfPath) }
+    }
+
+    override suspend fun reflowFor(path: String): ReflowDocument? {
+        if (!canConvert(path)) return null
+        val pdfPath = ensurePdf(path)
+        return withContext(ioDispatcher) { ReflowSidecar.read(pdfPath) }
     }
 
     private fun cacheFileFor(

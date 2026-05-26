@@ -14,6 +14,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.model.UnionAllPolicy
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.sync.domain.model.RectDto
@@ -32,6 +33,9 @@ data class DocumentAnnotationState(
     val currentPageOffset: Int,
     val pageExtents: Map<Int, PageExtent> = emptyMap(),
     val favoritePageIndices: Set<Int> = emptySet(),
+    // Не синхронизируется дельтами (нет StrokeDelta для выделений) — переносится как есть,
+    // чтобы headless-сохранение на хосте не затирало липкие выделения с диска.
+    val highlights: Map<Int, List<StickyHighlight>> = emptyMap(),
 )
 
 private val logger = KotlinLogging.logger {}
@@ -179,6 +183,7 @@ class HostAnnotationProjection(
                 currentPageOffset = state.currentPageOffset,
                 favoritePageIndices = state.favoritePageIndices,
                 pageExtents = state.pageExtents,
+                highlights = state.highlights,
             )
         logger.info { "Projection autosave to disk: doc=$documentId success=${result.isSuccess}" }
     }
@@ -213,6 +218,7 @@ class HostAnnotationProjection(
                 bundle.pageExtents.forEach { (page, ext) ->
                     state.pageExtents[page] = ext
                 }
+                state.highlights = bundle.highlights
                 logger.info {
                     "Projection loaded from disk: doc=$documentId pages=${bundle.pages.size}"
                 }
@@ -306,6 +312,7 @@ class HostAnnotationProjection(
         var currentPage: Int = 0
         var currentPageOffset: Int = 0
         var favoritePageIndices: Set<Int> = emptySet()
+        var highlights: Map<Int, List<StickyHighlight>> = emptyMap()
     }
 
     private fun MutableDocumentState.toImmutable() =
@@ -320,6 +327,7 @@ class HostAnnotationProjection(
             currentPageOffset = currentPageOffset,
             pageExtents = pageExtents.toMap(),
             favoritePageIndices = favoritePageIndices,
+            highlights = highlights,
         )
 
     private fun MutableDocumentState.toAnnotationLayers(): List<AnnotationLayer> =

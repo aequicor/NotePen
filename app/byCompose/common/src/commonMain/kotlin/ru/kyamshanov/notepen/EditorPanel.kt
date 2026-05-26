@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -40,9 +41,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.debounce
@@ -60,6 +66,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
@@ -78,10 +86,15 @@ import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
 import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
 import ru.kyamshanov.notepen.reflow.ReflowPageLocator
 import ru.kyamshanov.notepen.reflow.ReflowReading
+import ru.kyamshanov.notepen.reflow.StrokeTextMapper
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
+import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
+import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import ru.kyamshanov.notepen.reflow.ui.LocalReflowSelection
 import ru.kyamshanov.notepen.reflow.ui.ReflowReader
+import ru.kyamshanov.notepen.reflow.ui.ReflowSelection
 import ru.kyamshanov.notepen.reflow.ui.toRenderSettings
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
@@ -282,6 +295,10 @@ fun EditorPanel(
             .getOrNull()
             ?.also { figurePageCache[pageIndex] = it }
     }
+    // Кэш извлечённого reflow-текста для синхронного снаппинга «липкого маркера» в
+    // редакторе: extract асинхронный, на каждый штрих его дёргать нельзя. Заполняется
+    // фоном при наличии текстового слоя и липком маркере; переиспользуется режимом чтения.
+    val reflowDocCacheState = remember(pdfState) { mutableStateOf<ReflowDocument?>(null) }
     var reflowReading by remember(pdfState) { mutableStateOf<ReflowReading?>(null) }
     LaunchedEffect(pdfState.readingMode, pdfState) {
         if (!pdfState.readingMode) {
@@ -292,12 +309,16 @@ fun EditorPanel(
         // чтения сразу встать на соответствующий абзац.
         val targetPage = pdfViewerState.firstVisiblePageIndex
         val strokesByPage = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
+        val highlightsByPage = pdfState.highlights.toMap()
         val reading =
-            runCatching { reflowReadingUseCase(filePath, strokesByPage) }
+            runCatching {
+                reflowReadingUseCase(filePath, strokesByPage, highlightsByPage, reflowDocCacheState.value)
+            }
                 .onFailure { e -> panelLogger.warn { "Reflow reading build failed: ${e::class.simpleName}" } }
                 .getOrNull()
         reflowReading = reading
         if (reading != null) {
+            if (reflowDocCacheState.value == null) reflowDocCacheState.value = reading.document
             ReflowPageLocator
                 .blockIndexForPage(reading.document, targetPage)
                 ?.let { reflowListState.scrollToItem(it) }
@@ -311,6 +332,18 @@ fun EditorPanel(
             .mapNotNull { index -> reflowReading?.let { ReflowPageLocator.pageForBlock(it.document, index) } }
             .distinctUntilChanged()
             .collect { page -> pdfViewerState.scrollToPage(page, 0) }
+    }
+
+    // Фоновое извлечение reflow-текста для снаппинга «липкого маркера» в редакторе:
+    // запускается, когда у документа есть текстовый слой (readingModeAvailable) и маркер
+    // липкий. Один раз на документ; результат переиспользуется режимом чтения.
+    LaunchedEffect(pdfState, readingModeAvailable, markerSettings.sticky, filePath) {
+        if (reflowDocCacheState.value != null) return@LaunchedEffect
+        if (!readingModeAvailable || !markerSettings.sticky) return@LaunchedEffect
+        reflowDocCacheState.value =
+            runCatching { reflowExtractor.extract(filePath) }
+                .onFailure { e -> panelLogger.warn { "Sticky-marker text extract failed: ${e::class.simpleName}" } }
+                .getOrNull()
     }
 
     val hasAnnotations by remember {
@@ -449,6 +482,7 @@ fun EditorPanel(
                 currentPageOffset = currentPageOffsetPx,
                 favoritePageIndices = favoritePageIndices.toSet(),
                 pageExtents = extents,
+                highlights = pdfState.highlights.toMap(),
             )
         showSnackbar(if (result.isSuccess) message else "Ошибка локального сохранения")
     }
@@ -617,6 +651,9 @@ fun EditorPanel(
             bundle.pageExtents.forEach { (pageIndex, ext) ->
                 drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.setExtent(ext)
             }
+            // Липкие выделения не синхронизируются дельтами — грузим с диска всегда,
+            // независимо от projection-штрихов.
+            bundle.highlights.forEach { (pageIndex, hs) -> pdfState.highlights[pageIndex] = hs }
             favoritePageIndices.clear()
             favoritePageIndices.addAll(bundle.favoritePageIndices)
         }
@@ -648,6 +685,7 @@ fun EditorPanel(
                 currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
                 favoritePageIndices = state.favoritePageIndices.toSet(),
                 pageExtents = extents,
+                highlights = state.highlights.toMap(),
             ).onFailure { e -> panelLogger.warn { "Auto-save failed for ${state.filePath}: ${e::class.simpleName}" } }
     }
     val requestRemoteSaveIfConnected: suspend () -> Unit = {
@@ -668,6 +706,7 @@ fun EditorPanel(
             var acc = 0
             for ((_, s) in pdfState.drawingStates) acc += s.historyVersion.value
             acc + pdfState.favoritePageIndices.size +
+                pdfState.highlights.values.sumOf { it.size } +
                 penSettings.hashCode() + markerSettings.hashCode() + eraserSettings.hashCode()
         }.drop(1)
             .distinctUntilChanged()
@@ -709,6 +748,34 @@ fun EditorPanel(
     val eraserOverrideProvider = rememberUpdatedState(eraserOverride)
     val pencilModeProvider = rememberUpdatedState(pencilModeEnabled)
     val syncEngineProvider = rememberUpdatedState(syncEngine)
+    // Снаппинг «липкого маркера»: завершённый маркер-штрих превращаем в выделение по словам
+    // под ним и убираем сам штрих. true — штрих стал выделением; false — обычный путь
+    // (не маркер / не липкий / нет текстового кэша / под штрихом нет текста).
+    val trySnapStroke =
+        remember(pdfState, drawingStates) {
+            fun(
+                pageIndex: Int,
+                path: DrawingPath,
+            ): Boolean {
+                val doc = reflowDocCacheState.value
+                val state = drawingStates[pageIndex]
+                val markerSticky = path.toolType == ToolKind.MARKER && markerSettingsProvider.value.sticky
+                val rects =
+                    if (markerSticky && doc != null && state != null) {
+                        StrokeTextMapper.snapToWords(doc, pageIndex, path)
+                    } else {
+                        emptyList()
+                    }
+                if (rects.isEmpty() || state == null) return false
+                val lastIndex = state.currentPaths.lastIndex
+                if (lastIndex >= 0) state.currentPaths.removeAt(lastIndex)
+                pdfState.highlights[pageIndex] =
+                    pdfState.highlights[pageIndex].orEmpty() +
+                    StickyHighlight(rects = rects, colorArgb = path.colorArgb)
+                state.markHistoryChanged()
+                return true
+            }
+        }
     val drawingController =
         remember(pdfViewerState, drawingStates, magnifierState) {
             MultiPageDrawingController(
@@ -719,11 +786,12 @@ fun EditorPanel(
                 markerSettings = { markerSettingsProvider.value },
                 eraserSettings = { eraserSettingsProvider.value },
                 eraserOverride = { eraserOverrideProvider.value },
-                skipPage = { magnifierState.enabled },
                 onGestureStart = { pageIndex, snapshot -> pdfState.pushUndoSnapshot(pageIndex, snapshot) },
                 onStrokeFinished = { pageIndex, path ->
-                    val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
-                    handlePanelStrokeFinished(state, pageIndex, path, syncEngineProvider.value)
+                    if (!trySnapStroke(pageIndex, path)) {
+                        val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
+                        handlePanelStrokeFinished(state, pageIndex, path, syncEngineProvider.value)
+                    }
                 },
                 onEraseFinished = { pageIndex, before, _ ->
                     val state = drawingStates[pageIndex] ?: return@MultiPageDrawingController
@@ -811,6 +879,13 @@ fun EditorPanel(
             )
         }
     val gestureRoute = remember(pdfState) { mutableStateOf(PanelGestureRoute.NONE) }
+    // Окно-origin gesture-узла viewer'а (его левый-верхний угол в координатах
+    // окна Compose). Нативный pen-stream (`WindowsPointerHook`) репортит позиции
+    // в координатах окна, а Compose pointerInput viewer'а — локально к этому
+    // узлу (смещён вниз на полосу вкладок / reading-инсет). Этим origin'ом
+    // нативные pen-координаты приводятся в ту же viewport-систему, что у мыши
+    // и `pdfViewerState.pan/zoom`, — иначе перо и рамка лупы расходятся.
+    val viewerOriginInWindow = remember { mutableStateOf(Offset.Zero) }
     val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
     val magnifierInputControllerHolder =
         remember(pdfState) {
@@ -823,9 +898,15 @@ fun EditorPanel(
         tilt: Float,
     ) {
         if (magnifierState.enabled) {
+            // `contentBoundsInViewport` хранится в координатах окна Compose
+            // (панель репортит `boundsInWindow()`), а `viewportPos` — локально к
+            // gesture-узлу viewer'а, смещённому вниз на полосу вкладок /
+            // reading-инсет. Поднимаем позицию в координаты окна на origin узла,
+            // иначе hit-тест «внутри панели?» промахивается и рисование/ластик/
+            // выделение вне панели переставали работать на desktop.
             val panelLocal =
                 ru.kyamshanov.notepen.magnifier
-                    .viewportToPanelLocal(magnifierState, viewportPos)
+                    .viewportToPanelLocal(magnifierState, viewportPos + viewerOriginInWindow.value)
             val mc = magnifierInputControllerHolder.value
             if (panelLocal != null && mc != null) {
                 mc.onDown(panelLocal, magnifierState.panelSize, pressure, tilt)
@@ -834,6 +915,15 @@ fun EditorPanel(
             }
             if (magnifierTargetGestureController.onDown(viewportPos)) {
                 gestureRoute.value = PanelGestureRoute.TARGET_RECT
+                return
+            }
+            // Жест начат на странице вне панели/рамки: при зажатом open-триггере
+            // (или armed quick-loupe) это переселекция новой области, иначе —
+            // обычное рисование. Без этой ветки повторное выделение при уже
+            // включённой лупе было недостижимо (ранний return выше).
+            if (openTriggerProvider.value || quickLoupeArmed.value) {
+                loupeSelectionController.onDown(viewportPos)
+                gestureRoute.value = PanelGestureRoute.LOUPE
                 return
             }
             drawingController.onDown(viewportPos, pressure, tilt)
@@ -858,9 +948,11 @@ fun EditorPanel(
             PanelGestureRoute.LOUPE -> loupeSelectionController.onMove(viewportPos)
             PanelGestureRoute.DRAWING -> drawingController.onMove(viewportPos, pressure, tilt)
             PanelGestureRoute.MAGNIFIER -> {
+                // См. routedOnDown: позиция поднимается в координаты окна на
+                // origin узла, чтобы совпасть с window-space contentBounds.
                 val panelLocal =
                     ru.kyamshanov.notepen.magnifier
-                        .viewportToPanelLocal(magnifierState, viewportPos)
+                        .viewportToPanelLocal(magnifierState, viewportPos + viewerOriginInWindow.value)
                 val mc = magnifierInputControllerHolder.value
                 if (panelLocal != null && mc != null) mc.onMove(panelLocal, magnifierState.panelSize, pressure, tilt)
             }
@@ -903,8 +995,12 @@ fun EditorPanel(
         if (!isFocused) return@LaunchedEffect
         tabletController.penPointerEvents.collect { ev ->
             when (ev.type) {
-                PenPointerEventType.DOWN -> routedOnDown(ev.position, ev.pressure, ev.tilt)
-                PenPointerEventType.UPDATE -> routedOnMove(ev.position, ev.pressure, ev.tilt)
+                // Нативные pen-координаты приходят в координатах окна; приводим
+                // их в локальную viewport-систему gesture-узла (как у мыши).
+                PenPointerEventType.DOWN ->
+                    routedOnDown(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
+                PenPointerEventType.UPDATE ->
+                    routedOnMove(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
                 PenPointerEventType.UP -> routedOnUp()
                 PenPointerEventType.CANCEL -> routedOnCancel()
             }
@@ -970,6 +1066,9 @@ fun EditorPanel(
                 onPage = pageIdx,
                 viewportSize = Size(viewportW, viewportH),
                 targetCenterOnPage = centerN,
+                // Открываем панель правее тулрейла (а не поверх него): инсет уже
+                // включает ширину рейла/сайдбара + зазор.
+                startInsetPx = pdfViewerState.fitWidthInsetStartPx,
             )
         }
     }
@@ -1086,16 +1185,29 @@ fun EditorPanel(
                 modifier =
                     Modifier
                         .fillMaxSize()
+                        .onGloballyPositioned { viewerOriginInWindow.value = it.positionInWindow() }
                         .stylusEventSink(tabletController)
                         .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
-                primaryDragPanEnabled = {
+                primaryDragPanEnabled = { pos ->
                     // Палец/указатель свободен для панорамирования, когда он не
                     // является инструментом рисования: либо инструмент неактивен,
                     // либо включён режим стилуса (рисует только перо) — как в
                     // ноут-апах, где палец скроллит, а стилус рисует.
+                    //
+                    // Но если нажатие попало на рамку-цель лупы — pan отклоняем:
+                    // drag должен двигать/ресайзить рамку (TARGET_RECT в
+                    // `routedOnDown`), а не панорамировать страницу из-под неё. На
+                    // десктопе pan-обработчик ловит Press на Initial-проходе раньше
+                    // внутреннего drag-роутера, поэтому без этой проверки страница
+                    // перетаскивалась вместо рамки.
                     (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
                         !quickLoupeArmed.value &&
-                        !openTriggerProvider.value
+                        !openTriggerProvider.value &&
+                        !(
+                            magnifierState.enabled &&
+                                magnifierTargetGestureController.hitTest(pos) !=
+                                ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
+                        )
                 },
                 gestureModifier =
                     Modifier.pdfMultiPageDrawingInput(
@@ -1142,6 +1254,7 @@ fun EditorPanel(
                             penSettings = penSettings,
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
+                            highlights = pdfState.highlights[pageIndex].orEmpty(),
                             pdfWidth = pdfWidth,
                             pdfHeight = pdfHeight,
                             pageExtent = extent,
@@ -1231,7 +1344,11 @@ fun EditorPanel(
                 val magOnStrokeFinished: (Int, DrawingPath) -> Unit =
                     remember(drawingStates) {
                         { pageIdx, path ->
-                            drawingStates[pageIdx]?.let { handlePanelStrokeFinished(it, pageIdx, path, syncEngineRef.value) }
+                            if (!trySnapStroke(pageIdx, path)) {
+                                drawingStates[pageIdx]?.let {
+                                    handlePanelStrokeFinished(it, pageIdx, path, syncEngineRef.value)
+                                }
+                            }
                         }
                     }
                 val magOnEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit =
@@ -1271,41 +1388,115 @@ fun EditorPanel(
                     }
                 magnifierInputControllerHolder.value = magnifierInputController
 
-                MagnifierInputPanel(
-                    state = magnifierState,
-                    pdfDrawingStateProvider = magPdfDrawingStateProvider,
-                    toolMode = toolMode,
-                    penSettings = penSettings,
-                    markerSettings = markerSettings,
-                    eraserSettings = eraserSettings,
-                    eraserOverride = magEraserOverrideProvider,
-                    pencilModeEnabled = pencilModeEnabled,
-                    onGestureStart = magOnGestureStart,
-                    onStrokeFinished = magOnStrokeFinished,
-                    onEraseFinished = magOnEraseFinished,
-                    onClose = { magnifierState.disable() },
-                    externalInputController = magnifierInputController,
-                )
+                // Панель лупы — плавающее окно поверх всего хрома: рендерим в
+                // Popup, иначе она оказывается под левым тулрейлом (тулрейл —
+                // sibling-Box в `DetailsContent`, отрисованный после grid'а, и
+                // перекрывает панель). Popup-слой рисуется над оконным контентом.
+                // На десктопе Popup живёт в том же окне/scene, поэтому
+                // `boundsInWindow()` панели (→ contentBoundsInViewport) и
+                // маршрутизация нативного пера не меняются. Позиционирование —
+                // через offset Popup'а (panelTopLeft, viewport-px); не focusable,
+                // чтобы Popup не перехватывал клавиатуру/шорткаты.
+                Popup(
+                    alignment = Alignment.TopStart,
+                    offset =
+                        IntOffset(
+                            magnifierState.panelTopLeft.x.toInt(),
+                            magnifierState.panelTopLeft.y.toInt(),
+                        ),
+                    properties = PopupProperties(focusable = false),
+                ) {
+                    MagnifierInputPanel(
+                        state = magnifierState,
+                        pdfDrawingStateProvider = magPdfDrawingStateProvider,
+                        toolMode = toolMode,
+                        penSettings = penSettings,
+                        markerSettings = markerSettings,
+                        eraserSettings = eraserSettings,
+                        eraserOverride = magEraserOverrideProvider,
+                        pencilModeEnabled = pencilModeEnabled,
+                        onGestureStart = magOnGestureStart,
+                        onStrokeFinished = magOnStrokeFinished,
+                        onEraseFinished = magOnEraseFinished,
+                        onClose = { magnifierState.disable() },
+                        externalInputController = magnifierInputController,
+                    )
+                }
             }
 
             if (pdfState.readingMode) {
                 val reading = reflowReading
                 if (reading != null) {
-                    ReflowReader(
-                        document = reading.document,
-                        stored = readerStored,
-                        onStoredChange = onReaderStoredChange,
-                        newPresetIdProvider = { generateUuid() },
-                        barVisible = isFocused && pdfState.readerBarVisible,
-                        onBarVisibleChange = { visible ->
-                            if (isFocused) pdfState.readerBarVisible = visible
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        highlights = reading.highlights,
-                        listState = reflowListState,
-                        renderPage = renderFigurePage,
-                        onPageDeltaReady = { reflowPageDelta.value = it },
-                    )
+                    // Подсветки для ридера — реактивно из текущего состояния (штрихи +
+                    // липкие выделения), чтобы созданное прямо в чтении показывалось сразу.
+                    // Маппинг штрих/подсветка → анкеры — геометрически дорогой хит-тест по
+                    // документу, поэтому: (1) штрихи и подсветки считаем РАЗДЕЛЬНО, чтобы
+                    // добавление подсветки не пересчитывало анкеры штрихов; (2) анкеры каждой
+                    // подсветки кэшируем по её значению (она привязана к странице и неизменна).
+                    // Иначе каждое новое выделение пересчитывало бы анкеры всех предыдущих —
+                    // после выделения копился бы лаг, а следующее «подвисало». Кэш живёт на документ.
+                    val strokeAnchors by remember(reading) {
+                        derivedStateOf {
+                            val doc = reading.document
+                            drawingStates.entries.flatMap { (page, st) ->
+                                st.currentPaths.flatMap { StrokeTextMapper.anchorsFor(doc, page, it) }
+                            }
+                        }
+                    }
+                    val highlightAnchorCache = remember(reading) { mutableMapOf<StickyHighlight, List<TextAnchor>>() }
+                    val highlightAnchors by remember(reading) {
+                        derivedStateOf {
+                            val doc = reading.document
+                            pdfState.highlights.entries.flatMap { (page, hs) ->
+                                hs.flatMap { h ->
+                                    highlightAnchorCache.getOrPut(h) {
+                                        StrokeTextMapper.anchorsForRects(doc, page, h.rects)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    val readerHighlights by remember(reading) {
+                        derivedStateOf { strokeAnchors + highlightAnchors }
+                    }
+                    // Сквозное выделение отдаёт анкеры по всем покрытым блокам сразу; маппим их
+                    // в геометрию по страницам (selectionRectsByPage уже сливает по строкам) и
+                    // на каждую затронутую страницу добавляем StickyHighlight цвета маркера. Один
+                    // pushUndoSnapshot на страницу (до правки её подсветок) — откат жеста по шагам.
+                    val createHighlight: (List<TextAnchor>) -> Unit = { anchors ->
+                        StrokeTextMapper.selectionRectsByPage(reading.document, anchors)
+                            .forEach { (page, rects) ->
+                                if (rects.isNotEmpty()) {
+                                    pdfState.pushUndoSnapshot(
+                                        page,
+                                        drawingStates[page]?.currentPaths?.toList() ?: emptyList(),
+                                    )
+                                    pdfState.highlights[page] =
+                                        pdfState.highlights[page].orEmpty() +
+                                        StickyHighlight(rects = rects, colorArgb = markerSettings.colorArgb)
+                                }
+                            }
+                    }
+                    CompositionLocalProvider(
+                        LocalReflowSelection provides
+                            ReflowSelection(immediate = toolMode == ToolMode.MARKER, onCreate = createHighlight),
+                    ) {
+                        ReflowReader(
+                            document = reading.document,
+                            stored = readerStored,
+                            onStoredChange = onReaderStoredChange,
+                            newPresetIdProvider = { generateUuid() },
+                            barVisible = isFocused && pdfState.readerBarVisible,
+                            onBarVisibleChange = { visible ->
+                                if (isFocused) pdfState.readerBarVisible = visible
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            highlights = readerHighlights,
+                            listState = reflowListState,
+                            renderPage = renderFigurePage,
+                            onPageDeltaReady = { reflowPageDelta.value = it },
+                        )
+                    }
                 } else {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
                         Text(

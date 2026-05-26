@@ -10,8 +10,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -26,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -36,8 +40,10 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -52,9 +58,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -62,6 +71,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.TextAlign
@@ -113,7 +123,13 @@ import ru.kyamshanov.notepen.reflow.api.TextAnchor
  *   страничном режиме делегирует [VerticalPager.animateScrollToPage]; в скролл-режиме
  *   — прокрутке на дельту экранов ([listState]). Нужен, чтобы аппаратные клавиши
  *   (стрелки/громкость/Space), приходящие в общий key-sink выше по дереву, могли
- *   листать ридер. Горизонтальный свайп вызывает тот же обработчик локально.
+ *   листать ридер (перелистывания свайпом нет — навигация только клавишами).
+ *
+ * Выделение текста для создания подсветок доступно в режиме чтения всегда и охватывает
+ * несколько абзацев (сквозной жест на контейнере, см. [reflowSelectionDrag]); на
+ * отпускании отдаёт анкеры через [LocalReflowSelection]. От состояния маркера
+ * ([ReflowSelection.immediate]) зависит лишь жест запуска: активен — тянем сразу, иначе —
+ * после долгого нажатия. Пока тянем — список/пейджер не скроллятся.
  */
 @Composable
 public fun ReflowReader(
@@ -196,16 +212,12 @@ public fun ReflowReader(
     // дельта не зависела от contentPadding/резерва под airbar.
     var viewportHeightPx by remember { mutableStateOf(0) }
 
-    // Активный обработчик «листнуть на ±N»: им пользуется и горизонтальный свайп
-    // (локально), и аппаратные клавиши (через [onPageDeltaReady] выше по дереву).
-    // Заполняется активным режимом (paged — пейджером, scroll — прокруткой) и
-    // обнуляется, пока контент не готов либо при выходе из композиции.
-    var pageDelta by remember(document) { mutableStateOf<((Int) -> Unit)?>(null) }
+    // Активный обработчик «листнуть на ±N»: им пользуются аппаратные клавиши (через
+    // [onPageDeltaReady] выше по дереву). Заполняется активным режимом (paged —
+    // пейджером, scroll — прокруткой) и обнуляется, пока контент не готов либо при
+    // выходе из композиции. (Перелистывания свайпом больше нет: навигация — клавишами.)
     val latestOnPageDeltaReady by rememberUpdatedState(onPageDeltaReady)
-    val setPageDelta: (((Int) -> Unit)?) -> Unit = { handler ->
-        pageDelta = handler
-        latestOnPageDeltaReady(handler)
-    }
+    val setPageDelta: (((Int) -> Unit)?) -> Unit = { handler -> latestOnPageDeltaReady(handler) }
     DisposableEffect(Unit) { onDispose { latestOnPageDeltaReady(null) } }
 
     // Скролл-режим: «страница» = дельта экранов (с лёгким нахлёстом, чтобы строка
@@ -224,13 +236,15 @@ public fun ReflowReader(
         }
     }
 
-    // Свайп влево → следующая страница (+1), вправо → предыдущая (-1) — как
-    // перелистывание печатной книги. Отдельный pointerInput: detectHorizontalDrag
-    // забирает указатель только после горизонтального slop, поэтому вертикальный
-    // скролл пейджера/списка и тап-по-тексту (соседний pointerInput) не глотаются.
-    val latestPageDelta by rememberUpdatedState(pageDelta)
-    val swipeThresholdPx = with(LocalDensity.current) { SWIPE_DISTANCE_THRESHOLD_DP.toPx() }
-
+    // Выделение текста для создания подсветок. Доступно в режиме чтения всегда; на
+    // отпускании всегда отдаёт анкеры наружу ([ReflowSelection.onCreate]). От состояния
+    // маркера ([ReflowSelection.immediate]) зависит лишь жест запуска — см. ниже.
+    val selection = LocalReflowSelection.current
+    val selectionState = remember(document) { ReflowSelectionState() }
+    val latestSelection by rememberUpdatedState(selection)
+    // Синхронизируем «немедленный режим» в состояние: от него зависит блокировка скролла
+    // контента (а не только активное выделение) — см. ReflowSelectionState.scrollLocked.
+    SideEffect { selectionState.immediate = selection.immediate }
     Box(
         modifier =
             modifier
@@ -239,42 +253,38 @@ public fun ReflowReader(
                 .onSizeChanged { viewportHeightPx = it.height }
                 .pointerInput(barVisible) {
                     detectTapGestures { onBarVisibleChange(!barVisible) }
-                }.pointerInput(swipeThresholdPx) {
-                    var dragX = 0f
-                    detectHorizontalDragGestures(
-                        onDragStart = { dragX = 0f },
-                        onDragEnd = {
-                            if (dragX <= -swipeThresholdPx) {
-                                latestPageDelta?.invoke(1)
-                            } else if (dragX >= swipeThresholdPx) {
-                                latestPageDelta?.invoke(-1)
-                            }
-                            dragX = 0f
-                        },
-                        onDragCancel = { dragX = 0f },
-                    ) { change, dragAmount ->
-                        dragX += dragAmount
-                        change.consume()
-                    }
                 },
     ) {
-        if (settings.paged) {
-            PagedReflowContent(
-                document = document,
-                anchorsByBlock = anchorsByBlock,
-                settings = settings,
-                renderPage = renderPage,
-                onVisibleBlockChange = { pagedFirstBlock = it },
-                onPageDeltaReady = setPageDelta,
-            )
-        } else {
-            ScrollReflowContent(
-                document = document,
-                anchorsByBlock = anchorsByBlock,
-                settings = settings,
-                listState = listState,
-                renderPage = renderPage,
-            )
+        CompositionLocalProvider(LocalReflowSelectionState provides selectionState) {
+            Box(
+                modifier =
+                    Modifier
+                        .matchParentSize()
+                        .onGloballyPositioned { selectionState.containerCoordinates = it }
+                        .reflowSelectionDrag(selection.immediate, selectionState) {
+                            val anchors = selectionState.anchorsForSelection()
+                            if (anchors.isNotEmpty()) latestSelection.onCreate(anchors)
+                        },
+            ) {
+                if (settings.paged) {
+                    PagedReflowContent(
+                        document = document,
+                        anchorsByBlock = anchorsByBlock,
+                        settings = settings,
+                        renderPage = renderPage,
+                        onVisibleBlockChange = { pagedFirstBlock = it },
+                        onPageDeltaReady = setPageDelta,
+                    )
+                } else {
+                    ScrollReflowContent(
+                        document = document,
+                        anchorsByBlock = anchorsByBlock,
+                        settings = settings,
+                        listState = listState,
+                        renderPage = renderPage,
+                    )
+                }
+            }
         }
 
         // Затемнение «внутренней яркости» и тёплый ночной тинт — оверлеем поверх
@@ -327,6 +337,62 @@ public fun ReflowReader(
     }
 }
 
+/**
+ * Жест сквозного выделения на контейнере контента. Позиции жеста приходят в координатах
+ * контейнера — той же системе, в которой [state] хит-тестит блоки, поэтому хит-тест идёт
+ * без дополнительных переводов.
+ *
+ * Стартовый детектор зависит от [immediate]:
+ * - маркер активен — выделение анкерится на самом касании (DOWN) и тянется **без слопа**
+ *   ([awaitFirstDown] + [drag]); так оно начинается сразу, и даже короткий drag ниже
+ *   порога слопа выделяет — в отличие от штатного `detectDragGestures`, который сначала
+ *   ждёт превышения слопа и потому для коротких/быстрых жестов вовсе не стартует;
+ * - маркер выключен — после долгого нажатия ([detectDragGesturesAfterLongPress]), чтобы
+ *   обычное чтение не «цепляло» выделение.
+ *
+ * В обоих случаях движение двигает конец выделения, а на отпускании вызывается [onRelease]
+ * (там собираются и отдаются анкеры) и выделение сбрасывается; отмена/перехват — тоже сброс.
+ */
+private fun Modifier.reflowSelectionDrag(
+    immediate: Boolean,
+    state: ReflowSelectionState,
+    onRelease: () -> Unit,
+): Modifier =
+    pointerInput(immediate, state) {
+        val onStart: (Offset) -> Unit = { pos -> state.moveTo(pos, anchoring = true) }
+        val onMove: (PointerInputChange) -> Unit = { change ->
+            state.moveTo(change.position, anchoring = false)
+            change.consume()
+        }
+        val onEnd: () -> Unit = {
+            onRelease()
+            state.clear()
+        }
+        val onCancel: () -> Unit = { state.clear() }
+        if (immediate) {
+            // Без слопа: анкер ставим прямо на DOWN, далее ведём конец до отпускания.
+            // Структурно повторяем detectDragGesturesAfterLongPress, но без ожидания
+            // долгого нажатия — поэтому выделение начинается мгновенно.
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                onStart(down.position)
+                // НЕ потребляем сам DOWN: иначе родительский detectTapGestures (он требует
+                // непотреблённого нажатия) перестал бы переключать панель ридера по тапу.
+                // Реальный drag всё равно «выигрывает» — движения потребляются в onMove,
+                // что снимает тап у родителя; чистый тап вернёт completed=false → onCancel.
+                val completed = drag(down.id) { change -> onMove(change) }
+                if (completed) onEnd() else onCancel()
+            }
+        } else {
+            detectDragGesturesAfterLongPress(
+                onDragStart = onStart,
+                onDragEnd = onEnd,
+                onDragCancel = onCancel,
+                onDrag = { change, _ -> onMove(change) },
+            )
+        }
+    }
+
 /** Скролл-режим: одна прокручиваемая колонка с ритм-паузами. */
 @Composable
 private fun BoxScope.ScrollReflowContent(
@@ -338,6 +404,9 @@ private fun BoxScope.ScrollReflowContent(
 ) {
     LazyColumn(
         state = listState,
+        // При активном маркере (немедленный режим) или идущем выделении список не скроллим —
+        // жест принадлежит выделению (см. ReflowSelectionState.scrollLocked).
+        userScrollEnabled = !LocalReflowSelectionState.current.scrollLocked,
         modifier =
             Modifier
                 .align(Alignment.TopCenter)
@@ -354,7 +423,13 @@ private fun BoxScope.ScrollReflowContent(
     ) {
         itemsIndexed(document.blocks) { index, block ->
             Column {
-                ReflowBlockView(block, anchorsByBlock[index].orEmpty(), settings, renderPage)
+                ReflowBlockView(
+                    block,
+                    anchorsByBlock[index].orEmpty(),
+                    settings,
+                    renderPage,
+                    blockIndex = index,
+                )
                 if (settings.ergonomicsEnabled &&
                     index < document.blocks.lastIndex &&
                     ReadingErgonomics.isRhythmBreak(index, RHYTHM_EVERY_BLOCKS)
@@ -402,7 +477,13 @@ private fun PagedReflowContent(
                 ) {
                     document.blocks.forEachIndexed { index, block ->
                         Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }) {
-                            ReflowBlockView(block, anchorsByBlock[index].orEmpty(), settings, renderPage)
+                            ReflowBlockView(
+                                block,
+                                anchorsByBlock[index].orEmpty(),
+                                settings,
+                                renderPage,
+                                blockIndex = index,
+                            )
                         }
                     }
                 }
@@ -443,7 +524,13 @@ private fun PagedReflowContent(
             onPageDeltaReady(pagerPageDelta)
             onDispose { onPageDeltaReady(null) }
         }
-        VerticalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { pageIndex ->
+        VerticalPager(
+            state = pagerState,
+            // При активном маркере (немедленный режим) или идущем выделении страницы не листаем
+            // — жест принадлежит выделению (см. ReflowSelectionState.scrollLocked).
+            userScrollEnabled = !LocalReflowSelectionState.current.scrollLocked,
+            modifier = Modifier.fillMaxSize(),
+        ) { pageIndex ->
             Column(
                 modifier =
                     Modifier
@@ -462,6 +549,7 @@ private fun PagedReflowContent(
                         anchorsByBlock[blockIndex].orEmpty(),
                         settings,
                         renderPage,
+                        blockIndex = blockIndex,
                     )
                 }
             }
@@ -475,30 +563,141 @@ private fun ReflowBlockView(
     anchors: List<TextAnchor>,
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+    blockIndex: Int,
 ) {
     when (block) {
         is ReflowBlock.Heading ->
-            BasicText(
-                text = styledText(block.text, block.source, anchors, settings),
+            SelectableReflowText(
+                content = BlockContent(block.text, block.source),
+                anchors = anchors,
                 style = settings.headingStyle(block.level),
+                settings = settings,
+                blockIndex = blockIndex,
             )
 
         is ReflowBlock.Paragraph ->
-            BasicText(
-                text = styledText(block.text, block.source, anchors, settings),
+            SelectableReflowText(
+                content = BlockContent(block.text, block.source),
+                anchors = anchors,
                 style = settings.paragraphStyle(),
+                settings = settings,
+                blockIndex = blockIndex,
             )
 
         is ReflowBlock.ListItem ->
-            BasicText(
-                text = styledText(block.text, block.source, anchors, settings),
-                style = settings.paragraphStyle(),
-                modifier = Modifier.padding(start = settings.contentPadding),
-            )
+            Box(Modifier.padding(start = settings.contentPadding)) {
+                SelectableReflowText(
+                    content = BlockContent(block.text, block.source),
+                    anchors = anchors,
+                    style = settings.paragraphStyle(),
+                    settings = settings,
+                    blockIndex = blockIndex,
+                )
+            }
+
+        is ReflowBlock.Blockquote ->
+            BlockquoteView(block, anchors, settings, blockIndex)
 
         is ReflowBlock.Table -> TableView(block, settings)
 
         is ReflowBlock.Figure -> FigureView(block, settings, renderPage)
+
+        ReflowBlock.Divider -> DividerView(settings)
+    }
+}
+
+/**
+ * Текст блока и его исходные провенанс-спаны — одна цельная единица «что рисуем».
+ * Сгруппированы, чтобы не плодить параметры [SelectableReflowText].
+ *
+ * @property text видимый текст блока
+ * @property source провенанс-спаны (жирность/моноширинность/исходные области)
+ */
+private data class BlockContent(
+    val text: String,
+    val source: List<SourceSpan>,
+)
+
+/**
+ * Текстовый блок ридера, участвующий в сквозном выделении (см. [ReflowSelectionState]).
+ * Сам жест выделения живёт на корневом контейнере; блок лишь публикует свою раскладку
+ * ([reportLayout]) и собственные координаты ([reportCoordinates]) — из них хит-тест
+ * лениво считает границы в системе контейнера, чтобы попасть в нужный блок и символ — и
+ * читает свой текущий диапазон выделения ([selectionAnchorFor]) для превью прямо в тексте.
+ * На выходе из композиции снимает регистрацию ([forget]). Без активного выделения это
+ * обычный [BasicText].
+ */
+@Composable
+private fun SelectableReflowText(
+    content: BlockContent,
+    anchors: List<TextAnchor>,
+    style: TextStyle,
+    settings: ReflowReaderSettings,
+    blockIndex: Int,
+) {
+    val selectionState = LocalReflowSelectionState.current
+    DisposableEffect(selectionState, blockIndex) {
+        onDispose { selectionState.forget(blockIndex) }
+    }
+    val liveAnchor = selectionState.selectionAnchorFor(blockIndex)
+    val liveAnchors = if (liveAnchor != null) anchors + liveAnchor else anchors
+
+    BasicText(
+        text = styledText(content.text, content.source, liveAnchors, settings),
+        style = style,
+        onTextLayout = { selectionState.reportLayout(blockIndex, it) },
+        modifier =
+            Modifier.onGloballyPositioned { coordinates ->
+                selectionState.reportCoordinates(blockIndex, coordinates)
+            },
+    )
+}
+
+/**
+ * Цитата: тонкая вертикальная линейка слева + втянутый курсивный текст
+ * приглушённого цвета. Подсветка [anchors] течёт вместе с текстом, как в абзаце.
+ */
+@Composable
+private fun BlockquoteView(
+    block: ReflowBlock.Blockquote,
+    anchors: List<TextAnchor>,
+    settings: ReflowReaderSettings,
+    blockIndex: Int,
+) {
+    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+        Box(
+            modifier =
+                Modifier
+                    .width(BLOCKQUOTE_BAR_WIDTH)
+                    .fillMaxHeight()
+                    .background(settings.textColor.copy(alpha = BLOCKQUOTE_BAR_ALPHA)),
+        )
+        Box(Modifier.padding(start = settings.contentPadding)) {
+            SelectableReflowText(
+                content = BlockContent(block.text, block.source),
+                anchors = anchors,
+                style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic),
+                settings = settings,
+                blockIndex = blockIndex,
+            )
+        }
+    }
+}
+
+/** Тематический разделитель: тонкая короткая линия по центру с воздухом. */
+@Composable
+private fun DividerView(settings: ReflowReaderSettings) {
+    Box(
+        modifier = Modifier.fillMaxWidth().padding(vertical = settings.blockSpacing),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxWidth(DIVIDER_LINE_FRACTION)
+                    .height(1.dp)
+                    .background(settings.textColor.copy(alpha = DIVIDER_LINE_ALPHA)),
+        )
     }
 }
 
@@ -825,14 +1024,11 @@ private fun blockTextLength(block: ReflowBlock): Int =
         is ReflowBlock.Heading -> block.text.length
         is ReflowBlock.Paragraph -> block.text.length
         is ReflowBlock.ListItem -> block.text.length
+        is ReflowBlock.Blockquote -> block.text.length
         is ReflowBlock.Table -> block.rows.sumOf { row -> row.cells.sumOf { it.text.length } }
         is ReflowBlock.Figure -> 0
+        ReflowBlock.Divider -> 0
     }
-
-// Свайп засчитывается как перелистывание после ~64dp горизонтального смещения —
-// заметно больше touch-slop, чтобы случайные диагональные движения при скролле не
-// листали страницу, но без необходимости «бросать» через весь экран.
-private val SWIPE_DISTANCE_THRESHOLD_DP = 64.dp
 
 // В скролл-режиме «страница» прокручивает ~90% вьюпорта: нахлёст в одну-две строки
 // сохраняет контекст на стыке (как Page Down в читалках), а не прыгает ровно на экран.
@@ -873,3 +1069,8 @@ private val TABLE_BORDER_WIDTH = 1.dp
 private val TABLE_CELL_PADDING = 8.dp
 private const val TABLE_BORDER_ALPHA = 0.22f
 private const val TABLE_HEADER_ALPHA = 0.06f
+
+private val BLOCKQUOTE_BAR_WIDTH = 3.dp
+private const val BLOCKQUOTE_BAR_ALPHA = 0.3f
+private const val DIVIDER_LINE_FRACTION = 0.2f
+private const val DIVIDER_LINE_ALPHA = 0.25f

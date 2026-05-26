@@ -1,14 +1,17 @@
 package ru.kyamshanov.notepen.tools.marker
 
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.LineWeight
 import androidx.compose.ui.graphics.Color
+import ru.kyamshanov.notepen.BooleanToggle
 import ru.kyamshanov.notepen.ColorPresets
 import ru.kyamshanov.notepen.NotePenIcons
 import ru.kyamshanov.notepen.SlotItem
 import ru.kyamshanov.notepen.StrokeWidthSlider
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.applyPreset
+import ru.kyamshanov.notepen.annotation.domain.model.applySticky
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
 
 /** Settings slots for the marker tool: color presets and stroke width. */
@@ -40,6 +43,16 @@ public fun markerSlots(
                     min = MarkerSettings.MIN_STROKE_WIDTH,
                     max = MarkerSettings.MAX_STROKE_WIDTH,
                     onWidthChange = { onChange(settings.applyStrokeWidth(it)) },
+                )
+            },
+        ),
+        SlotItem(
+            icon = Icons.Default.AutoFixHigh,
+            contentDescription = "Липкое выделение",
+            content = {
+                BooleanToggle(
+                    enabled = settings.sticky,
+                    onToggle = { onChange(settings.applySticky(it)) },
                 )
             },
         ),

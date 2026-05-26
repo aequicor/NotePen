@@ -16,8 +16,10 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserMode
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import java.io.File
 import java.io.IOException
@@ -67,6 +69,22 @@ private data class EraserSettingsDto(
 private data class MarkerSettingsDto(
     val colorArgb: Long = MarkerSettings.PRESET_COLORS[0],
     val strokeWidth: Float = MarkerSettings.DEFAULT_STROKE_WIDTH,
+    val sticky: Boolean = true,
+)
+
+@Serializable
+private data class NormalizedRectDto(
+    val l: Float,
+    val t: Float,
+    val r: Float,
+    val b: Float,
+)
+
+@Serializable
+private data class StickyHighlightDto(
+    val rects: List<NormalizedRectDto> = emptyList(),
+    val colorArgb: Long = MarkerSettings.PRESET_COLORS[0],
+    val strokeId: String = "",
 )
 
 @Serializable
@@ -96,6 +114,8 @@ private data class AnnotationDataDto(
     val currentPageOffset: Int = 0,
     val favoritePageIndices: List<Int> = emptyList(),
     val pageExtents: Map<String, PageExtentDto> = emptyMap(),
+    // Отсутствие ключа у легаси-файлов даёт пустую карту — выделения добавлены позже штрихов.
+    val highlights: Map<String, List<StickyHighlightDto>> = emptyMap(),
 )
 
 // ── Mappers ──────────────────────────────────────────────────────────────────
@@ -124,13 +144,21 @@ private fun EraserMode.toDto() = if (this == EraserMode.OBJECT) EraserModeDto.OB
 
 private fun EraserSettings.toDto() = EraserSettingsDto(shape.toDto(), sizeNormalized, mode.toDto())
 
-private fun MarkerSettings.toDto() = MarkerSettingsDto(colorArgb, strokeWidth)
+private fun MarkerSettings.toDto() = MarkerSettingsDto(colorArgb, strokeWidth, sticky)
 
-private fun MarkerSettingsDto.toDomain() = MarkerSettings(colorArgb, strokeWidth)
+private fun MarkerSettingsDto.toDomain() = MarkerSettings(colorArgb, strokeWidth, sticky)
 
 private fun PageExtentDto.toDomain() = PageExtent(l, t, r, b)
 
 private fun PageExtent.toDto() = PageExtentDto(left, top, right, bottom)
+
+private fun NormalizedRectDto.toDomain() = NormalizedRect(l, t, r, b)
+
+private fun NormalizedRect.toDto() = NormalizedRectDto(left, top, right, bottom)
+
+private fun StickyHighlightDto.toDomain() = StickyHighlight(rects.map { it.toDomain() }, colorArgb, strokeId)
+
+private fun StickyHighlight.toDto() = StickyHighlightDto(rects.map { it.toDto() }, colorArgb, strokeId)
 
 // ── Repository ───────────────────────────────────────────────────────────────
 
@@ -172,6 +200,7 @@ class AnnotationRepositoryJvmAndroid(
         currentPageOffset: Int,
         favoritePageIndices: Set<Int>,
         pageExtents: Map<Int, PageExtent>,
+        highlights: Map<Int, List<StickyHighlight>>,
     ): Result<Unit> =
         withContext(ioDispatcher) {
             try {
@@ -192,6 +221,11 @@ class AnnotationRepositoryJvmAndroid(
                                 .filterValues { it != PageExtent.Pdf }
                                 .mapKeys { it.key.toString() }
                                 .mapValues { (_, e) -> e.toDto() },
+                        highlights =
+                            highlights
+                                .filterValues { it.isNotEmpty() }
+                                .mapKeys { it.key.toString() }
+                                .mapValues { (_, hs) -> hs.map { it.toDto() } },
                     )
                 val file = storeFileFor(pdfPath)
                 file.parentFile?.mkdirs()
@@ -238,9 +272,14 @@ class AnnotationRepositoryJvmAndroid(
                         dto.pageExtents.mapNotNull { (k, v) ->
                             k.toIntOrNull()?.let { it to v.toDomain() }
                         }.toMap()
+                    val highlights =
+                        dto.highlights.mapNotNull { (k, hs) ->
+                            k.toIntOrNull()?.let { it to hs.map { h -> h.toDomain() } }
+                        }.toMap()
                     Result.success(
                         AnnotationBundle(
                             pages = pages,
+                            highlights = highlights,
                             scale = dto.scale,
                             pen = dto.pen?.toDomain() ?: PenSettings(),
                             marker = dto.marker?.toDomain() ?: MarkerSettings(),

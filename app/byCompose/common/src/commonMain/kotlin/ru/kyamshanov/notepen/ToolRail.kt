@@ -10,6 +10,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -34,6 +35,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -484,6 +487,98 @@ internal fun systemControlEntries(
 }
 
 /**
+ * Drawing-tool state for the tool rail: the active [toolMode] plus the per-tool
+ * settings (pen / marker / eraser) and the saved [toolPresets], each paired with
+ * its change callback. Grouped so the rail composables take a single cohesive
+ * argument instead of a dozen loose tool parameters.
+ *
+ * @property toolMode the currently active drawing tool.
+ * @property onToolModeChange invoked with the next tool when a toggle is tapped.
+ * @property penSettings current pen settings; [onPenSettingsChange] reports edits.
+ * @property markerSettings current marker settings; [onMarkerSettingsChange] reports edits.
+ * @property eraserSettings current eraser settings; [onEraserSettingsChange] reports edits.
+ * @property toolPresets saved per-tool presets; [onToolPresetsChange] reports edits.
+ * @property onPresetApplied invoked with a preset id when the user applies one;
+ *   `null` disables preset-applied reporting.
+ */
+data class ToolRailTools(
+    val toolMode: ToolMode,
+    val onToolModeChange: (ToolMode) -> Unit,
+    val penSettings: PenSettings,
+    val onPenSettingsChange: (PenSettings) -> Unit,
+    val markerSettings: MarkerSettings,
+    val onMarkerSettingsChange: (MarkerSettings) -> Unit,
+    val eraserSettings: EraserSettings,
+    val onEraserSettingsChange: (EraserSettings) -> Unit,
+    val toolPresets: StoredToolPresets,
+    val onToolPresetsChange: (StoredToolPresets) -> Unit,
+    val onPresetApplied: ((id: String) -> Unit)? = null,
+)
+
+/**
+ * Non-drawing ("system") controls for the tool rail — export, zoom, page
+ * thumbnails, table of contents, reading mode, pencil mode, magnifier, sync and
+ * the shortcuts settings. Mirrors the parameters of [systemControlEntries]; the
+ * rail unpacks it when building that wheel section.
+ *
+ * @property hasAnnotations enables the PDF export button.
+ * @property isExporting shows the export progress spinner.
+ * @property onExport invoked when the export button is tapped.
+ * @property scale current zoom percentage shown between the zoom buttons.
+ * @property onZoomIn / @property onZoomOut zoom cluster callbacks.
+ * @property showThumbnails / @property onToggleThumbnails page-thumbnails toggle state + callback.
+ * @property showTocButton whether the table-of-contents button is shown at all.
+ * @property showToc / @property onToggleToc table-of-contents toggle state + callback.
+ * @property readingModeEnabled / @property readingModeAvailable / @property onToggleReadingMode
+ *   reading-mode toggle state, availability (reflow possible) and callback.
+ * @property showPencilModeButton / @property pencilModeEnabled / @property onPencilModeChange
+ *   stylus-mode button visibility, state and callback.
+ * @property magnifierEnabled / @property onMagnifierToggle writing-loupe toggle state + callback.
+ * @property showSyncButton / @property syncTint / @property onOpenSync sync button visibility,
+ *   tint and callback.
+ * @property onOpenShortcutsSettings opens the keyboard-shortcuts settings.
+ */
+data class ToolRailSystem(
+    val hasAnnotations: Boolean,
+    val isExporting: Boolean,
+    val onExport: () -> Unit,
+    val scale: Int,
+    val onZoomIn: () -> Unit,
+    val onZoomOut: () -> Unit,
+    val showThumbnails: Boolean,
+    val onToggleThumbnails: () -> Unit,
+    val showTocButton: Boolean,
+    val showToc: Boolean,
+    val onToggleToc: () -> Unit,
+    val readingModeEnabled: Boolean,
+    val readingModeAvailable: Boolean,
+    val onToggleReadingMode: () -> Unit,
+    val showPencilModeButton: Boolean,
+    val pencilModeEnabled: Boolean,
+    val onPencilModeChange: (Boolean) -> Unit,
+    val magnifierEnabled: Boolean,
+    val onMagnifierToggle: () -> Unit,
+    val showSyncButton: Boolean,
+    val syncTint: Color,
+    val onOpenSync: () -> Unit,
+    val onOpenShortcutsSettings: () -> Unit,
+)
+
+/**
+ * Reader-theme colours applied to the tool rail in reading mode.
+ *
+ * @property background glass tint of the rail; `null` keeps the [MaterialTheme]
+ *   surface colour.
+ * @property contentColor recolours the selected-tool indicator under the reader
+ *   theme (see [railSelectionColorScheme]); `null` keeps the [MaterialTheme]
+ *   accent.
+ */
+data class ToolRailReaderTheme(
+    val background: Color? = null,
+    val contentColor: Color? = null,
+)
+
+/**
  * Landscape (vertical) tool rail: one glass island holding a single vertical
  * [WheelStrip] — tool toggles, the active tool's settings slots and presets, and
  * the system controls, separated by [RailDivider]s. Entries fade towards the
@@ -493,87 +588,22 @@ internal fun systemControlEntries(
  * RIGHT of the rail carrying the slider / color picker — the slot icons stay put
  * inside the wheel.
  *
- * [onRailWidthChanged] reports the rail's width (excluding the budding panel) so
- * the caller can align the back button to the rail.
+ * @param tools drawing-tool state (active tool, per-tool settings, presets).
+ * @param system non-drawing controls (export, zoom, thumbnails, toc, …).
+ * @param readerTheme reader-theme colours applied in reading mode.
+ * @param onRailWidthChanged reports the rail's width (excluding the budding panel)
+ *   so the caller can align the back button to the rail.
  */
 @Composable
 fun LandscapeToolRail(
-    toolMode: ToolMode,
-    onToolModeChange: (ToolMode) -> Unit,
-    penSettings: PenSettings,
-    onPenSettingsChange: (PenSettings) -> Unit,
-    markerSettings: MarkerSettings,
-    onMarkerSettingsChange: (MarkerSettings) -> Unit,
-    eraserSettings: EraserSettings,
-    onEraserSettingsChange: (EraserSettings) -> Unit,
-    toolPresets: StoredToolPresets,
-    onToolPresetsChange: (StoredToolPresets) -> Unit,
-    onPresetApplied: ((id: String) -> Unit)? = null,
-    hasAnnotations: Boolean,
-    isExporting: Boolean,
-    onExport: () -> Unit,
-    scale: Int,
-    onZoomIn: () -> Unit,
-    onZoomOut: () -> Unit,
-    showThumbnails: Boolean,
-    onToggleThumbnails: () -> Unit,
-    showTocButton: Boolean,
-    showToc: Boolean,
-    onToggleToc: () -> Unit,
-    readingModeEnabled: Boolean,
-    readingModeAvailable: Boolean,
-    onToggleReadingMode: () -> Unit,
-    showPencilModeButton: Boolean,
-    pencilModeEnabled: Boolean,
-    onPencilModeChange: (Boolean) -> Unit,
-    magnifierEnabled: Boolean,
-    onMagnifierToggle: () -> Unit,
-    showSyncButton: Boolean,
-    syncTint: Color,
-    onOpenSync: () -> Unit,
-    onOpenShortcutsSettings: () -> Unit,
+    tools: ToolRailTools,
+    system: ToolRailSystem,
     modifier: Modifier = Modifier,
-    /** Фон активной темы ридера для стекла рельсы; `null` — цвет [MaterialTheme]. */
-    readerBackground: Color? = null,
-    /**
-     * Цвет контента активной темы ридера; в режиме чтения перекрашивает индикатор
-     * выбранного инструмента под тему читалки (см. [railSelectionColorScheme]).
-     * `null` — индикатор сохраняет акцент [MaterialTheme].
-     */
-    readerContentColor: Color? = null,
+    readerTheme: ToolRailReaderTheme = ToolRailReaderTheme(),
     onRailWidthChanged: (Dp) -> Unit = {},
 ) {
     val density = LocalDensity.current
-    var expandedIndex by remember(toolMode) { mutableStateOf<Int?>(null) }
-    // Switching directly between two slots first collapses the open panel, then
-    // opens the requested one — [pendingIndex] holds the slot awaiting that
-    // delayed open.
-    var pendingIndex by remember(toolMode) { mutableStateOf<Int?>(null) }
-    // Retain the last expanded slot so the budding panel keeps rendering its
-    // content through the collapse exit animation.
-    var lastExpanded by remember { mutableStateOf(0) }
-    LaunchedEffect(expandedIndex) { expandedIndex?.let { lastExpanded = it } }
-    LaunchedEffect(expandedIndex, pendingIndex) {
-        if (expandedIndex == null && pendingIndex != null) {
-            delay(PANEL_ANIM_MS.toLong())
-            expandedIndex = pendingIndex
-            pendingIndex = null
-        }
-    }
-    val onSlotToggle: (Int) -> Unit = { i ->
-        when {
-            expandedIndex == i -> {
-                expandedIndex = null
-                pendingIndex = null
-            }
-            expandedIndex == null -> expandedIndex = i
-            else -> {
-                // Collapse the current panel; the LaunchedEffect opens [i] next.
-                pendingIndex = i
-                expandedIndex = null
-            }
-        }
-    }
+    val expansion = rememberToolRailExpansion(tools.toolMode)
 
     // Vertical anchoring: the budding panel aligns its centre to the tapped
     // slot button so it visually sprouts from that button.
@@ -581,7 +611,7 @@ fun LandscapeToolRail(
     var buttonCenterY by remember { mutableStateOf(0f) }
     var panelHeightPx by remember { mutableStateOf(0) }
 
-    val toolActive = toolMode != ToolMode.NONE
+    val toolActive = tools.toolMode != ToolMode.NONE
 
     Row(
         modifier = modifier.onGloballyPositioned { railCoords = it },
@@ -591,44 +621,11 @@ fun LandscapeToolRail(
         // вертикальном колесе (затухание к краям). Колесо подгоняется по высоте
         // под содержимое и прокручивается, если оно не помещается.
         val entries =
-            unifiedToolWheelEntries(
-                orientation = RailOrientation.VERTICAL,
-                toolMode = toolMode,
-                onToolModeChange = onToolModeChange,
-                penSettings = penSettings,
-                onPenSettingsChange = onPenSettingsChange,
-                markerSettings = markerSettings,
-                onMarkerSettingsChange = onMarkerSettingsChange,
-                eraserSettings = eraserSettings,
-                onEraserSettingsChange = onEraserSettingsChange,
-                toolPresets = toolPresets,
-                onToolPresetsChange = onToolPresetsChange,
-                onPresetApplied = onPresetApplied,
-                expandedIndex = expandedIndex,
-                onSlotToggle = onSlotToggle,
-                hasAnnotations = hasAnnotations,
-                isExporting = isExporting,
-                onExport = onExport,
-                scale = scale,
-                onZoomIn = onZoomIn,
-                onZoomOut = onZoomOut,
-                showThumbnails = showThumbnails,
-                onToggleThumbnails = onToggleThumbnails,
-                showTocButton = showTocButton,
-                showToc = showToc,
-                onToggleToc = onToggleToc,
-                readingModeEnabled = readingModeEnabled,
-                readingModeAvailable = readingModeAvailable,
-                onToggleReadingMode = onToggleReadingMode,
-                showPencilModeButton = showPencilModeButton,
-                pencilModeEnabled = pencilModeEnabled,
-                onPencilModeChange = onPencilModeChange,
-                magnifierEnabled = magnifierEnabled,
-                onMagnifierToggle = onMagnifierToggle,
-                showSyncButton = showSyncButton,
-                syncTint = syncTint,
-                onOpenSync = onOpenSync,
-                onOpenShortcutsSettings = onOpenShortcutsSettings,
+            landscapeWheelEntries(
+                tools = tools,
+                system = system,
+                expandedIndex = expansion.expandedIndex,
+                onSlotToggle = expansion::toggle,
                 expandedButtonModifier =
                     Modifier.onGloballyPositioned { btn ->
                         railCoords?.let { row ->
@@ -642,52 +639,203 @@ fun LandscapeToolRail(
                     },
             )
         GlassSurface(
-            tint = readerBackground ?: MaterialTheme.colorScheme.surface,
+            tint = readerTheme.background ?: MaterialTheme.colorScheme.surface,
             modifier = Modifier.onSizeChanged { onRailWidthChanged(with(density) { it.width.toDp() }) },
         ) {
-            MaterialTheme(colorScheme = railSelectionColorScheme(MaterialTheme.colorScheme, readerContentColor)) {
+            MaterialTheme(colorScheme = railSelectionColorScheme(MaterialTheme.colorScheme, readerTheme.contentColor)) {
                 WheelStrip(
                     entries = entries,
                     orientation = RailOrientation.VERTICAL,
                     modifier = Modifier.padding(ISLAND_PADDING),
-                    selectedKey = selectedToolWheelKey(toolMode),
+                    selectedKey = selectedToolWheelKey(tools.toolMode),
                 )
             }
         }
-        AnimatedVisibility(
-            visible = toolActive && expandedIndex != null,
-            enter =
-                expandHorizontally(animationSpec = tween(PANEL_ANIM_MS), expandFrom = Alignment.Start) +
-                    fadeIn(animationSpec = tween(PANEL_ANIM_MS)) +
-                    scaleIn(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
-            exit =
-                shrinkHorizontally(animationSpec = tween(PANEL_ANIM_MS), shrinkTowards = Alignment.Start) +
-                    fadeOut(animationSpec = tween(PANEL_ANIM_MS)) +
-                    scaleOut(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
-            modifier =
-                Modifier
-                    .align(Alignment.Top)
-                    .offset {
-                        IntOffset(0, (buttonCenterY - panelHeightPx / 2f).roundToInt().coerceAtLeast(0))
-                    },
-        ) {
-            Row(verticalAlignment = Alignment.Top) {
-                Spacer(Modifier.width(ISLAND_GAP))
-                GlassSurface(modifier = Modifier.onSizeChanged { panelHeightPx = it.height }) {
-                    ToolSettingsExpansionContent(
-                        toolMode = toolMode,
-                        penSettings = penSettings,
-                        onPenSettingsChange = onPenSettingsChange,
-                        markerSettings = markerSettings,
-                        onMarkerSettingsChange = onMarkerSettingsChange,
-                        eraserSettings = eraserSettings,
-                        onEraserSettingsChange = onEraserSettingsChange,
-                        orientation = RailOrientation.VERTICAL,
-                        index = lastExpanded,
-                    )
-                }
+        ToolRailBuddingPanel(
+            visible = toolActive && expansion.expandedIndex != null,
+            anchor = ToolRailAnchor(buttonCenterY, panelHeightPx, onPanelHeightChange = { panelHeightPx = it }),
+            tools = tools,
+            slotIndex = expansion.lastExpanded,
+        )
+    }
+}
+
+/**
+ * Builds the landscape wheel entries by unpacking [tools] and [system] into the
+ * shared [unifiedToolWheelEntries] builder (vertical orientation).
+ * [expandedButtonModifier] anchors the budding panel to the open settings slot.
+ */
+private fun landscapeWheelEntries(
+    tools: ToolRailTools,
+    system: ToolRailSystem,
+    expandedIndex: Int?,
+    onSlotToggle: (Int) -> Unit,
+    expandedButtonModifier: Modifier,
+): List<WheelEntry> =
+    unifiedToolWheelEntries(
+        orientation = RailOrientation.VERTICAL,
+        toolMode = tools.toolMode,
+        onToolModeChange = tools.onToolModeChange,
+        penSettings = tools.penSettings,
+        onPenSettingsChange = tools.onPenSettingsChange,
+        markerSettings = tools.markerSettings,
+        onMarkerSettingsChange = tools.onMarkerSettingsChange,
+        eraserSettings = tools.eraserSettings,
+        onEraserSettingsChange = tools.onEraserSettingsChange,
+        toolPresets = tools.toolPresets,
+        onToolPresetsChange = tools.onToolPresetsChange,
+        onPresetApplied = tools.onPresetApplied,
+        expandedIndex = expandedIndex,
+        onSlotToggle = onSlotToggle,
+        hasAnnotations = system.hasAnnotations,
+        isExporting = system.isExporting,
+        onExport = system.onExport,
+        scale = system.scale,
+        onZoomIn = system.onZoomIn,
+        onZoomOut = system.onZoomOut,
+        showThumbnails = system.showThumbnails,
+        onToggleThumbnails = system.onToggleThumbnails,
+        showTocButton = system.showTocButton,
+        showToc = system.showToc,
+        onToggleToc = system.onToggleToc,
+        readingModeEnabled = system.readingModeEnabled,
+        readingModeAvailable = system.readingModeAvailable,
+        onToggleReadingMode = system.onToggleReadingMode,
+        showPencilModeButton = system.showPencilModeButton,
+        pencilModeEnabled = system.pencilModeEnabled,
+        onPencilModeChange = system.onPencilModeChange,
+        magnifierEnabled = system.magnifierEnabled,
+        onMagnifierToggle = system.onMagnifierToggle,
+        showSyncButton = system.showSyncButton,
+        syncTint = system.syncTint,
+        onOpenSync = system.onOpenSync,
+        onOpenShortcutsSettings = system.onOpenShortcutsSettings,
+        expandedButtonModifier = expandedButtonModifier,
+    )
+
+/**
+ * Vertical anchoring for the budding panel: where it sits and how it measures.
+ *
+ * @property buttonCenterY y of the tapped slot's centre, in the rail's coordinates;
+ *   the panel offsets its own centre to match so it sprouts from that slot.
+ * @property panelHeightPx the panel's last measured height, used to centre it.
+ * @property onPanelHeightChange reports the panel's measured height back.
+ */
+@Stable
+private class ToolRailAnchor(
+    val buttonCenterY: Float,
+    val panelHeightPx: Int,
+    val onPanelHeightChange: (Int) -> Unit,
+)
+
+/**
+ * The vertical "budding" panel that sprouts to the RIGHT of the rail carrying the
+ * active settings slot's slider / color picker. It vertically anchors its centre
+ * to the tapped slot via [anchor].
+ */
+@Composable
+private fun RowScope.ToolRailBuddingPanel(
+    visible: Boolean,
+    anchor: ToolRailAnchor,
+    tools: ToolRailTools,
+    slotIndex: Int,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter =
+            expandHorizontally(animationSpec = tween(PANEL_ANIM_MS), expandFrom = Alignment.Start) +
+                fadeIn(animationSpec = tween(PANEL_ANIM_MS)) +
+                scaleIn(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
+        exit =
+            shrinkHorizontally(animationSpec = tween(PANEL_ANIM_MS), shrinkTowards = Alignment.Start) +
+                fadeOut(animationSpec = tween(PANEL_ANIM_MS)) +
+                scaleOut(animationSpec = tween(PANEL_ANIM_MS), transformOrigin = TransformOrigin(0f, 0.5f)),
+        modifier =
+            Modifier
+                .align(Alignment.Top)
+                .offset {
+                    IntOffset(0, (anchor.buttonCenterY - anchor.panelHeightPx / 2f).roundToInt().coerceAtLeast(0))
+                },
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Spacer(Modifier.width(ISLAND_GAP))
+            GlassSurface(modifier = Modifier.onSizeChanged { anchor.onPanelHeightChange(it.height) }) {
+                ToolSettingsExpansionContent(
+                    toolMode = tools.toolMode,
+                    penSettings = tools.penSettings,
+                    onPenSettingsChange = tools.onPenSettingsChange,
+                    markerSettings = tools.markerSettings,
+                    onMarkerSettingsChange = tools.onMarkerSettingsChange,
+                    eraserSettings = tools.eraserSettings,
+                    onEraserSettingsChange = tools.onEraserSettingsChange,
+                    orientation = RailOrientation.VERTICAL,
+                    index = slotIndex,
+                )
             }
         }
+    }
+}
+
+/**
+ * Expansion state of the rail's settings slots: which slot's budding panel is
+ * open and the pending slot during a slot-to-slot switch.
+ *
+ * @property expandedIndex the currently open slot, or `null` when none is open.
+ * @property lastExpanded the last opened slot — kept so the budding panel renders
+ *   its content through the collapse exit animation even after [expandedIndex]
+ *   clears.
+ */
+@Stable
+internal class ToolRailExpansion(
+    private val expanded: MutableState<Int?>,
+    private val pending: MutableState<Int?>,
+    private val last: MutableState<Int>,
+) {
+    val expandedIndex: Int? get() = expanded.value
+    val lastExpanded: Int get() = last.value
+
+    /** Toggles slot [index]; switching from another open slot collapses it first. */
+    fun toggle(index: Int) {
+        when {
+            expanded.value == index -> {
+                expanded.value = null
+                pending.value = null
+            }
+            expanded.value == null -> expanded.value = index
+            else -> {
+                // Collapse the current panel; the LaunchedEffect opens [index] next.
+                pending.value = index
+                expanded.value = null
+            }
+        }
+    }
+}
+
+/**
+ * Wires the rail's expansion state and the delayed slot-switch effect.
+ * [expandedIndex]/pending reset whenever the active [toolMode] changes; the last
+ * opened slot persists so a collapsing panel keeps its content.
+ */
+@Composable
+internal fun rememberToolRailExpansion(toolMode: ToolMode): ToolRailExpansion {
+    val expandedIndex = remember(toolMode) { mutableStateOf<Int?>(null) }
+    // Switching directly between two slots first collapses the open panel, then
+    // opens the requested one — [pendingIndex] holds the slot awaiting that
+    // delayed open.
+    val pendingIndex = remember(toolMode) { mutableStateOf<Int?>(null) }
+    // Retain the last expanded slot so the budding panel keeps rendering its
+    // content through the collapse exit animation.
+    val lastExpanded = remember { mutableStateOf(0) }
+    LaunchedEffect(expandedIndex.value) { expandedIndex.value?.let { lastExpanded.value = it } }
+    LaunchedEffect(expandedIndex.value, pendingIndex.value) {
+        if (expandedIndex.value == null && pendingIndex.value != null) {
+            delay(PANEL_ANIM_MS.toLong())
+            expandedIndex.value = pendingIndex.value
+            pendingIndex.value = null
+        }
+    }
+    return remember(expandedIndex, pendingIndex, lastExpanded) {
+        ToolRailExpansion(expandedIndex, pendingIndex, lastExpanded)
     }
 }
 

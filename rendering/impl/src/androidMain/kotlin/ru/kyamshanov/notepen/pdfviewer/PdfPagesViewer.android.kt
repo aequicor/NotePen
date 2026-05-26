@@ -105,7 +105,7 @@ actual fun PdfPagesViewer(
     renderer: PdfPageRenderer,
     modifier: Modifier,
     gestureModifier: Modifier,
-    primaryDragPanEnabled: () -> Boolean,
+    primaryDragPanEnabled: (position: Offset) -> Boolean,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }

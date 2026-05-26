@@ -45,7 +45,13 @@ expect fun PdfPagesViewer(
      * pipeline.
      */
     gestureModifier: Modifier = Modifier,
-    primaryDragPanEnabled: () -> Boolean = { false },
+    /**
+     * Принимает позицию нажатия (viewport-px) и возвращает `true`, когда
+     * primary-drag должен панорамировать документ. Получает позицию, чтобы
+     * отклонять pan на интерактивных оверлеях поверх страницы (например,
+     * рамка-цель лупы), где drag уходит в их собственный жест.
+     */
+    primaryDragPanEnabled: (position: Offset) -> Boolean = { false },
     pageContent: PdfPageContent,
 )
 

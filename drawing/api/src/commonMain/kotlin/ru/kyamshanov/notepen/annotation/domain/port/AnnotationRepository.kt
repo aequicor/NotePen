@@ -7,6 +7,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 
 /** Persistence port for per-document handwritten annotations. */
 interface AnnotationRepository {
@@ -21,6 +22,7 @@ interface AnnotationRepository {
         currentPageOffset: Int = 0,
         favoritePageIndices: Set<Int> = emptySet(),
         pageExtents: Map<Int, PageExtent> = emptyMap(),
+        highlights: Map<Int, List<StickyHighlight>> = emptyMap(),
     ): Result<Unit>
 
     suspend fun load(pdfPath: String): Result<AnnotationBundle>
