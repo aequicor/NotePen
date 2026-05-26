@@ -22,6 +22,7 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
@@ -58,6 +59,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -96,6 +98,7 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import kotlin.math.abs
 
 /**
  * Reflow-ридер: рендерит [ReflowDocument] колонкой ограниченной ширины с
@@ -199,6 +202,10 @@ public fun ReflowReader(
     // Первый видимый блок: из прокрутки (скролл) либо из текущей страницы (paged).
     var pagedFirstBlock by remember(document) { mutableStateOf(0) }
     val firstVisibleBlock = if (settings.paged) pagedFirstBlock else listState.firstVisibleItemIndex
+    // Якорь чтения, общий для обоих режимов: сохраняет место при переключении
+    // страница<->скролл. Paged пишет его через onVisibleBlockChange; скролл отслеживает
+    // первый видимый элемент (эффекты ниже).
+    var readingAnchor by remember(document) { mutableStateOf(0) }
     val progressLabel =
         remember(settings.progress, firstVisibleBlock, document) {
             progressLabel(settings.progress, firstVisibleBlock, document)
@@ -235,16 +242,37 @@ public fun ReflowReader(
     // Скролл-режим: «страница» = дельта экранов (с лёгким нахлёстом, чтобы строка
     // на стыке не терялась). animateScrollBy сам клампится на краях списка.
     if (!settings.paged) {
+        val barReservePx = with(LocalDensity.current) { READER_BAR_RESERVE.toPx() }
         val scrollPageDelta: (Int) -> Unit =
-            remember(listState, scope) {
+            remember(listState, scope, barReservePx) {
                 { delta ->
-                    val step = viewportHeightPx * PAGE_SCROLL_OVERLAP_FRACTION
+                    // Видимая высота вьюпорта = корневой Box минус поле под airbar (на него
+                    // ужат LazyColumn ниже), поэтому шаг считаем от неё — иначе перелистывание
+                    // перепрыгивало бы строку вместо нахлёста.
+                    val step = (viewportHeightPx - barReservePx) * PAGE_SCROLL_OVERLAP_FRACTION
                     if (step > 0f) scope.launch { listState.animateScrollBy(delta * step) }
                 }
             }
         DisposableEffect(scrollPageDelta) {
             setPageDelta(scrollPageDelta)
             onDispose { setPageDelta(null) }
+        }
+    }
+
+    // Мост позиции страница<->скролл: при переключении в скролл встаём на якорный блок;
+    // пока скроллим — двигаем якорь, чтобы возврат в страницы попал на то же место. Самый
+    // первый композит пропускаем, чтобы не сбить уже восстановленную позицию списка.
+    var positionBridgeReady by remember(document) { mutableStateOf(false) }
+    LaunchedEffect(settings.paged) {
+        if (!positionBridgeReady) {
+            positionBridgeReady = true
+        } else if (!settings.paged) {
+            listState.scrollToItem(readingAnchor.coerceAtLeast(0))
+        }
+    }
+    LaunchedEffect(settings.paged, listState) {
+        if (!settings.paged) {
+            snapshotFlow { listState.firstVisibleItemIndex }.collect { readingAnchor = it }
         }
     }
 
@@ -264,10 +292,9 @@ public fun ReflowReader(
                 .background(effectiveBackground)
                 .onSizeChanged { viewportHeightPx = it.height }
                 .pointerInput(barVisible, settings.tapToTurn) {
-                    // Тап-зоны: лево — назад, право — вперёд, центр — показать/скрыть
-                    // панель (стандарт e-readers). Тап (не drag) совместим с выделением:
-                    // селекшн-жест ниже потребляет только движения, оставляя нам DOWN/тап.
-                    // Свайпа-перелистывания нет — горизонтальный drag принадлежит выделению.
+                    // Тап-зоны: лево — назад, право — вперёд, центр — показать/скрыть панель
+                    // (стандарт e-readers). Тап (не drag) совместим с выделением: селекшн-жест
+                    // ниже потребляет только движения, оставляя нам DOWN/тап.
                     detectTapGestures { offset ->
                         when (tapAction(offset.x, size.width, settings.tapToTurn)) {
                             TapAction.PREV -> latestPageDelta?.invoke(-1)
@@ -275,6 +302,26 @@ public fun ReflowReader(
                             TapAction.TOGGLE_BAR -> onBarVisibleChange(!barVisible)
                         }
                     }
+                }
+                .pointerInput(Unit) {
+                    // Свайп пальцем листает страницу: копим горизонтальный сдвиг и на отпускании
+                    // листаем, если ушли дальше порога. Выделение (долгое нажатие/маркер) живёт на
+                    // дочернем контейнере и в Main-проходе потребляет drag раньше — поэтому при
+                    // активном выделении свайп сюда не доходит и не конфликтует.
+                    var dx = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dx = 0f },
+                        onDragCancel = { dx = 0f },
+                        onDragEnd = {
+                            if (abs(dx) > size.width * SWIPE_TURN_FRACTION) {
+                                latestPageDelta?.invoke(if (dx < 0) 1 else -1)
+                            }
+                        },
+                        onHorizontalDrag = { change, amount ->
+                            dx += amount
+                            change.consume()
+                        },
+                    )
                 },
     ) {
         CompositionLocalProvider(LocalReflowSelectionState provides selectionState) {
@@ -294,7 +341,11 @@ public fun ReflowReader(
                         anchorsByBlock = anchorsByBlock,
                         settings = settings,
                         renderPage = renderPage,
-                        onVisibleBlockChange = { pagedFirstBlock = it },
+                        initialAnchorBlock = readingAnchor,
+                        onVisibleBlockChange = {
+                            pagedFirstBlock = it
+                            readingAnchor = it
+                        },
                         onPageDeltaReady = setPageDelta,
                     )
                 } else {
@@ -433,13 +484,17 @@ private fun BoxScope.ScrollReflowContent(
             Modifier
                 .align(Alignment.TopCenter)
                 .widthIn(max = settings.maxContentWidth)
-                .fillMaxWidth(),
+                .fillMaxWidth()
+                // Ужимаем вьюпорт на постоянное поле под airbar: текст в середине документа
+                // не оказывается под панелью (contentPadding резервирует место лишь в конце
+                // списка), а показ/скрытие панели не сдвигает текст — поле есть всегда.
+                .padding(bottom = READER_BAR_RESERVE),
         contentPadding =
             PaddingValues(
                 start = settings.contentPadding,
                 top = settings.contentPadding,
                 end = settings.contentPadding,
-                bottom = settings.contentPadding + READER_BAR_RESERVE,
+                bottom = settings.contentPadding,
             ),
         verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
     ) {
@@ -476,6 +531,7 @@ private fun PagedReflowContent(
     anchorsByBlock: Map<Int, List<TextAnchor>>,
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+    initialAnchorBlock: Int,
     onVisibleBlockChange: (Int) -> Unit,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit,
 ) {
@@ -489,7 +545,25 @@ private fun PagedReflowContent(
                 (maxHeight - READER_TOP_RESERVE - READER_BAR_RESERVE).toPx().coerceAtLeast(1f)
             }
         val spacingPx = with(density) { settings.blockSpacing.toPx() }
-        val heights = remember(document) { mutableStateMapOf<Int, Int>() }
+        // Сигнатура измерения: всё, что меняет высоту блока при вёрстке. Если она изменилась
+        // (другой кегль/шрифт/межстрочный/ширина колонки/поля/выравнивание/переносы/трекинг/
+        // bionic) — высоты переснимаем заново. Иначе пагинация считает по устаревшим высотам:
+        // после увеличения кегля блоки рендерятся выше, чем думала раскладка, низ страницы
+        // обрезается clipToBounds — и кусок текста пропадает между страницами.
+        val measureKey =
+            listOf(
+                settings.fontFamily,
+                settings.fontSize,
+                settings.lineHeightMultiplier,
+                settings.columnChars,
+                settings.contentPadding,
+                settings.align,
+                settings.hyphenation,
+                settings.letterSpacing,
+                settings.wordSpacing,
+                settings.bionic,
+            )
+        val heights = remember(document, measureKey) { mutableStateMapOf<Int, Int>() }
         val measured = document.blocks.isEmpty() || heights.size >= document.blocks.size
 
         if (!measured) {
@@ -519,25 +593,33 @@ private fun PagedReflowContent(
         }
 
         val pages =
-            remember(document, pageHeightPx, spacingPx, heights.size) {
+            remember(document, pageHeightPx, spacingPx, heights.size, measureKey) {
                 ReaderPagination.paginate(
                     blockHeightsPx = document.blocks.indices.map { heights[it]?.toFloat() ?: 0f },
                     pageHeightPx = pageHeightPx,
                     spacingPx = spacingPx,
+                    keepWithNext = document.blocks.map { it is ReflowBlock.Heading },
                 )
             }
         if (pages.isEmpty()) return@BoxWithConstraints
 
         val lastPage = pages.lastIndex
-        // Индекс текущей страницы — единый источник для свайпа, тап-зон и аппаратных
-        // клавиш. Сбрасывается на 0 при смене документа; при ре-пагинации (смена
-        // кегля/полей) клампится, чтобы не указывать за конец списка страниц.
+        // Якорь чтения — индекс первого видимого блока. Durable: переживает ре-пагинацию
+        // (смена кегля/полей) и переключение страница<->скролл. Номер страницы выводим из
+        // него после раскладки — сам номер не храним, он нестабилен при переверстке.
+        var anchorBlock by remember(document) { mutableStateOf(initialAnchorBlock) }
         var currentPage by remember(document) { mutableStateOf(0) }
-        LaunchedEffect(lastPage) {
-            if (currentPage > lastPage) currentPage = lastPage
+        // Ре-пагинация: встаём на страницу, где теперь лежит якорный блок, а не на тот же
+        // номер — место чтения сохраняется при смене кегля/полей.
+        LaunchedEffect(pages) {
+            val target = pages.indexOfFirst { anchorBlock in it }
+            currentPage = (if (target >= 0) target else currentPage).coerceIn(0, lastPage)
         }
+        // Текущий первый блок — это и есть якорь; публикуем наружу (прогресс + смена режима).
         LaunchedEffect(currentPage, pages) {
-            onVisibleBlockChange(pages.getOrNull(currentPage)?.firstOrNull() ?: 0)
+            val first = pages.getOrNull(currentPage)?.firstOrNull() ?: 0
+            anchorBlock = first
+            onVisibleBlockChange(first)
         }
 
         // «Листнуть на ±N» = смена currentPage в границах списка страниц. Публикуем
@@ -548,9 +630,10 @@ private fun PagedReflowContent(
             onPageDeltaReady(pageDeltaHandler)
             onDispose { onPageDeltaReady(null) }
         }
-        // Системное «уменьшить движение» форсит мгновенный переход, не меняя настройку.
+        // Системное «уменьшить движение» заменяет слайд мягким перекрёстным затуханием
+        // (а не резкой сменой) — щадящий компромисс, как в Apple Books; настройку не меняем.
         val transition =
-            if (isReducedMotionEnabled()) PageTransition.NONE else settings.pageTransition
+            if (isReducedMotionEnabled()) PageTransition.FADE else settings.pageTransition
         AnimatedContent(
             targetState = currentPage,
             transitionSpec = { pageTransitionSpec(transition, initialState, targetState) },
@@ -1122,6 +1205,10 @@ private const val PAGE_SCROLL_OVERLAP_FRACTION = 0.9f
 private const val TAP_ZONE_PREV_FRACTION = 0.3f
 private const val TAP_ZONE_NEXT_FRACTION = 0.3f
 
+// Доля ширины, на которую нужно увести горизонтальный свайп, чтобы листнуть страницу
+// (защита от случайных микро-сдвигов).
+private const val SWIPE_TURN_FRACTION = 0.18f
+
 // Длительность анимации перехода между страницами (slide/fade), мс.
 private const val PAGE_ANIM_MS = 280
 
@@ -1154,8 +1241,9 @@ private const val RULER_BAND_ALPHA = 0.06f
 private const val RULER_LINE_ALPHA = 0.18f
 private val NIGHT_TINT = Color(0xFFFF7A1A)
 
-// Вертикальные резервы страничного режима под всплывающий хром: снизу — airbar
-// настроек, сверху — счётчик страниц (на Android ещё и под статус-бар). Сознательно
+// Вертикальные резервы под всплывающий хром: снизу — airbar настроек (постоянное поле в
+// обоих режимах — свёрнутая панель не наезжает на текст, а её показ/скрытие его не двигает),
+// сверху — счётчик страниц страничного режима (на Android ещё и под статус-бар). Сознательно
 // щедрые, как поля книги; точная высота хрома платформозависима, поэтому берём с запасом.
 private val READER_BAR_RESERVE = 96.dp
 private val READER_TOP_RESERVE = 88.dp
