@@ -226,6 +226,8 @@ fun EditorPanel(
     onOpenPanelPicker: ((DocumentId) -> Unit)?,
     onClosePanel: (() -> Unit)?,
     onControlsChanged: (PanelControls?) -> Unit,
+    /** Opens the sessions dialog; forwarded to the tab strip's left «Сессии» button. */
+    onOpenSessions: () -> Unit,
     fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
     fitWidthTopInset: androidx.compose.ui.unit.Dp = 0.dp,
     modifier: Modifier = Modifier,
@@ -1350,6 +1352,7 @@ fun EditorPanel(
                 onAddTab = { onAddTab() },
                 onOpenInNewPanel = onOpenPanelPicker,
                 onClosePanel = onClosePanel,
+                onOpenSessions = onOpenSessions,
                 // В режиме чтения красим полосу вкладок под фон активной темы ридера,
                 // чтобы хром сливался с ридером (как и остальной хром этой панели), а
                 // подписи/иконки — под цвет текста темы, иначе на тёмной теме они

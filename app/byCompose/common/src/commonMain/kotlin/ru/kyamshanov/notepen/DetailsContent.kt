@@ -712,6 +712,7 @@ fun DetailsContent(
                 EditorPanel(
                     panel = panel,
                     tabSession = tabSession,
+                    onOpenSessions = { showSessionsDialog = true },
                     isFocused = panel.id == layout.focusedPanelId,
                     loader = loader,
                     renderer = renderer,

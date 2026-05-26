@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -93,6 +94,11 @@ fun TabBar(
      * only one panel is open, hiding the menu item.
      */
     onClosePanel: (() -> Unit)?,
+    /**
+     * Invoked by the left-edge «Сессии» button that opens the sessions dialog
+     * (save / restore the workspace). `null` hides the button.
+     */
+    onOpenSessions: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     /**
      * Glass tint of the strip; `null` keeps the default `surfaceContainerLow`.
@@ -119,6 +125,20 @@ fun TabBar(
         fillAlpha = 0.35f,
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = startInset, end = endInset)) {
+            onOpenSessions?.let { open ->
+                // Yandex-style: a sessions button anchored at the left edge of the strip.
+                val sessionsBtnModifier = Modifier.size(TAB_BAR_HEIGHT).padding(2.dp)
+                IconButton(
+                    onClick = open,
+                    modifier = titleBarInteraction?.interactive(sessionsBtnModifier) ?: sessionsBtnModifier,
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Layers,
+                        contentDescription = "Сессии",
+                        tint = contentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
             BoxWithConstraints(
                 modifier =
                     Modifier
