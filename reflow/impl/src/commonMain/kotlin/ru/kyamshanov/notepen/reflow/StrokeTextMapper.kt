@@ -120,6 +120,32 @@ public object StrokeTextMapper {
         return anchors
     }
 
+    /**
+     * Геометрия для «липкого выделения», созданного из текстового выделения в режиме
+     * чтения: для каждого [TextAnchor] берёт его [SourceSpan]-ы ([spansFor]), группирует
+     * по исходной странице и сливает в полосы по строкам ([mergeIntoLines]). Так выделение
+     * по диапазону символов превращается в те же слово-выровненные [NormalizedRect], что
+     * хранит StickyHighlight (одна страница может дать несколько полос; один блок,
+     * собранный с разных страниц, корректно разносится по страницам).
+     *
+     * @return области выделения по нулевому индексу страницы; пусто, если ничего не покрыто
+     */
+    public fun selectionRectsByPage(
+        document: ReflowDocument,
+        anchors: List<TextAnchor>,
+    ): Map<Int, List<NormalizedRect>> {
+        if (anchors.isEmpty()) return emptyMap()
+        val boundsByPage = mutableMapOf<Int, MutableList<ReflowRect>>()
+        anchors.forEach { anchor ->
+            spansFor(document, anchor).forEach { span ->
+                boundsByPage.getOrPut(span.pageIndex) { mutableListOf() }.add(span.bounds)
+            }
+        }
+        return boundsByPage.mapValues { (_, bounds) ->
+            mergeIntoLines(bounds).map { NormalizedRect(it.left, it.top, it.right, it.bottom) }
+        }
+    }
+
     private fun ReflowBlock.sourceSpans(): List<SourceSpan> =
         when (this) {
             is ReflowBlock.Paragraph -> source

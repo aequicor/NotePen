@@ -19,6 +19,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -85,7 +86,10 @@ import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
+import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import ru.kyamshanov.notepen.reflow.ui.LocalReflowSelection
 import ru.kyamshanov.notepen.reflow.ui.ReflowReader
+import ru.kyamshanov.notepen.reflow.ui.ReflowSelection
 import ru.kyamshanov.notepen.reflow.ui.toRenderSettings
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
@@ -697,6 +701,7 @@ fun EditorPanel(
             var acc = 0
             for ((_, s) in pdfState.drawingStates) acc += s.historyVersion.value
             acc + pdfState.favoritePageIndices.size +
+                pdfState.highlights.values.sumOf { it.size } +
                 penSettings.hashCode() + markerSettings.hashCode() + eraserSettings.hashCode()
         }.drop(1)
             .distinctUntilChanged()
@@ -1355,21 +1360,76 @@ fun EditorPanel(
             if (pdfState.readingMode) {
                 val reading = reflowReading
                 if (reading != null) {
-                    ReflowReader(
-                        document = reading.document,
-                        stored = readerStored,
-                        onStoredChange = onReaderStoredChange,
-                        newPresetIdProvider = { generateUuid() },
-                        barVisible = isFocused && pdfState.readerBarVisible,
-                        onBarVisibleChange = { visible ->
-                            if (isFocused) pdfState.readerBarVisible = visible
-                        },
-                        modifier = Modifier.fillMaxSize(),
-                        highlights = reading.highlights,
-                        listState = reflowListState,
-                        renderPage = renderFigurePage,
-                        onPageDeltaReady = { reflowPageDelta.value = it },
-                    )
+                    // Подсветки для ридера — реактивно из текущего состояния (штрихи +
+                    // липкие выделения), чтобы созданное прямо в чтении показывалось сразу.
+                    // Маппинг штрих/подсветка → анкеры — геометрически дорогой хит-тест по
+                    // документу, поэтому: (1) штрихи и подсветки считаем РАЗДЕЛЬНО, чтобы
+                    // добавление подсветки не пересчитывало анкеры штрихов; (2) анкеры каждой
+                    // подсветки кэшируем по её значению (она привязана к странице и неизменна).
+                    // Иначе каждое новое выделение пересчитывало бы анкеры всех предыдущих —
+                    // после выделения копился бы лаг, а следующее «подвисало». Кэш живёт на документ.
+                    val strokeAnchors by remember(reading) {
+                        derivedStateOf {
+                            val doc = reading.document
+                            drawingStates.entries.flatMap { (page, st) ->
+                                st.currentPaths.flatMap { StrokeTextMapper.anchorsFor(doc, page, it) }
+                            }
+                        }
+                    }
+                    val highlightAnchorCache = remember(reading) { mutableMapOf<StickyHighlight, List<TextAnchor>>() }
+                    val highlightAnchors by remember(reading) {
+                        derivedStateOf {
+                            val doc = reading.document
+                            pdfState.highlights.entries.flatMap { (page, hs) ->
+                                hs.flatMap { h ->
+                                    highlightAnchorCache.getOrPut(h) {
+                                        StrokeTextMapper.anchorsForRects(doc, page, h.rects)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    val readerHighlights by remember(reading) {
+                        derivedStateOf { strokeAnchors + highlightAnchors }
+                    }
+                    // Сквозное выделение отдаёт анкеры по всем покрытым блокам сразу; маппим их
+                    // в геометрию по страницам (selectionRectsByPage уже сливает по строкам) и
+                    // на каждую затронутую страницу добавляем StickyHighlight цвета маркера. Один
+                    // pushUndoSnapshot на страницу (до правки её подсветок) — откат жеста по шагам.
+                    val createHighlight: (List<TextAnchor>) -> Unit = { anchors ->
+                        StrokeTextMapper.selectionRectsByPage(reading.document, anchors)
+                            .forEach { (page, rects) ->
+                                if (rects.isNotEmpty()) {
+                                    pdfState.pushUndoSnapshot(
+                                        page,
+                                        drawingStates[page]?.currentPaths?.toList() ?: emptyList(),
+                                    )
+                                    pdfState.highlights[page] =
+                                        pdfState.highlights[page].orEmpty() +
+                                        StickyHighlight(rects = rects, colorArgb = markerSettings.colorArgb)
+                                }
+                            }
+                    }
+                    CompositionLocalProvider(
+                        LocalReflowSelection provides
+                            ReflowSelection(immediate = toolMode == ToolMode.MARKER, onCreate = createHighlight),
+                    ) {
+                        ReflowReader(
+                            document = reading.document,
+                            stored = readerStored,
+                            onStoredChange = onReaderStoredChange,
+                            newPresetIdProvider = { generateUuid() },
+                            barVisible = isFocused && pdfState.readerBarVisible,
+                            onBarVisibleChange = { visible ->
+                                if (isFocused) pdfState.readerBarVisible = visible
+                            },
+                            modifier = Modifier.fillMaxSize(),
+                            highlights = readerHighlights,
+                            listState = reflowListState,
+                            renderPage = renderFigurePage,
+                            onPageDeltaReady = { reflowPageDelta.value = it },
+                        )
+                    }
                 } else {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
                         Text(
