@@ -1,30 +1,28 @@
 #!/usr/bin/env bash
-# SessionStart hook. Prints a one-line context block for the KMP+Ktor project.
+# SessionStart hook. One-line context + this worktree's parallel-session resource lane.
 
 set -euo pipefail
 
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '(no git)')"
-status_lines="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ' || echo '0')"
+uncommitted="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ' || echo '0')"
 
-gradle_version="(no wrapper)"
-if [ -f "./gradlew" ]; then
-  gradle_version="$(./gradlew --version 2>/dev/null | sed -n 's/^Gradle \(.*\)$/\1/p' | head -n1)"
-  [ -z "$gradle_version" ] && gradle_version="(unknown)"
+# Worktree detection: a linked worktree's git-dir differs from the shared git-common-dir.
+worktree="(main checkout)"
+gdir="$(git rev-parse --git-dir 2>/dev/null || echo '')"
+cdir="$(git rev-parse --git-common-dir 2>/dev/null || echo '')"
+if [ -n "$gdir" ] && [ "$gdir" != "$cdir" ]; then
+  worktree="$(basename "$PWD")"
 fi
 
-kotlin_version="(unknown)"
-if [ -f "gradle/libs.versions.toml" ]; then
-  kotlin_version="$(sed -n 's/^kotlin[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' gradle/libs.versions.toml | head -n1)"
-  [ -z "$kotlin_version" ] && kotlin_version="(not in libs.versions.toml)"
+# Lane: prefer the exported ANDROID_SERIAL (direnv / sourced .envrc); else preview from the dir name.
+if [ -n "${ANDROID_SERIAL:-}" ]; then
+  lane="serial=${ANDROID_SERIAL}${APP_ID_SUFFIX:+ appId${APP_ID_SUFFIX}}${SERVER_PORT:+ server:${SERVER_PORT}}"
+else
+  slug="$(basename "$PWD")"
+  sum="$(printf '%s' "$slug" | cksum 2>/dev/null | cut -d' ' -f1)"
+  sum="${sum:-0}"
+  id=$(( sum % 50 + 1 ))
+  lane="not loaded — would be id=${id} serial=emulator-$(( 5554 + id * 2 )) (load .envrc; see skill parallel-sessions)"
 fi
 
-# Bounded scan of build files to detect KMP and Ktor.
-scan="$(find . -maxdepth 3 \( -name '*.gradle.kts' -o -name 'libs.versions.toml' \) -not -path '*/build/*' 2>/dev/null || true)"
-kmp="no"
-ktor="no"
-if [ -n "$scan" ]; then
-  if printf '%s\n' "$scan" | xargs grep -lE 'multiplatform' >/dev/null 2>&1; then kmp="yes"; fi
-  if printf '%s\n' "$scan" | xargs grep -liE 'ktor' >/dev/null 2>&1; then ktor="yes"; fi
-fi
-
-echo "[session-start] branch: ${branch} | uncommitted: ${status_lines} | gradle: ${gradle_version} | kotlin: ${kotlin_version} | kmp: ${kmp} | ktor: ${ktor}"
+echo "[parallel-work-kmp] worktree: ${worktree} | branch: ${branch} | uncommitted: ${uncommitted} | lane: ${lane}"

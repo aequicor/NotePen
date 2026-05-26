@@ -1,6 +1,6 @@
 {
   "lockVersion": "1",
-  "aikitVersion": "0.2.0",
+  "aikitVersion": "0.1.0",
   "generatedAt": "",
   "applications": [
     {
@@ -8,104 +8,64 @@
       "path": ".",
       "targets": {
         "claude": {
-          "bundle": "flow-kit@0.0.1",
-          "source": "internal",
+          "bundle": "parallel-work-kmp@0.0.1",
+          "source": "C:/Users/kruz18/IdeaProjects/ai-kit-v2/kit-setup/bundles/parallel_work_kmp-0_0_1",
           "files": [
             {
               "path": "CLAUDE.md",
-              "sha256": "6664746f7973b4085fe872f540a18a54c7ae7ab6d09c9d9f1a2998d020529d42"
+              "sha256": "5bd7e8cf741eeb233bee933a0dc9fd65e0abb4c33625932d9cce356fd7a97495"
             },
             {
-              "path": ".claude/agents/analyst.md",
-              "sha256": "5634d2c3cfa56450e403a7f3d058c3c5970e61f634628ac523d153987733c612"
+              "path": ".claude/commands/merge.md",
+              "sha256": "45a27b987441ca0bffc87fcbc3a9e1ce924661101637981c5bfe35987819f843"
             },
             {
-              "path": ".claude/agents/kotlin-specialist.md",
-              "sha256": "d9fd430f0b16485b5be7ea955b72f27f467529c9ba3fcb81294aeddc1a6d8359"
+              "path": ".claude/skills/parallel-sessions/SKILL.md",
+              "sha256": "9dcc9cc9366900f95b7ded4095f7fb38921b10bd1cf5dfb7db1ac164b9fd183e"
             },
             {
-              "path": ".claude/agents/ktor-specialist.md",
-              "sha256": "2780dd9d931b5950cf087863ad2b79754a75b10da5de14ef396c06e2468140d4"
+              "path": ".claude/skills/parallel-sessions/references/isolation.md",
+              "sha256": "c2ca00b8242ae38eb2c02134888d5d53c23bd0305ce180e370ccbb17b7d6793c"
             },
             {
-              "path": ".claude/agents/security-reviewer.md",
-              "sha256": "db7e72d2c51f67abf88f0a8139b47a362c82bfb862ee7ff68a8fe98e23c58baf"
+              "path": ".claude/skills/parallel-sessions/templates/applicationIdSuffix.gradle.kts",
+              "sha256": "3553f1c8ed0e044ca94a82a6449b589b3c5839a5a740e6f24cbe75085a52ae93"
             },
             {
-              "path": ".claude/agents/interface-tester.md",
-              "sha256": "f3af429088330ffddb5c1f9a58520a6b133a7c9708bec74d384d2eff44b310d3"
+              "path": ".claude/skills/parallel-sessions/templates/envrc.sh",
+              "sha256": "e69c53bbebeec0e52b4f7714b42670ceb23777f5cc0ff4e060268414fc73eeb5"
             },
             {
-              "path": ".claude/agents/gradle-troubleshooter.md",
-              "sha256": "6bcc6427225b92178a333593479f7ebbcdc6fc96acaed10b33a84f2c20f921b8"
+              "path": ".claude/skills/parallel-sessions/templates/gradle-parallel.properties",
+              "sha256": "d616bb36f28248799c2a8ee4e0803bea01ddea6af39f48a9cd0421c6a2387d59"
             },
             {
-              "path": ".claude/agents/test-runner.md",
-              "sha256": "ac039cec27809b2ba2b1759fa8e3acde6499c49a3d677be1dd0ea26d48816b47"
+              "path": ".claude/skills/parallel-sessions/templates/worktreeinclude",
+              "sha256": "0493dbab4f5ea2bcc9db62393d53f580ce6d818a5d272d0e11746c51e8797aa7"
             },
             {
-              "path": ".claude/commands/pipeline.md",
-              "sha256": "a2c9e2c79ce76e1ed58c65eecb3d4b2fb78d7d46d83120dfda7f5b52d6475075"
-            },
-            {
-              "path": ".claude/commands/build-check.md",
-              "sha256": "07506d8c3a22ef670cf05a6b4a54710a403de54649224ff3eef8012b6dd6bb7f"
-            },
-            {
-              "path": ".claude/commands/review.md",
-              "sha256": "4f528a1a4d81511ea903fcd9259207a8d5c911a05f658d8480e9698ffd066bcc"
-            },
-            {
-              "path": ".claude/skills/security-review/SKILL.md",
-              "sha256": "8c7556933cff1db6709bd9bfea741da8b7cb4ddf237c47d29b213df27a98600b"
-            },
-            {
-              "path": ".claude/skills/interface-testing/SKILL.md",
-              "sha256": "4343a151fbbd78d7c75d6543e9a17d8eebb62956b1829d3fc6361972d378424d"
-            },
-            {
-              "path": ".claude/skills/interface-testing/references/compose.md",
-              "sha256": "859dc59574124afc4ca081559c52821965fedd3e678f2916e25b87fbb663a8c5"
-            },
-            {
-              "path": ".claude/skills/interface-testing/references/ktor-api.md",
-              "sha256": "e39995139a3dde661c9d88bb3856cf1dde728626d8a43bd955a6f462e70f44f8"
-            },
-            {
-              "path": ".claude/skills/docs-on-demand/SKILL.md",
-              "sha256": "64e4c0ad1779e30326b105b81c1aa29e61ca1cf31ab7003cb88513c9aea820c0"
-            },
-            {
-              "path": ".claude/skills/kotlin-build/SKILL.md",
-              "sha256": "7c91a96541bc8ab75375e62e66edc184fdc4e661e9c0b7aa05369a8ed4911b8f"
+              "path": ".claude/skills/snapshot-testing/SKILL.md",
+              "sha256": "5b62e6ad323866b75da03d7d9947edf26c1dc2cd5c6c18a1c5d52f0f8932f2b7"
             },
             {
               "path": ".claude/hooks/session-start.sh",
-              "sha256": "3040fba45aa22f7d6fee0329095d9f8ebd1268d4b0d630b5df5384c249e02672"
+              "sha256": "a47d9b1e587aa24b0af7f66e7d07f072675266df90debabcbd980b997ffbb9ac"
             },
             {
               "path": ".claude/strict/hooks/block-dangerous.sh",
-              "sha256": "475997959ba5c88eb7559fe6b753c0f9f1ef46035d8bbdbe078c6d01f4a90737"
+              "sha256": "211e08b13a19f9a0b9565ce9b82f338bffe488b02fc7068d59edbfac12457289"
             },
             {
-              "path": ".claude/strict/hooks/guard-commit.sh",
-              "sha256": "a6a2b9b892414cd41f726b74fe08cb00147ce3c18cb18bc00802e78e9f78ed03"
-            },
-            {
-              "path": ".claude/hooks/post-edit-ktlint.sh",
-              "sha256": "afe8833fabf47d7b893fd63ae72bb4ee9e12d593ff79f8143062384036d8c171"
-            },
-            {
-              "path": ".claude/hooks/stop-checks.sh",
-              "sha256": "20aea3775eb6573b90ed41e5ae0023b04396d052d065d10dd75a8d430fc82553"
+              "path": ".claude/strict/hooks/guard-device.sh",
+              "sha256": "8cca9d727b5c956673eba5ac52447d958f6f20344c55460d333973431033e225"
             },
             {
               "path": ".claude/settings.json",
-              "sha256": "d0fd6c2b6cb040d3f806c949fd33836b6d5b94068c8c11e2839de8d373e170f6"
+              "sha256": "5c46aa7f0630aa04ddade3482f2d4b80d3848ea8a66f320880ad3d10a00610d8"
             },
             {
               "path": ".mcp.json",
-              "sha256": "c2d03f5a4da338c725e4644f68b5a29c0e7b547e368c5dadbc5df05ba871f8ca"
+              "sha256": "b9df450ffe3f1820d18292fd9348b8c7924611a44575d8fd775e6263ee68319e"
             }
           ]
         }

@@ -29,14 +29,20 @@ case "$cmd" in
   *"git clean -f"*|*"git clean -fd"*)
     block "git clean -f is not allowed (review files first)"
     ;;
+  *"git worktree remove --force"*|*"git worktree remove -f"*)
+    block "git worktree remove --force can delete another session's worktree (and its uncommitted work)"
+    ;;
+  *"git worktree prune"*)
+    block "git worktree prune can drop another session's worktree registration — list first with 'git worktree list'"
+    ;;
   *"chmod 777"*)
     block "chmod 777 is not allowed"
     ;;
   *"./gradlew --stop"*)
-    # allowed — это санитарная операция, не деструктивная
+    # allowed — sanitary, not destructive
     ;;
-  *"rm -rf .gradle"*|*"rm -rf build"*|*"rm -rf ~/.gradle"*)
-    block "manual gradle cache wipe is not allowed (use ./gradlew clean)"
+  *"rm -rf .gradle"*|*"rm -rf build"*|*"rm -rf ~/.gradle"*|*"rm -rf ~/.konan"*)
+    block "manual gradle/konan cache wipe is not allowed — these are shared across worktrees (use ./gradlew clean)"
     ;;
 esac
 

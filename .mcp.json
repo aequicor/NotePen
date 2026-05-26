@@ -7,33 +7,6 @@
                 "-y",
                 "claude-in-mobile"
             ]
-        },
-        "maven-indexer": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": [
-                "-y",
-                "maven-indexer-mcp@latest"
-            ]
-        },
-        "github": {
-            "transport": "stdio",
-            "command": "npx",
-            "args": [
-                "-y",
-                "@modelcontextprotocol/server-github"
-            ]
-        },
-        "serena": {
-            "transport": "stdio",
-            "command": "uvx",
-            "args": [
-                "--from",
-                "serena",
-                "serena",
-                "--project-dir",
-                "."
-            ]
         }
     }
 }

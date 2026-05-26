@@ -6,15 +6,16 @@
       "path": ".",
       "targets": {
         "claude": {
-          "bundle": "flow-kit@0.0.1",
-          "source": "internal",
+          "bundle": "parallel-work-kmp@0.0.1",
+          "source": "C:/Users/kruz18/IdeaProjects/ai-kit-v2/kit-setup/bundles/parallel_work_kmp-0_0_1",
           "inputs": {
             "projectName": "NotePen",
             "projectType": "kmp-fullstack",
-            "autonomyLevel": "auto",
-            "githubMcp": true,
+            "maxParallelSessions": 3,
+            "snapshotTool": "roborazzi",
             "mobileMcp": true,
-            "serenaMcp": true,
+            "maestroMcp": false,
+            "direnv": true,
             "strict": true
           }
         }
