@@ -486,9 +486,13 @@ internal fun systemControlEntries(
         if (showSyncButton) add(WheelEntry("sys_sync") { syncButton() })
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
         if (!readingModeEnabled) add(WheelEntry("sys_export") { exportButton() })
-        add(WheelEntry("sys_zoom_in") { zoomInButton() })
-        add(WheelEntry("sys_zoom_label", SCALE_LABEL_WIDTH) { zoomLabel() })
-        add(WheelEntry("sys_zoom_out") { zoomOutButton() })
+        // В режиме чтения масштаб страницы не применяется (reflow-поток с
+        // собственным кеглем), поэтому зум-кластер прячем.
+        if (!readingModeEnabled) {
+            add(WheelEntry("sys_zoom_in") { zoomInButton() })
+            add(WheelEntry("sys_zoom_label", SCALE_LABEL_WIDTH) { zoomLabel() })
+            add(WheelEntry("sys_zoom_out") { zoomOutButton() })
+        }
     }
 }
 
