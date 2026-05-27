@@ -71,6 +71,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -93,7 +94,6 @@ import ru.kyamshanov.notepen.reflow.api.ReaderSettingsReducer
 import ru.kyamshanov.notepen.reflow.api.ReaderTheme
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.wheelItem
-import ru.kyamshanov.notepen.wheelScrollButtonGutter
 import kotlin.math.roundToInt
 
 /**
@@ -279,7 +279,11 @@ private fun CollapsedPill(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         if (progressLabel != null) {
-            val progressStyle = TextStyle(color = textColor.copy(alpha = 0.7f), fontSize = 12.sp)
+            // Выравниваем по правому краю слота: при резерве ширины под «100%» короткая строка
+            // («0%») прижимается к колесу пресетов, а свободное место уходит к левому краю —
+            // иначе между процентом и пресетами зиял зазор шириной в недостающие цифры.
+            val progressStyle =
+                TextStyle(color = textColor.copy(alpha = 0.7f), fontSize = 12.sp, textAlign = TextAlign.End)
             val measurer = rememberTextMeasurer()
             val density = LocalDensity.current
             // Процент проходит диапазон 0..100 — число цифр в строке растёт (9→10, 99→100),
@@ -312,13 +316,13 @@ private fun CollapsedPill(
         // в которые ещё можно прокрутить (READER_WHEEL_MIN_ALPHA — не до полного исчезновения).
         // Вьюпорт колеса фиксирован по доступной ширине (weight(1f), fill=true), а НЕ следует
         // за контентом — иначе ужатие слотов меняло бы ширину контента → таблетки → пересчёт
-        // барабана, и колесо дёргалось. Когда всё помещается, плашки идут по центру в полный
-        // размер (барабан/скролл неактивны); при переполнении — скролл с барабаном у краёв.
+        // барабана, и колесо дёргалось. Стрелки прокрутки (WheelScrollButtons) накладываются
+        // поверх крайних плашек, а не оттесняют их гаттером: симметричный гаттер съедал место с
+        // обеих сторон даже у края (где стрелки нет), оставляя пустой зазор до метки прогресса.
         Box(modifier = Modifier.weight(1f)) {
             LazyRow(
                 modifier =
                     Modifier
-                        .wheelScrollButtonGutter(listState)
                         .fadingEdges(
                             RailOrientation.HORIZONTAL,
                             READER_WHEEL_FADE_EDGE,
@@ -326,9 +330,10 @@ private fun CollapsedPill(
                             fadeEnd = listState.canScrollForward,
                         ),
                 state = listState,
-                // Центрируем плашки, когда они помещаются (короткий список не липнет к левому
-                // краю широкого вьюпорта); при переполнении выравнивание не мешает прокрутке.
-                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                // Прижимаем плашки к левому краю вьюпорта — сразу за меткой прогресса, без
+                // большого зазора между процентом и пресетами; шестерёнка остаётся закреплённой
+                // справа. При переполнении выравнивание не мешает прокрутке.
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.Start),
                 verticalAlignment = Alignment.CenterVertically,
                 contentPadding = PaddingValues(horizontal = 4.dp),
             ) {
