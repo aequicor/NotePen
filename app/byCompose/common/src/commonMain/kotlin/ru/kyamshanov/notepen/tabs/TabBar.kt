@@ -148,7 +148,8 @@ fun TabBar(
         fillAlpha = 0.35f,
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = appliedStart, end = appliedEnd)) {
-            sessionsMenu?.let { menu ->
+            // One sessions button per window — only the panel at the window's left edge.
+            sessionsMenu?.takeIf { atLeftEdge }?.let { menu ->
                 // Yandex-style: a sessions button anchored at the left edge of the strip.
                 // The Box anchors the dropdown to the button (mirrors TabChip's menu).
                 var sessionsExpanded by remember { mutableStateOf(false) }
