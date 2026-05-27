@@ -513,8 +513,7 @@ public fun WheelStrip(
  * explicit way to advance the rail; on touch the drag gesture is the affordance and
  * this composes nothing. Each chevron is shown only while [state] can still scroll
  * that way (and fades with that ability), so a rail resting against either stop
- * shows only the button that does something. Tapping nudges the list by
- * [pageFraction] of its viewport.
+ * shows only the button that does something. Tapping advances the list by one item.
  *
  * Call inside the wheel's [Box] after the list, so the buttons align to its
  * start/end edges and sit above the items. [tint]/[background] come from the
@@ -525,14 +524,27 @@ public fun BoxScope.WheelScrollButtons(
     state: LazyListState,
     tint: Color,
     background: Color,
-    pageFraction: Float = WHEEL_SCROLL_PAGE_FRACTION,
 ) {
     if (!isDesktopPlatform) return
     val scope = rememberCoroutineScope()
-    val nudge: (Float) -> Unit = { direction ->
+    // Каждое нажатие сдвигает ленту ровно на один элемент. Сдвигаем фиксированной
+    // дельтой (animateScrollBy), а НЕ animateScrollToItem: wheelItem ужимает след
+    // крайних элементов, поэтому их измеренные offset «плывут», и доводка по индексу
+    // дёргала правый край после остановки. Шаг = расстояние между началами соседних
+    // слотов у центра (там они полноразмерны) = натуральный размер + зазор.
+    val nudge: (Int) -> Unit = { direction ->
         scope.launch {
-            val viewport = (state.layoutInfo.viewportEndOffset - state.layoutInfo.viewportStartOffset).toFloat()
-            if (viewport > 0f) state.animateScrollBy(direction * viewport * pageFraction)
+            val info = state.layoutInfo
+            val visible = info.visibleItemsInfo
+            if (visible.isNotEmpty()) {
+                val center = (info.viewportStartOffset + info.viewportEndOffset) / 2
+                val pivot = visible.minByOrNull { abs(it.offset + it.size / 2 - center) } ?: visible.first()
+                val neighbour =
+                    visible.firstOrNull { it.index == pivot.index + 1 }
+                        ?: visible.firstOrNull { it.index == pivot.index - 1 }
+                val step = neighbour?.let { abs(it.offset - pivot.offset).toFloat() } ?: pivot.size.toFloat()
+                state.animateScrollBy(direction * step)
+            }
         }
     }
     AnimatedVisibility(
@@ -541,7 +553,7 @@ public fun BoxScope.WheelScrollButtons(
         exit = fadeOut(),
         modifier = Modifier.align(Alignment.CenterStart),
     ) {
-        ChevronButton(pointsForward = false, tint = tint, background = background, onClick = { nudge(-1f) })
+        ChevronButton(pointsForward = false, tint = tint, background = background, onClick = { nudge(-1) })
     }
     AnimatedVisibility(
         visible = state.canScrollForward,
@@ -549,7 +561,7 @@ public fun BoxScope.WheelScrollButtons(
         exit = fadeOut(),
         modifier = Modifier.align(Alignment.CenterEnd),
     ) {
-        ChevronButton(pointsForward = true, tint = tint, background = background, onClick = { nudge(1f) })
+        ChevronButton(pointsForward = true, tint = tint, background = background, onClick = { nudge(1) })
     }
 }
 
@@ -617,7 +629,6 @@ internal expect val isDesktopPlatform: Boolean
 public const val WHEEL_EDGE_BAND_WIDE: Float = 0.85f
 
 private val WHEEL_SCROLL_BUTTON_SIZE = 22.dp
-private const val WHEEL_SCROLL_PAGE_FRACTION = 0.7f
 private const val CHEVRON_FRACTION = 0.46f
 private const val CHEVRON_STROKE_FRACTION = 0.18f
 private const val WHEEL_SCROLL_FORWARD_LABEL = "Прокрутить вперёд"
