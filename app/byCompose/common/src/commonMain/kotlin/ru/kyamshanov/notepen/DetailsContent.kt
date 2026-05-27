@@ -14,6 +14,8 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -88,6 +90,8 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -668,7 +672,24 @@ fun DetailsContent(
                         .only(WindowInsetsSides.Horizontal),
                 ).focusRequester(focusRequester)
                 .focusTarget()
-                .onKeyEvent { e ->
+                // В режиме чтения тап по полотну (скрытие панели, перелистывание по
+                // тап-зонам) очищает фокус с этого focusTarget — и хардварное
+                // перелистывание стрелками перестаёт работать. Перехватываем нажатие
+                // в Initial-проходе (родитель → дочерний, до потребления ридером) и
+                // возвращаем фокус сюда. Только в reading mode, чтобы не мешать
+                // фокусировке текстовых полей в обычном редакторе.
+                .then(
+                    if (readingModeEnabled) {
+                        Modifier.pointerInput(Unit) {
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                focusRequester.requestFocus()
+                            }
+                        }
+                    } else {
+                        Modifier
+                    },
+                ).onKeyEvent { e ->
                     val isShift = e.key == Key.ShiftLeft || e.key == Key.ShiftRight
                     val isCtrl = e.key == Key.CtrlLeft || e.key == Key.CtrlRight
                     val isAlt = e.key == Key.AltLeft || e.key == Key.AltRight
