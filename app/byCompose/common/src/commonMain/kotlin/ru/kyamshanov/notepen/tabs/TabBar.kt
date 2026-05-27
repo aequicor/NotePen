@@ -196,18 +196,27 @@ fun TabBar(
                                 }
                             }
                         }
-                        TabChip(
-                            tab = tab,
-                            isActive = tab.id == openDocs.activeId,
-                            showClose = tab.id == openDocs.activeId && tabCount > 1,
-                            onSelect = { onSelect(side, tab.id) },
-                            onClose = { onClose(side, tab.id) },
-                            onNewTab = { onAddTab(side) },
-                            onOpenInNewPanel = onOpenInNewPanel?.let { cb -> { cb(tab.id) } },
-                            onClosePanel = onClosePanel,
-                            contentColor = contentColor,
-                            modifier = Modifier.width(tabWidth),
-                        )
+                        // Carve the chip out of the title-bar drag zone with a stable
+                        // outer Box marked interactive — same pattern as the «Сессии» / «+»
+                        // buttons above. Threading interactive through the chip's own
+                        // modifier chain (alongside combinedClickable) leaves the OS
+                        // treating a clean tap as a window-drag, so the tab never switches.
+                        Box(
+                            modifier = (titleBarInteraction?.interactive(Modifier) ?: Modifier).width(tabWidth),
+                        ) {
+                            TabChip(
+                                tab = tab,
+                                isActive = tab.id == openDocs.activeId,
+                                showClose = tab.id == openDocs.activeId && tabCount > 1,
+                                onSelect = { onSelect(side, tab.id) },
+                                onClose = { onClose(side, tab.id) },
+                                onNewTab = { onAddTab(side) },
+                                onOpenInNewPanel = onOpenInNewPanel?.let { cb -> { cb(tab.id) } },
+                                onClosePanel = onClosePanel,
+                                contentColor = contentColor,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
                     }
                 }
             }

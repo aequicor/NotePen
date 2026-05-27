@@ -237,6 +237,10 @@ fun DetailsContent(
     // Restore the full workspace split (all panels + tabs) saved before the
     // editor was torn down — e.g. while the user picked a file in the library.
     // Then keep the snapshot in sync with every layout change.
+    // Gates the pending-tab open below: restore() rebuilds the registry from
+    // scratch, so a tab added before it lands would be wiped. The suspend call
+    // to consumePendingRestore makes that ordering race real, hence the flag.
+    var workspaceRestored by remember(tabSession) { mutableStateOf(false) }
     LaunchedEffect(tabSession) {
         // A pending restore is set only by the library's "Сессии" menu (explicit
         // user action). When present it wins over the in-process split and brings
@@ -249,13 +253,17 @@ fun DetailsContent(
         } else {
             WorkspaceSnapshot.decode(savedLayout)?.let { tabSession.restore(it) }
         }
+        workspaceRestored = true
         snapshotFlow { tabSession.layout }
             .collect { l -> savedLayout = WorkspaceSnapshot.encode(l.toSnapshot()) }
     }
 
-    // Library "+" opens a file into the focused panel as a new tab.
+    // Library "+" opens a file into the focused panel as a new tab — only after
+    // the workspace split above has been restored, so it layers on top instead
+    // of being clobbered by the restore.
     val pendingTabUri by component.pendingTabUri.subscribeAsState()
-    LaunchedEffect(pendingTabUri) {
+    LaunchedEffect(pendingTabUri, workspaceRestored) {
+        if (!workspaceRestored) return@LaunchedEffect
         if (pendingTabUri.isBlank()) return@LaunchedEffect
         tabSession.openTab(
             panelId = tabSession.layout.focusedPanelId,
