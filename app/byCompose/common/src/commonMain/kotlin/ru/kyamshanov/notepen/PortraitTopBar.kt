@@ -318,7 +318,7 @@ private fun PortraitPageCounter(
                 LaunchedEffect(Unit) { focusRequester.requestFocus() }
                 Box(modifier = Modifier.width(IntrinsicSize.Min)) {
                     Text(
-                        text = fieldValue.text.ifEmpty { "0" },
+                        text = "8".repeat(totalPages.toString().length),
                         style = MaterialTheme.typography.labelLarge,
                         modifier = Modifier.alpha(0f),
                     )
@@ -362,27 +362,41 @@ private fun PortraitPageCounter(
                     )
                 }
             } else {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "8".repeat(totalPages.toString().length),
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.alpha(0f),
+                    )
+                    Text(
+                        text = currentPage.toString(),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = labelColor,
+                        modifier =
+                            Modifier.clickable {
+                                fieldValue =
+                                    TextFieldValue(
+                                        text = currentPage.toString(),
+                                        selection = TextRange(0, currentPage.toString().length),
+                                    )
+                                editing = true
+                            },
+                    )
+                }
+            }
+        } else {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    text = "8".repeat(totalPages.toString().length),
+                    style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.alpha(0f),
+                )
                 Text(
                     text = currentPage.toString(),
                     style = MaterialTheme.typography.labelLarge,
                     color = labelColor,
-                    modifier =
-                        Modifier.clickable {
-                            fieldValue =
-                                TextFieldValue(
-                                    text = currentPage.toString(),
-                                    selection = TextRange(0, currentPage.toString().length),
-                                )
-                            editing = true
-                        },
                 )
             }
-        } else {
-            Text(
-                text = currentPage.toString(),
-                style = MaterialTheme.typography.labelLarge,
-                color = labelColor,
-            )
         }
         Text(
             text = " / $totalPages",
