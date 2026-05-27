@@ -599,8 +599,10 @@ class MagnifierState {
                             s.copy(
                                 targetOnPage =
                                     Rect(
-                                        LINE_LEFT_MARGIN, newTop,
-                                        LINE_LEFT_MARGIN + w, newTop + h,
+                                        LINE_LEFT_MARGIN,
+                                        newTop,
+                                        LINE_LEFT_MARGIN + w,
+                                        newTop + h,
                                     ),
                             ),
                         )

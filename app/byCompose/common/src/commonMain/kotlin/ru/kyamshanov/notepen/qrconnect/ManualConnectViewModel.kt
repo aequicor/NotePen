@@ -34,10 +34,14 @@ class ManualConnectViewModel(
         data object Connecting : Status()
 
         /** Latest attempt succeeded — peer info is the host reported by the server. */
-        data class Connected(val peer: DeviceInfo) : Status()
+        data class Connected(
+            val peer: DeviceInfo,
+        ) : Status()
 
         /** Latest attempt failed with the human-readable [message]. */
-        data class Failed(val message: String) : Status()
+        data class Failed(
+            val message: String,
+        ) : Status()
     }
 
     private val _payload = MutableStateFlow("")

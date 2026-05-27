@@ -6,7 +6,9 @@ package ru.kyamshanov.notepen.tabs
  * the same PDF open on two pages independently.
  */
 @JvmInline
-value class DocumentId(val value: Long)
+value class DocumentId(
+    val value: Long,
+)
 
 /**
  * Metadata for one tab. Visual state and per-document Compose state

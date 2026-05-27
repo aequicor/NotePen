@@ -33,7 +33,8 @@ class RecentsLibraryManifestProvider(
         )
 
     override suspend fun resolveAbsolutePath(id: BookId): String? =
-        historyRepository.getAll()
+        historyRepository
+            .getAll()
             .firstOrNull { documentIdFromFilePath(it.uri) == id.value }
             ?.uri
 }

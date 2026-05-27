@@ -151,7 +151,10 @@ private const val LOW_LATENCY_OVERLAY_MAX_DIM_PX = 2400
  * асинхронный rebuild — иначе только что завершённый штрих «пропадал» на время
  * растеризации (см. anti-flicker в [DrawablePdfPage]).
  */
-private data class CachedInk(val strokeCount: Int, val bitmap: ImageBitmap)
+private data class CachedInk(
+    val strokeCount: Int,
+    val bitmap: ImageBitmap,
+)
 
 /**
  * Растеризует все [paths] в off-screen [ImageBitmap] размера [bw]×[bh].

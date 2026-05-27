@@ -48,12 +48,14 @@ class MlKitQrScanner(
                     it.surfaceProvider = previewView.surfaceProvider
                 }
             val analysis =
-                ImageAnalysis.Builder()
+                ImageAnalysis
+                    .Builder()
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
             val mlScanner =
                 BarcodeScanning.getClient(
-                    BarcodeScannerOptions.Builder()
+                    BarcodeScannerOptions
+                        .Builder()
                         .setBarcodeFormats(Barcode.FORMAT_QR_CODE)
                         .build(),
                 )
@@ -65,16 +67,15 @@ class MlKitQrScanner(
                     return@setAnalyzer
                 }
                 val input = InputImage.fromMediaImage(mediaImage, proxy.imageInfo.rotationDegrees)
-                mlScanner.process(input)
+                mlScanner
+                    .process(input)
                     .addOnSuccessListener { barcodes ->
                         barcodes.firstNotNullOfOrNull { it.rawValue }?.let { value ->
                             trySend(value)
                         }
-                    }
-                    .addOnFailureListener { e ->
+                    }.addOnFailureListener { e ->
                         logger.debug { "ML Kit decode failed: ${e.message}" }
-                    }
-                    .addOnCompleteListener { proxy.close() }
+                    }.addOnCompleteListener { proxy.close() }
             }
             runCatching {
                 cameraProvider.unbindAll()

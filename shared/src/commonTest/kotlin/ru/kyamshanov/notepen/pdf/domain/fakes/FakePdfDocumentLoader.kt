@@ -4,7 +4,9 @@ import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocumentInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 
-internal class FakePdfDocumentLoader(private val info: PdfDocumentInfo) : PdfDocumentLoader {
+internal class FakePdfDocumentLoader(
+    private val info: PdfDocumentInfo,
+) : PdfDocumentLoader {
     var lastLoadedPath: String? = null
         private set
 

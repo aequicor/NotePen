@@ -29,7 +29,9 @@ sealed class NetworkMessage {
     /** Sent by the server when the pairing code is rejected or expired. */
     @Serializable
     @SerialName("pair_rejected")
-    data class PairRejected(val reason: String) : NetworkMessage()
+    data class PairRejected(
+        val reason: String,
+    ) : NetworkMessage()
 
     /** Sent by either side to keep the connection alive. */
     @Serializable

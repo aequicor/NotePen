@@ -3,7 +3,10 @@ package ru.kyamshanov.notepen.sync.domain.port
 import kotlinx.coroutines.flow.Flow
 
 /** Byte count transferred so far and total size in bytes. */
-data class TransferProgress(val transferred: Long, val total: Long) {
+data class TransferProgress(
+    val transferred: Long,
+    val total: Long,
+) {
     val fraction: Float get() = if (total > 0) transferred.toFloat() / total else 0f
 }
 

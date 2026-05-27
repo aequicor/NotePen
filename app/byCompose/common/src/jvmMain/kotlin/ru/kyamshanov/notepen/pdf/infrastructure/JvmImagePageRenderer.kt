@@ -16,7 +16,9 @@ import java.awt.image.BufferedImage
  *
  * @param ioDispatcher диспетчер для блокирующего масштабирования; не должен быть Main-диспетчером
  */
-class JvmImagePageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfPageRenderer {
+class JvmImagePageRenderer(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfPageRenderer {
     override suspend fun renderPage(
         document: PdfDocument,
         pageIndex: Int,

@@ -35,7 +35,9 @@ internal data class PutContentRequest(
 )
 
 @Serializable
-internal data class PutContentResponse(val content: ContentEntryDto)
+internal data class PutContentResponse(
+    val content: ContentEntryDto,
+)
 
 private val githubContentsJson = Json { ignoreUnknownKeys = true }
 

@@ -19,7 +19,7 @@ class ThumbnailRepositoryDesktopTest {
 
     @BeforeTest
     fun setUp() {
-        tmpDir = createTempDir("notepen-test-thumbs")
+        tmpDir = java.nio.file.Files.createTempDirectory("notepen-test-thumbs").toFile()
         repository = ThumbnailRepositoryDesktop(cacheDir = tmpDir)
     }
 

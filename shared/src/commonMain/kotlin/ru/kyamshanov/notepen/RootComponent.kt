@@ -19,12 +19,20 @@ interface RootComponent {
 
     // Defines all possible child components
     sealed class Child {
-        class MainChild(val component: MainComponent) : Child()
+        class MainChild(
+            val component: MainComponent,
+        ) : Child()
 
-        class DetailsChild(val component: DetailsComponent) : Child()
+        class DetailsChild(
+            val component: DetailsComponent,
+        ) : Child()
 
-        class PeerCatalogChild(val component: PeerCatalogComponent) : Child()
+        class PeerCatalogChild(
+            val component: PeerCatalogComponent,
+        ) : Child()
 
-        class FolderContentsChild(val component: FolderComponent) : Child()
+        class FolderContentsChild(
+            val component: FolderComponent,
+        ) : Child()
     }
 }

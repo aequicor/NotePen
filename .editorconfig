@@ -6,5 +6,14 @@ ktlint_code_style = ktlint_official
 ktlint_standard_function-naming = disabled
 # KMP/Compose files routinely hold several top-level declarations.
 ktlint_standard_filename = disabled
+# Rules tightened in ktlint 1.6/1.7 that clash with the existing code style; keep them
+# off to avoid churning legacy code (formatting preference only, no behaviour change).
+ktlint_standard_chain-method-continuation = disabled
+ktlint_standard_backing-property-naming = disabled
+ktlint_standard_no-consecutive-comments = disabled
 max_line_length = 140
 insert_final_newline = true
+
+# Never lint generated sources (Compose `Res.kt` resource accessors, etc.).
+[**/build/**.{kt,kts}]
+ktlint = disabled

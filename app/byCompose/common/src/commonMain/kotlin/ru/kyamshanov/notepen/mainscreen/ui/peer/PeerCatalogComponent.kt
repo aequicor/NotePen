@@ -28,7 +28,8 @@ class PeerCatalogComponentImpl(
     receivedPdfDir: String?,
     val onBack: () -> Unit,
     onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
-) : PeerCatalogComponent, ComponentContext by componentContext {
+) : PeerCatalogComponent,
+    ComponentContext by componentContext {
     val viewModel =
         PeerCatalogViewModel(
             lifecycle = lifecycle,

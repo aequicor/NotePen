@@ -15,7 +15,9 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
  *
  * @param ioDispatcher диспетчер для блокирующего рендеринга; не должен быть Main-диспетчером
  */
-class AndroidPdfPageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfPageRenderer {
+class AndroidPdfPageRenderer(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfPageRenderer {
     override suspend fun renderPage(
         document: PdfDocument,
         pageIndex: Int,

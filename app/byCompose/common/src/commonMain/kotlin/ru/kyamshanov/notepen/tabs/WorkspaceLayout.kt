@@ -6,7 +6,9 @@ package ru.kyamshanov.notepen.tabs
  * panel and by the grid renderer to keep panel state across re-tiling.
  */
 @JvmInline
-value class PanelId(val value: Long)
+value class PanelId(
+    val value: Long,
+)
 
 /**
  * One panel of the workspace grid: a stack of [OpenDocuments] (browser-style
@@ -30,7 +32,9 @@ data class Panel(
  * - [LEFT_PLUS_STACK]: large left, right-top, right-bottom.
  * - [GRID_2X2]: top-left, top-right, bottom-left, bottom-right.
  */
-enum class LayoutTemplate(val capacity: Int) {
+enum class LayoutTemplate(
+    val capacity: Int,
+) {
     /** One panel filling the whole workspace. */
     FULL(1),
 

@@ -156,8 +156,7 @@ internal object ReflowAssembler {
                     .filter {
                         !FigureGeometry.isFullPage(it, page.widthPt, page.heightPt) &&
                             !FigureGeometry.isTooSmall(it, page.widthPt, page.heightPt)
-                    }
-                    .forEach { add(Item.Image(it)) }
+                    }.forEach { add(Item.Image(it)) }
             }.sortedBy { it.top }
 
         val builder = BlockBuilder(page.pageIndex, page.widthPt, page.heightPt, bodyFont, typicalPitch)
@@ -356,7 +355,8 @@ internal object ReflowAssembler {
                 !glyph.monospace &&
                     glyph.text.firstOrNull()?.let { it in TRAILING_PUNCT } == true
             val needsSpace =
-                pieces.isNotEmpty() && !attachesToPrev &&
+                pieces.isNotEmpty() &&
+                    !attachesToPrev &&
                     (pendingSpace || (gap != null && gap > spaceThreshold))
             spaceBefore += needsSpace
             pieces +=
@@ -632,7 +632,12 @@ internal object ReflowAssembler {
         val bottom: Float,
         val fontSize: Float,
     ) {
-        fun startsLowercase(): Boolean = pieces.firstOrNull()?.text?.firstOrNull()?.isLowerCase() == true
+        fun startsLowercase(): Boolean =
+            pieces
+                .firstOrNull()
+                ?.text
+                ?.firstOrNull()
+                ?.isLowerCase() == true
 
         /**
          * Строка открывает элемент списка: начинается с маркера-буллета
@@ -735,15 +740,22 @@ internal object ReflowAssembler {
     private sealed interface Item {
         val top: Float
 
-        data class Text(val line: Line) : Item {
+        data class Text(
+            val line: Line,
+        ) : Item {
             override val top: Float get() = line.top
         }
 
-        data class Image(val rect: ReflowRect) : Item {
+        data class Image(
+            val rect: ReflowRect,
+        ) : Item {
             override val top: Float get() = rect.top
         }
 
-        data class Table(val table: ReflowBlock.Table, override val top: Float) : Item
+        data class Table(
+            val table: ReflowBlock.Table,
+            override val top: Float,
+        ) : Item
     }
 }
 

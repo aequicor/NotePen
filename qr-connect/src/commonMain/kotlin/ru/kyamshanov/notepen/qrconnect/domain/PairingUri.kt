@@ -45,13 +45,13 @@ data class PairingUri(
             val prefix = "$SCHEME://$HOST?"
             if (!raw.startsWith(prefix)) return null
             val params =
-                raw.substring(prefix.length)
+                raw
+                    .substring(prefix.length)
                     .split('&')
                     .mapNotNull { pair ->
                         val eq = pair.indexOf('=')
                         if (eq <= 0) null else pair.substring(0, eq) to pair.substring(eq + 1)
-                    }
-                    .toMap()
+                    }.toMap()
             val host = params["h"]?.let(::decodeComponent) ?: return null
             val port = params["p"]?.toIntOrNull() ?: return null
             val code = params["c"]?.let(::decodeComponent) ?: return null
@@ -72,7 +72,10 @@ private fun encodeComponent(value: String): String {
             (b in 'A'.code..'Z'.code) ||
                 (b in 'a'.code..'z'.code) ||
                 (b in '0'.code..'9'.code) ||
-                b == '-'.code || b == '_'.code || b == '.'.code || b == '~'.code
+                b == '-'.code ||
+                b == '_'.code ||
+                b == '.'.code ||
+                b == '~'.code
         if (safe) {
             out.append(b.toChar())
         } else {
@@ -121,6 +124,20 @@ private fun hexDigit(c: Char): Int =
 
 private val HEX =
     charArrayOf(
-        '0', '1', '2', '3', '4', '5', '6', '7',
-        '8', '9', 'A', 'B', 'C', 'D', 'E', 'F',
+        '0',
+        '1',
+        '2',
+        '3',
+        '4',
+        '5',
+        '6',
+        '7',
+        '8',
+        '9',
+        'A',
+        'B',
+        'C',
+        'D',
+        'E',
+        'F',
     )

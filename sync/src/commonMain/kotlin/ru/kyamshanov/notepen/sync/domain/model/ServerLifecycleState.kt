@@ -16,11 +16,17 @@ sealed class ServerLifecycleState {
      * presents the [code] is a pairing candidate (subject to manual approval).
      * The same [code] is valid for the lifetime of the current [Running] state.
      */
-    data class Running(val host: String, val port: Int, val code: String) : ServerLifecycleState()
+    data class Running(
+        val host: String,
+        val port: Int,
+        val code: String,
+    ) : ServerLifecycleState()
 
     /** Server has been asked to stop and is in the process of tearing down. */
     data object Stopped : ServerLifecycleState()
 
     /** Server failed to start or has aborted unexpectedly. */
-    data class Error(val message: String) : ServerLifecycleState()
+    data class Error(
+        val message: String,
+    ) : ServerLifecycleState()
 }

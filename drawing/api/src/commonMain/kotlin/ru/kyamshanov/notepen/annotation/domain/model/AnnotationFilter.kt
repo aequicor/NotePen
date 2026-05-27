@@ -14,13 +14,19 @@ sealed interface AnnotationFilter {
     data object All : AnnotationFilter
 
     /** Keeps strokes authored by any of these device ids ([AnnotationLayer.ownerDeviceId]). */
-    data class ByAuthor(val deviceIds: Set<String>) : AnnotationFilter
+    data class ByAuthor(
+        val deviceIds: Set<String>,
+    ) : AnnotationFilter
 
     /** Keeps strokes produced by any of these tools. */
-    data class ByTool(val tools: Set<ToolKind>) : AnnotationFilter
+    data class ByTool(
+        val tools: Set<ToolKind>,
+    ) : AnnotationFilter
 
     /** Keeps strokes on a page within this (inclusive) range. */
-    data class ByPageRange(val pages: IntRange) : AnnotationFilter
+    data class ByPageRange(
+        val pages: IntRange,
+    ) : AnnotationFilter
 
     /**
      * Keeps strokes authored within `[fromMillis, toMillis)`.
@@ -29,16 +35,25 @@ sealed interface AnnotationFilter {
      * are not captured yet, so this currently keeps every stroke (pass-through);
      * it gains effect once strokes carry a creation time.
      */
-    data class ByTime(val fromMillis: Long, val toMillis: Long) : AnnotationFilter
+    data class ByTime(
+        val fromMillis: Long,
+        val toMillis: Long,
+    ) : AnnotationFilter
 
     /** Keeps a stroke only if every one of [filters] keeps it. */
-    data class And(val filters: List<AnnotationFilter>) : AnnotationFilter
+    data class And(
+        val filters: List<AnnotationFilter>,
+    ) : AnnotationFilter
 
     /** Keeps a stroke if any of [filters] keeps it. */
-    data class Or(val filters: List<AnnotationFilter>) : AnnotationFilter
+    data class Or(
+        val filters: List<AnnotationFilter>,
+    ) : AnnotationFilter
 
     /** Inverts [filter]. */
-    data class Not(val filter: AnnotationFilter) : AnnotationFilter
+    data class Not(
+        val filter: AnnotationFilter,
+    ) : AnnotationFilter
 }
 
 /**

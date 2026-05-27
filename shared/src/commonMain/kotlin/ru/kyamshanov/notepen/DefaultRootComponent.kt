@@ -54,7 +54,8 @@ class DefaultRootComponent(
         onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
         onOpenFolder: (folderId: String, folderName: String) -> Unit,
     ) -> FolderComponent,
-) : RootComponent, ComponentContext by componentContext {
+) : RootComponent,
+    ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
 
     override val stack: Value<ChildStack<*, RootComponent.Child>> =
@@ -211,7 +212,9 @@ class DefaultRootComponent(
          * требование уникальности конфигураций в стеке.
          */
         @Serializable
-        data class Library(val instanceId: Long) : Config
+        data class Library(
+            val instanceId: Long,
+        ) : Config
 
         @Serializable
         data class Details(

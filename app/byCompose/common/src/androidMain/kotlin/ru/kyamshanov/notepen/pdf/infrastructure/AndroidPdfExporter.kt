@@ -27,7 +27,9 @@ import java.io.FileOutputStream
  *
  * @param ioDispatcher dispatcher for blocking file I/O and rendering
  */
-class AndroidPdfExporter(private val ioDispatcher: CoroutineDispatcher) : PdfExporter {
+class AndroidPdfExporter(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfExporter {
     override suspend fun export(
         sourcePdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,

@@ -66,7 +66,8 @@ class HostQrPairingCoordinatorTest {
 
             job.cancel()
             val withPending =
-                collected.filterIsInstance<HostQrPairingCoordinator.State.ShowingQr>()
+                collected
+                    .filterIsInstance<HostQrPairingCoordinator.State.ShowingQr>()
                     .lastOrNull { it.pendingApproval == peer }
             assertTrue(withPending != null, "expected ShowingQr with pendingApproval=$peer; got $collected")
         }

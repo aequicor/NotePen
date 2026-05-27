@@ -52,7 +52,9 @@ internal fun setupJbrTitleBar(window: Frame): JbrTitleBarSetup? {
     )
 }
 
-private class JbrTitleBarInteraction(private val titleBar: CustomTitleBar) : TitleBarInteraction {
+private class JbrTitleBarInteraction(
+    private val titleBar: CustomTitleBar,
+) : TitleBarInteraction {
     /**
      * Registers this node as the window-drag zone.  Every pointer event reaching
      * the node calls [CustomTitleBar.forceHitTest] with `false`, telling the OS

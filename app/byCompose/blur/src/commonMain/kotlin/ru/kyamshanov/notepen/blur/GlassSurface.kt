@@ -1,20 +1,26 @@
 package ru.kyamshanov.notepen.blur
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.unit.dp
 
 /**
- * Floating "frosted glass" surface used for tool rail, tool-settings panel and
- * the portrait top airbar. Centralises the look so all three surfaces stay in
- * sync: lowered fill alpha over a chosen tint, a subtle outline border and a
- * backdrop blur sampled from [LocalHazeState].
+ * Floating "liquid glass" surface used for the tool rail, tool-settings panel,
+ * portrait top airbar, page pill and sidebars. Centralises the look so every surface
+ * stays in sync: a refracting glass backdrop (see [glassBackdropLayer]) plus a crisp
+ * specular rim, drawn *behind* the content so icons/labels on top stay sharp, all
+ * lifted by a soft ambient shadow. When blur is disabled it degrades to a denser
+ * opaque fill + hairline.
  */
 @Composable
 fun GlassSurface(
@@ -24,19 +30,39 @@ fun GlassSurface(
     fillAlpha: Float = GLASS_FILL_ALPHA_OPAQUE,
     content: @Composable () -> Unit,
 ) {
-    val blurOn = LocalBlurEnabled.current
-    Surface(
-        modifier = modifier.glassBackdrop(shape = shape, tint = tint),
-        shape = shape,
-        // Blur on: the haze material already supplies the frosted tint, so layer only a
-        // faint extra tint to keep panel identity. Off: fall back to a denser opaque fill.
-        color = tint.copy(alpha = if (blurOn) GLASS_FILL_ALPHA else fillAlpha),
-        tonalElevation = 0.dp,
-        border =
-            BorderStroke(
-                width = GlassBorderWidth,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = GLASS_BORDER_ALPHA),
-            ),
-        content = content,
-    )
+    val glassActive = LocalBlurEnabled.current && LocalGlassBackdrop.current?.layer != null
+    Box(modifier = modifier) {
+        if (glassActive) {
+            // Blurred glass backdrop (effected layer), then a crisp hairline edge on top
+            // (separate layer so the blur doesn't soften it). Skip the edge on full-width
+            // rectangular bars, where a 4-side border reads as stray top/bottom stripes.
+            Box(Modifier.matchParentSize().glassBackdropLayer(shape = shape, tint = tint))
+            if (shape !== RectangleShape) {
+                Box(
+                    Modifier
+                        .matchParentSize()
+                        .border(
+                            width = GlassBorderWidth,
+                            color = MaterialTheme.colorScheme.outline.copy(alpha = GLASS_BORDER_ALPHA),
+                            shape = shape,
+                        ),
+                )
+            }
+        } else {
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .clip(shape)
+                    .background(tint.copy(alpha = fillAlpha))
+                    .border(
+                        width = GlassBorderWidth,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = GLASS_BORDER_ALPHA),
+                        shape = shape,
+                    ),
+            )
+        }
+        CompositionLocalProvider(LocalContentColor provides MaterialTheme.colorScheme.onSurface) {
+            content()
+        }
+    }
 }

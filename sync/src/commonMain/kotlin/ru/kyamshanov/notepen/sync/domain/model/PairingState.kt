@@ -6,23 +6,33 @@ sealed class PairingState {
     data object Idle : PairingState()
 
     /** Server is running and waiting for a client to connect. */
-    data class AwaitingConnection(val code: String, val host: String, val port: Int) : PairingState()
+    data class AwaitingConnection(
+        val code: String,
+        val host: String,
+        val port: Int,
+    ) : PairingState()
 
     /** A client connected but hasn't sent a valid pairing code yet. */
     data object AwaitingCode : PairingState()
 
     /** Pairing is complete — channel is ready for sync. */
-    data class Connected(val peer: DeviceInfo) : PairingState()
+    data class Connected(
+        val peer: DeviceInfo,
+    ) : PairingState()
 
     /** An error occurred (server failed to start, connection dropped, etc.). */
-    data class Error(val message: String) : PairingState()
+    data class Error(
+        val message: String,
+    ) : PairingState()
 
     /**
      * Transient state on the client side: the session has dropped and the client
      * is retrying the connection. [secondsRemaining] counts down to the
      * reconnect deadline (10 s). After that the state moves to [LostConnection].
      */
-    data class Reconnecting(val secondsRemaining: Int) : PairingState()
+    data class Reconnecting(
+        val secondsRemaining: Int,
+    ) : PairingState()
 
     /**
      * Reconnect deadline elapsed without a successful reattach. The client UI

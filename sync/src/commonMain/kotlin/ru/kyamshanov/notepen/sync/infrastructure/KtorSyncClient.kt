@@ -48,7 +48,9 @@ private const val RECONNECT_RETRY_INTERVAL_MS = 1_000L
  * If the deadline elapses without success, that host's state becomes
  * [PairingState.LostConnection]; other hosts are unaffected.
  */
-class KtorSyncClient(private val client: HttpClient) : SyncClient {
+class KtorSyncClient(
+    private val client: HttpClient,
+) : SyncClient {
     private val mutex = Mutex()
     private val sessions = mutableMapOf<String, HostSession>()
 
@@ -347,7 +349,9 @@ private class HostSession(
 }
 
 private sealed class SessionOutcome {
-    data class Paired(val peer: DeviceInfo) : SessionOutcome()
+    data class Paired(
+        val peer: DeviceInfo,
+    ) : SessionOutcome()
 
     /**
      * The host sent an explicit [NetworkMessage.Disconnect] (user pressed
@@ -357,7 +361,9 @@ private sealed class SessionOutcome {
      */
     data object RemoteClosed : SessionOutcome()
 
-    data class PairingFailed(val reason: String) : SessionOutcome()
+    data class PairingFailed(
+        val reason: String,
+    ) : SessionOutcome()
 
     data object Disconnected : SessionOutcome()
 }

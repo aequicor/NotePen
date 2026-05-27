@@ -32,7 +32,8 @@ class FolderContentsComponentImpl(
     val onOpenFilePicker: suspend () -> String?,
     onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
     onOpenFolder: (folderId: String, folderName: String) -> Unit,
-) : FolderComponent, ComponentContext by componentContext {
+) : FolderComponent,
+    ComponentContext by componentContext {
     val viewModel =
         FolderContentsViewModel(
             lifecycle = lifecycle,

@@ -263,9 +263,7 @@ actual fun ComposableAppTheme(
     darkTheme: Boolean,
     // Dynamic color is available on Android 12+
     dynamicColor: Boolean,
-    content:
-        @Composable()
-        () -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val colorScheme =
         when {

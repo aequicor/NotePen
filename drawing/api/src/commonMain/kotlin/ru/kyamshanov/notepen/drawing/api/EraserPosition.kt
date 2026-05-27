@@ -6,4 +6,7 @@ package ru.kyamshanov.notepen.drawing.api
  * Заменяет `Offset` из `compose.ui.geometry`, чтобы модуль `rendering-api`
  * не зависел от `compose.ui`.
  */
-public data class EraserPosition(val x: Float, val y: Float)
+public data class EraserPosition(
+    val x: Float,
+    val y: Float,
+)

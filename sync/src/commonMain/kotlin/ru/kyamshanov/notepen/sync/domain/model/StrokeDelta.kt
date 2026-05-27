@@ -52,7 +52,12 @@ sealed class StrokeDelta {
 
 /** Serialisation-safe версия [PageExtent]. Поля сокращены для wire-overhead. */
 @Serializable
-data class RectDto(val l: Float, val t: Float, val r: Float, val b: Float) {
+data class RectDto(
+    val l: Float,
+    val t: Float,
+    val r: Float,
+    val b: Float,
+) {
     fun toDomain(): PageExtent = PageExtent(l, t, r, b)
 
     companion object {

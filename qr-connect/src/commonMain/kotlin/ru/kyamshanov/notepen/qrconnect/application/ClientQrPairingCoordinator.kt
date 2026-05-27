@@ -43,20 +43,27 @@ class ClientQrPairingCoordinator(
         data object Scanning : State()
 
         /** A valid pairing URI has been scanned; the client is dialling the host. */
-        data class Connecting(val uri: PairingUri) : State()
+        data class Connecting(
+            val uri: PairingUri,
+        ) : State()
 
         /** Pairing succeeded — sync messages now flow through [syncClient]. */
-        data class Connected(val server: DeviceInfo) : State()
+        data class Connected(
+            val server: DeviceInfo,
+        ) : State()
 
         /** Pairing failed (rejected code, network error, etc.). */
-        data class Failed(val error: QrConnectError) : State()
+        data class Failed(
+            val error: QrConnectError,
+        ) : State()
     }
 
     fun run(): Flow<State> =
         flow {
             emit(State.Scanning)
             val uri =
-                scanner.scans()
+                scanner
+                    .scans()
                     .mapNotNull(PairingUri::parse)
                     .first()
             logger.info { "Scanned pairing URI for ${uri.host}:${uri.port}" }

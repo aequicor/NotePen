@@ -23,13 +23,24 @@ private val logger = KotlinLogging.logger {}
 
 /** Result of [RemoteDocumentOpener.open]. */
 sealed class RemoteDocumentResult {
-    data class Success(val documentId: String, val localPath: String) : RemoteDocumentResult()
+    data class Success(
+        val documentId: String,
+        val localPath: String,
+    ) : RemoteDocumentResult()
 
-    data class NotFound(val documentId: String, val reason: String) : RemoteDocumentResult()
+    data class NotFound(
+        val documentId: String,
+        val reason: String,
+    ) : RemoteDocumentResult()
 
-    data class Timeout(val documentId: String) : RemoteDocumentResult()
+    data class Timeout(
+        val documentId: String,
+    ) : RemoteDocumentResult()
 
-    data class Failure(val documentId: String, val cause: Throwable) : RemoteDocumentResult()
+    data class Failure(
+        val documentId: String,
+        val cause: Throwable,
+    ) : RemoteDocumentResult()
 }
 
 /**

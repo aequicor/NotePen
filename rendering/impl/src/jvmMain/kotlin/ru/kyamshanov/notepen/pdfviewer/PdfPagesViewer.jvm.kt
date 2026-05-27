@@ -509,7 +509,11 @@ actual fun PdfPagesViewer(
                 val first = (visible.first - BUFFER_PAGES).coerceAtLeast(0)
                 val last = (visible.last + BUFFER_PAGES).coerceAtMost(pageCount - 1)
 
-                data class Item(val placeableX: Int, val placeableY: Int, val placeable: androidx.compose.ui.layout.Placeable)
+                data class Item(
+                    val placeableX: Int,
+                    val placeableY: Int,
+                    val placeable: androidx.compose.ui.layout.Placeable,
+                )
                 val items = mutableListOf<Item>()
                 // Размер/растеризацию ведём в layoutZoom (≤ cap); зум сверх cap даёт
                 // graphicsLayer через residualScale. Размещение — в полном zoom,
@@ -848,7 +852,8 @@ private fun Modifier.pdfDesktopPointerInput(
                                 // Горизонтальный скролл только в режиме BOTH; вертикаль
                                 // подавляется лишь в NONE (см. [PdfViewerState.scrollMode]).
                                 val hPx =
-                                    if (suppressH || absDx < SCROLL_H_DEAD_ZONE ||
+                                    if (suppressH ||
+                                        absDx < SCROLL_H_DEAD_ZONE ||
                                         state.scrollMode != ScrollMode.BOTH
                                     ) {
                                         0f

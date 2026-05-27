@@ -84,12 +84,13 @@ class AddToHistoryUseCaseTest {
             val useCase = AddToHistoryUseCase(repo)
 
             val result =
-                useCase.execute(
-                    uri = "content://provider/document/999",
-                    displayName = "report.pdf",
-                    fileSize = 2048L,
-                    openedAt = 200L,
-                ).getOrThrow()
+                useCase
+                    .execute(
+                        uri = "content://provider/document/999",
+                        displayName = "report.pdf",
+                        fileSize = 2048L,
+                        openedAt = 200L,
+                    ).getOrThrow()
 
             assertIs<AddHistoryResult.SafFuzzyMatchDetected>(result)
             assertEquals(existing, (result as AddHistoryResult.SafFuzzyMatchDetected).existing)
@@ -119,12 +120,13 @@ class AddToHistoryUseCaseTest {
             val useCase = AddToHistoryUseCase(repo)
 
             val result =
-                useCase.execute(
-                    uri = "content://provider/document/999",
-                    displayName = "report.pdf",
-                    fileSize = null,
-                    openedAt = 200L,
-                ).getOrThrow()
+                useCase
+                    .execute(
+                        uri = "content://provider/document/999",
+                        displayName = "report.pdf",
+                        fileSize = null,
+                        openedAt = 200L,
+                    ).getOrThrow()
 
             // Must NOT be fuzzy match — should be Added
             assertIs<AddHistoryResult.Added>(result)
@@ -147,12 +149,13 @@ class AddToHistoryUseCaseTest {
             val useCase = AddToHistoryUseCase(repo)
 
             val result =
-                useCase.execute(
-                    uri = "content://provider/document/999",
-                    displayName = "report.pdf",
-                    fileSize = null,
-                    openedAt = 200L,
-                ).getOrThrow()
+                useCase
+                    .execute(
+                        uri = "content://provider/document/999",
+                        displayName = "report.pdf",
+                        fileSize = null,
+                        openedAt = 200L,
+                    ).getOrThrow()
 
             assertIs<AddHistoryResult.Added>(result)
         }
@@ -178,12 +181,13 @@ class AddToHistoryUseCaseTest {
             val useCase = AddToHistoryUseCase(repo)
 
             val result =
-                useCase.execute(
-                    uri = "content://provider/document/999",
-                    displayName = "other.pdf",
-                    fileSize = 2048L,
-                    openedAt = 200L,
-                ).getOrThrow()
+                useCase
+                    .execute(
+                        uri = "content://provider/document/999",
+                        displayName = "other.pdf",
+                        fileSize = 2048L,
+                        openedAt = 200L,
+                    ).getOrThrow()
 
             assertIs<AddHistoryResult.Added>(result)
         }
@@ -205,13 +209,14 @@ class AddToHistoryUseCaseTest {
             val useCase = AddToHistoryUseCase(repo)
 
             val result =
-                useCase.execute(
-                    uri = uri,
-                    displayName = "file.pdf",
-                    fileSize = 512L,
-                    openedAt = 999L,
-                    lastPageIndex = 5,
-                ).getOrThrow()
+                useCase
+                    .execute(
+                        uri = uri,
+                        displayName = "file.pdf",
+                        fileSize = 512L,
+                        openedAt = 999L,
+                        lastPageIndex = 5,
+                    ).getOrThrow()
 
             val moved = assertIs<AddHistoryResult.Moved>(result)
             assertEquals("existing-id", moved.record.id)
@@ -234,12 +239,13 @@ class AddToHistoryUseCaseTest {
             val useCase = AddToHistoryUseCase(repo)
 
             val result =
-                useCase.execute(
-                    uri = "/home/user/file.pdf",
-                    displayName = "file.pdf",
-                    fileSize = 1024L,
-                    openedAt = 100L,
-                ).getOrThrow()
+                useCase
+                    .execute(
+                        uri = "/home/user/file.pdf",
+                        displayName = "file.pdf",
+                        fileSize = 1024L,
+                        openedAt = 100L,
+                    ).getOrThrow()
 
             assertIs<AddHistoryResult.Added>(result)
             assertEquals(1, repo.upsertCalls.size)
@@ -266,12 +272,13 @@ class AddToHistoryUseCaseTest {
             val useCase = AddToHistoryUseCase(repo)
 
             val result =
-                useCase.execute(
-                    uri = "content://provider/document/999",
-                    displayName = "report.pdf",
-                    fileSize = null,
-                    openedAt = 200L,
-                ).getOrThrow()
+                useCase
+                    .execute(
+                        uri = "content://provider/document/999",
+                        displayName = "report.pdf",
+                        fileSize = null,
+                        openedAt = 200L,
+                    ).getOrThrow()
 
             assertIs<AddHistoryResult.Added>(result)
         }

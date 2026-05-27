@@ -9,10 +9,14 @@ import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 /** Результат добавления файла в историю. */
 sealed class AddHistoryResult {
     /** Файл добавлен как новая запись. */
-    data class Added(val record: RecentFile) : AddHistoryResult()
+    data class Added(
+        val record: RecentFile,
+    ) : AddHistoryResult()
 
     /** Существующая запись перемещена в начало (обновлён openedAt). */
-    data class Moved(val record: RecentFile) : AddHistoryResult()
+    data class Moved(
+        val record: RecentFile,
+    ) : AddHistoryResult()
 
     /**
      * Обнаружено fuzzy-совпадение SAF: запись с тем же именем и размером,
@@ -59,7 +63,9 @@ class AddToHistoryUseCase(
                     existing.firstOrNull { rec ->
                         rec.uri != normalizedUri &&
                             rec.displayName == displayName &&
-                            fileSize != null && rec.fileSize != null && rec.fileSize == fileSize
+                            fileSize != null &&
+                            rec.fileSize != null &&
+                            rec.fileSize == fileSize
                     }
                 if (candidate != null) {
                     return@runCatching AddHistoryResult.SafFuzzyMatchDetected(candidate, normalizedUri)

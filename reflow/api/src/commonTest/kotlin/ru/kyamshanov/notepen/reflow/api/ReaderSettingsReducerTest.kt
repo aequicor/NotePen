@@ -134,7 +134,12 @@ class ReaderSettingsReducerTest {
         val next = ReaderSettingsReducer.editActive(stored, stored.current.copy(fontSizeSp = 999f), "id-1")
 
         assertEquals(ReaderSettings.MAX_FONT_SP, next.current.fontSizeSp)
-        assertEquals(ReaderSettings.MAX_FONT_SP, next.userPresets.first().settings.fontSizeSp)
+        assertEquals(
+            ReaderSettings.MAX_FONT_SP,
+            next.userPresets
+                .first()
+                .settings.fontSizeSp,
+        )
     }
 
     @Test
@@ -170,7 +175,12 @@ class ReaderSettingsReducerTest {
         val tooLong = "x".repeat(ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH + 50)
         val next = ReaderSettingsReducer.renamePreset(stored, "c1", tooLong)
 
-        assertEquals(ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH, next.userPresets.first().name.length)
+        assertEquals(
+            ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH,
+            next.userPresets
+                .first()
+                .name.length,
+        )
         assertEquals("x".repeat(ReaderSettingsReducer.MAX_PRESET_NAME_LENGTH), next.userPresets.first().name)
     }
 

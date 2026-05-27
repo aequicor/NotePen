@@ -139,7 +139,9 @@ class AndroidPdfReflowExtractor(
      * Stream-engine PdfBox-Android, собирающий размещение встроенных растровых
      * изображений (через CTM в [drawImage]); прочие операции игнорируются.
      */
-    private class ImageRegionCollector(page: PDPage) : PDFGraphicsStreamEngine(page) {
+    private class ImageRegionCollector(
+        page: PDPage,
+    ) : PDFGraphicsStreamEngine(page) {
         val regions = mutableListOf<ReflowRect>()
         private val pageHeight = page.mediaBox.height
 

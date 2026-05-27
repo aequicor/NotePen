@@ -102,9 +102,7 @@ data class ColorFamily(
 actual fun ComposableAppTheme(
     darkTheme: Boolean,
     dynamicColor: Boolean,
-    content:
-        @Composable()
-        () -> Unit,
+    content: @Composable () -> Unit,
 ) {
     val colorScheme =
         when {

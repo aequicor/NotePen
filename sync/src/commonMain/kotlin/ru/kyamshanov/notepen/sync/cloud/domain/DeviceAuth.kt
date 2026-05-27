@@ -16,7 +16,9 @@ data class DeviceAuthorization(
 /** Outcome of one poll for the device-flow access token. */
 sealed interface DeviceTokenResult {
     /** The user approved; [accessToken] is a bearer token for the provider API. */
-    data class Authorized(val accessToken: String) : DeviceTokenResult
+    data class Authorized(
+        val accessToken: String,
+    ) : DeviceTokenResult
 
     /** The user has not approved yet — keep polling at the current interval. */
     data object Pending : DeviceTokenResult
@@ -25,5 +27,7 @@ sealed interface DeviceTokenResult {
     data object SlowDown : DeviceTokenResult
 
     /** Terminal failure (code expired, access denied, device flow disabled, …). */
-    data class Failed(val reason: String) : DeviceTokenResult
+    data class Failed(
+        val reason: String,
+    ) : DeviceTokenResult
 }

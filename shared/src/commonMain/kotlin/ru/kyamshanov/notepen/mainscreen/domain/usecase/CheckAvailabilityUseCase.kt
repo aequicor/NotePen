@@ -16,7 +16,10 @@ import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 private val logger = KotlinLogging.logger {}
 
 /** Результат проверки доступности одного файла. */
-data class AvailabilityUpdate(val id: String, val status: AvailabilityStatus)
+data class AvailabilityUpdate(
+    val id: String,
+    val status: AvailabilityStatus,
+)
 
 /**
  * Параллельно проверяет доступность всех записей истории.

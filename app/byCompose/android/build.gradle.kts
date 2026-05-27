@@ -52,12 +52,21 @@ kotlin {
 
 android {
     namespace = "ru.kyamshanov.notepen"
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
+    compileSdk =
+        libs.versions.android.compileSdk
+            .get()
+            .toInt()
 
     defaultConfig {
         applicationId = "ru.kyamshanov.notepen"
-        minSdk = libs.versions.android.minSdk.get().toInt()
-        targetSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
+        targetSdk =
+            libs.versions.android.compileSdk
+                .get()
+                .toInt()
         versionCode = 1
         versionName = providers.gradleProperty("app.version").getOrElse("1.0.0")
     }

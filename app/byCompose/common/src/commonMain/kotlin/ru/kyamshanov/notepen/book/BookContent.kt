@@ -74,7 +74,10 @@ sealed interface ContentBlock {
      * @property level уровень от 1 (самый крупный) до 6
      * @property text текст заголовка с уже снятой внутренней разметкой
      */
-    data class Heading(val level: Int, val text: String) : ContentBlock
+    data class Heading(
+        val level: Int,
+        val text: String,
+    ) : ContentBlock
 
     /**
      * Абзац основного текста (`p` и блочные контейнеры без спец-семантики).
@@ -84,7 +87,9 @@ sealed interface ContentBlock {
      *
      * @property text форматированный текст абзаца
      */
-    data class Paragraph(val text: RichText) : ContentBlock
+    data class Paragraph(
+        val text: RichText,
+    ) : ContentBlock
 
     /**
      * Элемент списка (`li`). Маркер намеренно не зашит в [text] — его
@@ -108,7 +113,9 @@ sealed interface ContentBlock {
      *
      * @property text форматированный текст цитаты
      */
-    data class Blockquote(val text: RichText) : ContentBlock
+    data class Blockquote(
+        val text: RichText,
+    ) : ContentBlock
 
     /**
      * Растровое изображение (`img`/`image`), извлечённое из контейнера книги.
@@ -144,7 +151,9 @@ sealed interface ContentBlock {
      *
      * @property rows строки сверху вниз; первая обычно заголовочная
      */
-    data class Table(val rows: List<List<String>>) : ContentBlock
+    data class Table(
+        val rows: List<List<String>>,
+    ) : ContentBlock
 
     /** Горизонтальный разделитель (`hr`). */
     data object HorizontalRule : ContentBlock

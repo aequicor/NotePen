@@ -17,7 +17,9 @@ import javax.imageio.ImageIO
  *
  * @param ioDispatcher диспетчер для блокирующего IO; не должен быть Main-диспетчером
  */
-class JvmImageDocumentLoader(private val ioDispatcher: CoroutineDispatcher) : PdfDocumentLoader {
+class JvmImageDocumentLoader(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfDocumentLoader {
     override suspend fun load(path: String): PdfDocument =
         withContext(ioDispatcher) {
             val file = File(path)

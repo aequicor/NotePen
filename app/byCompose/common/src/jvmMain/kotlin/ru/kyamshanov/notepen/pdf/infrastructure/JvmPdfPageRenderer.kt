@@ -17,7 +17,9 @@ import java.awt.image.BufferedImage
  *
  * @param ioDispatcher диспетчер для блокирующего рендеринга; не должен быть Main-диспетчером
  */
-class JvmPdfPageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfPageRenderer {
+class JvmPdfPageRenderer(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfPageRenderer {
     override suspend fun renderPage(
         document: PdfDocument,
         pageIndex: Int,

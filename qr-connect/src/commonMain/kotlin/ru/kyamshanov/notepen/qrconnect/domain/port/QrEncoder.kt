@@ -17,7 +17,10 @@ fun interface QrEncoder {
  * Square matrix where `true` means a dark module (drawn pixel) and `false`
  * means light (background). Side length equals [size].
  */
-class QrMatrix(val size: Int, private val data: BooleanArray) {
+class QrMatrix(
+    val size: Int,
+    private val data: BooleanArray,
+) {
     init {
         require(data.size == size * size) { "data length must equal size*size" }
     }

@@ -84,7 +84,12 @@ class PdfDrawingStateEraseTest {
 
         assertEquals(1, state.currentPaths.size, "no split when erasing at start")
         assertEquals(listOf(0.30f, 0.50f, 0.70f), state.currentPaths[0].points.map { it.x })
-        assertTrue(state.currentPaths[0].points.first().isNewPath)
+        assertTrue(
+            state.currentPaths[0]
+                .points
+                .first()
+                .isNewPath,
+        )
     }
 
     @Test

@@ -85,8 +85,10 @@ class AndroidTabletInputController : TabletInputController {
         val action = event.actionMasked
 
         // Tool flip: eraser tip is reported as TOOL_TYPE_ERASER from DOWN.
-        eraserFlow.value = toolType == MotionEvent.TOOL_TYPE_ERASER && action != MotionEvent.ACTION_UP &&
-            action != MotionEvent.ACTION_HOVER_EXIT && action != MotionEvent.ACTION_CANCEL
+        eraserFlow.value = toolType == MotionEvent.TOOL_TYPE_ERASER &&
+            action != MotionEvent.ACTION_UP &&
+            action != MotionEvent.ACTION_HOVER_EXIT &&
+            action != MotionEvent.ACTION_CANCEL
 
         // Barrel / side button. BUTTON_STYLUS_PRIMARY is the canonical bit;
         // some pens (Wacom EMR) also report SECONDARY on a second button.

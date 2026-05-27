@@ -101,8 +101,7 @@ class FileTransferReceiver(
                     }
                     else -> Unit
                 }
-            }
-            .first()
+            }.first()
     }
 }
 

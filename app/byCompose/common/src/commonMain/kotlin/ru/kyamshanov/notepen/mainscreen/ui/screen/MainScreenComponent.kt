@@ -50,7 +50,8 @@ class MainScreenComponent(
     private val remoteCatalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>? = null,
     /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
-) : MainComponent, ComponentContext by componentContext {
+) : MainComponent,
+    ComponentContext by componentContext {
     /** ViewModel главного экрана, привязанная к жизненному циклу компонента. */
     val viewModel =
         MainScreenViewModel(

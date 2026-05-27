@@ -10,7 +10,9 @@ package ru.kyamshanov.notepen.sync.domain.model
  * a persisted per-book id and is intentionally deferred.)
  */
 @JvmInline
-value class BookId(val value: String)
+value class BookId(
+    val value: String,
+)
 
 /**
  * A single book discovered under the library root.

@@ -22,7 +22,9 @@ import java.io.File
  *
  * @param ioDispatcher dispatcher for blocking file I/O
  */
-class JvmPdfExporter(private val ioDispatcher: CoroutineDispatcher) : PdfExporter {
+class JvmPdfExporter(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfExporter {
     override suspend fun export(
         sourcePdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,

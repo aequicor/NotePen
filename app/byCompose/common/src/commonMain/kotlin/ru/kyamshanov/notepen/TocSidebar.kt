@@ -17,13 +17,13 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.book.TocEntry
 
 /**
@@ -46,14 +46,13 @@ fun TocSidebar(
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
-    Surface(
+    GlassSurface(
         modifier =
             modifier
                 .fillMaxHeight()
                 .width(TOC_SIDEBAR_WIDTH),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = TOC_SIDEBAR_ALPHA),
+        tint = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(topEnd = TOC_SIDEBAR_CORNER, bottomEnd = TOC_SIDEBAR_CORNER),
-        tonalElevation = 2.dp,
     ) {
         Column(modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
             Text(
@@ -129,7 +128,6 @@ private fun TocEntryRow(
 }
 
 internal val TOC_SIDEBAR_WIDTH = 240.dp
-private val TOC_SIDEBAR_CORNER = 12.dp
+private val TOC_SIDEBAR_CORNER = 18.dp
 private val TOC_INDENT_PER_LEVEL = 14.dp
-private const val TOC_SIDEBAR_ALPHA = 0.92f
 private const val TOC_PAGE_NUMBER_ALPHA = 0.7f

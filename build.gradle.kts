@@ -1,5 +1,6 @@
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import org.gradle.api.attributes.Bundling
+import org.jlleitschuh.gradle.ktlint.KtlintExtension
 
 plugins {
     // this is necessary to avoid the plugins to be loaded multiple times
@@ -13,7 +14,7 @@ plugins {
     alias(libs.plugins.detekt) apply false
     alias(libs.plugins.ktlint) apply false
     alias(libs.plugins.roborazzi) apply false
-    kotlin("jvm") version "2.1.0" apply false
+    kotlin("jvm") version "2.3.21" apply false
 }
 
 subprojects {
@@ -27,6 +28,14 @@ subprojects {
         pluginManager.withPlugin(kotlinPluginId) {
             pluginManager.apply("io.gitlab.arturbosch.detekt")
             pluginManager.apply("org.jlleitschuh.gradle.ktlint")
+
+            // ktlint otherwise lints Compose's generated `Res.kt` resource accessors under
+            // build/generated — exclude all generated sources so only our code is checked.
+            extensions.configure<KtlintExtension> {
+                filter {
+                    exclude { entry -> entry.file.path.contains("/generated/") }
+                }
+            }
 
             // detekt's default `detekt` task only scans the JVM `src/main` layout, which does
             // not exist in KMP modules. Point it at every Kotlin source root instead.

@@ -86,10 +86,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import dev.chrisbanes.haze.HazeState
-import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
@@ -164,7 +163,6 @@ public fun ReflowReader(
     onBarVisibleChange: (Boolean) -> Unit,
     newPresetIdProvider: () -> String,
     modifier: Modifier = Modifier,
-    hazeState: HazeState? = null,
     highlights: List<TextAnchor> = emptyList(),
     listState: LazyListState = rememberLazyListState(),
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)? = null,
@@ -350,8 +348,7 @@ public fun ReflowReader(
                             TapAction.TOGGLE_BAR -> onBarVisibleChange(!barVisible)
                         }
                     }
-                }
-                .pointerInput(selection.immediate, settings.paged) {
+                }.pointerInput(selection.immediate, settings.paged) {
                     // В страничном режиме без активного маркера HorizontalPager обрабатывает
                     // свайп нативно — внешний обработчик не нужен и только создал бы конкуренцию жестов.
                     if (settings.paged && !selection.immediate) return@pointerInput
@@ -425,7 +422,11 @@ public fun ReflowReader(
                 modifier =
                     Modifier
                         .matchParentSize()
-                        .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
+                        // Capture the reader page background into the glass backdrop too, so
+                        // panels sample a solid page (like PDF mode) instead of transparent gaps
+                        // between text lines — otherwise the reader panels read as effect-less.
+                        .glassSource()
+                        .background(effectiveBackground)
                         .onGloballyPositioned { selectionState.containerCoordinates = it }
                         .reflowSelectionDrag(selection.immediate, selectionState) {
                             val anchors = selectionState.anchorsForSelection()
@@ -496,7 +497,6 @@ public fun ReflowReader(
                 autoHideMs = settings.autoHideMs,
                 maxVerticalMarginDp = maxVerticalMarginDp,
                 onRequestHide = { onBarVisibleChange(false) },
-                hazeState = hazeState,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

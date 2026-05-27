@@ -18,7 +18,9 @@ interface IdGenerator {
  * Default [IdGenerator] backed by a monotonically increasing `Long`. Not
  * thread-safe; intended for UI-thread use.
  */
-class SequentialIdGenerator(initial: Long = 0L) : IdGenerator {
+class SequentialIdGenerator(
+    initial: Long = 0L,
+) : IdGenerator {
     private var counter: Long = initial
 
     override fun next(): DocumentId {
@@ -35,7 +37,9 @@ class SequentialIdGenerator(initial: Long = 0L) : IdGenerator {
  * Counts monotonically across the entire app session, never reused
  * — matches the "Document N" semantics in the feature spec.
  */
-class FallbackNameCounter(initial: Int = 0) {
+class FallbackNameCounter(
+    initial: Int = 0,
+) {
     private var counter: Int = initial
 
     /** Returns the next "Document N" name. */

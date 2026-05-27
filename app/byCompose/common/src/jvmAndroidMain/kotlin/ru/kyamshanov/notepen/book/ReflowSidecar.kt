@@ -50,27 +50,45 @@ private data class ReflowDocDto(
 private sealed interface ReflowBlockDto {
     @Serializable
     @SerialName("heading")
-    data class Heading(val text: String, val level: Int, val source: List<SourceSpanDto> = emptyList()) : ReflowBlockDto
+    data class Heading(
+        val text: String,
+        val level: Int,
+        val source: List<SourceSpanDto> = emptyList(),
+    ) : ReflowBlockDto
 
     @Serializable
     @SerialName("paragraph")
-    data class Paragraph(val text: String, val source: List<SourceSpanDto> = emptyList()) : ReflowBlockDto
+    data class Paragraph(
+        val text: String,
+        val source: List<SourceSpanDto> = emptyList(),
+    ) : ReflowBlockDto
 
     @Serializable
     @SerialName("blockquote")
-    data class Blockquote(val text: String, val source: List<SourceSpanDto> = emptyList()) : ReflowBlockDto
+    data class Blockquote(
+        val text: String,
+        val source: List<SourceSpanDto> = emptyList(),
+    ) : ReflowBlockDto
 
     @Serializable
     @SerialName("listItem")
-    data class ListItem(val text: String, val source: List<SourceSpanDto> = emptyList()) : ReflowBlockDto
+    data class ListItem(
+        val text: String,
+        val source: List<SourceSpanDto> = emptyList(),
+    ) : ReflowBlockDto
 
     @Serializable
     @SerialName("table")
-    data class Table(val rows: List<List<CellDto>>) : ReflowBlockDto
+    data class Table(
+        val rows: List<List<CellDto>>,
+    ) : ReflowBlockDto
 
     @Serializable
     @SerialName("figure")
-    data class Figure(val pageIndex: Int, val bounds: RectDto) : ReflowBlockDto
+    data class Figure(
+        val pageIndex: Int,
+        val bounds: RectDto,
+    ) : ReflowBlockDto
 
     @Serializable
     @SerialName("divider")
@@ -78,7 +96,10 @@ private sealed interface ReflowBlockDto {
 }
 
 @Serializable
-private data class CellDto(val text: String, val source: List<SourceSpanDto> = emptyList())
+private data class CellDto(
+    val text: String,
+    val source: List<SourceSpanDto> = emptyList(),
+)
 
 @Serializable
 private data class SourceSpanDto(

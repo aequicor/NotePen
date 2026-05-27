@@ -10,7 +10,10 @@ import kotlinx.serialization.Serializable
  * @property settings Full pen configuration captured by this preset.
  */
 @Serializable
-data class PenPreset(val id: String, val settings: PenSettings)
+data class PenPreset(
+    val id: String,
+    val settings: PenSettings,
+)
 
 /**
  * A saved snapshot of [MarkerSettings] the user can re-apply with one tap.
@@ -19,7 +22,10 @@ data class PenPreset(val id: String, val settings: PenSettings)
  * @property settings Full marker configuration captured by this preset.
  */
 @Serializable
-data class MarkerPreset(val id: String, val settings: MarkerSettings)
+data class MarkerPreset(
+    val id: String,
+    val settings: MarkerSettings,
+)
 
 /**
  * A saved snapshot of [EraserSettings] the user can re-apply with one tap.
@@ -28,7 +34,10 @@ data class MarkerPreset(val id: String, val settings: MarkerSettings)
  * @property settings Full eraser configuration captured by this preset.
  */
 @Serializable
-data class EraserPreset(val id: String, val settings: EraserSettings)
+data class EraserPreset(
+    val id: String,
+    val settings: EraserSettings,
+)
 
 /**
  * User-defined tool presets persisted globally (across all documents).

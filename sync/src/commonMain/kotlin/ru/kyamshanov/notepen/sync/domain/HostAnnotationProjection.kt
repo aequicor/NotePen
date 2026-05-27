@@ -269,7 +269,11 @@ class HostAnnotationProjection(
         return mutex.withLock {
             val state = states[documentId] ?: return@withLock null
             val out = mutableListOf<StrokeDelta.Added>()
-            val pageIndices = state.layers.values.flatMap { it.keys }.distinct().sorted()
+            val pageIndices =
+                state.layers.values
+                    .flatMap { it.keys }
+                    .distinct()
+                    .sorted()
             for (pageIndex in pageIndices) {
                 // Page extent is document-level: attach it to the first stroke
                 // emitted for the page; the receiver unions extents anyway.

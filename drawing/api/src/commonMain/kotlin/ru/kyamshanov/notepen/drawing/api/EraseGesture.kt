@@ -24,7 +24,9 @@ class EraseGesture(
     private var lastEraseY = Float.NaN
     private val halfSize = eraserSettings.sizeNormalized / 2f
     private val moveThresholdSq = (halfSize * 0.25f).let { it * it }
-    private var lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
+    private var lastHistoryBump =
+        kotlin.time.TimeSource.Monotonic
+            .markNow()
     private var pendingBump = false
 
     fun start(
@@ -46,7 +48,9 @@ class EraseGesture(
             )
         if (changed) {
             pdfDrawingState.markHistoryChanged()
-            lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
+            lastHistoryBump =
+                kotlin.time.TimeSource.Monotonic
+                    .markNow()
             pendingBump = false
         }
     }
@@ -73,7 +77,9 @@ class EraseGesture(
             pendingBump = true
             if (lastHistoryBump.elapsedNow().inWholeMilliseconds >= 80L) {
                 pdfDrawingState.markHistoryChanged()
-                lastHistoryBump = kotlin.time.TimeSource.Monotonic.markNow()
+                lastHistoryBump =
+                    kotlin.time.TimeSource.Monotonic
+                        .markNow()
                 pendingBump = false
             }
         }

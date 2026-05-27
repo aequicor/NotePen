@@ -15,7 +15,9 @@ import java.io.File
  *
  * @param ioDispatcher диспетчер для блокирующего IO; не должен быть Main-диспетчером
  */
-class JvmPdfDocumentLoader(private val ioDispatcher: CoroutineDispatcher) : PdfDocumentLoader {
+class JvmPdfDocumentLoader(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfDocumentLoader {
     override suspend fun load(path: String): PdfDocument =
         withContext(ioDispatcher) {
             val file = File(path)

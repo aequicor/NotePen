@@ -1,3 +1,6 @@
+import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
@@ -21,13 +24,10 @@ sqldelight {
 kotlin {
     applyDefaultHierarchyTemplate()
     jvm()
-    // androidTarget Java/Kotlin level is configured via android { compileOptions }
-    // below — SQLDelight 2.x's buildscript pin downgrades the KGP enough that
-    // the new `compilerOptions { jvmTarget }` DSL stops compiling in this file.
-    @Suppress("DEPRECATION")
     androidTarget {
-        compilations.all {
-            kotlinOptions { jvmTarget = "11" }
+        @OptIn(ExperimentalKotlinGradlePluginApi::class)
+        compilerOptions {
+            jvmTarget.set(JvmTarget.JVM_11)
         }
     }
 
@@ -83,9 +83,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
+    compileSdk =
+        libs.versions.android.compileSdk
+            .get()
+            .toInt()
     defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
     }
 }
 
@@ -94,5 +100,6 @@ android {
 // inside the Gradle daemon on this Windows JVM (`NativeDB._open_utf8`
 // UnsatisfiedLinkError). We have no migrations yet, so disabling the verify
 // task is safe; revisit when the first .sqm migration lands.
-tasks.matching { it.name.startsWith("verify") && it.name.contains("NotePenSyncDatabase") }
+tasks
+    .matching { it.name.startsWith("verify") && it.name.contains("NotePenSyncDatabase") }
     .configureEach { enabled = false }

@@ -7,9 +7,7 @@ import androidx.compose.runtime.Composable
 expect fun ComposableAppTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = true, // Dynamic color is available on Android 12+
-    content:
-        @Composable()
-        () -> Unit,
+    content: @Composable () -> Unit,
 )
 
 object AppTheme {

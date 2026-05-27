@@ -77,35 +77,37 @@ class GitHubDeviceAuthenticator(
     /** Requests a device + user code for [scope] (e.g. `"repo"`). */
     suspend fun requestAuthorization(scope: String): DeviceAuthorization {
         val body =
-            httpClient.post(DEVICE_CODE_URL) {
-                header(HttpHeaders.Accept, "application/json")
-                setBody(
-                    FormDataContent(
-                        Parameters.build {
-                            append("client_id", clientId)
-                            append("scope", scope)
-                        },
-                    ),
-                )
-            }.bodyAsText()
+            httpClient
+                .post(DEVICE_CODE_URL) {
+                    header(HttpHeaders.Accept, "application/json")
+                    setBody(
+                        FormDataContent(
+                            Parameters.build {
+                                append("client_id", clientId)
+                                append("scope", scope)
+                            },
+                        ),
+                    )
+                }.bodyAsText()
         return parseDeviceCode(body)
     }
 
     /** Performs one token poll for [deviceCode]; the caller loops with delay. */
     suspend fun poll(deviceCode: String): DeviceTokenResult {
         val body =
-            httpClient.post(ACCESS_TOKEN_URL) {
-                header(HttpHeaders.Accept, "application/json")
-                setBody(
-                    FormDataContent(
-                        Parameters.build {
-                            append("client_id", clientId)
-                            append("device_code", deviceCode)
-                            append("grant_type", DEVICE_GRANT_TYPE)
-                        },
-                    ),
-                )
-            }.bodyAsText()
+            httpClient
+                .post(ACCESS_TOKEN_URL) {
+                    header(HttpHeaders.Accept, "application/json")
+                    setBody(
+                        FormDataContent(
+                            Parameters.build {
+                                append("client_id", clientId)
+                                append("device_code", deviceCode)
+                                append("grant_type", DEVICE_GRANT_TYPE)
+                            },
+                        ),
+                    )
+                }.bodyAsText()
         return parseTokenResult(body)
     }
 }

@@ -7,4 +7,7 @@ package ru.kyamshanov.notepen.sync.domain.model
  * to the requester via
  * [ru.kyamshanov.notepen.sync.domain.port.PeerServer.send] with `peer.id`.
  */
-data class PeerMessage(val peer: DeviceInfo, val message: NetworkMessage)
+data class PeerMessage(
+    val peer: DeviceInfo,
+    val message: NetworkMessage,
+)

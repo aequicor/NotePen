@@ -21,9 +21,6 @@ kotlin {
     sourceSets {
 
         commonMain.dependencies {
-            // api: LocalHazeState / GlassBackdropProvider expose haze types in :blur's public API.
-            api(libs.haze)
-            implementation(libs.haze.materials)
             // compose
             implementation(compose.runtime)
             implementation(compose.foundation)
@@ -47,8 +44,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
+    compileSdk =
+        libs.versions.android.compileSdk
+            .get()
+            .toInt()
     defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
     }
 }

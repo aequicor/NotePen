@@ -65,7 +65,9 @@ class DetailsContentTest {
     }
 }
 
-private class FakeDetailsComponent(title: String = "test-title") : DetailsComponent {
+private class FakeDetailsComponent(
+    title: String = "test-title",
+) : DetailsComponent {
     var onBackCallCount: Int = 0
         private set
 

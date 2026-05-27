@@ -43,7 +43,8 @@ public object StrokeTextMapper {
         val anchors = mutableListOf<TextAnchor>()
         document.blocks.forEachIndexed { blockIndex, block ->
             val covered =
-                block.sourceSpans()
+                block
+                    .sourceSpans()
                     .filter { it.pageIndex == pageIndex && intersects(box, it.bounds) }
                     .map { it.charStart to it.charEnd }
             mergeRanges(covered).forEach { (start, end) ->
@@ -110,7 +111,8 @@ public object StrokeTextMapper {
         val anchors = mutableListOf<TextAnchor>()
         document.blocks.forEachIndexed { blockIndex, block ->
             val covered =
-                block.sourceSpans()
+                block
+                    .sourceSpans()
                     .filter { span -> span.pageIndex == pageIndex && boxes.any { intersects(it, span.bounds) } }
                     .map { it.charStart to it.charEnd }
             mergeRanges(covered).forEach { (start, end) ->

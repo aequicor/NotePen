@@ -70,7 +70,9 @@ class HostQrPairingCoordinator(
         data object Stopped : State()
 
         /** Server failed to start. */
-        data class Failed(val error: QrConnectError) : State()
+        data class Failed(
+            val error: QrConnectError,
+        ) : State()
     }
 
     /**

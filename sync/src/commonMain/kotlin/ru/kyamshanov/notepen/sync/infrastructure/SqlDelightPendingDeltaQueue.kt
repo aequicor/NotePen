@@ -80,7 +80,9 @@ class SqlDelightPendingDeltaQueue(
     override fun pendingCounts(): Flow<Map<String, Int>> =
         flow {
             emitAll(
-                queries.countsAll().asFlow()
+                queries
+                    .countsAll()
+                    .asFlow()
                     .mapToList(ioDispatcher)
                     .map { rows -> rows.associate { it.document_id to it.pendingCount.toInt() } },
             )

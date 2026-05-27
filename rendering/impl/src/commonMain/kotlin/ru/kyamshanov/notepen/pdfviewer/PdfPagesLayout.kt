@@ -522,4 +522,7 @@ object PdfViewerMath {
  * Float-эквивалент `androidx.compose.ui.geometry.Size`, чтобы не тащить
  * Compose в чистую математику.
  */
-data class FloatSize(val width: Float, val height: Float)
+data class FloatSize(
+    val width: Float,
+    val height: Float,
+)

@@ -62,7 +62,7 @@ fun PageIndicatorAirbar(
     val textColor = contentColor ?: MaterialTheme.colorScheme.onSurface
     GlassSurface(
         modifier = modifier,
-        shape = RoundedCornerShape(AIRBAR_CORNER_RADIUS),
+        shape = RoundedCornerShape(percent = 50),
         tint = containerColor ?: MaterialTheme.colorScheme.surface,
     ) {
         Row(
@@ -193,6 +193,5 @@ private fun EditablePageNumber(
     }
 }
 
-private val AIRBAR_CORNER_RADIUS = 12.dp
 private val AIRBAR_PADDING_H = 16.dp
 private val AIRBAR_PADDING_V = 8.dp

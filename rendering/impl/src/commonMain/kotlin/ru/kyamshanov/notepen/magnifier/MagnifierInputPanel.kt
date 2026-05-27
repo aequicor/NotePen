@@ -205,7 +205,12 @@ fun MagnifierInputPanel(
                                 imageVector = Icons.Default.SwapHoriz,
                                 contentDescription =
                                     if (state.autoScrollEnabled) "Авто-прокрутка включена" else "Авто-прокрутка выключена",
-                                tint = if (state.autoScrollEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint =
+                                    if (state.autoScrollEnabled) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
                             )
                         }
                     }
@@ -705,7 +710,10 @@ private fun magnifierLiveCacheDim(panelSize: Size): IntSize {
  * anti-flicker — пока фоновая растеризация догоняет, ещё не вошедший в битмап
  * хвост `currentPaths` дорисовывается в Canvas.
  */
-private data class MagnifierCompletedLayer(val strokeCount: Int, val bitmap: ImageBitmap?)
+private data class MagnifierCompletedLayer(
+    val strokeCount: Int,
+    val bitmap: ImageBitmap?,
+)
 
 @Composable
 private fun rememberMagnifierCompletedLayers(

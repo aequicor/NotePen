@@ -6,10 +6,14 @@ package ru.kyamshanov.notepen.book
  */
 internal sealed interface BookSource {
     /** Текстовая книга (EPUB/FB2) — поток [ContentBlock]. */
-    data class Text(val content: BookContent) : BookSource
+    data class Text(
+        val content: BookContent,
+    ) : BookSource
 
     /** Комикс (CBZ/CBR) — изображения страниц в порядке чтения. */
-    data class Comic(val images: List<ByteArray>) : BookSource
+    data class Comic(
+        val images: List<ByteArray>,
+    ) : BookSource
 }
 
 /**

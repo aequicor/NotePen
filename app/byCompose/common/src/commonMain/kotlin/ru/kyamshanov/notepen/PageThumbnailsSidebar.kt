@@ -66,6 +66,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -212,14 +213,13 @@ fun PageThumbnailsSidebar(
         }
     }
 
-    Surface(
+    GlassSurface(
         modifier =
             modifier
                 .fillMaxHeight()
                 .width(SIDEBAR_WIDTH),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = SIDEBAR_ALPHA),
+        tint = MaterialTheme.colorScheme.surfaceVariant,
         shape = RoundedCornerShape(topEnd = SIDEBAR_CORNER, bottomEnd = SIDEBAR_CORNER),
-        tonalElevation = 2.dp,
     ) {
         Column(modifier = Modifier.windowInsetsPadding(WindowInsets.systemBars)) {
             FilterModeChip(
@@ -563,7 +563,6 @@ private fun FavoriteStar(
 internal val SIDEBAR_WIDTH = 100.dp
 private val THUMBNAIL_WIDTH = 80.dp
 private val THUMBNAIL_SPACING = 8.dp
-private val SIDEBAR_CORNER = 12.dp
+private val SIDEBAR_CORNER = 18.dp
 private val FILTER_CHIP_CORNER = 8.dp
-private const val SIDEBAR_ALPHA = 0.92f
 private const val SIDEBAR_AUTOSCROLL_DEBOUNCE_MS = 120L

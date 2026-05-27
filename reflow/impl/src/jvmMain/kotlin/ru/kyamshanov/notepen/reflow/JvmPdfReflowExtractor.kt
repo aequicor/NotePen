@@ -30,7 +30,9 @@ import java.io.File
  *
  * @param ioDispatcher диспетчер для блокирующего парсинга; не должен быть Main-диспетчером
  */
-class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : PdfReflowExtractor {
+class JvmPdfReflowExtractor(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfReflowExtractor {
     override suspend fun probe(path: String): PdfContentKind =
         withContext(ioDispatcher) {
             openDocument(path).use { document ->
@@ -119,7 +121,9 @@ class JvmPdfReflowExtractor(private val ioDispatcher: CoroutineDispatcher) : Pdf
      * Stream-engine, собирающий размещение встроенных растровых изображений
      * (через CTM в [drawImage]); прочие операции рисования игнорируются.
      */
-    private class ImageRegionCollector(page: PDPage) : PDFGraphicsStreamEngine(page) {
+    private class ImageRegionCollector(
+        page: PDPage,
+    ) : PDFGraphicsStreamEngine(page) {
         val regions = mutableListOf<ReflowRect>()
         private val pageHeight = page.mediaBox.height
 

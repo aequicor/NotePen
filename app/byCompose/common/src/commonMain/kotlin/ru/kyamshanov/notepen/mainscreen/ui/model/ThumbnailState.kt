@@ -10,7 +10,9 @@ sealed class ThumbnailState {
      *
      * @property imageData Закодированные данные изображения.
      */
-    data class Ready(val imageData: ByteArray) : ThumbnailState() {
+    data class Ready(
+        val imageData: ByteArray,
+    ) : ThumbnailState() {
         override fun equals(other: Any?): Boolean = other is Ready && imageData.contentEquals(other.imageData)
 
         override fun hashCode(): Int = imageData.contentHashCode()

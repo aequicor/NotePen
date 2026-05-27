@@ -7,4 +7,7 @@ package ru.kyamshanov.notepen.sync.domain.model
  * specific host that originated the request via
  * [ru.kyamshanov.notepen.sync.domain.port.SyncClient.send] with `host.id`.
  */
-data class HostMessage(val host: DeviceInfo, val message: NetworkMessage)
+data class HostMessage(
+    val host: DeviceInfo,
+    val message: NetworkMessage,
+)

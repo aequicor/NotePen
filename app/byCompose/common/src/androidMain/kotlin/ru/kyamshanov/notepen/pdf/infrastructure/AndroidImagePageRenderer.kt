@@ -15,7 +15,9 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
  *
  * @param ioDispatcher диспетчер для блокирующего масштабирования; не должен быть Main-диспетчером
  */
-class AndroidImagePageRenderer(private val ioDispatcher: CoroutineDispatcher) : PdfPageRenderer {
+class AndroidImagePageRenderer(
+    private val ioDispatcher: CoroutineDispatcher,
+) : PdfPageRenderer {
     override suspend fun renderPage(
         document: PdfDocument,
         pageIndex: Int,

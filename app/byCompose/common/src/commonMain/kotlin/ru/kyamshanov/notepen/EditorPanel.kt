@@ -71,7 +71,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
-import ru.kyamshanov.notepen.blur.LocalHazeState
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
@@ -1507,7 +1506,6 @@ fun EditorPanel(
                             onBarVisibleChange = { visible ->
                                 if (isFocused) pdfState.readerBarVisible = visible
                             },
-                            hazeState = if (readerStored.blurEnabled) LocalHazeState.current else null,
                             modifier = Modifier.fillMaxSize(),
                             highlights = readerHighlights,
                             listState = reflowListState,

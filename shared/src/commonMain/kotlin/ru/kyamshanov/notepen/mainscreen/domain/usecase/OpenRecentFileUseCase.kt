@@ -9,10 +9,14 @@ import ru.kyamshanov.notepen.mainscreen.domain.port.FileAvailabilityChecker
 /** Результат открытия файла из истории. */
 sealed class OpenFileResult {
     /** Файл доступен — можно открыть. */
-    data class Success(val uri: String) : OpenFileResult()
+    data class Success(
+        val uri: String,
+    ) : OpenFileResult()
 
     /** Файл недоступен; поле [status] объясняет причину. */
-    data class NotAvailable(val status: AvailabilityStatus) : OpenFileResult()
+    data class NotAvailable(
+        val status: AvailabilityStatus,
+    ) : OpenFileResult()
 }
 
 /**

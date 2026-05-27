@@ -117,14 +117,26 @@ internal interface PenWndProc : StdCallLibrary.StdCallCallback {
  * полей в POINTER_PEN_INFO совпали с native layout.
  */
 @Structure.FieldOrder(
-    "pointerType", "pointerId", "frameId", "pointerFlags",
-    "sourceDevice", "hwndTarget",
-    "ptPixelLocationX", "ptPixelLocationY",
-    "ptHimetricLocationX", "ptHimetricLocationY",
-    "ptPixelLocationRawX", "ptPixelLocationRawY",
-    "ptHimetricLocationRawX", "ptHimetricLocationRawY",
-    "dwTime", "historyCount", "inputData", "dwKeyStates",
-    "performanceCount", "buttonChangeType",
+    "pointerType",
+    "pointerId",
+    "frameId",
+    "pointerFlags",
+    "sourceDevice",
+    "hwndTarget",
+    "ptPixelLocationX",
+    "ptPixelLocationY",
+    "ptHimetricLocationX",
+    "ptHimetricLocationY",
+    "ptPixelLocationRawX",
+    "ptPixelLocationRawY",
+    "ptHimetricLocationRawX",
+    "ptHimetricLocationRawY",
+    "dwTime",
+    "historyCount",
+    "inputData",
+    "dwKeyStates",
+    "performanceCount",
+    "buttonChangeType",
 )
 internal open class PointerInfo : Structure() {
     @JvmField var pointerType: Int = 0
@@ -224,7 +236,11 @@ object WindowsPointerHook {
         }
     }
 
-    private data class Hook(val hwnd: HWND, val original: Pointer, val callback: PenWndProc)
+    private data class Hook(
+        val hwnd: HWND,
+        val original: Pointer,
+        val callback: PenWndProc,
+    )
 
     private val hooks = mutableMapOf<HWND, Hook>()
 

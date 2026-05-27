@@ -26,7 +26,7 @@ class FolderRepositoryDesktopTest {
 
     @BeforeTest
     fun setUp() {
-        tmpDir = createTempDir("notepen-test-folders")
+        tmpDir = java.nio.file.Files.createTempDirectory("notepen-test-folders").toFile()
         repo = FolderRepositoryDesktop(dataDir = tmpDir)
     }
 

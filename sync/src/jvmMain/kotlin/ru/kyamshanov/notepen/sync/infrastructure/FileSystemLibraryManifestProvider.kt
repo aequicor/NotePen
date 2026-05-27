@@ -39,7 +39,8 @@ class FileSystemLibraryManifestProvider(
         }
         val books = mutableListOf<LibraryBook>()
         val resolved = mutableMapOf<String, String>()
-        rootCanonical.walkTopDown()
+        rootCanonical
+            .walkTopDown()
             .filter { it.isFile && isBook(it) }
             .forEach { file ->
                 val canonical = file.canonicalFile

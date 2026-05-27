@@ -22,7 +22,7 @@ class FileHistoryRepositoryDesktopTest {
 
     @BeforeTest
     fun setUp() {
-        tmpDir = createTempDir("notepen-test-history")
+        tmpDir = java.nio.file.Files.createTempDirectory("notepen-test-history").toFile()
         repository = FileHistoryRepositoryDesktop(dataDir = tmpDir)
     }
 

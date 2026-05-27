@@ -24,7 +24,7 @@ kotlin {
             implementation(projects.reflow.api)
             implementation(projects.drawing.api)
             implementation(projects.app.byCompose.uikit)
-            implementation(libs.haze)
+            implementation(projects.app.byCompose.blur)
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.ui)
@@ -38,7 +38,6 @@ kotlin {
         jvmTest.dependencies {
             @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
             implementation(compose.uiTest)
-            implementation(libs.roborazzi)
             implementation(libs.roborazzi.compose.desktop)
         }
         jvmMain.dependencies {
@@ -60,8 +59,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
+    compileSdk =
+        libs.versions.android.compileSdk
+            .get()
+            .toInt()
     defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
+        minSdk =
+            libs.versions.android.minSdk
+                .get()
+                .toInt()
     }
 }

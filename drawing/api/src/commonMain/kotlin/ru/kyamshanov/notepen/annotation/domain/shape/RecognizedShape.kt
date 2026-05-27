@@ -9,7 +9,10 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
  */
 public sealed interface RecognizedShape {
     /** Прямой отрезок. */
-    public data class Line(val start: DrawingPoint, val end: DrawingPoint) : RecognizedShape
+    public data class Line(
+        val start: DrawingPoint,
+        val end: DrawingPoint,
+    ) : RecognizedShape
 
     /** Эллипс с центром `(cx, cy)` и полуосями `rx, ry` (все в нормализованных координатах). */
     public data class Ellipse(

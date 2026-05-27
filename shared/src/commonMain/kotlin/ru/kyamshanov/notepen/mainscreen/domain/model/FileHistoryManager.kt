@@ -74,8 +74,7 @@ object FileHistoryManager {
                 .filter { (_, f) ->
                     f.availabilityStatus == AvailabilityStatus.NOT_FOUND ||
                         f.availabilityStatus == AvailabilityStatus.FILE_ERROR
-                }
-                .minByOrNull { (_, f) -> f.openedAt }
+                }.minByOrNull { (_, f) -> f.openedAt }
                 ?.index
 
         if (notFoundIndex != null) return notFoundIndex
