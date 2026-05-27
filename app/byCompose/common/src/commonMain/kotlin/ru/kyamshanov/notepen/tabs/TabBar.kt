@@ -42,6 +42,9 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.findRootCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -119,14 +122,32 @@ fun TabBar(
     val titleBarInteraction = LocalTitleBarInteraction.current
     val startInset = LocalTitleBarStartInset.current
     val endInset = LocalTitleBarEndInset.current
-    val barModifier = modifier.fillMaxWidth().height(TAB_BAR_HEIGHT)
+    // The OS window controls (macOS traffic lights, Windows caption buttons) only
+    // overlay the chrome at the window edges. In a split layout only the panel whose
+    // strip actually touches that edge must reserve room for them — an inner panel
+    // would otherwise show a phantom gap. Detect the touched edges by position.
+    var atLeftEdge by remember { mutableStateOf(true) }
+    var atRightEdge by remember { mutableStateOf(true) }
+    val edgeTolerancePx = with(LocalDensity.current) { 2.dp.toPx() }
+    val barModifier =
+        modifier
+            .fillMaxWidth()
+            .height(TAB_BAR_HEIGHT)
+            .onGloballyPositioned { coords ->
+                val left = coords.positionInRoot().x
+                val rootWidth = coords.findRootCoordinates().size.width
+                atLeftEdge = left <= edgeTolerancePx
+                atRightEdge = left + coords.size.width >= rootWidth - edgeTolerancePx
+            }
+    val appliedStart = if (atLeftEdge) startInset else 0.dp
+    val appliedEnd = if (atRightEdge) endInset else 0.dp
     GlassSurface(
         modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
         shape = RectangleShape,
         tint = tint ?: MaterialTheme.colorScheme.surfaceContainerLow,
         fillAlpha = 0.35f,
     ) {
-        Row(modifier = Modifier.fillMaxWidth().padding(start = startInset, end = endInset)) {
+        Row(modifier = Modifier.fillMaxWidth().padding(start = appliedStart, end = appliedEnd)) {
             sessionsMenu?.let { menu ->
                 // Yandex-style: a sessions button anchored at the left edge of the strip.
                 // The Box anchors the dropdown to the button (mirrors TabChip's menu).
@@ -294,8 +315,7 @@ private fun TabChip(
                             event.changes.firstOrNull { it.pressed }?.let { menuOffset = it.position }
                         }
                     }
-                }
-                .then(
+                }.then(
                     if (hasMenu && !SupportsLongPressMenu) {
                         Modifier.pointerInput(Unit) {
                             // Desktop: open on secondary (right) click at the cursor.
@@ -313,8 +333,7 @@ private fun TabChip(
                     } else {
                         Modifier
                     },
-                )
-                .combinedClickable(
+                ).combinedClickable(
                     enabled = true,
                     onClick = { if (!isActive) onSelect() },
                     onLongClick =
