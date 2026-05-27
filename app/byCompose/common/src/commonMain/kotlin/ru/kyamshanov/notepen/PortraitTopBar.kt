@@ -218,7 +218,10 @@ fun PortraitTopBar(
                         onOpenShortcutsSettings = onOpenShortcutsSettings,
                     )
                 // `weight` снимаем в RowScope; [MaterialTheme] не создаёт layout-узел,
-                // поэтому вес доходит до Row и сквозь обёртку перекраски.
+                // поэтому вес доходит до Row и сквозь обёртку перекраски. Ширину колеса
+                // держим стабильной (вес), а его содержимое прижимаем к правому краю
+                // через contentAlignment — иначе обёртка по содержимому анимировала бы
+                // ширину и дёргала затухание крайних иконок при скролле PDF.
                 val wheelModifier = Modifier.weight(1f)
                 MaterialTheme(
                     colorScheme =
@@ -233,6 +236,7 @@ fun PortraitTopBar(
                         orientation = RailOrientation.HORIZONTAL,
                         modifier = wheelModifier,
                         selectedKey = selectedToolWheelKey(toolMode),
+                        contentAlignment = Alignment.CenterEnd,
                     )
                 }
             }

@@ -359,6 +359,12 @@ public class WheelEntry(
  *   indicator is drawn behind that entry and physically slides to its position
  *   when the selection changes (and follows the entry while scrolling). Pass
  *   `null` for no selection — the indicator fades out.
+ * @param contentAlignment where the (content-sized) strip sits inside the space
+ *   the caller gives it. Defaults to [Alignment.Center]. Pass e.g.
+ *   [Alignment.CenterEnd] to pin a horizontal strip to the right edge while keeping
+ *   the strip's own width stable — important when the caller hands it a fixed
+ *   ([Modifier.weight]) box, so the strip width can't animate and wobble the
+ *   [wheelItem] falloff on outer recompositions.
  */
 @Composable
 public fun WheelStrip(
@@ -376,6 +382,7 @@ public fun WheelStrip(
     selectedKey: Any? = null,
     indicatorColor: Color = MaterialTheme.colorScheme.primaryContainer,
     indicatorSize: Dp = 40.dp,
+    contentAlignment: Alignment = Alignment.Center,
 ) {
     val falloffPx = if (falloff > 0.dp) with(LocalDensity.current) { falloff.toPx() } else 0f
     val count = entries.size
@@ -434,7 +441,7 @@ public fun WheelStrip(
     // Кэш натуральных размеров слотов: хвостовой запас прокрутки считается от
     // натуральной длины, чтобы ужатие следа не запускало петлю дрожания (см. wheelItem).
     val naturalSizes = remember { mutableMapOf<Int, Int>() }
-    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+    BoxWithConstraints(modifier, contentAlignment = contentAlignment) {
         val itemBox: @Composable LazyItemScope.(Int, WheelEntry) -> Unit = { index, entry ->
             val reportModifier =
                 if (index == selectedIndex) {
