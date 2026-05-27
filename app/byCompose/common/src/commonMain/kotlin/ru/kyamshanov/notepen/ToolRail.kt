@@ -487,7 +487,7 @@ internal fun systemControlEntries(
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
         if (!readingModeEnabled) add(WheelEntry("sys_export") { exportButton() })
         add(WheelEntry("sys_zoom_in") { zoomInButton() })
-        add(WheelEntry("sys_zoom_label", WHEEL_LABEL_ENTRY_SIZE) { zoomLabel() })
+        add(WheelEntry("sys_zoom_label", SCALE_LABEL_WIDTH) { zoomLabel() })
         add(WheelEntry("sys_zoom_out") { zoomOutButton() })
     }
 }
@@ -867,9 +867,8 @@ private val WHEEL_DIVIDER_LENGTH = 28.dp
 private val WHEEL_DIVIDER_THICKNESS = 1.5.dp
 private const val WHEEL_DIVIDER_ALPHA = 0.7f
 
-/** Main-axis size estimates for non-button wheel entries (for tight strip sizing). */
+/** Main-axis size estimate for the divider wheel entry (for tight strip sizing). */
 private val WHEEL_DIVIDER_ENTRY_SIZE = 16.dp
-private val WHEEL_LABEL_ENTRY_SIZE = 24.dp
 
 private val SCALE_LABEL_WIDTH = 40.dp
 private val ISLAND_GAP = 8.dp
