@@ -174,6 +174,28 @@ internal fun columnWidthValue(
     fontSizeValue: Float,
 ): Float = columnChars * CHAR_ADVANCE_RATIO * fontSizeValue
 
+/**
+ * Зажимает верхнее/нижнее поля так, чтобы вместе они не съедали больше
+ * `1 - [MIN_PAGE_CONTENT_FRACTION]` высоты вьюпорта. Иначе полезная высота страницы
+ * вырождается почти в ноль, и построчная пагинация ([ReaderPagination]) нарезала бы
+ * контент на тысячи микространиц (OOM). При переполнении оба поля масштабируются
+ * пропорционально, сохраняя заданную пользователем асимметрию верх/низ.
+ */
+internal fun clampVerticalMargins(
+    top: Dp,
+    bottom: Dp,
+    viewportHeight: Dp,
+): Pair<Dp, Dp> {
+    val maxCombined = viewportHeight * (1f - MIN_PAGE_CONTENT_FRACTION)
+    val combined = top + bottom
+    if (combined <= 0.dp || combined <= maxCombined) return top to bottom
+    val factor = maxCombined / combined
+    return (top * factor) to (bottom * factor)
+}
+
+/** Минимальная доля высоты вьюпорта под текст — нижняя граница полезной высоты страницы. */
+private const val MIN_PAGE_CONTENT_FRACTION = 0.3f
+
 /** Цвет фона темы PAPER — дефолт data class (совпадает с [paletteOf]). */
 internal val PAPER_BACKGROUND: Color = Color(0xFFFAF6EF)
 

@@ -219,8 +219,21 @@ public data class ReaderSettings(
         /** Минимальное верхнее/нижнее поле, dp (0 — текст вплотную к краю). */
         public const val MIN_VERTICAL_MARGIN_DP: Float = 0f
 
-        /** Максимальное верхнее/нижнее поле, dp. */
-        public const val MAX_VERTICAL_MARGIN_DP: Float = 48f
+        /**
+         * Абсолютный потолок верхнего/нижнего поля, dp — страховочный кламп для
+         * [coerced]. Реальный максимум ползунка считается от высоты вьюпорта
+         * ([MAX_VERTICAL_MARGIN_FRACTION]): на большом планшете в положении лёжа
+         * текст можно сдвинуть к центру, чтобы глаза не напрягались у краёв.
+         * Значение покрывает 35 % самых высоких планшетов.
+         */
+        public const val MAX_VERTICAL_MARGIN_DP: Float = 480f
+
+        /**
+         * Доля высоты вьюпорта, до которой можно поднять верхнее/нижнее поле через
+         * ползунок. Слой UI считает максимум как `высота_вьюпорта_dp * доля`
+         * (с потолком [MAX_VERTICAL_MARGIN_DP]).
+         */
+        public const val MAX_VERTICAL_MARGIN_FRACTION: Float = 0.35f
 
         /** Минимальный межбуквенный интервал, sp. */
         public const val MIN_LETTER_SPACING_SP: Float = 0f

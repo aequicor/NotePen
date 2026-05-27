@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -117,6 +118,8 @@ import kotlin.math.roundToInt
  * @param textColor цвет текста/контролов (из темы ридера)
  * @param progressLabel готовая строка индикатора прогресса, либо `null`
  * @param autoHideMs автоскрытие через N мс простоя (0 — не скрывать)
+ * @param maxVerticalMarginDp максимум ползунков верхнего/нижнего поля, dp —
+ *   доля высоты вьюпорта (см. [ReaderSettings.MAX_VERTICAL_MARGIN_FRACTION])
  * @param onRequestHide попросить скрыть весь airbar (тап-скрытие/автоскрытие)
  */
 @Composable
@@ -128,6 +131,7 @@ internal fun ReaderAirbar(
     textColor: Color,
     progressLabel: String?,
     autoHideMs: Long,
+    maxVerticalMarginDp: Float,
     onRequestHide: () -> Unit,
     hazeState: HazeState?,
     modifier: Modifier = Modifier,
@@ -179,6 +183,7 @@ internal fun ReaderAirbar(
                 onChange = ::emit,
                 background = background,
                 textColor = textColor,
+                maxVerticalMarginDp = maxVerticalMarginDp,
                 hazeState = hazeState,
             )
             Spacer(Modifier.height(8.dp))
@@ -660,6 +665,7 @@ private fun TuneSheet(
     onChange: (ReaderSettings) -> Unit,
     background: Color,
     textColor: Color,
+    maxVerticalMarginDp: Float,
     hazeState: HazeState?,
 ) {
     val fillAlpha = if (hazeState != null) AIRBAR_SHEET_BLUR_ALPHA else AIRBAR_SHEET_ALPHA
@@ -721,16 +727,16 @@ private fun TuneSheet(
             )
             LabeledSlider(
                 label = "Поле сверху",
-                value = settings.topMarginDp,
-                range = ReaderSettings.MIN_VERTICAL_MARGIN_DP..ReaderSettings.MAX_VERTICAL_MARGIN_DP,
+                value = settings.topMarginDp.coerceAtMost(maxVerticalMarginDp),
+                range = ReaderSettings.MIN_VERTICAL_MARGIN_DP..maxVerticalMarginDp,
                 valueText = "${settings.topMarginDp.roundToInt()}",
                 textColor = textColor,
                 onChange = { onChange(settings.copy(topMarginDp = it)) },
             )
             LabeledSlider(
                 label = "Поле снизу",
-                value = settings.bottomMarginDp,
-                range = ReaderSettings.MIN_VERTICAL_MARGIN_DP..ReaderSettings.MAX_VERTICAL_MARGIN_DP,
+                value = settings.bottomMarginDp.coerceAtMost(maxVerticalMarginDp),
+                range = ReaderSettings.MIN_VERTICAL_MARGIN_DP..maxVerticalMarginDp,
                 valueText = "${settings.bottomMarginDp.roundToInt()}",
                 textColor = textColor,
                 onChange = { onChange(settings.copy(bottomMarginDp = it)) },
@@ -914,22 +920,33 @@ private fun ReaderSlider(
     tint: Color,
     onChange: (Float) -> Unit,
 ) {
-    var trackWidth by remember { mutableStateOf(1) }
+    val trackWidth = remember { mutableStateOf(1) }
     val span = (range.endInclusive - range.start).takeIf { it > 0f } ?: 1f
     val fraction = ((value - range.start) / span).coerceIn(0f, 1f)
     val thumbHalfPx = with(LocalDensity.current) { (SLIDER_THUMB / 2).toPx() }
 
-    val setFromX: (Float) -> Unit = { x ->
-        val frac = (x / trackWidth).coerceIn(0f, 1f)
-        onChange(range.start + frac * span)
-    }
+    // Жесты живут в pointerInput(Unit) — корутина не перезапускается между композициями,
+    // поэтому замкнулась бы на onChange/range первой композиции и эмитила бы по устаревшему
+    // снимку настроек (правка одного поля сбрасывала бы соседнее). Читаем актуальные значения
+    // через State, а сам обработчик держим стабильным (remember), чтобы не пересоздавать жест.
+    val onChangeState = rememberUpdatedState(onChange)
+    val rangeState = rememberUpdatedState(range)
+    val setFromX =
+        remember {
+            { x: Float ->
+                val r = rangeState.value
+                val s = (r.endInclusive - r.start).takeIf { it > 0f } ?: 1f
+                val frac = (x / trackWidth.value).coerceIn(0f, 1f)
+                onChangeState.value(r.start + frac * s)
+            }
+        }
 
     Box(
         modifier =
             Modifier
                 .fillMaxWidth()
                 .height(SLIDER_HEIGHT)
-                .onSizeChanged { trackWidth = it.width.coerceAtLeast(1) }
+                .onSizeChanged { trackWidth.value = it.width.coerceAtLeast(1) }
                 .pointerInput(Unit) { detectTapGestures { setFromX(it.x) } }
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures { change, _ ->
@@ -955,7 +972,7 @@ private fun ReaderSlider(
         )
         Box(
             Modifier
-                .offsetX { (fraction * trackWidth - thumbHalfPx).roundToInt() }
+                .offsetX { (fraction * trackWidth.value - thumbHalfPx).roundToInt() }
                 .size(SLIDER_THUMB)
                 .clip(CircleShape)
                 .background(tint),

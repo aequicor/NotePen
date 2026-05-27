@@ -45,15 +45,19 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -90,12 +94,25 @@ import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
+import ru.kyamshanov.notepen.reflow.api.ReaderSettings
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
 import kotlin.math.abs
+
+/**
+ * Общий на весь ридер кэш растров страниц для врезок-картинок ([FigureView]),
+ * по индексу страницы. Нужен, чтобы при свежей композиции фигуры (виртуализация
+ * `LazyColumn`, ре-пагинация, перелистывание) растр был доступен **синхронно** и
+ * блок не мигал плейсхолдером: иначе высота картинки скачет placeholder↔растр,
+ * запускает ре-пагинацию и пейджер начинает дёргаться между страницами
+ * («то фото, то текст»). Заполняется в [FigureView], сбрасывается со сменой
+ * документа (ремембер в [ReflowReader]).
+ */
+internal val LocalFigureBitmapCache: ProvidableCompositionLocal<SnapshotStateMap<Int, ImageBitmap>> =
+    staticCompositionLocalOf { mutableStateMapOf() }
 
 /**
  * Reflow-ридер: рендерит [ReflowDocument] колонкой ограниченной ширины с
@@ -155,7 +172,31 @@ public fun ReflowReader(
     navigateToBlock: MutableState<Int?> = remember { mutableStateOf(null) },
     onFirstBlockChange: (Int) -> Unit = {},
 ) {
-    val settings = remember(stored.current) { stored.current.toRenderSettings() }
+    // Высота вьюпорта ридера в px — нужна и для зажима вертикальных полей (ниже), и для
+    // шага «листнуть страницу» в скролл-режиме. Меряем корневой Box (см. onSizeChanged).
+    var viewportHeightPx by remember { mutableStateOf(0) }
+
+    val baseSettings = remember(stored.current) { stored.current.toRenderSettings() }
+    val density = LocalDensity.current
+    // Зажимаем вертикальные поля под фактическую высоту вьюпорта: пользователь (или
+    // перенесённое с большего экрана значение) может задать поля, в сумме превышающие
+    // высоту страницы — тогда без зажима пагинация схлопывается в микространицы (OOM).
+    // Делаем это в единой точке, чтобы и раскладка, и визуальные отступы совпадали.
+    val settings =
+        remember(baseSettings, viewportHeightPx, density) {
+            if (viewportHeightPx <= 0) {
+                baseSettings
+            } else {
+                val viewportDp = with(density) { viewportHeightPx.toDp() }
+                val (top, bottom) =
+                    clampVerticalMargins(baseSettings.topMargin, baseSettings.bottomMargin, viewportDp)
+                if (top == baseSettings.topMargin && bottom == baseSettings.bottomMargin) {
+                    baseSettings
+                } else {
+                    baseSettings.copy(topMargin = top, bottomMargin = bottom)
+                }
+            }
+        }
     val anchorsByBlock = remember(highlights) { highlights.groupBy { it.blockIndex } }
 
     // Сессия чтения тикает всегда: нужна и для эргономики, и для контекстного
@@ -223,10 +264,9 @@ public fun ReflowReader(
 
     val scope = rememberCoroutineScope()
 
-    // Высота вьюпорта ридера в px — шаг «листнуть страницу» в скролл-режиме (paged
-    // меряет страницу сам). Меряем корневой Box, а не внутренний LazyColumn, чтобы
-    // дельта не зависела от contentPadding/резерва под airbar.
-    var viewportHeightPx by remember { mutableStateOf(0) }
+    // Кэш растров врезок-картинок (см. [LocalFigureBitmapCache]). Сбрасывается со
+    // сменой документа, чтобы индексы страниц не пересекались между документами.
+    val figureBitmapCache = remember(document) { mutableStateMapOf<Int, ImageBitmap>() }
 
     // Активный обработчик «листнуть на ±N»: им пользуются тап-зоны (локально, через
     // [latestPageDelta]) и аппаратные клавиши (через [onPageDeltaReady] выше по дереву).
@@ -377,7 +417,10 @@ public fun ReflowReader(
                     }
                 },
     ) {
-        CompositionLocalProvider(LocalReflowSelectionState provides selectionState) {
+        CompositionLocalProvider(
+            LocalReflowSelectionState provides selectionState,
+            LocalFigureBitmapCache provides figureBitmapCache,
+        ) {
             Box(
                 modifier =
                     Modifier
@@ -431,6 +474,18 @@ public fun ReflowReader(
         }
 
         if (barVisible) {
+            // Максимум ползунков верхнего/нижнего поля — доля высоты вьюпорта (до
+            // измерения откатываемся к абсолютному потолку), чтобы на большом
+            // планшете текст можно было сдвинуть к центру.
+            val density = LocalDensity.current
+            val maxVerticalMarginDp =
+                if (viewportHeightPx <= 0) {
+                    ReaderSettings.MAX_VERTICAL_MARGIN_DP
+                } else {
+                    val viewportDp = with(density) { viewportHeightPx.toDp().value }
+                    (viewportDp * ReaderSettings.MAX_VERTICAL_MARGIN_FRACTION)
+                        .coerceAtMost(ReaderSettings.MAX_VERTICAL_MARGIN_DP)
+                }
             ReaderAirbar(
                 stored = stored,
                 onStoredChange = onStoredChange,
@@ -439,6 +494,7 @@ public fun ReflowReader(
                 textColor = settings.textColor,
                 progressLabel = progressLabel,
                 autoHideMs = settings.autoHideMs,
+                maxVerticalMarginDp = maxVerticalMarginDp,
                 onRequestHide = { onBarVisibleChange(false) },
                 hazeState = hazeState,
                 modifier = Modifier.align(Alignment.BottomCenter),
@@ -1006,8 +1062,12 @@ private fun FigureView(
         FigurePlaceholder(settings)
         return
     }
-    val pageBitmap by androidx.compose.runtime.produceState<ImageBitmap?>(initialValue = null, figure.pageIndex) {
-        value = renderPage(figure.pageIndex)
+    // Засеиваем начальным значением из общего кэша: при ре-композиции фигуры
+    // (виртуализация/ре-пагинация/перелистывание) растр доступен сразу, без кадра
+    // с плейсхолдером — иначе скачок высоты блока зацикливал бы пагинацию.
+    val cache = LocalFigureBitmapCache.current
+    val pageBitmap by produceState<ImageBitmap?>(cache[figure.pageIndex], figure.pageIndex) {
+        value = cache[figure.pageIndex] ?: renderPage(figure.pageIndex)?.also { cache[figure.pageIndex] = it }
     }
     val bitmap = pageBitmap
     if (bitmap == null) {
