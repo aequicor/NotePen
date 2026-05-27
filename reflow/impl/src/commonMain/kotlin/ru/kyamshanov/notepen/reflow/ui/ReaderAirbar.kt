@@ -161,6 +161,10 @@ internal fun ReaderAirbar(
         modifier =
             modifier
                 .padding(horizontal = 12.dp, vertical = AIRBAR_BOTTOM_PADDING)
+                // На широком экране (desktop) колесо пресетов с weight(1f) растягивало airbar
+                // на всю ширину окна. Ограничиваем шириной развёрнутого TuneSheet и центрируем
+                // (align(BottomCenter) у родителя) — на узком портрете лимит не достигается.
+                .widthIn(max = AIRBAR_MAX_WIDTH)
                 .wrapContentWidth()
                 .pointerInput(Unit) { detectTapGestures { touched() } },
         horizontalAlignment = Alignment.CenterHorizontally,
