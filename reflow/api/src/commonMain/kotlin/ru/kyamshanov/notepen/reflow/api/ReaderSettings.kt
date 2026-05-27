@@ -353,10 +353,13 @@ public object BuiltinReaderPresets {
  * @property activePresetId id выбранного пресета для подсветки в панели — может
  *   указывать как на встроенный, так и на кастомный пресет из [userPresets]; `null` —
  *   активного пресета нет (например, после удаления активного кастома)
+ * @property blurEnabled backdrop-blur стеклянных панелей редактора. Дорогой эффект —
+ *   на слабых устройствах / при низком заряде пользователю предлагается его отключить.
  */
 @Serializable
 public data class StoredReaderSettings(
     public val current: ReaderSettings = ReaderSettings(),
     public val userPresets: List<ReaderPreset> = emptyList(),
     public val activePresetId: String? = null,
+    public val blurEnabled: Boolean = true,
 )

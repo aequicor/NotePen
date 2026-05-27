@@ -24,6 +24,7 @@ kotlin {
             implementation(projects.reflow.api)
             implementation(projects.drawing.api)
             implementation(projects.app.byCompose.uikit)
+            implementation(libs.haze)
             implementation(compose.runtime)
             implementation(compose.foundation)
             implementation(compose.ui)

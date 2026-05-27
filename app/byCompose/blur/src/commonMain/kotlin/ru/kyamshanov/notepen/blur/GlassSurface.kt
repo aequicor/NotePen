@@ -1,4 +1,4 @@
-package ru.kyamshanov.notepen.ui.glass
+package ru.kyamshanov.notepen.blur
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -13,26 +13,29 @@ import androidx.compose.ui.unit.dp
 /**
  * Floating "frosted glass" surface used for tool rail, tool-settings panel and
  * the portrait top airbar. Centralises the look so all three surfaces stay in
- * sync: lowered fill alpha over a chosen tint, a subtle outline border and an
- * optional backdrop blur on platforms that support it.
+ * sync: lowered fill alpha over a chosen tint, a subtle outline border and a
+ * backdrop blur sampled from [LocalHazeState].
  */
 @Composable
-internal fun GlassSurface(
+fun GlassSurface(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(GlassCornerRadius),
     tint: Color = MaterialTheme.colorScheme.surface,
-    fillAlpha: Float = GlassFillAlpha,
+    fillAlpha: Float = GLASS_FILL_ALPHA_OPAQUE,
     content: @Composable () -> Unit,
 ) {
+    val blurOn = LocalBlurEnabled.current
     Surface(
-        modifier = modifier.glassBackdrop(),
+        modifier = modifier.glassBackdrop(shape = shape, tint = tint),
         shape = shape,
-        color = tint.copy(alpha = fillAlpha),
+        // Blur on: the haze material already supplies the frosted tint, so layer only a
+        // faint extra tint to keep panel identity. Off: fall back to a denser opaque fill.
+        color = tint.copy(alpha = if (blurOn) GLASS_FILL_ALPHA else fillAlpha),
         tonalElevation = 0.dp,
         border =
             BorderStroke(
                 width = GlassBorderWidth,
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = GlassBorderAlpha),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = GLASS_BORDER_ALPHA),
             ),
         content = content,
     )

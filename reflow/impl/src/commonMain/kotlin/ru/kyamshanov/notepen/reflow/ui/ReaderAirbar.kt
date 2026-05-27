@@ -71,13 +71,16 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.HazeTint
+import dev.chrisbanes.haze.hazeEffect
 import kotlinx.coroutines.delay
 import ru.kyamshanov.notepen.RailOrientation
 import ru.kyamshanov.notepen.WHEEL_EDGE_BAND_WIDE
@@ -126,6 +129,7 @@ internal fun ReaderAirbar(
     progressLabel: String?,
     autoHideMs: Long,
     onRequestHide: () -> Unit,
+    hazeState: HazeState?,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -175,6 +179,7 @@ internal fun ReaderAirbar(
                 onChange = ::emit,
                 background = background,
                 textColor = textColor,
+                hazeState = hazeState,
             )
             Spacer(Modifier.height(8.dp))
         }
@@ -182,6 +187,7 @@ internal fun ReaderAirbar(
             stored = stored,
             background = background,
             textColor = textColor,
+            hazeState = hazeState,
             progressLabel = progressLabel,
             expanded = expanded,
             onToggleExpanded = {
@@ -251,6 +257,7 @@ private fun CollapsedPill(
     stored: StoredReaderSettings,
     background: Color,
     textColor: Color,
+    hazeState: HazeState?,
     progressLabel: String?,
     expanded: Boolean,
     onToggleExpanded: () -> Unit,
@@ -264,11 +271,13 @@ private fun CollapsedPill(
     // натуральной длины колеса, чтобы ужатие слотов не запускало петлю дрожания
     // крайних плашек при движении мыши над текстом (см. wheelItem).
     val naturalSizes = remember { mutableMapOf<Int, Int>() }
+    val fillAlpha = if (hazeState != null) AIRBAR_BLUR_ALPHA else AIRBAR_ALPHA
     Row(
         modifier =
             Modifier
                 .clip(RoundedCornerShape(AIRBAR_RADIUS))
-                .background(background.copy(alpha = AIRBAR_ALPHA))
+                .glassBlur(hazeState, background)
+                .background(background.copy(alpha = fillAlpha))
                 .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(AIRBAR_RADIUS))
                 // Свёрнутую таблетку шириной 560dp не ограничиваем: колесо пресетов берёт всю
                 // доступную ширину (в портрете её больше), поэтому плашки помещаются без скролла
@@ -651,12 +660,15 @@ private fun TuneSheet(
     onChange: (ReaderSettings) -> Unit,
     background: Color,
     textColor: Color,
+    hazeState: HazeState?,
 ) {
+    val fillAlpha = if (hazeState != null) AIRBAR_SHEET_BLUR_ALPHA else AIRBAR_SHEET_ALPHA
     Column(
         modifier =
             Modifier
                 .clip(RoundedCornerShape(AIRBAR_RADIUS))
-                .background(background.copy(alpha = AIRBAR_SHEET_ALPHA))
+                .glassBlur(hazeState, background)
+                .background(background.copy(alpha = fillAlpha))
                 .border(1.dp, textColor.copy(alpha = 0.08f), RoundedCornerShape(AIRBAR_RADIUS))
                 .widthIn(max = AIRBAR_MAX_WIDTH)
                 .heightIn(max = AIRBAR_SHEET_MAX_HEIGHT)
@@ -1167,6 +1179,37 @@ private val READER_WHEEL_FADE_EDGE = 14.dp
 private const val READER_WHEEL_MIN_ALPHA = 0.5f
 private const val AIRBAR_ALPHA = 0.92f
 private const val AIRBAR_SHEET_ALPHA = 0.96f
+
+// With a frosted material active the haze tint does most of the work, so the
+// hand-drawn fill on top stays faint to avoid muddy double-tinting.
+private const val AIRBAR_BLUR_ALPHA = 0.12f
+private const val AIRBAR_SHEET_BLUR_ALPHA = 0.15f
+private val AIRBAR_BLUR_RADIUS = 18.dp
+
+// Frosted-glass character (mimics the macOS material rather than a flat blur):
+// a luminosity tint of the reader theme plus a touch of film grain.
+private const val AIRBAR_GLASS_TINT_ALPHA = 0.32f
+private const val AIRBAR_GLASS_NOISE = 0.05f
+
+/**
+ * Frosted-glass backdrop for reader panels; no-op when [state] is null (blur off).
+ * [tint] is the reader theme background, so the frost matches the page (sepia, night…).
+ */
+private fun Modifier.glassBlur(
+    state: HazeState?,
+    tint: Color,
+): Modifier =
+    if (state == null) {
+        this
+    } else {
+        hazeEffect(state) {
+            blurRadius = AIRBAR_BLUR_RADIUS
+            backgroundColor = tint
+            tints = listOf(HazeTint(tint.copy(alpha = AIRBAR_GLASS_TINT_ALPHA)))
+            noiseFactor = AIRBAR_GLASS_NOISE
+            blurEnabled = true
+        }
+    }
 
 /**
  * Доступностная подпись кнопки-тюнера (шестерёнки): сам глиф безтекстовый, поэтому

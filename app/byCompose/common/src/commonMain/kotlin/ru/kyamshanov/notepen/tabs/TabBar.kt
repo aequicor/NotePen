@@ -48,10 +48,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
-import ru.kyamshanov.notepen.ui.glass.GlassSurface
 
 /** Vertical extent of a [TabBar] — exposed so callers can offset the content below it. */
 val TAB_BAR_HEIGHT = 36.dp

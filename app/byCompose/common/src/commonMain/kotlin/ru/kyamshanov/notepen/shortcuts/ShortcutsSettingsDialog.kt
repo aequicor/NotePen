@@ -7,10 +7,13 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,15 +60,33 @@ fun ShortcutsSettingsDialog(
     onChange: (ShortcutsSettings) -> Unit,
     onDismiss: () -> Unit,
     penButtons: StateFlow<Set<Int>>,
+    blurEnabled: Boolean,
+    onBlurEnabledChange: (Boolean) -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Готово") }
         },
-        title = { Text("Шорткаты") },
+        title = { Text("Настройки") },
         text = {
             Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Размытие панелей", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "Эффект матового стекла. Отключите на слабых устройствах или при низком заряде.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Switch(checked = blurEnabled, onCheckedChange = onBlurEnabledChange)
+                }
+                HorizontalDivider(Modifier.padding(vertical = 12.dp))
                 BindingField(
                     title = "Открыть лупу",
                     binding = settings.loupeOpen,

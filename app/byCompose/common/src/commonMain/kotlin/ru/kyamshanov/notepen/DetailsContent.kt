@@ -52,8 +52,10 @@ import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -105,6 +107,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
+import ru.kyamshanov.notepen.blur.GlassBackdropProvider
+import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -142,7 +146,6 @@ import ru.kyamshanov.notepen.tabs.WorkspaceLayout
 import ru.kyamshanov.notepen.tabs.WorkspaceSnapshot
 import ru.kyamshanov.notepen.tabs.rememberTabSession
 import ru.kyamshanov.notepen.tabs.toSnapshot
-import ru.kyamshanov.notepen.ui.glass.GlassSurface
 import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
@@ -398,6 +401,25 @@ fun DetailsContent(
         coroutineScope.launch { readerSettingsRepository.save(updated) }
     }
 
+    // Glass blur is expensive: on a low-end device or low battery, recommend (don't force)
+    // turning it off. Shown at most once per session via the editor snackbar.
+    val blurAdvice = rememberBlurAdvice()
+    var blurRecommendationShown by remember { mutableStateOf(false) }
+    LaunchedEffect(blurAdvice.shouldRecommendDisablingBlur, readerStored.blurEnabled) {
+        if (readerStored.blurEnabled && blurAdvice.shouldRecommendDisablingBlur && !blurRecommendationShown) {
+            blurRecommendationShown = true
+            val result =
+                snackbarHostState.showSnackbar(
+                    message = "Размытие панелей может замедлять работу на этом устройстве",
+                    actionLabel = "Отключить",
+                    duration = SnackbarDuration.Long,
+                )
+            if (result == SnackbarResult.ActionPerformed) {
+                onReaderStoredChange(readerStored.copy(blurEnabled = false))
+            }
+        }
+    }
+
     // Last preset explicitly selected per tool within this document session.
     // Null means "not yet chosen" — the first activation falls back to the first builtin.
     var lastPenPresetId by remember { mutableStateOf<String?>(null) }
@@ -630,670 +652,681 @@ fun DetailsContent(
             0.dp
         }
 
-    Box(
-        modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            // Landscape side notch / punch-hole: inset the whole editor from the
-            // horizontal display cutout (and any side system bar) so the tab-strip
-            // edges — and the content below them — never slide under it. Consumed
-            // here, so the tool rail's own systemBars∪displayCutout padding doesn't
-            // double-apply. No-op in portrait, on desktop, and on cutout-less screens.
-            .windowInsetsPadding(
-                WindowInsets.systemBars
-                    .union(WindowInsets.displayCutout)
-                    .only(WindowInsetsSides.Horizontal),
-            ).focusRequester(focusRequester)
-            .focusTarget()
-            .onKeyEvent { e ->
-                val isShift = e.key == Key.ShiftLeft || e.key == Key.ShiftRight
-                val isCtrl = e.key == Key.CtrlLeft || e.key == Key.CtrlRight
-                val isAlt = e.key == Key.AltLeft || e.key == Key.AltRight
-                val isMeta = e.key == Key.MetaLeft || e.key == Key.MetaRight
-                val readerPageTurn =
-                    if (readingModeEnabled && e.type == KeyEventType.KeyDown) {
-                        readerPageTurnDelta(e.key, shiftHeld)
-                    } else {
-                        null
-                    }
-                when {
-                    isShift -> {
-                        shiftHeld = e.type == KeyEventType.KeyDown
-                        false
-                    }
-                    isCtrl -> {
-                        ctrlHeld = e.type == KeyEventType.KeyDown
-                        false
-                    }
-                    isAlt -> {
-                        altHeld = e.type == KeyEventType.KeyDown
-                        false
-                    }
-                    isMeta -> {
-                        metaHeld = e.type == KeyEventType.KeyDown
-                        false
-                    }
-                    e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && !shiftHeld -> {
-                        tabSession.focusedActiveState?.let { st ->
-                            if (st.undoStack.isNotEmpty()) {
-                                val entry = st.undoStack.removeLast()
-                                val current = st.drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
-                                val currentHighlights = st.highlights[entry.pageIndex].orEmpty()
-                                st.redoStack.addLast(
-                                    PdfDocumentState.UndoEntry(entry.pageIndex, current, currentHighlights),
-                                )
-                                st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
-                                st.highlights[entry.pageIndex] = entry.highlights
-                            }
-                        }
-                        true
-                    }
-                    e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && shiftHeld -> {
-                        tabSession.focusedActiveState?.let { st ->
-                            if (st.redoStack.isNotEmpty()) {
-                                val entry = st.redoStack.removeLast()
-                                st.undoStack.addLast(
-                                    PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths, entry.highlights),
-                                )
-                                st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
-                                st.highlights[entry.pageIndex] = entry.highlights
-                            }
-                        }
-                        true
-                    }
-                    // Перелистывание ридера хардварными клавишами — только в режиме
-                    // чтения (см. readerPageTurn выше), иначе стрелки/Space/PageUp-Down
-                    // остаются свободны. Клавиши громкости тут — запасной путь (на
-                    // Android их раньше съедает оконный перехват ReaderVolumeKeyHandler;
-                    // на десктопе их нет).
-                    readerPageTurn != null -> {
-                        controls?.readerPageDelta?.invoke(readerPageTurn)
-                        true
-                    }
-                    else -> {
-                        when (e.type) {
-                            KeyEventType.KeyDown -> nonModifierKeysDown[e.key.keyCode] = Unit
-                            KeyEventType.KeyUp -> nonModifierKeysDown.remove(e.key.keyCode)
-                            else -> Unit
-                        }
-                        false
-                    }
-                }
-            },
-    ) {
-        // Workspace grid. Each panel draws its own tab strip at its top; the grid
-        // clears the status bar / display cutout so the top-row tab strips sit below them.
+    GlassBackdropProvider(blurEnabled = readerStored.blurEnabled) {
         Box(
-            Modifier
+            modifier
                 .fillMaxSize()
-                .padding(top = topChromeInset)
-                .onSizeChanged { gridHeightPx = it.height.toFloat() },
-        ) {
-            GridContainer(
-                layout = layout,
-                onSetRatio = { index, value -> tabSession.setRatio(index, value) },
-                onFocusPanel = { tabSession.focusPanel(it) },
-            ) { panel ->
-                val templates = tabSession.availableTemplatesForAdd()
-                EditorPanel(
-                    panel = panel,
-                    tabSession = tabSession,
-                    sessionsMenu = { expanded, onDismiss ->
-                        SessionsMenu(
-                            expanded = expanded,
-                            onDismiss = onDismiss,
-                            sessionRepository = sessionRepository,
-                            lastSession = lastSession,
-                            onCaptureCurrent = { tabSession.captureSession() },
-                            onRestore = { data ->
-                                tabSession.restoreSession(data)
-                                // Keep the in-process layout snapshot consistent with the restored split.
-                                savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
-                            },
-                        )
-                    },
-                    isFocused = panel.id == layout.focusedPanelId,
-                    loader = loader,
-                    renderer = renderer,
-                    outlineProvider = outlineProvider,
-                    toolMode = toolMode,
-                    penSettings = penSettings,
-                    markerSettings = markerSettings,
-                    eraserSettings = eraserSettings,
-                    pencilModeEnabled = pencilModeEnabled,
-                    eraserOverride = eraserOverride,
-                    shortcutsSettings = shortcutsSettings,
-                    ctrlHeld = ctrlHeld,
-                    shiftHeld = shiftHeld,
-                    altHeld = altHeld,
-                    metaHeld = metaHeld,
-                    nonModifierKeysDown = nonModifierKeysDown.keys,
-                    penButtonsPressed = penButtonsPressed,
-                    annotationRepository = annotationRepository,
-                    pdfExporter = pdfExporter,
-                    reflowExtractor = reflowExtractor,
-                    readerStored = readerStored,
-                    onReaderStoredChange = onReaderStoredChange,
-                    syncEngineFor = syncEngineFor,
-                    peerClient = peerClient,
-                    pendingDeltaCounts = pendingDeltaCounts,
-                    receivedPdfDir = receivedPdfDir,
-                    openDocumentRegistry = openDocumentRegistry,
-                    hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
-                    showSnackbar = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } },
-                    onRestoreToolSettings = { pen, marker, eraser ->
-                        penSettings = pen
-                        markerSettings = marker
-                        // A restored width is the user's own choice — don't override it.
-                        markerWidthPinned = true
-                        eraserSettings = eraser
-                        // Seed this document's tool checkpoint with its just-loaded
-                        // settings (keyed by file path), so switching away and back
-                        // restores them.
-                        panel.tabs.activeTab?.filePath?.let { filePath ->
-                            documentToolStates[filePath] =
-                                ToolStateSnapshot(
-                                    toolMode = toolMode,
-                                    penSettings = pen,
-                                    markerSettings = marker,
-                                    eraserSettings = eraser,
-                                    markerWidthPinned = true,
-                                )
-                        }
-                    },
-                    onAddTab = { onAddTabToPanel(panel.id) },
-                    onAllTabsClosed = onBackWithSave,
-                    onOpenPanelPicker =
-                        if (templates.isNotEmpty() && panel.tabs.tabs.size > 1) {
-                            { tabId ->
-                                tabSession.focusPanel(panel.id)
-                                pendingPanelMove = panel.id to tabId
-                            }
+                .background(MaterialTheme.colorScheme.background)
+                // Landscape side notch / punch-hole: inset the whole editor from the
+                // horizontal display cutout (and any side system bar) so the tab-strip
+                // edges — and the content below them — never slide under it. Consumed
+                // here, so the tool rail's own systemBars∪displayCutout padding doesn't
+                // double-apply. No-op in portrait, on desktop, and on cutout-less screens.
+                .windowInsetsPadding(
+                    WindowInsets.systemBars
+                        .union(WindowInsets.displayCutout)
+                        .only(WindowInsetsSides.Horizontal),
+                ).focusRequester(focusRequester)
+                .focusTarget()
+                .onKeyEvent { e ->
+                    val isShift = e.key == Key.ShiftLeft || e.key == Key.ShiftRight
+                    val isCtrl = e.key == Key.CtrlLeft || e.key == Key.CtrlRight
+                    val isAlt = e.key == Key.AltLeft || e.key == Key.AltRight
+                    val isMeta = e.key == Key.MetaLeft || e.key == Key.MetaRight
+                    val readerPageTurn =
+                        if (readingModeEnabled && e.type == KeyEventType.KeyDown) {
+                            readerPageTurnDelta(e.key, shiftHeld)
                         } else {
                             null
-                        },
-                    onClosePanel =
-                        if (layout.panels.size > 1) {
-                            {
-                                val anyTab = panel.tabs.tabs.firstOrNull()
-                                if (anyTab != null) {
-                                    // Close every tab in this panel → panel is removed.
-                                    panel.tabs.tabs
-                                        .toList()
-                                        .forEach { tabSession.closeTab(panel.id, it.id) }
+                        }
+                    when {
+                        isShift -> {
+                            shiftHeld = e.type == KeyEventType.KeyDown
+                            false
+                        }
+                        isCtrl -> {
+                            ctrlHeld = e.type == KeyEventType.KeyDown
+                            false
+                        }
+                        isAlt -> {
+                            altHeld = e.type == KeyEventType.KeyDown
+                            false
+                        }
+                        isMeta -> {
+                            metaHeld = e.type == KeyEventType.KeyDown
+                            false
+                        }
+                        e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && !shiftHeld -> {
+                            tabSession.focusedActiveState?.let { st ->
+                                if (st.undoStack.isNotEmpty()) {
+                                    val entry = st.undoStack.removeLast()
+                                    val current =
+                                        st.drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
+                                    val currentHighlights = st.highlights[entry.pageIndex].orEmpty()
+                                    st.redoStack.addLast(
+                                        PdfDocumentState.UndoEntry(entry.pageIndex, current, currentHighlights),
+                                    )
+                                    st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+                                    st.highlights[entry.pageIndex] = entry.highlights
                                 }
                             }
-                        } else {
-                            null
-                        },
-                    onControlsChanged = { c -> if (panel.id == layout.focusedPanelId) focusedControls = c },
-                    fitWidthStartInset = fitWidthStartInset,
-                    fitWidthTopInset = fitWidthTopInset,
-                )
-            }
-        }
-
-        // ---- Unified toolbar: overlay floating just below the tab strip ------
-        Box(
-            Modifier
-                .fillMaxSize()
-                .consumeWindowInsets(WindowInsets.statusBars)
-                .padding(top = TAB_BAR_HEIGHT + topChromeInset),
-        ) {
-            val dividerPx = with(density) { DIVIDER_HIT.toPx() }
-            if (isLandscape) {
-                // When a left-edge sidebar is open it would otherwise sit on top of the
-                // back button and tool rail; push them right by the sidebar's width so
-                // they sit beside it. Both the thumbnails and the (wider) ToC sidebar
-                // anchor to the left edge, so each one shifts the chrome by its own width.
-                val railShift by animateDpAsState(
-                    targetValue =
-                        when {
-                            focusedPanelStartXFraction(layout) != 0f -> 0.dp
-                            showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true ->
-                                SIDEBAR_WIDTH
-                            showToc -> TOC_SIDEBAR_WIDTH
-                            else -> 0.dp
-                        },
-                    animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS),
-                    label = "railShift",
-                )
-                AnimatedVisibility(
-                    visible = !chromeHidden,
-                    enter = slideInHorizontally { -it } + fadeIn(),
-                    exit = slideOutHorizontally { -it } + fadeOut(),
-                    modifier =
-                        Modifier
-                            .align(Alignment.TopStart)
-                            .offset(x = railShift)
-                            // Те же инсеты, что и у рельсы ниже — иначе при боковом
-                            // вырезе/системном баре кнопка назад не совпадает с рельсой
-                            // по левому краю.
-                            .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
-                            .padding(start = 16.dp, top = 8.dp),
-                ) {
-                    GlassSurface(
-                        shape = CircleShape,
-                        tint = readerBackground ?: MaterialTheme.colorScheme.surface,
-                        modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp),
-                    ) {
-                        Box(
-                            modifier =
-                                Modifier
-                                    .fillMaxSize()
-                                    .clip(CircleShape)
-                                    .clickable(onClick = onBackOrCloseThumbnails),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = BACK_CONTENT_DESCRIPTION,
-                                tint = readerContentColor ?: MaterialTheme.colorScheme.onSurface,
-                            )
+                            true
+                        }
+                        e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && shiftHeld -> {
+                            tabSession.focusedActiveState?.let { st ->
+                                if (st.redoStack.isNotEmpty()) {
+                                    val entry = st.redoStack.removeLast()
+                                    st.undoStack.addLast(
+                                        PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths, entry.highlights),
+                                    )
+                                    st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+                                    st.highlights[entry.pageIndex] = entry.highlights
+                                }
+                            }
+                            true
+                        }
+                        // Перелистывание ридера хардварными клавишами — только в режиме
+                        // чтения (см. readerPageTurn выше), иначе стрелки/Space/PageUp-Down
+                        // остаются свободны. Клавиши громкости тут — запасной путь (на
+                        // Android их раньше съедает оконный перехват ReaderVolumeKeyHandler;
+                        // на десктопе их нет).
+                        readerPageTurn != null -> {
+                            controls?.readerPageDelta?.invoke(readerPageTurn)
+                            true
+                        }
+                        else -> {
+                            when (e.type) {
+                                KeyEventType.KeyDown -> nonModifierKeysDown[e.key.keyCode] = Unit
+                                KeyEventType.KeyUp -> nonModifierKeysDown.remove(e.key.keyCode)
+                                else -> Unit
+                            }
+                            false
                         }
                     }
-                }
-
-                AnimatedVisibility(
-                    visible = !chromeHidden,
-                    enter = slideInHorizontally { -it } + fadeIn(),
-                    exit = slideOutHorizontally { -it } + fadeOut(),
-                    modifier =
-                        Modifier
-                            // Резервируем сверху высоту back-кнопки (чтобы не перекрыть её),
-                            // а ниже занимаем всю высоту и центрируем рельсу по вертикали —
-                            // на десктопе она оказывается посередине, а не прижата к верху.
-                            .align(Alignment.TopStart)
-                            .offset(x = railShift)
-                            // systemBars ∪ displayCutout: в ландшафте вырез/«бровь» уходит
-                            // на боковой край, и без cutout вертикальная рельса налезала
-                            // на него слева.
-                            .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
-                            .padding(
-                                start = 16.dp,
-                                top = 8.dp + landscapePageCounterHeightDp + 16.dp,
-                                end = 16.dp,
-                                bottom = 16.dp,
-                            ).fillMaxHeight(),
-                ) {
-                    Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
-                        LandscapeToolRail(
-                            tools =
-                                ToolRailTools(
-                                    toolMode = toolMode,
-                                    onToolModeChange = { toolMode = it },
-                                    penSettings = penSettings,
-                                    onPenSettingsChange = { penSettings = it },
-                                    markerSettings = markerSettings,
-                                    onMarkerSettingsChange = {
-                                        if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
-                                        markerSettings = it
-                                    },
-                                    eraserSettings = eraserSettings,
-                                    onEraserSettingsChange = { eraserSettings = it },
-                                    toolPresets = toolPresets,
-                                    onToolPresetsChange = onToolPresetsChange,
-                                    onPresetApplied = onPresetApplied,
-                                ),
-                            system =
-                                ToolRailSystem(
-                                    hasAnnotations = hasAnnotations,
-                                    isExporting = isExporting,
-                                    onExport = { controls?.export?.invoke() },
-                                    scale = scale,
-                                    onZoomIn = {
-                                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                            vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                                        }
-                                    },
-                                    onZoomOut = {
-                                        tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                            vs.zoomBy(
-                                                TOOLBAR_ZOOM_STEP_OUT,
-                                                Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f),
-                                            )
-                                        }
-                                    },
-                                    showThumbnails = showThumbnails,
-                                    onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
-                                    showTocButton = hasToc,
-                                    showToc = showToc,
-                                    onToggleToc = { controls?.toggleToc?.invoke() },
-                                    readingModeEnabled = readingModeEnabled,
-                                    readingModeAvailable = readingModeAvailable,
-                                    onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
-                                    showPencilModeButton = SupportsPencilMode,
-                                    pencilModeEnabled = pencilModeEnabled,
-                                    onPencilModeChange = onPencilModeChange,
-                                    magnifierEnabled = magnifierEnabled,
-                                    onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
-                                    showSyncButton = syncPaneEnabled,
-                                    syncTint = syncStatusTint,
-                                    onOpenSync = { showSyncPanel = true },
-                                    onOpenShortcutsSettings = { showShortcutsDialog = true },
-                                ),
-                            readerTheme =
-                                ToolRailReaderTheme(
-                                    background = readerBackground,
-                                    contentColor = readerContentColor,
-                                ),
-                            onRailWidthChanged = { landscapeToolbarWidthDp = it },
-                        )
-                    }
-                }
-
-                // ---- Page-indicator airbar: slides to the centre of the focused panel ----
-                val airbarCenterFraction by animateFloatAsState(
-                    targetValue = focusedPanelCenterXFraction(layout),
-                    animationSpec =
-                        spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow,
-                        ),
-                    label = "airbarCenter",
-                )
-                val airbarTopPx by animateFloatAsState(
-                    targetValue = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
-                    animationSpec =
-                        spring(
-                            dampingRatio = Spring.DampingRatioNoBouncy,
-                            stiffness = Spring.StiffnessMediumLow,
-                        ),
-                    label = "airbarTop",
-                )
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier =
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            .graphicsLayer {
-                                translationX =
-                                    (airbarCenterFraction - 0.5f) * windowSizeInPx.width.toFloat()
-                                // The grid's top sits exactly one tab-strip below this airbar's
-                                // natural position, so translating by the focused panel's top
-                                // offset (relative to the grid) lands it on that panel.
-                                translationY = airbarTopPx
-                            }.windowInsetsPadding(WindowInsets.statusBars)
-                            .padding(top = 8.dp),
-                ) {
-                    AnimatedVisibility(
-                        visible = totalPages > 0 && !chromeHidden,
-                        enter = slideInVertically { -it } + fadeIn(),
-                        exit = slideOutVertically { -it } + fadeOut(),
-                    ) {
-                        PageIndicatorAirbar(
-                            currentPage = currentPage,
-                            totalPages = totalPages,
-                            onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
-                            containerColor = readerBackground,
-                            contentColor = readerContentColor,
-                            modifier =
-                                Modifier.onSizeChanged {
-                                    landscapePageCounterHeightDp = with(density) { it.height.toDp() }
+                },
+        ) {
+            // Workspace grid. Each panel draws its own tab strip at its top; the grid
+            // clears the status bar / display cutout so the top-row tab strips sit below them.
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .padding(top = topChromeInset)
+                    .onSizeChanged { gridHeightPx = it.height.toFloat() },
+            ) {
+                GridContainer(
+                    layout = layout,
+                    onSetRatio = { index, value -> tabSession.setRatio(index, value) },
+                    onFocusPanel = { tabSession.focusPanel(it) },
+                ) { panel ->
+                    val templates = tabSession.availableTemplatesForAdd()
+                    EditorPanel(
+                        panel = panel,
+                        tabSession = tabSession,
+                        sessionsMenu = { expanded, onDismiss ->
+                            SessionsMenu(
+                                expanded = expanded,
+                                onDismiss = onDismiss,
+                                sessionRepository = sessionRepository,
+                                lastSession = lastSession,
+                                onCaptureCurrent = { tabSession.captureSession() },
+                                onRestore = { data ->
+                                    tabSession.restoreSession(data)
+                                    // Keep the in-process layout snapshot consistent with the restored split.
+                                    savedLayout = WorkspaceSnapshot.encode(tabSession.layout.toSnapshot())
                                 },
-                        )
-                    }
+                            )
+                        },
+                        isFocused = panel.id == layout.focusedPanelId,
+                        loader = loader,
+                        renderer = renderer,
+                        outlineProvider = outlineProvider,
+                        toolMode = toolMode,
+                        penSettings = penSettings,
+                        markerSettings = markerSettings,
+                        eraserSettings = eraserSettings,
+                        pencilModeEnabled = pencilModeEnabled,
+                        eraserOverride = eraserOverride,
+                        shortcutsSettings = shortcutsSettings,
+                        ctrlHeld = ctrlHeld,
+                        shiftHeld = shiftHeld,
+                        altHeld = altHeld,
+                        metaHeld = metaHeld,
+                        nonModifierKeysDown = nonModifierKeysDown.keys,
+                        penButtonsPressed = penButtonsPressed,
+                        annotationRepository = annotationRepository,
+                        pdfExporter = pdfExporter,
+                        reflowExtractor = reflowExtractor,
+                        readerStored = readerStored,
+                        onReaderStoredChange = onReaderStoredChange,
+                        syncEngineFor = syncEngineFor,
+                        peerClient = peerClient,
+                        pendingDeltaCounts = pendingDeltaCounts,
+                        receivedPdfDir = receivedPdfDir,
+                        openDocumentRegistry = openDocumentRegistry,
+                        hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
+                        showSnackbar = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } },
+                        onRestoreToolSettings = { pen, marker, eraser ->
+                            penSettings = pen
+                            markerSettings = marker
+                            // A restored width is the user's own choice — don't override it.
+                            markerWidthPinned = true
+                            eraserSettings = eraser
+                            // Seed this document's tool checkpoint with its just-loaded
+                            // settings (keyed by file path), so switching away and back
+                            // restores them.
+                            panel.tabs.activeTab?.filePath?.let { filePath ->
+                                documentToolStates[filePath] =
+                                    ToolStateSnapshot(
+                                        toolMode = toolMode,
+                                        penSettings = pen,
+                                        markerSettings = marker,
+                                        eraserSettings = eraser,
+                                        markerWidthPinned = true,
+                                    )
+                            }
+                        },
+                        onAddTab = { onAddTabToPanel(panel.id) },
+                        onAllTabsClosed = onBackWithSave,
+                        onOpenPanelPicker =
+                            if (templates.isNotEmpty() && panel.tabs.tabs.size > 1) {
+                                { tabId ->
+                                    tabSession.focusPanel(panel.id)
+                                    pendingPanelMove = panel.id to tabId
+                                }
+                            } else {
+                                null
+                            },
+                        onClosePanel =
+                            if (layout.panels.size > 1) {
+                                {
+                                    val anyTab = panel.tabs.tabs.firstOrNull()
+                                    if (anyTab != null) {
+                                        // Close every tab in this panel → panel is removed.
+                                        panel.tabs.tabs
+                                            .toList()
+                                            .forEach { tabSession.closeTab(panel.id, it.id) }
+                                    }
+                                }
+                            } else {
+                                null
+                            },
+                        onControlsChanged = { c -> if (panel.id == layout.focusedPanelId) focusedControls = c },
+                        fitWidthStartInset = fitWidthStartInset,
+                        fitWidthTopInset = fitWidthTopInset,
+                    )
                 }
-            } else {
-                Column(
-                    modifier =
-                        Modifier
-                            .align(Alignment.TopStart)
-                            .fillMaxWidth(),
-                ) {
+            }
+
+            // ---- Unified toolbar: overlay floating just below the tab strip ------
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .consumeWindowInsets(WindowInsets.statusBars)
+                    .padding(top = TAB_BAR_HEIGHT + topChromeInset),
+            ) {
+                val dividerPx = with(density) { DIVIDER_HIT.toPx() }
+                if (isLandscape) {
+                    // When a left-edge sidebar is open it would otherwise sit on top of the
+                    // back button and tool rail; push them right by the sidebar's width so
+                    // they sit beside it. Both the thumbnails and the (wider) ToC sidebar
+                    // anchor to the left edge, so each one shifts the chrome by its own width.
+                    val railShift by animateDpAsState(
+                        targetValue =
+                            when {
+                                focusedPanelStartXFraction(layout) != 0f -> 0.dp
+                                showThumbnails && tabSession.focusedActiveState?.pages?.isNotEmpty() == true ->
+                                    SIDEBAR_WIDTH
+                                showToc -> TOC_SIDEBAR_WIDTH
+                                else -> 0.dp
+                            },
+                        animationSpec = tween(THUMBNAIL_SIDEBAR_ANIM_MS),
+                        label = "railShift",
+                    )
                     AnimatedVisibility(
                         visible = !chromeHidden,
-                        enter = slideInVertically { -it } + fadeIn(),
-                        exit = slideOutVertically { -it } + fadeOut(),
+                        enter = slideInHorizontally { -it } + fadeIn(),
+                        exit = slideOutHorizontally { -it } + fadeOut(),
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopStart)
+                                .offset(x = railShift)
+                                // Те же инсеты, что и у рельсы ниже — иначе при боковом
+                                // вырезе/системном баре кнопка назад не совпадает с рельсой
+                                // по левому краю.
+                                .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                                .padding(start = 16.dp, top = 8.dp),
                     ) {
-                        PortraitTopBar(
-                            currentPage = currentPage,
-                            totalPages = totalPages,
-                            onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
-                            toolMode = toolMode,
-                            onToolModeChange = { toolMode = it },
-                            penSettings = penSettings,
-                            onPenSettingsChange = { penSettings = it },
-                            markerSettings = markerSettings,
-                            onMarkerSettingsChange = {
-                                if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
-                                markerSettings = it
-                            },
-                            eraserSettings = eraserSettings,
-                            onEraserSettingsChange = { eraserSettings = it },
-                            toolPresets = toolPresets,
-                            onToolPresetsChange = onToolPresetsChange,
-                            onPresetApplied = onPresetApplied,
-                            hasAnnotations = hasAnnotations,
-                            isExporting = isExporting,
-                            onExport = { controls?.export?.invoke() },
-                            scale = scale,
-                            onZoomIn = {
-                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                                }
-                            },
-                            onZoomOut = {
-                                tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
-                                    vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
-                                }
-                            },
-                            showThumbnails = showThumbnails,
-                            onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
-                            showTocButton = hasToc,
-                            showToc = showToc,
-                            onToggleToc = { controls?.toggleToc?.invoke() },
-                            readingModeEnabled = readingModeEnabled,
-                            readingModeAvailable = readingModeAvailable,
-                            onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
-                            showPencilModeButton = SupportsPencilMode,
-                            pencilModeEnabled = pencilModeEnabled,
-                            onPencilModeChange = onPencilModeChange,
-                            magnifierEnabled = magnifierEnabled,
-                            onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
-                            showSyncButton = syncPaneEnabled,
-                            syncTint = syncStatusTint,
-                            onOpenSync = { showSyncPanel = true },
-                            onOpenShortcutsSettings = { showShortcutsDialog = true },
-                            onBack = onBackOrCloseThumbnails,
-                            readerBackground = readerBackground,
-                            readerContentColor = readerContentColor,
-                        )
+                        GlassSurface(
+                            shape = CircleShape,
+                            tint = readerBackground ?: MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp),
+                        ) {
+                            Box(
+                                modifier =
+                                    Modifier
+                                        .fillMaxSize()
+                                        .clip(CircleShape)
+                                        .clickable(onClick = onBackOrCloseThumbnails),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = BACK_CONTENT_DESCRIPTION,
+                                    tint = readerContentColor ?: MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
                     }
-                }
-            }
 
-            // Меню страниц/оглавления поверх контента. В портрете — модальная боковая
-            // шторка слева с затемнением (тап по фону закрывает); в ландшафте рельса
-            // отъезжает вправо (railShift выше), затемнения нет.
-            val sideMenuState = tabSession.focusedActiveState
-            if (sideMenuState != null) {
-                FocusedPanelMenus(
-                    focusedState = sideMenuState,
-                    renderer = renderer,
-                    controls = controls,
-                    showThumbnails = showThumbnails,
-                    showToc = showToc,
-                    scrim = !isLandscape,
-                    offsetXPx = focusedPanelStartXPx(layout, windowSizeInPx.width.toFloat(), dividerPx),
-                    offsetYPx = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
-                    heightPx =
-                        focusedPanelHeightPx(layout, gridHeightPx, dividerPx) -
-                            with(density) { TAB_BAR_HEIGHT.toPx() },
-                    onClose = onBackOrCloseThumbnails,
-                )
-            }
-        }
+                    AnimatedVisibility(
+                        visible = !chromeHidden,
+                        enter = slideInHorizontally { -it } + fadeIn(),
+                        exit = slideOutHorizontally { -it } + fadeOut(),
+                        modifier =
+                            Modifier
+                                // Резервируем сверху высоту back-кнопки (чтобы не перекрыть её),
+                                // а ниже занимаем всю высоту и центрируем рельсу по вертикали —
+                                // на десктопе она оказывается посередине, а не прижата к верху.
+                                .align(Alignment.TopStart)
+                                .offset(x = railShift)
+                                // systemBars ∪ displayCutout: в ландшафте вырез/«бровь» уходит
+                                // на боковой край, и без cutout вертикальная рельса налезала
+                                // на него слева.
+                                .windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.displayCutout))
+                                .padding(
+                                    start = 16.dp,
+                                    top = 8.dp + landscapePageCounterHeightDp + 16.dp,
+                                    end = 16.dp,
+                                    bottom = 16.dp,
+                                ).fillMaxHeight(),
+                    ) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxHeight()) {
+                            LandscapeToolRail(
+                                tools =
+                                    ToolRailTools(
+                                        toolMode = toolMode,
+                                        onToolModeChange = { toolMode = it },
+                                        penSettings = penSettings,
+                                        onPenSettingsChange = { penSettings = it },
+                                        markerSettings = markerSettings,
+                                        onMarkerSettingsChange = {
+                                            if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                                            markerSettings = it
+                                        },
+                                        eraserSettings = eraserSettings,
+                                        onEraserSettingsChange = { eraserSettings = it },
+                                        toolPresets = toolPresets,
+                                        onToolPresetsChange = onToolPresetsChange,
+                                        onPresetApplied = onPresetApplied,
+                                    ),
+                                system =
+                                    ToolRailSystem(
+                                        hasAnnotations = hasAnnotations,
+                                        isExporting = isExporting,
+                                        onExport = { controls?.export?.invoke() },
+                                        scale = scale,
+                                        onZoomIn = {
+                                            tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                                vs.zoomBy(
+                                                    TOOLBAR_ZOOM_STEP_IN,
+                                                    Offset(
+                                                        vs.viewportSize.width / 2f,
+                                                        vs.viewportSize.height / 2f,
+                                                    ),
+                                                )
+                                            }
+                                        },
+                                        onZoomOut = {
+                                            tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                                vs.zoomBy(
+                                                    TOOLBAR_ZOOM_STEP_OUT,
+                                                    Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f),
+                                                )
+                                            }
+                                        },
+                                        showThumbnails = showThumbnails,
+                                        onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                                        showTocButton = hasToc,
+                                        showToc = showToc,
+                                        onToggleToc = { controls?.toggleToc?.invoke() },
+                                        readingModeEnabled = readingModeEnabled,
+                                        readingModeAvailable = readingModeAvailable,
+                                        onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
+                                        showPencilModeButton = SupportsPencilMode,
+                                        pencilModeEnabled = pencilModeEnabled,
+                                        onPencilModeChange = onPencilModeChange,
+                                        magnifierEnabled = magnifierEnabled,
+                                        onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                                        showSyncButton = syncPaneEnabled,
+                                        syncTint = syncStatusTint,
+                                        onOpenSync = { showSyncPanel = true },
+                                        onOpenShortcutsSettings = { showShortcutsDialog = true },
+                                    ),
+                                readerTheme =
+                                    ToolRailReaderTheme(
+                                        background = readerBackground,
+                                        contentColor = readerContentColor,
+                                    ),
+                                onRailWidthChanged = { landscapeToolbarWidthDp = it },
+                            )
+                        }
+                    }
 
-        // Floating airbar (bottom-right): the quick loupe (touch only) and the
-        // scroll-mode toggle stacked into one glass island. The sync entry now
-        // lives in the settings wheel (see systemControlEntries); its panel and
-        // status tint are owned higher up so the wheel can reach them too.
-        // В режиме чтения прокрутка только вертикальная (reflow-поток), поэтому
-        // переключатель режима скролла бессмысленен — прячем его.
-        val showScrollModeButton = controls != null && !readingModeEnabled
-        val airbarButtonCount =
-            (if (SupportsQuickLoupe) 1 else 0) +
-                (if (showScrollModeButton) 1 else 0)
-        if (airbarButtonCount > 0 && !chromeHidden) {
-            GlassSurface(
-                modifier =
-                    Modifier
-                        .align(Alignment.BottomEnd)
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(bottom = 88.dp, end = 16.dp),
-                shape =
-                    if (airbarButtonCount > 1) {
-                        RoundedCornerShape(28.dp)
-                    } else {
-                        CircleShape
-                    },
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (SupportsQuickLoupe) {
-                        val armed = controls?.quickLoupeArmed == true
-                        IconButton(onClick = { controls?.toggleQuickLoupe?.invoke() }) {
-                            Icon(
-                                imageVector = Icons.Default.ZoomIn,
-                                contentDescription = "Быстрая лупа: выделить область",
-                                tint =
-                                    if (armed) {
-                                        MaterialTheme.colorScheme.primary
-                                    } else {
-                                        MaterialTheme.colorScheme.onSurface
+                    // ---- Page-indicator airbar: slides to the centre of the focused panel ----
+                    val airbarCenterFraction by animateFloatAsState(
+                        targetValue = focusedPanelCenterXFraction(layout),
+                        animationSpec =
+                            spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                        label = "airbarCenter",
+                    )
+                    val airbarTopPx by animateFloatAsState(
+                        targetValue = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
+                        animationSpec =
+                            spring(
+                                dampingRatio = Spring.DampingRatioNoBouncy,
+                                stiffness = Spring.StiffnessMediumLow,
+                            ),
+                        label = "airbarTop",
+                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier =
+                            Modifier
+                                .align(Alignment.TopCenter)
+                                .graphicsLayer {
+                                    translationX =
+                                        (airbarCenterFraction - 0.5f) * windowSizeInPx.width.toFloat()
+                                    // The grid's top sits exactly one tab-strip below this airbar's
+                                    // natural position, so translating by the focused panel's top
+                                    // offset (relative to the grid) lands it on that panel.
+                                    translationY = airbarTopPx
+                                }.windowInsetsPadding(WindowInsets.statusBars)
+                                .padding(top = 8.dp),
+                    ) {
+                        AnimatedVisibility(
+                            visible = totalPages > 0 && !chromeHidden,
+                            enter = slideInVertically { -it } + fadeIn(),
+                            exit = slideOutVertically { -it } + fadeOut(),
+                        ) {
+                            PageIndicatorAirbar(
+                                currentPage = currentPage,
+                                totalPages = totalPages,
+                                onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
+                                containerColor = readerBackground,
+                                contentColor = readerContentColor,
+                                modifier =
+                                    Modifier.onSizeChanged {
+                                        landscapePageCounterHeightDp = with(density) { it.height.toDp() }
                                     },
                             )
                         }
                     }
-                    if (showScrollModeButton) {
-                        val mode = controls?.scrollMode ?: ScrollMode.BOTH
-                        IconButton(onClick = { controls?.cycleScrollMode?.invoke() }) {
-                            Icon(
-                                imageVector =
-                                    when (mode) {
-                                        ScrollMode.BOTH -> Icons.Default.OpenWith
-                                        ScrollMode.VERTICAL -> Icons.Default.SwapVert
-                                        ScrollMode.NONE -> Icons.Default.Block
-                                    },
-                                contentDescription =
-                                    when (mode) {
-                                        ScrollMode.BOTH -> "Скролл: по обеим осям"
-                                        ScrollMode.VERTICAL -> "Скролл: только по вертикали"
-                                        ScrollMode.NONE -> "Скролл выключен"
-                                    },
-                                tint =
-                                    if (mode == ScrollMode.BOTH) {
-                                        MaterialTheme.colorScheme.onSurface
-                                    } else {
-                                        MaterialTheme.colorScheme.primary
-                                    },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if (showSyncPanel && syncPaneEnabled) {
-            Dialog(onDismissRequest = { showSyncPanel = false }) {
-                Surface(
-                    shape = MaterialTheme.shapes.large,
-                    tonalElevation = 6.dp,
-                    modifier =
-                        Modifier
-                            .widthIn(min = 320.dp, max = 480.dp)
-                            .heightIn(min = 200.dp, max = 720.dp),
-                ) {
+                } else {
                     Column(
                         modifier =
                             Modifier
-                                .fillMaxSize()
-                                .padding(8.dp),
+                                .align(Alignment.TopStart)
+                                .fillMaxWidth(),
                     ) {
-                        if (hostQrViewModel != null) {
-                            Row(
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 16.dp, end = 8.dp, top = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = "QR-подключение",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                IconButton(onClick = { showSyncPanel = false }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Закрыть",
-                                    )
-                                }
-                            }
-                            HostQrPairingPanel(
-                                viewModel = hostQrViewModel,
-                                onCloseDialog = { showSyncPanel = false },
-                            )
-                        }
-                        if (clientScanViewModel != null && manualConnectViewModel != null && peerClient != null) {
-                            Row(
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 16.dp, end = 8.dp, top = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    text = "Подключение",
-                                    style = MaterialTheme.typography.titleLarge,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                IconButton(onClick = { showSyncPanel = false }) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Закрыть",
-                                    )
-                                }
-                            }
-                            ClientPairingPanel(
-                                scanViewModel = clientScanViewModel,
-                                manualViewModel = manualConnectViewModel,
-                                peerClient = peerClient,
-                                onClose = { showSyncPanel = false },
-                                onConnected = { showSyncPanel = false },
+                        AnimatedVisibility(
+                            visible = !chromeHidden,
+                            enter = slideInVertically { -it } + fadeIn(),
+                            exit = slideOutVertically { -it } + fadeOut(),
+                        ) {
+                            PortraitTopBar(
+                                currentPage = currentPage,
+                                totalPages = totalPages,
+                                onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
+                                toolMode = toolMode,
+                                onToolModeChange = { toolMode = it },
+                                penSettings = penSettings,
+                                onPenSettingsChange = { penSettings = it },
+                                markerSettings = markerSettings,
+                                onMarkerSettingsChange = {
+                                    if (it.strokeWidth != markerSettings.strokeWidth) markerWidthPinned = true
+                                    markerSettings = it
+                                },
+                                eraserSettings = eraserSettings,
+                                onEraserSettingsChange = { eraserSettings = it },
+                                toolPresets = toolPresets,
+                                onToolPresetsChange = onToolPresetsChange,
+                                onPresetApplied = onPresetApplied,
+                                hasAnnotations = hasAnnotations,
+                                isExporting = isExporting,
+                                onExport = { controls?.export?.invoke() },
+                                scale = scale,
+                                onZoomIn = {
+                                    tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                        vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                                    }
+                                },
+                                onZoomOut = {
+                                    tabSession.focusedActiveState?.pdfViewerState?.let { vs ->
+                                        vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))
+                                    }
+                                },
+                                showThumbnails = showThumbnails,
+                                onToggleThumbnails = { controls?.toggleThumbnails?.invoke() },
+                                showTocButton = hasToc,
+                                showToc = showToc,
+                                onToggleToc = { controls?.toggleToc?.invoke() },
+                                readingModeEnabled = readingModeEnabled,
+                                readingModeAvailable = readingModeAvailable,
+                                onToggleReadingMode = { controls?.toggleReadingMode?.invoke() },
+                                showPencilModeButton = SupportsPencilMode,
+                                pencilModeEnabled = pencilModeEnabled,
+                                onPencilModeChange = onPencilModeChange,
+                                magnifierEnabled = magnifierEnabled,
+                                onMagnifierToggle = { controls?.toggleMagnifier?.invoke() },
+                                showSyncButton = syncPaneEnabled,
+                                syncTint = syncStatusTint,
+                                onOpenSync = { showSyncPanel = true },
+                                onOpenShortcutsSettings = { showShortcutsDialog = true },
+                                onBack = onBackOrCloseThumbnails,
+                                readerBackground = readerBackground,
+                                readerContentColor = readerContentColor,
                             )
                         }
                     }
                 }
+
+                // Меню страниц/оглавления поверх контента. В портрете — модальная боковая
+                // шторка слева с затемнением (тап по фону закрывает); в ландшафте рельса
+                // отъезжает вправо (railShift выше), затемнения нет.
+                val sideMenuState = tabSession.focusedActiveState
+                if (sideMenuState != null) {
+                    FocusedPanelMenus(
+                        focusedState = sideMenuState,
+                        renderer = renderer,
+                        controls = controls,
+                        showThumbnails = showThumbnails,
+                        showToc = showToc,
+                        scrim = !isLandscape,
+                        offsetXPx = focusedPanelStartXPx(layout, windowSizeInPx.width.toFloat(), dividerPx),
+                        offsetYPx = focusedPanelStartYPx(layout, gridHeightPx, dividerPx),
+                        heightPx =
+                            focusedPanelHeightPx(layout, gridHeightPx, dividerPx) -
+                                with(density) { TAB_BAR_HEIGHT.toPx() },
+                        onClose = onBackOrCloseThumbnails,
+                    )
+                }
             }
-        }
 
-        SnackbarHost(
-            hostState = snackbarHostState,
-            modifier =
-                Modifier
-                    .align(Alignment.BottomCenter)
-                    .windowInsetsPadding(WindowInsets.navigationBars),
-        )
+            // Floating airbar (bottom-right): the quick loupe (touch only) and the
+            // scroll-mode toggle stacked into one glass island. The sync entry now
+            // lives in the settings wheel (see systemControlEntries); its panel and
+            // status tint are owned higher up so the wheel can reach them too.
+            // В режиме чтения прокрутка только вертикальная (reflow-поток), поэтому
+            // переключатель режима скролла бессмысленен — прячем его.
+            val showScrollModeButton = controls != null && !readingModeEnabled
+            val airbarButtonCount =
+                (if (SupportsQuickLoupe) 1 else 0) +
+                    (if (showScrollModeButton) 1 else 0)
+            if (airbarButtonCount > 0 && !chromeHidden) {
+                GlassSurface(
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(bottom = 88.dp, end = 16.dp),
+                    shape =
+                        if (airbarButtonCount > 1) {
+                            RoundedCornerShape(28.dp)
+                        } else {
+                            CircleShape
+                        },
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (SupportsQuickLoupe) {
+                            val armed = controls?.quickLoupeArmed == true
+                            IconButton(onClick = { controls?.toggleQuickLoupe?.invoke() }) {
+                                Icon(
+                                    imageVector = Icons.Default.ZoomIn,
+                                    contentDescription = "Быстрая лупа: выделить область",
+                                    tint =
+                                        if (armed) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        },
+                                )
+                            }
+                        }
+                        if (showScrollModeButton) {
+                            val mode = controls?.scrollMode ?: ScrollMode.BOTH
+                            IconButton(onClick = { controls?.cycleScrollMode?.invoke() }) {
+                                Icon(
+                                    imageVector =
+                                        when (mode) {
+                                            ScrollMode.BOTH -> Icons.Default.OpenWith
+                                            ScrollMode.VERTICAL -> Icons.Default.SwapVert
+                                            ScrollMode.NONE -> Icons.Default.Block
+                                        },
+                                    contentDescription =
+                                        when (mode) {
+                                            ScrollMode.BOTH -> "Скролл: по обеим осям"
+                                            ScrollMode.VERTICAL -> "Скролл: только по вертикали"
+                                            ScrollMode.NONE -> "Скролл выключен"
+                                        },
+                                    tint =
+                                        if (mode == ScrollMode.BOTH) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            MaterialTheme.colorScheme.primary
+                                        },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
 
-        if (showShortcutsDialog) {
-            ShortcutsSettingsDialog(
-                settings = shortcutsSettings,
-                onChange = { shortcutsSettingsState.value = it },
-                onDismiss = { showShortcutsDialog = false },
-                penButtons = tabletController.penButtons,
+            if (showSyncPanel && syncPaneEnabled) {
+                Dialog(onDismissRequest = { showSyncPanel = false }) {
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        tonalElevation = 6.dp,
+                        modifier =
+                            Modifier
+                                .widthIn(min = 320.dp, max = 480.dp)
+                                .heightIn(min = 200.dp, max = 720.dp),
+                    ) {
+                        Column(
+                            modifier =
+                                Modifier
+                                    .fillMaxSize()
+                                    .padding(8.dp),
+                        ) {
+                            if (hostQrViewModel != null) {
+                                Row(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "QR-подключение",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IconButton(onClick = { showSyncPanel = false }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Закрыть",
+                                        )
+                                    }
+                                }
+                                HostQrPairingPanel(
+                                    viewModel = hostQrViewModel,
+                                    onCloseDialog = { showSyncPanel = false },
+                                )
+                            }
+                            if (clientScanViewModel != null && manualConnectViewModel != null && peerClient != null) {
+                                Row(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .padding(start = 16.dp, end = 8.dp, top = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        text = "Подключение",
+                                        style = MaterialTheme.typography.titleLarge,
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    IconButton(onClick = { showSyncPanel = false }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Закрыть",
+                                        )
+                                    }
+                                }
+                                ClientPairingPanel(
+                                    scanViewModel = clientScanViewModel,
+                                    manualViewModel = manualConnectViewModel,
+                                    peerClient = peerClient,
+                                    onClose = { showSyncPanel = false },
+                                    onConnected = { showSyncPanel = false },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars),
             )
-        }
 
-        pendingPanelMove?.let { (fromPanelId, tabId) ->
-            LayoutPickerOverlay(
-                templates = tabSession.availableTemplatesForAdd(),
-                onPick = { template: LayoutTemplate ->
-                    tabSession.moveTabToNewPanel(template, fromPanelId, tabId)
-                    pendingPanelMove = null
-                },
-                onDismiss = { pendingPanelMove = null },
-            )
+            if (showShortcutsDialog) {
+                ShortcutsSettingsDialog(
+                    settings = shortcutsSettings,
+                    onChange = { shortcutsSettingsState.value = it },
+                    onDismiss = { showShortcutsDialog = false },
+                    penButtons = tabletController.penButtons,
+                    blurEnabled = readerStored.blurEnabled,
+                    onBlurEnabledChange = { onReaderStoredChange(readerStored.copy(blurEnabled = it)) },
+                )
+            }
+
+            pendingPanelMove?.let { (fromPanelId, tabId) ->
+                LayoutPickerOverlay(
+                    templates = tabSession.availableTemplatesForAdd(),
+                    onPick = { template: LayoutTemplate ->
+                        tabSession.moveTabToNewPanel(template, fromPanelId, tabId)
+                        pendingPanelMove = null
+                    },
+                    onDismiss = { pendingPanelMove = null },
+                )
+            }
         }
     }
 }

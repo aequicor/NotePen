@@ -65,6 +65,7 @@ kotlin {
 
             implementation(projects.app.byCompose.theme)
             implementation(projects.app.byCompose.uikit)
+            implementation(projects.app.byCompose.blur)
 
             implementation(libs.kotlin.logging.common)
             implementation(libs.kotlinx.serialization.core)

@@ -21,10 +21,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -71,6 +71,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
+import ru.kyamshanov.notepen.blur.LocalHazeState
+import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
 import ru.kyamshanov.notepen.magnifier.MagnifierInputPanel
@@ -1199,6 +1201,7 @@ fun EditorPanel(
                 modifier =
                     Modifier
                         .fillMaxSize()
+                        .glassSource()
                         .onGloballyPositioned { viewerOriginInWindow.value = it.positionInWindow() }
                         .stylusEventSink(tabletController)
                         .pointerHoverIcon(if (toolMode == ToolMode.NONE) PointerIcon.Hand else PointerIcon.Default),
@@ -1504,6 +1507,7 @@ fun EditorPanel(
                             onBarVisibleChange = { visible ->
                                 if (isFocused) pdfState.readerBarVisible = visible
                             },
+                            hazeState = if (readerStored.blurEnabled) LocalHazeState.current else null,
                             modifier = Modifier.fillMaxSize(),
                             highlights = readerHighlights,
                             listState = reflowListState,

@@ -34,7 +34,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
-import ru.kyamshanov.notepen.ui.glass.GlassSurface
+import ru.kyamshanov.notepen.blur.GlassSurface
 
 /**
  * Floating page indicator. When [onNavigateToPage] is provided the current-page

@@ -5,8 +5,6 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.pager.HorizontalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,16 +36,18 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,6 +82,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
@@ -145,6 +147,7 @@ public fun ReflowReader(
     onBarVisibleChange: (Boolean) -> Unit,
     newPresetIdProvider: () -> String,
     modifier: Modifier = Modifier,
+    hazeState: HazeState? = null,
     highlights: List<TextAnchor> = emptyList(),
     listState: LazyListState = rememberLazyListState(),
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)? = null,
@@ -379,6 +382,7 @@ public fun ReflowReader(
                 modifier =
                     Modifier
                         .matchParentSize()
+                        .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
                         .onGloballyPositioned { selectionState.containerCoordinates = it }
                         .reflowSelectionDrag(selection.immediate, selectionState) {
                             val anchors = selectionState.anchorsForSelection()
@@ -436,6 +440,7 @@ public fun ReflowReader(
                 progressLabel = progressLabel,
                 autoHideMs = settings.autoHideMs,
                 onRequestHide = { onBarVisibleChange(false) },
+                hazeState = hazeState,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

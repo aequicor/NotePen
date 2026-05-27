@@ -59,7 +59,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
-import ru.kyamshanov.notepen.ui.glass.GlassSurface
+import ru.kyamshanov.notepen.blur.GlassSurface
 import kotlin.math.roundToInt
 
 /**
