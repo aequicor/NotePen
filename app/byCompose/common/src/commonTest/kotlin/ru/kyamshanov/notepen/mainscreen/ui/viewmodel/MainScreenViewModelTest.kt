@@ -434,7 +434,7 @@ class MainScreenViewModelTest {
 
         val dialog = viewModel.state.value.createFolderDialog
         assertNotNull(dialog, "Dialog should be open")
-        assertFalse(dialog!!.isConfirmEnabled, "isConfirmEnabled must be false for empty name")
+        assertFalse(dialog.isConfirmEnabled, "isConfirmEnabled must be false for empty name")
     }
 
     // onErrorEventHandled → errorEvent = null
@@ -475,7 +475,7 @@ class MainScreenViewModelTest {
             target,
             "FilePickerResult with non-null URI must set navigationTarget to Editor",
         )
-        assertEquals(selectedPath, (target as NavigationTarget.Editor).uri)
+        assertEquals(selectedPath, target.uri)
     }
 
     // TC-127 / DEF-002: FilePickerResult with null URI (user cancelled) → navigationTarget cleared (not stuck on FilePicker).

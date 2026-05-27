@@ -1,11 +1,10 @@
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKmpLibrary)
     alias(libs.plugins.kotlinSerialization)
 }
 
@@ -15,8 +14,10 @@ kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
-    androidTarget {
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
+    androidLibrary {
+        namespace = "io.aequicor.notepen.common"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
@@ -54,20 +55,20 @@ kotlin {
             implementation(libs.lifecycle.coroutines)
 
             // compose
-            implementation(compose.runtime)
-            implementation(compose.foundation)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
             implementation(compose.material3)
             @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
             implementation(compose.materialIconsExtended)
-            implementation(compose.ui)
-            implementation(compose.components.resources)
-            implementation(compose.components.uiToolingPreview)
+            implementation(libs.compose.ui)
+            implementation(libs.compose.components.resources)
+            implementation(libs.compose.components.ui.tooling.preview)
 
             implementation(projects.app.byCompose.theme)
             implementation(projects.app.byCompose.uikit)
             implementation(projects.app.byCompose.blur)
 
-            implementation(libs.kotlin.logging.common)
+            implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.serialization.core)
         }
 
@@ -77,9 +78,9 @@ kotlin {
         }
 
         androidMain.dependencies {
-            implementation(compose.preview)
+            implementation(libs.compose.ui.tooling.preview)
             implementation(libs.androidx.activity.compose)
-            implementation(libs.kotlin.logging.android)
+            implementation(libs.kotlin.logging)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.androidx.camera.view)
@@ -88,24 +89,12 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
-            implementation(libs.kotlin.logging.jvm)
+            implementation(libs.kotlin.logging)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.apache.pdfbox)
             runtimeOnly(libs.apache.pdfbox.jbig2)
             implementation(libs.jmdns)
         }
-    }
-}
-
-android {
-    namespace = "ru.kyamshanov.notepen"
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    compileSdk = libs.versions.android.compileSdk.get().toInt()
-    defaultConfig {
-        minSdk = libs.versions.android.minSdk.get().toInt()
     }
 }

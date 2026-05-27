@@ -161,6 +161,7 @@ private fun ShowingQrContent(
     }
 }
 
+@Suppress("DEPRECATION") // LocalClipboard migration needs per-platform ClipEntry; deferred
 @Composable
 private fun ManualConnectionDetails(payload: String) {
     var expanded by remember { mutableStateOf(false) }

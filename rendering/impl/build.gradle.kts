@@ -1,11 +1,10 @@
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKmpLibrary)
 }
 
 kotlin {
@@ -14,8 +13,10 @@ kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xexpect-actual-classes")
     }
-    androidTarget {
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
+    androidLibrary {
+        namespace = "io.aequicor.notepen.rendering.impl"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
@@ -29,13 +30,13 @@ kotlin {
             implementation(projects.tools.marker)
             implementation(projects.shared)
 
-            implementation(compose.runtime)
-            implementation(compose.foundation)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
             implementation(compose.material3)
             implementation(compose.materialIconsExtended)
-            implementation(compose.ui)
+            implementation(libs.compose.ui)
 
-            implementation(libs.kotlin.logging.common)
+            implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
         }
 
@@ -45,8 +46,8 @@ kotlin {
         }
 
         androidMain.dependencies {
-            implementation(compose.preview)
-            implementation(libs.kotlin.logging.android)
+            implementation(libs.compose.ui.tooling.preview)
+            implementation(libs.kotlin.logging)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.androidx.graphics.core)
@@ -54,30 +55,12 @@ kotlin {
 
         jvmMain.dependencies {
             implementation(compose.desktop.currentOs)
-            implementation(libs.kotlin.logging.jvm)
+            implementation(libs.kotlin.logging)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.apache.pdfbox)
             implementation(libs.jna)
             implementation(libs.jna.platform)
         }
-    }
-}
-
-android {
-    namespace = "ru.kyamshanov.notepen.rendering.impl"
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    compileSdk =
-        libs.versions.android.compileSdk
-            .get()
-            .toInt()
-    defaultConfig {
-        minSdk =
-            libs.versions.android.minSdk
-                .get()
-                .toInt()
     }
 }

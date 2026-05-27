@@ -1,3 +1,5 @@
+@file:OptIn(FlowPreview::class)
+
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
@@ -51,6 +53,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop

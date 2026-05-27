@@ -1,4 +1,4 @@
-import io.gitlab.arturbosch.detekt.extensions.DetektExtension
+import dev.detekt.gradle.extensions.DetektExtension
 import org.gradle.api.attributes.Bundling
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 
@@ -7,6 +7,7 @@ plugins {
     // in each subproject's classloader
     alias(libs.plugins.androidApplication) apply false
     alias(libs.plugins.androidLibrary) apply false
+    alias(libs.plugins.androidKmpLibrary) apply false
     alias(libs.plugins.composeCompiler) apply false
     alias(libs.plugins.composeMultiplatform) apply false
     alias(libs.plugins.kotlinMultiplatform) apply false
@@ -26,7 +27,7 @@ subprojects {
         "org.jetbrains.kotlin.jvm",
     ).forEach { kotlinPluginId ->
         pluginManager.withPlugin(kotlinPluginId) {
-            pluginManager.apply("io.gitlab.arturbosch.detekt")
+            pluginManager.apply("dev.detekt")
             pluginManager.apply("org.jlleitschuh.gradle.ktlint")
 
             // ktlint otherwise lints Compose's generated `Res.kt` resource accessors under

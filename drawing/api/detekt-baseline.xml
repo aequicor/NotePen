@@ -1,18 +1,15 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ComplexCondition:PageExtent.kt$PageExtent$l == left &amp;&amp; t == top &amp;&amp; r == right &amp;&amp; b == bottom</ID>
-    <ID>CyclomaticComplexMethod:PdfDrawingState.kt$public fun PdfDrawingState.erasePointsInZone( centerX: Float, centerY: Float, halfSizeNormalized: Float, shape: EraserShape, bumpHistory: Boolean = true, ): Boolean</ID>
-    <ID>CyclomaticComplexMethod:ShapeRecognizer.kt$ShapeRecognizer$public fun recognize( points: List&lt;DrawingPoint&gt;, aspect: Float, ): RecognizedShape?</ID>
-    <ID>LongParameterList:AnnotationRepository.kt$AnnotationRepository$( pdfPath: String, annotations: Map&lt;Int, List&lt;DrawingPath&gt;&gt;, scale: Int, pen: PenSettings = PenSettings(), marker: MarkerSettings = MarkerSettings(), eraser: EraserSettings = EraserSettings(), currentPage: Int = 0, currentPageOffset: Int = 0, favoritePageIndices: Set&lt;Int&gt; = emptySet(), pageExtents: Map&lt;Int, PageExtent&gt; = emptyMap(), highlights: Map&lt;Int, List&lt;StickyHighlight&gt;&gt; = emptyMap(), )</ID>
-    <ID>LoopWithTooManyJumpStatements:MergePolicy.kt$UnionAllPolicy$for</ID>
-    <ID>MaxLineLength:MarkerSettings.kt$fun</ID>
-    <ID>MaxLineLength:ToolPreset.kt$BuiltinToolPresets$MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:green", MarkerSettings(colorArgb = 0x8076FF03L, strokeWidth = 0.025f))</ID>
-    <ID>MaxLineLength:ToolPreset.kt$BuiltinToolPresets$MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:yellow", MarkerSettings(colorArgb = 0x80FFEB3BL, strokeWidth = 0.025f))</ID>
-    <ID>NestedBlockDepth:MergePolicy.kt$UnionAllPolicy$override fun compose( layers: List&lt;AnnotationLayer&gt;, filter: AnnotationFilter, ): Map&lt;Int, List&lt;DrawingPath&gt;&gt;</ID>
-    <ID>NestedBlockDepth:PdfDrawingState.kt$public fun PdfDrawingState.erasePointsInZone( centerX: Float, centerY: Float, halfSizeNormalized: Float, shape: EraserShape, bumpHistory: Boolean = true, ): Boolean</ID>
-    <ID>ReturnCount:PdfDrawingState.kt$PdfDrawingState$public fun snapLiveStrokeToShape(pageAspect: Float): Boolean</ID>
-    <ID>ReturnCount:ShapeRecognizer.kt$ShapeRecognizer$public fun recognize( points: List&lt;DrawingPoint&gt;, aspect: Float, ): RecognizedShape?</ID>
+    <ID>ComplexCondition:PageExtent.kt:PageExtent$l == left &amp;&amp; t == top &amp;&amp; r == right &amp;&amp; b == bottom</ID>
+    <ID>CyclomaticComplexMethod:PdfDrawingState.kt:public fun PdfDrawingState.erasePointsInZone: Boolean</ID>
+    <ID>CyclomaticComplexMethod:ShapeRecognizer.kt:ShapeRecognizer$public fun recognize: RecognizedShape?</ID>
+    <ID>LoopWithTooManyJumpStatements:MergePolicy.kt:UnionAllPolicy$for</ID>
+    <ID>MaxLineLength:MarkerSettings.kt:fun</ID>
+    <ID>MaxLineLength:ToolPreset.kt:BuiltinToolPresets$MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:green", MarkerSettings(colorArgb = 0x8076FF03L, strokeWidth = 0.025f))</ID>
+    <ID>MaxLineLength:ToolPreset.kt:BuiltinToolPresets$MarkerPreset("${BUILTIN_PRESET_PREFIX}marker:yellow", MarkerSettings(colorArgb = 0x80FFEB3BL, strokeWidth = 0.025f))</ID>
+    <ID>ReturnCount:PdfDrawingState.kt:PdfDrawingState$public fun snapLiveStrokeToShape: Boolean</ID>
+    <ID>ReturnCount:ShapeRecognizer.kt:ShapeRecognizer$public fun recognize: RecognizedShape?</ID>
   </CurrentIssues>
 </SmellBaseline>

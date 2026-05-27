@@ -1,19 +1,16 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:WheelCarousel.kt$@Composable public fun WheelStrip( entries: List&lt;WheelEntry&gt;, orientation: RailOrientation, modifier: Modifier = Modifier, state: LazyListState = rememberLazyListState(), crossAxisSize: Dp = 40.dp, gap: Dp = 2.dp, edgePadding: Dp = 4.dp, falloff: Dp = 0.dp, minScale: Float = 0.6f, minAlpha: Float = 0f, fadeEdgeWidth: Dp = crossAxisSize, selectedKey: Any? = null, indicatorColor: Color = MaterialTheme.colorScheme.primaryContainer, indicatorSize: Dp = 40.dp, contentAlignment: Alignment = Alignment.Center, )</ID>
-    <ID>LongMethod:WheelCarousel.kt$@Composable public fun WheelStrip( entries: List&lt;WheelEntry&gt;, orientation: RailOrientation, modifier: Modifier = Modifier, state: LazyListState = rememberLazyListState(), crossAxisSize: Dp = 40.dp, gap: Dp = 2.dp, edgePadding: Dp = 4.dp, falloff: Dp = 0.dp, minScale: Float = 0.6f, minAlpha: Float = 0f, fadeEdgeWidth: Dp = crossAxisSize, selectedKey: Any? = null, indicatorColor: Color = MaterialTheme.colorScheme.primaryContainer, indicatorSize: Dp = 40.dp, contentAlignment: Alignment = Alignment.Center, )</ID>
-    <ID>LongParameterList:ToolPresetsWidgets.kt$( items: List&lt;ToolPresetItem&gt;, addIcon: ImageVector, onApply: (String) -&gt; Unit, onAdd: () -&gt; Unit, onDelete: (String) -&gt; Unit, showAdd: Boolean = true, )</ID>
-    <ID>LongParameterList:WheelCarousel.kt$( entries: List&lt;WheelEntry&gt;, orientation: RailOrientation, modifier: Modifier = Modifier, state: LazyListState = rememberLazyListState(), crossAxisSize: Dp = 40.dp, gap: Dp = 2.dp, edgePadding: Dp = 4.dp, falloff: Dp = 0.dp, minScale: Float = 0.6f, minAlpha: Float = 0f, fadeEdgeWidth: Dp = crossAxisSize, selectedKey: Any? = null, indicatorColor: Color = MaterialTheme.colorScheme.primaryContainer, indicatorSize: Dp = 40.dp, contentAlignment: Alignment = Alignment.Center, )</ID>
-    <ID>LongParameterList:WheelCarousel.kt$( listState: LazyListState, index: Int, orientation: RailOrientation = RailOrientation.HORIZONTAL, falloffPx: Float = 0f, minScale: Float = 0.6f, minAlpha: Float = 0f, edgeBand: Float = 0.35f, naturalSizes: MutableMap&lt;Int, Int&gt;? = null, )</ID>
-    <ID>MatchingDeclarationName:ToolPresetsWidgets.kt$ToolPresetItem</ID>
-    <ID>MaxLineLength:ToolPresetsWidgets.kt$targetValue = if (item.selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant</ID>
-    <ID>MaxLineLength:WheelCarousel.kt$.</ID>
-    <ID>MaxLineLength:WheelCarousel.kt$val falloff = if (falloffPx &gt; 0f) falloffPx else (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f</ID>
-    <ID>MaxLineLength:WheelCarousel.kt$val t = wheelItemFalloff(listState.layoutInfo, index, falloffPx, edgeBand, naturalSizes) ?: return@graphicsLayer</ID>
-    <ID>ReturnCount:WheelCarousel.kt$internal fun wheelItemFalloff( layoutInfo: LazyListLayoutInfo, index: Int, falloffPx: Float, edgeBand: Float = 0.35f, naturalSizes: Map&lt;Int, Int&gt;? = null, ): Float?</ID>
-    <ID>TopLevelPropertyNaming:GlassmorphismBackButton.kt$private const val GlassBackgroundAlpha = 0.18f</ID>
-    <ID>TopLevelPropertyNaming:GlassmorphismBackButton.kt$private const val GlassBorderAlpha = 0.40f</ID>
+    <ID>CyclomaticComplexMethod:WheelCarousel.kt:@Composable public fun WheelStrip</ID>
+    <ID>LongMethod:WheelCarousel.kt:@Composable public fun WheelStrip</ID>
+    <ID>MatchingDeclarationName:ToolPresetsWidgets.kt:ToolPresetItem</ID>
+    <ID>MaxLineLength:ToolPresetsWidgets.kt:targetValue = if (item.selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant</ID>
+    <ID>MaxLineLength:WheelCarousel.kt:.</ID>
+    <ID>MaxLineLength:WheelCarousel.kt:val falloff = if (falloffPx &gt; 0f) falloffPx else (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f</ID>
+    <ID>MaxLineLength:WheelCarousel.kt:val t = wheelItemFalloff(listState.layoutInfo, index, falloffPx, edgeBand, naturalSizes) ?: return@graphicsLayer</ID>
+    <ID>ReturnCount:WheelCarousel.kt:internal fun wheelItemFalloff: Float?</ID>
+    <ID>TopLevelPropertyNaming:GlassmorphismBackButton.kt:private const val GlassBackgroundAlpha = 0.18f</ID>
+    <ID>TopLevelPropertyNaming:GlassmorphismBackButton.kt:private const val GlassBorderAlpha = 0.40f</ID>
   </CurrentIssues>
 </SmellBaseline>

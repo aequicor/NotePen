@@ -52,7 +52,7 @@ object EpubParser {
             val bytes = entries[path] ?: continue
             if (blocks.isNotEmpty()) blocks.add(ContentBlock.PageBreak)
             val doc = Jsoup.parse(String(bytes, Charsets.UTF_8), path)
-            val body = doc.body() ?: continue
+            val body = doc.body()
             val context = DocumentContext(baseDir = parentDir(path), entries = entries)
             appendBlocks(body, context, blocks)
         }

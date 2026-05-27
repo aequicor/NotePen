@@ -1,8 +1,6 @@
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.composeMultiplatform)
@@ -10,63 +8,19 @@ plugins {
 }
 
 kotlin {
-    androidTarget {
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
-        compilerOptions {
-            jvmTarget.set(JvmTarget.JVM_11)
-        }
-    }
-
-    sourceSets {
-        androidMain.dependencies {
-            implementation(projects.shared)
-            implementation(projects.sync)
-            implementation(projects.qrConnect)
-            implementation(projects.drawing.api)
-            implementation(projects.app.byCompose.common)
-            implementation(projects.rendering.api)
-            implementation(projects.rendering.impl)
-
-            implementation(libs.androidx.compose.ui.tooling.preview)
-            implementation(libs.androidx.activity.compose)
-            implementation(libs.androidx.core.splashscreen)
-            implementation(libs.kotlinx.serialization.json)
-            implementation(libs.ktor.client.core)
-            implementation(libs.ktor.client.cio)
-            implementation(libs.ktor.client.websockets)
-            implementation(libs.ktor.serialization.kotlinx.json)
-        }
-        commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-            implementation(compose.ui)
-            implementation(compose.components.resources)
-            implementation(compose.components.uiToolingPreview)
-            implementation(libs.kotlinx.serialization.core)
-
-            implementation(libs.decompose)
-        }
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_11)
     }
 }
 
 android {
-    namespace = "ru.kyamshanov.notepen"
-    compileSdk =
-        libs.versions.android.compileSdk
-            .get()
-            .toInt()
+    namespace = "io.aequicor.notepen"
+    compileSdk = libs.versions.android.compileSdk.get().toInt()
 
     defaultConfig {
         applicationId = "ru.kyamshanov.notepen"
-        minSdk =
-            libs.versions.android.minSdk
-                .get()
-                .toInt()
-        targetSdk =
-            libs.versions.android.compileSdk
-                .get()
-                .toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
+        targetSdk = libs.versions.android.compileSdk.get().toInt()
         versionCode = 1
         versionName = providers.gradleProperty("app.version").getOrElse("1.0.0")
     }
@@ -104,5 +58,31 @@ android {
 }
 
 dependencies {
+    implementation(projects.shared)
+    implementation(projects.sync)
+    implementation(projects.qrConnect)
+    implementation(projects.drawing.api)
+    implementation(projects.app.byCompose.common)
+    implementation(projects.rendering.api)
+    implementation(projects.rendering.impl)
+
+    implementation(libs.compose.runtime)
+    implementation(libs.compose.foundation)
+    implementation(compose.material3)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.components.resources)
+    implementation(libs.compose.components.ui.tooling.preview)
+
+    implementation(libs.decompose)
+    implementation(libs.androidx.compose.ui.tooling.preview)
+    implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.core.splashscreen)
+    implementation(libs.kotlinx.serialization.core)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
+    implementation(libs.ktor.client.websockets)
+    implementation(libs.ktor.serialization.kotlinx.json)
+
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

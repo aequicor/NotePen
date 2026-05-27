@@ -12,5 +12,10 @@ style:
   MagicNumber:
     # Compose UI code is dense with dp/sp literals; flagging each one is noise.
     active: false
-  UnusedPrivateMember:
+  # detekt 2.0 split UnusedPrivateMember into these finer-grained rules.
+  UnusedParameter:
+    ignoreAnnotated: ['Composable', 'Preview']
+  UnusedPrivateFunction:
+    ignoreAnnotated: ['Composable', 'Preview']
+  UnusedPrivateProperty:
     ignoreAnnotated: ['Composable', 'Preview']

@@ -93,7 +93,7 @@ class AddToHistoryUseCaseTest {
                     ).getOrThrow()
 
             assertIs<AddHistoryResult.SafFuzzyMatchDetected>(result)
-            assertEquals(existing, (result as AddHistoryResult.SafFuzzyMatchDetected).existing)
+            assertEquals(existing, result.existing)
             assertEquals("content://provider/document/999", result.newUri)
             assertTrue(repo.upsertCalls.isEmpty(), "upsert must NOT be called on fuzzy match")
         }

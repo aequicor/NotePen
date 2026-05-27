@@ -1,7 +1,7 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>ReturnCount:ReaderSettingsReducer.kt$ReaderSettingsReducer$public fun renamePreset( stored: StoredReaderSettings, id: String, newName: String, ): StoredReaderSettings</ID>
+    <ID>ReturnCount:ReaderSettingsReducer.kt:ReaderSettingsReducer$public fun renamePreset: StoredReaderSettings</ID>
   </CurrentIssues>
 </SmellBaseline>

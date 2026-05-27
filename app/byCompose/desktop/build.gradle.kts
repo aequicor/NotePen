@@ -111,19 +111,17 @@ configurations.configureEach {
 }
 
 kotlin {
-    jvm("desktop") {
-        withJava()
-    }
+    jvm("desktop")
 
     // JBR provides the WindowDecorations API used by setupJbrTitleBar (custom title
     // bar + native Windows snapping). Pinning the desktop toolchain to the JetBrains
     // vendor makes :run / :runDistributable and the jpackage/jlink bundled runtime use
     // JBR, so the custom title bar is active in dev and in shipped builds. Resolved from
-    // a locally-installed JBR 21 — foojay cannot auto-provision the JetBrains vendor, so
+    // a locally-installed JBR 25 — foojay cannot auto-provision the JetBrains vendor, so
     // a machine without one in an auto-detected dir must set
     // org.gradle.java.installations.paths in its user-level gradle.properties.
     jvmToolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
+        languageVersion.set(JavaLanguageVersion.of(25))
         vendor.set(JvmVendorSpec.JETBRAINS)
     }
 
@@ -131,7 +129,7 @@ kotlin {
         val desktopMain by getting
 
         commonMain.dependencies {
-            implementation(compose.components.resources)
+            implementation(libs.compose.components.resources)
         }
 
         desktopMain.dependencies {
@@ -157,12 +155,12 @@ kotlin {
             implementation(libs.decompose.compose)
 
             // compose
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material)
-            implementation(compose.ui)
+            implementation(libs.compose.runtime)
+            implementation(libs.compose.foundation)
+            implementation(libs.compose.material)
+            implementation(libs.compose.ui)
             //   implementation(compose.components.resources)
-            implementation(compose.components.uiToolingPreview)
+            implementation(libs.compose.components.ui.tooling.preview)
         }
     }
 }
@@ -182,7 +180,7 @@ compose.desktop {
         // полноценный jbrsdk с jpackage/jlink/jmods, а не runtime-only jbr.
         javaHome =
             javaToolchains.compilerFor {
-                languageVersion.set(JavaLanguageVersion.of(21))
+                languageVersion.set(JavaLanguageVersion.of(25))
                 vendor.set(JvmVendorSpec.JETBRAINS)
             }.map { it.metadata.installationPath.asFile.absolutePath }.get()
 

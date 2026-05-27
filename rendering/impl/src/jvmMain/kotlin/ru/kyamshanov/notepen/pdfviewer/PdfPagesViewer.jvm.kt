@@ -771,7 +771,7 @@ private fun Modifier.pdfDesktopPointerInput(
                             // а уходит в её move/resize. Иначе страница «уезжала» бы
                             // из-под рамки.
                             val primaryPanHere = primaryDragPanEnabled(change.position)
-                            val dblClick = (event.awtEventOrNull as? java.awt.event.MouseEvent)?.clickCount == 2
+                            val dblClick = event.awtEventOrNull?.clickCount == 2
                             if (dblClick && event.buttons.isPrimaryPressed && primaryPanHere) {
                                 // Double-tap-to-zoom: переключает fit-width ↔ приближение,
                                 // точка под курсором остаётся на месте.

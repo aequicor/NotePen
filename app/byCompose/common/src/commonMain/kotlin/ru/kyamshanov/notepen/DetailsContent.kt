@@ -1,3 +1,5 @@
+@file:OptIn(FlowPreview::class)
+
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
@@ -100,6 +102,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -1225,8 +1228,8 @@ fun DetailsContent(
                             }
                         }
                         if (showScrollModeButton) {
-                            val mode = controls?.scrollMode ?: ScrollMode.BOTH
-                            IconButton(onClick = { controls?.cycleScrollMode?.invoke() }) {
+                            val mode = controls.scrollMode
+                            IconButton(onClick = { controls.cycleScrollMode() }) {
                                 Icon(
                                     imageVector =
                                         when (mode) {

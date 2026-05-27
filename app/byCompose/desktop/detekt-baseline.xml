@@ -1,12 +1,12 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:main.kt$fun main(args: Array&lt;String&gt;)</ID>
-    <ID>InvalidPackageDeclaration:JbrTitleBar.kt$package ru.kyamshanov.notepen</ID>
-    <ID>LongMethod:main.kt$fun main(args: Array&lt;String&gt;)</ID>
-    <ID>MatchingDeclarationName:JbrTitleBar.kt$JbrTitleBarSetup</ID>
-    <ID>MaxLineLength:main.kt$val resourcePath = "composeResources/notepen.app.bycompose.desktop.generated.resources/files/app_icon_dock.png"</ID>
-    <ID>TooGenericExceptionCaught:Utils.kt$e: Throwable</ID>
+    <ID>CyclomaticComplexMethod:main.kt:fun main</ID>
+    <ID>InvalidPackageDeclaration:JbrTitleBar.kt:package ru.kyamshanov.notepen</ID>
+    <ID>LongMethod:main.kt:fun main</ID>
+    <ID>MatchingDeclarationName:JbrTitleBar.kt:JbrTitleBarSetup</ID>
+    <ID>MaxLineLength:main.kt:val resourcePath = "composeResources/notepen.app.bycompose.desktop.generated.resources/files/app_icon_dock.png"</ID>
+    <ID>TooGenericExceptionCaught:Utils.kt:e: Throwable</ID>
   </CurrentIssues>
 </SmellBaseline>

@@ -7,6 +7,7 @@ import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -51,8 +52,9 @@ class FileSystemLibraryManifestProviderTest {
             val book = provider.current().books.single()
             val resolved = provider.resolveAbsolutePath(book.id)
 
-            assertTrue(resolved != null && File(resolved).isFile)
-            assertTrue(File(resolved!!).canonicalPath.startsWith(root.canonicalPath))
+            assertNotNull(resolved)
+            assertTrue(File(resolved).isFile)
+            assertTrue(File(resolved).canonicalPath.startsWith(root.canonicalPath))
             assertNull(provider.resolveAbsolutePath(BookId("nope#deadbeef")))
         }
 

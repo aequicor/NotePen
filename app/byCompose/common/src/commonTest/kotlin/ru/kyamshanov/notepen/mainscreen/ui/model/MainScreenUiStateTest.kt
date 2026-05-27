@@ -32,7 +32,7 @@ class MainScreenUiStateTest {
             )
         val updated = state.copy(dragState = active)
         assertIs<DragState.Active>(updated.dragState)
-        assertEquals("file-99", (updated.dragState as DragState.Active).fileId)
+        assertEquals("file-99", updated.dragState.fileId)
     }
 
     // TC-STATE-4: copy() correctly updates successEvent

@@ -1,9 +1,8 @@
-import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidLibrary)
+    alias(libs.plugins.androidKmpLibrary)
     alias(libs.plugins.kotlinSerialization)
     alias(libs.plugins.sqldelight)
 }
@@ -24,8 +23,10 @@ sqldelight {
 kotlin {
     applyDefaultHierarchyTemplate()
     jvm()
-    androidTarget {
-        @OptIn(ExperimentalKotlinGradlePluginApi::class)
+    androidLibrary {
+        namespace = "io.aequicor.notepen.sync"
+        compileSdk = libs.versions.android.compileSdk.get().toInt()
+        minSdk = libs.versions.android.minSdk.get().toInt()
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_11)
         }
@@ -37,7 +38,7 @@ kotlin {
             implementation(projects.shared)
             implementation(projects.drawing.api)
 
-            implementation(libs.kotlin.logging.common)
+            implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.serialization.core)
             implementation(libs.kotlinx.serialization.json)
             implementation(libs.kotlinx.coroutines.core)
@@ -53,14 +54,14 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         androidMain.dependencies {
-            implementation(libs.kotlin.logging.android)
+            implementation(libs.kotlin.logging)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.ktor.client.cio)
             implementation(libs.sqldelight.android.driver)
         }
         jvmMain.dependencies {
-            implementation(libs.kotlin.logging.jvm)
+            implementation(libs.kotlin.logging)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
             implementation(libs.ktor.client.cio)
@@ -74,24 +75,6 @@ kotlin {
 
             implementation(libs.sqldelight.sqlite.driver)
         }
-    }
-}
-
-android {
-    namespace = "ru.kyamshanov.notepen.sync"
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
-    }
-    compileSdk =
-        libs.versions.android.compileSdk
-            .get()
-            .toInt()
-    defaultConfig {
-        minSdk =
-            libs.versions.android.minSdk
-                .get()
-                .toInt()
     }
 }
 

@@ -141,6 +141,7 @@ class DefaultRootComponent(
      * Библиотека, открытая поверх редактора: выбор файла не пушит новый
      * экран, а возвращает в редактор и просит открыть файл новой вкладкой.
      */
+    @OptIn(DelicateDecomposeApi::class)
     private fun libraryComponent(ctx: ComponentContext): MainComponent =
         mainComponentFactory(
             ctx,

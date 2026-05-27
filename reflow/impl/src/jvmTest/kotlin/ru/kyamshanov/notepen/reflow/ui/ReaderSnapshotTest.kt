@@ -23,6 +23,9 @@ import kotlin.test.Test
  * (`LaunchedEffect { while(true){ delay() } }`); при автопрокрутке часов он крутил бы
  * рекомпозицию до бесконечности и `waitForIdle()` не вернулся бы.
  */
+// v2 runDesktopComposeUiTest uses StandardTestDispatcher (queued coroutines);
+// migrating would re-time the mainClock/settle() logic these snapshots depend on.
+@Suppress("DEPRECATION")
 @OptIn(ExperimentalTestApi::class)
 class ReaderSnapshotTest {
     /**

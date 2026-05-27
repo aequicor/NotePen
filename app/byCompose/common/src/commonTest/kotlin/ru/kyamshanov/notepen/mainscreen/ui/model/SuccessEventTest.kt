@@ -10,7 +10,7 @@ class SuccessEventTest {
     fun `SuccessEvent FileAddedToFolder carries folderName`() {
         val event: SuccessEvent = SuccessEvent.FileAddedToFolder(folderName = "Документы")
         assertIs<SuccessEvent.FileAddedToFolder>(event)
-        assertEquals("Документы", (event as SuccessEvent.FileAddedToFolder).folderName)
+        assertEquals("Документы", event.folderName)
     }
 
     // TC-SUCCESS-2: SuccessEvent.FileAlreadyInFolder exists as singleton variant (CRITICAL #2)

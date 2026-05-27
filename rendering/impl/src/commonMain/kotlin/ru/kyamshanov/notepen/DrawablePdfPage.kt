@@ -580,7 +580,6 @@ fun DrawablePdfPage(
                     when (toolMode) {
                         ToolMode.PEN -> penSettings.strokeWidth
                         ToolMode.MARKER -> markerSettings.strokeWidth
-                        else -> 0f
                     } * pdfW
                 val radiusPx = kotlin.math.max(HOVER_INDICATOR_MIN_RADIUS_PX, toolStrokePx * 0.5f)
                 drawCircle(

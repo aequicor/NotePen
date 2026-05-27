@@ -1,14 +1,13 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues></ManuallySuppressedIssues>
+  <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongParameterList:DefaultDetailsComponent.kt$DefaultDetailsComponent$( componentContext: ComponentContext, title: String, private val historyRepository: FileHistoryRepository, private val onBackListener: () -&gt; Unit, private val onOpenLibraryListener: () -&gt; Unit, override val pendingTabUri: Value&lt;String&gt;, private val onPendingTabHandledListener: () -&gt; Unit, )</ID>
-    <ID>MaxLineLength:FileHistoryManager.kt$FileHistoryManager$*</ID>
-    <ID>ReturnCount:FileHistoryManager.kt$FileHistoryManager$fun applyUpsert( entries: List&lt;RecentFile&gt;, newFile: RecentFile, ): Pair&lt;List&lt;RecentFile&gt;, String?&gt;</ID>
-    <ID>ReturnCount:FileHistoryManager.kt$FileHistoryManager$fun findEvictIndex(entries: List&lt;RecentFile&gt;): Int</ID>
-    <ID>SwallowedException:OpenRecentFileUseCase.kt$OpenRecentFileUseCase$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:CheckAvailabilityUseCase.kt$CheckAvailabilityUseCase$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DefaultDetailsComponent.kt$DefaultDetailsComponent$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:OpenRecentFileUseCase.kt$OpenRecentFileUseCase$e: Exception</ID>
+    <ID>MaxLineLength:FileHistoryManager.kt:FileHistoryManager$*</ID>
+    <ID>ReturnCount:FileHistoryManager.kt:FileHistoryManager$fun applyUpsert: Pair&lt;List&lt;RecentFile&gt;, String?&gt;</ID>
+    <ID>ReturnCount:FileHistoryManager.kt:FileHistoryManager$fun findEvictIndex: Int</ID>
+    <ID>SwallowedException:OpenRecentFileUseCase.kt:OpenRecentFileUseCase$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:CheckAvailabilityUseCase.kt:CheckAvailabilityUseCase$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:DefaultDetailsComponent.kt:DefaultDetailsComponent$e: Exception</ID>
+    <ID>TooGenericExceptionCaught:OpenRecentFileUseCase.kt:OpenRecentFileUseCase$e: Exception</ID>
   </CurrentIssues>
 </SmellBaseline>

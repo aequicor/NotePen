@@ -1,7 +1,5 @@
 <?xml version="1.0" ?>
 <SmellBaseline>
-  <ManuallySuppressedIssues></ManuallySuppressedIssues>
-  <CurrentIssues>
-    <ID>LongParameterList:MarkerRenderer.kt$( points: List&lt;DrawingPoint&gt;, colorArgb: Long, normalizedStrokeWidth: Float, pdfWidth: Float, pdfHeight: Float, extent: PageExtent, scratch: Path, )</ID>
-  </CurrentIssues>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues/>
 </SmellBaseline>
