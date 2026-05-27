@@ -1,5 +1,0 @@
-# .worktreeinclude — gitignored files Claude Code copies into each `claude --worktree` worktree.
-# One path or glob per line. List machine-specific, gitignored files the build needs.
-# Tracked files (incl. .envrc if you commit it) are carried by git and don't belong here.
-
-local.properties
