@@ -229,6 +229,14 @@ fun EditorPanel(
     pdfExporter: PdfExporter,
     reflowExtractor: PdfReflowExtractor,
     readerStored: StoredReaderSettings,
+    /**
+     * `true` после первой загрузки [readerStored] с диска. Пока `false` — фактическое
+     * значение `readerStored` неотличимо от дефолтных настроек, поэтому хром/фон/плейсхолдер
+     * НЕ красятся «темой ридера» (иначе пользователь увидит дефолт-ридер, а затем скачок
+     * в сохранённую тему через 50–200 мс I/O). После true — одним кадром переходим в
+     * сохранённую тему.
+     */
+    readerStoredLoaded: Boolean,
     onReaderStoredChange: (StoredReaderSettings) -> Unit,
     syncEngineFor: ((documentId: String) -> SyncEngine)?,
     peerClient: SyncClient?,
@@ -1132,8 +1140,11 @@ fun EditorPanel(
         val tocAvailable = pdfState.outline.isNotEmpty()
         // Reader theme colours, resolved the same way ReaderAirbar does
         // (StoredReaderSettings.current.toRenderSettings()). Only published in
-        // reading mode; null otherwise so the chrome keeps its MaterialTheme look.
-        val readerRender = if (readingModeVisible) readerStored.current.toRenderSettings() else null
+        // reading mode AND when the stored settings have been loaded from disk;
+        // otherwise null so the chrome keeps its MaterialTheme look and we avoid
+        // a default→saved flicker once the async load resolves.
+        val readerRender =
+            if (readingModeVisible && readerStoredLoaded) readerStored.current.toRenderSettings() else null
         SideEffect {
             onControlsChanged(
                 PanelControls(
@@ -1192,7 +1203,11 @@ fun EditorPanel(
     // Под (скрываемой) полосой вкладок поле красим фоном темы ридера, чтобы в режиме чтения
     // оно не мигало системным фоном на тёмных темах.
     val readingChromeBg =
-        if (pdfState.readingMode) readerStored.current.toRenderSettings().background else Color.Transparent
+        if (pdfState.readingMode && readerStoredLoaded) {
+            readerStored.current.toRenderSettings().background
+        } else {
+            Color.Transparent
+        }
     Box(modifier.fillMaxSize().onSizeChanged { panelSizePx = it }) {
         Box(Modifier.fillMaxSize().background(readingChromeBg).padding(top = tabStripReserve)) {
             PdfPagesViewer(
@@ -1524,12 +1539,17 @@ fun EditorPanel(
                         )
                     }
                 } else {
-                    val readerRender = readerStored.current.toRenderSettings()
-                    Box(Modifier.fillMaxSize().background(readerRender.background)) {
+                    // До завершения первой загрузки настроек ридера не угадываем тему —
+                    // показываем нейтральный MaterialTheme, чтобы плейсхолдер не прыгал
+                    // с дефолтной темы ридера в сохранённую, когда I/O resolved.
+                    val readerRender = if (readerStoredLoaded) readerStored.current.toRenderSettings() else null
+                    val placeholderBg = readerRender?.background ?: MaterialTheme.colorScheme.surface
+                    val placeholderText = readerRender?.textColor ?: MaterialTheme.colorScheme.onSurface
+                    Box(Modifier.fillMaxSize().background(placeholderBg)) {
                         Text(
                             text = "Готовим режим чтения…",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = readerRender.textColor,
+                            color = placeholderText,
                             modifier = Modifier.align(Alignment.Center),
                         )
                     }
@@ -1559,8 +1579,18 @@ fun EditorPanel(
                 // чтобы хром сливался с ридером (как и остальной хром этой панели), а
                 // подписи/иконки — под цвет текста темы, иначе на тёмной теме они
                 // остаются тёмными и нечитаемыми.
-                tint = if (pdfState.readingMode) readerStored.current.toRenderSettings().background else null,
-                contentColor = if (pdfState.readingMode) readerStored.current.toRenderSettings().textColor else null,
+                tint =
+                    if (pdfState.readingMode && readerStoredLoaded) {
+                        readerStored.current.toRenderSettings().background
+                    } else {
+                        null
+                    },
+                contentColor =
+                    if (pdfState.readingMode && readerStoredLoaded) {
+                        readerStored.current.toRenderSettings().textColor
+                    } else {
+                        null
+                    },
             )
         }
     }

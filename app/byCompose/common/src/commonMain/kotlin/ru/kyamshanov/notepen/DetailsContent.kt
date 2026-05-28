@@ -126,6 +126,7 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingPanel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
+import ru.kyamshanov.notepen.reflow.ui.toRenderSettings
 import ru.kyamshanov.notepen.session.SessionData
 import ru.kyamshanov.notepen.session.captureSession
 import ru.kyamshanov.notepen.session.createSessionRepository
@@ -299,6 +300,12 @@ fun DetailsContent(
     // Настройки ридера — глобальные (на все документы и панели); видимость самого
     // airbar — per-tab. Персист между запусками — через ReaderSettingsRepository (ниже).
     var readerStored by remember { mutableStateOf(StoredReaderSettings()) }
+    // `true` после первой загрузки настроек с диска (см. LaunchedEffect ниже). До этого
+    // фактическое значение `readerStored` неотличимо от дефолтных настроек, поэтому
+    // окрашивать хром/фон под «тему ридера» рано — пользователь увидит дефолт-ридер,
+    // а затем (через 50–200 мс I/O) скачок в сохранённую тему. Все ридер-зависимые
+    // цвета гасим до true и переключаемся ОДНИМ скачком в сохранённую тему.
+    var readerStoredLoaded by remember { mutableStateOf(false) }
 
     // Per-document tool state: save on lose-focus, restore on gain-focus. Keyed by
     // file path, so switching tabs (not just panels) swaps the active tool and two
@@ -410,7 +417,10 @@ fun DetailsContent(
 
     // Reader settings + user presets, persisted across documents (mirrors tool presets).
     val readerSettingsRepository = remember { createReaderSettingsRepository() }
-    LaunchedEffect(Unit) { readerStored = readerSettingsRepository.load() }
+    LaunchedEffect(Unit) {
+        readerStored = readerSettingsRepository.load()
+        readerStoredLoaded = true
+    }
     val onReaderStoredChange: (StoredReaderSettings) -> Unit = { updated ->
         readerStored = updated
         coroutineScope.launch { readerSettingsRepository.save(updated) }
@@ -666,11 +676,21 @@ fun DetailsContent(
             0.dp
         }
 
+    // Под скрытым хромом (режим чтения + airbar спрятан тапом) область над панелью —
+    // status-bar inset + резерв под TAB_BAR_HEIGHT — заполняется ИМЕННО этим фоном.
+    // В режиме чтения при загруженной теме переключаем на фон ридера, иначе там
+    // проступает дефолтный colorScheme.background и читается как «полоска сверху».
+    val rootBackground =
+        if (readingModeEnabled && readerStoredLoaded) {
+            readerStored.current.toRenderSettings().background
+        } else {
+            MaterialTheme.colorScheme.background
+        }
     GlassBackdropProvider(blurEnabled = readerStored.blurEnabled) {
         Box(
             modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
+                .background(rootBackground)
                 // Landscape side notch / punch-hole: inset the whole editor from the
                 // horizontal display cutout (and any side system bar) so the tab-strip
                 // edges — and the content below them — never slide under it. Consumed
@@ -828,6 +848,7 @@ fun DetailsContent(
                         pdfExporter = pdfExporter,
                         reflowExtractor = reflowExtractor,
                         readerStored = readerStored,
+                        readerStoredLoaded = readerStoredLoaded,
                         onReaderStoredChange = onReaderStoredChange,
                         syncEngineFor = syncEngineFor,
                         peerClient = peerClient,
