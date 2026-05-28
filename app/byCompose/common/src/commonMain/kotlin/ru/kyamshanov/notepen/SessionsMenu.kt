@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -138,13 +139,18 @@ fun SessionsMenu(
 /** Width of the sessions dropdown content (the menu itself wraps to it). */
 private val SESSIONS_MENU_WIDTH = 320.dp
 
-/** Restores the pre-session workspace (the crash survivor); disabled when none exists. */
+/**
+ * Restores the pre-session workspace (the crash survivor); disabled when none exists.
+ * Rendered as a primary [Button] (terracotta on the warm-beige palette) so it reads
+ * as the menu's main call-to-action and doesn't get lost in the tonal glass surface
+ * — a `FilledTonalButton` here collapses into the menu's tint and is hard to spot.
+ */
 @Composable
 private fun RestoreLastSessionButton(
     lastSession: SessionData?,
     onRestore: (SessionData) -> Unit,
 ) {
-    FilledTonalButton(
+    Button(
         onClick = { lastSession?.let(onRestore) },
         enabled = lastSession != null,
         modifier = Modifier.fillMaxWidth(),
