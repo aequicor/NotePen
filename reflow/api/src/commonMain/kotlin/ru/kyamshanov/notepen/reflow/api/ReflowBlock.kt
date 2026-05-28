@@ -113,10 +113,18 @@ public sealed interface ReflowBlock {
      * @property pageIndex нулевой индекс исходной страницы
      * @property bounds область на странице в нормализованных координатах
      *   `[0..1]` (см. [ReflowRect])
+     * @property aspectRatio истинное соотношение `width/height` картинки (в
+     *   собственных пикселях/точках, **не** в нормализованных координатах
+     *   страницы — те зависят от пропорций страницы). Хранится отдельно от
+     *   [bounds], чтобы высота врезки при рендере была детерминирована: ридер
+     *   считает её аналитически `round(contentWidthPx / aspectRatio)` ещё до
+     *   композиции, и она не плывёт при колебаниях ширины контейнера на 1-2 px
+     *   (HorizontalPager-transformations) или при повторной композиции страницы.
      */
     public data class Figure(
         public val pageIndex: Int,
         public val bounds: ReflowRect,
+        public val aspectRatio: Float,
     ) : ReflowBlock
 
     /**

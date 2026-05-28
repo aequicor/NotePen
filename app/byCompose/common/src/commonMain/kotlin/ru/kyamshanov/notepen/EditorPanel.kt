@@ -96,6 +96,8 @@ import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import ru.kyamshanov.notepen.reflow.createReflowLayoutCache
+import ru.kyamshanov.notepen.reflow.ui.LocalReflowLayoutCache
 import ru.kyamshanov.notepen.reflow.ui.LocalReflowSelection
 import ru.kyamshanov.notepen.reflow.ui.ReflowReader
 import ru.kyamshanov.notepen.reflow.ui.ReflowSelection
@@ -288,6 +290,9 @@ fun EditorPanel(
 
     // ---- Reading (reflow) mode -------------------------------------------
     val reflowReadingUseCase = remember(reflowExtractor) { BuildReflowReadingUseCase(reflowExtractor) }
+    // Дисковый layout-cache: один на сессию редактора. На cache HIT раскладка
+    // мгновенно поднимается из бинарника, экономя ~3-4 секунды bg-обмера.
+    val reflowLayoutCache = remember { createReflowLayoutCache() }
     val reflowListState = remember(pdfState) { LazyListState() }
     // Императивный «листнуть на ±N», который публикует ReflowReader, когда контент
     // готов. Через него хардварные клавиши (общий key-sink в DetailsContent →
@@ -1504,6 +1509,7 @@ fun EditorPanel(
                     CompositionLocalProvider(
                         LocalReflowSelection provides
                             ReflowSelection(immediate = toolMode == ToolMode.MARKER, onCreate = createHighlight),
+                        LocalReflowLayoutCache provides reflowLayoutCache,
                     ) {
                         ReflowReader(
                             document = reading.document,

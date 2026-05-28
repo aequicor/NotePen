@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.book
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -9,6 +10,9 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import java.io.File
+import kotlin.time.TimeSource
+
+private val sidecarLogger = KotlinLogging.logger {}
 
 /**
  * Хранит reflow-документ книги в JSON-файле рядом с кешированным PDF
@@ -36,7 +40,22 @@ internal object ReflowSidecar {
     fun read(pdfPath: String): ReflowDocument? =
         runCatching {
             val file = pathFor(pdfPath)
-            if (file.exists()) json.decodeFromString(ReflowDocDto.serializer(), file.readText()).toModel() else null
+            if (!file.exists()) {
+                sidecarLogger.info { "PdfReflow: sidecar miss path=${file.name}" }
+                return@runCatching null
+            }
+            val totalMark = TimeSource.Monotonic.markNow()
+            val text = file.readText()
+            val readMs = totalMark.elapsedNow().inWholeMilliseconds
+            val decodeMark = TimeSource.Monotonic.markNow()
+            val doc = json.decodeFromString(ReflowDocDto.serializer(), text).toModel()
+            val decodeMs = decodeMark.elapsedNow().inWholeMilliseconds
+            val totalMs = totalMark.elapsedNow().inWholeMilliseconds
+            sidecarLogger.info {
+                "PdfReflow: sidecar hit size=${file.length()}b blocks=${doc.blocks.size} " +
+                    "read=${readMs}ms decode=${decodeMs}ms total=${totalMs}ms"
+            }
+            doc
         }.getOrNull()
 }
 
@@ -88,6 +107,15 @@ private sealed interface ReflowBlockDto {
     data class Figure(
         val pageIndex: Int,
         val bounds: RectDto,
+        /**
+         * Истинное соотношение `width/height` картинки. Поле добавлено вместе с
+         * детерминированной раскладкой Figure: до его появления (старые сайдкары)
+         * читалка вычисляла высоту из `Modifier.aspectRatio` на основе пропорций
+         * самого изображения — теперь это поле прокидывается из рендерера. Если
+         * сайдкар старого формата (поле `null`), читалка получит грубую оценку
+         * из bounds; при следующей перегенерации сайдкара значение проставится.
+         */
+        val aspectRatio: Float? = null,
     ) : ReflowBlockDto
 
     @Serializable
@@ -135,7 +163,7 @@ private fun ReflowBlock.toDto(): ReflowBlockDto =
         is ReflowBlock.ListItem -> ReflowBlockDto.ListItem(text, source.map { it.toDto() })
         is ReflowBlock.Table ->
             ReflowBlockDto.Table(rows.map { row -> row.cells.map { CellDto(it.text, it.source.map { s -> s.toDto() }) } })
-        is ReflowBlock.Figure -> ReflowBlockDto.Figure(pageIndex, bounds.toDto())
+        is ReflowBlock.Figure -> ReflowBlockDto.Figure(pageIndex, bounds.toDto(), aspectRatio)
         ReflowBlock.Divider -> ReflowBlockDto.Divider
     }
 
@@ -149,7 +177,16 @@ private fun ReflowBlockDto.toModel(): ReflowBlock =
             ReflowBlock.Table(
                 rows.map { row -> ReflowBlock.TableRow(row.map { ReflowBlock.TableCell(it.text, it.source.map { s -> s.toModel() }) }) },
             )
-        is ReflowBlockDto.Figure -> ReflowBlock.Figure(pageIndex, bounds.toModel())
+        is ReflowBlockDto.Figure -> {
+            val rect = bounds.toModel()
+            // Fallback для старых сайдкаров: оценка из bounds — ratio относительно
+            // пропорций страницы (не самой картинки), но без альтернатив; следующая
+            // перегенерация сайдкара рендерером проставит точное значение.
+            val ratio =
+                aspectRatio
+                    ?: if (rect.height > 0f) rect.width / rect.height else 1f
+            ReflowBlock.Figure(pageIndex, rect, ratio)
+        }
         ReflowBlockDto.Divider -> ReflowBlock.Divider
     }
 

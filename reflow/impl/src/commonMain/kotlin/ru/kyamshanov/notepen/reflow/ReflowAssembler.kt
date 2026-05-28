@@ -452,7 +452,11 @@ internal object ReflowAssembler {
 
         fun addImage(rect: ReflowRect) {
             flush()
-            blocks += ReflowBlock.Figure(pageIndex, rect.normalised(widthPt, heightPt))
+            // aspectRatio считаем по исходным PDF-точкам ДО нормализации: после
+            // нормализации `bounds.width/bounds.height` отражает пропорцию относительно
+            // страницы, а не самой картинки.
+            val ratio = if (rect.height > 0f) rect.width / rect.height else 1f
+            blocks += ReflowBlock.Figure(pageIndex, rect.normalised(widthPt, heightPt), ratio)
         }
 
         fun addTable(table: ReflowBlock.Table) {

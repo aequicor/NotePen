@@ -1,10 +1,14 @@
 package ru.kyamshanov.notepen.reflow
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import kotlin.time.TimeSource
+
+private val buildLogger = KotlinLogging.logger {}
 
 /**
  * Готовые данные для reflow-ридера: переверстанный документ и диапазоны-
@@ -44,7 +48,11 @@ public class BuildReflowReadingUseCase(
         highlightsByPage: Map<Int, List<StickyHighlight>> = emptyMap(),
         document: ReflowDocument? = null,
     ): ReflowReading {
+        val totalMark = TimeSource.Monotonic.markNow()
+        val extractMark = TimeSource.Monotonic.markNow()
         val doc = document ?: extractor.extract(path)
+        val extractMs = extractMark.elapsedNow().inWholeMilliseconds
+        val anchorMark = TimeSource.Monotonic.markNow()
         val strokeAnchors =
             strokesByPage.entries.flatMap { (pageIndex, strokes) ->
                 strokes.flatMap { stroke -> StrokeTextMapper.anchorsFor(doc, pageIndex, stroke) }
@@ -53,6 +61,13 @@ public class BuildReflowReadingUseCase(
             highlightsByPage.entries.flatMap { (pageIndex, highlights) ->
                 highlights.flatMap { highlight -> StrokeTextMapper.anchorsForRects(doc, pageIndex, highlight.rects) }
             }
+        val anchorMs = anchorMark.elapsedNow().inWholeMilliseconds
+        buildLogger.info {
+            "PdfReflow: reading-build extract=${extractMs}ms anchors=${anchorMs}ms " +
+                "blocks=${doc.blocks.size} strokes=${strokesByPage.values.sumOf { it.size }} " +
+                "highlights=${highlightsByPage.values.sumOf { it.size }} cached=${document != null} " +
+                "total=${totalMark.elapsedNow().inWholeMilliseconds}ms"
+        }
         return ReflowReading(document = doc, highlights = strokeAnchors + highlightAnchors)
     }
 }

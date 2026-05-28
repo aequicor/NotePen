@@ -80,14 +80,21 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.PageTransition
@@ -100,6 +107,10 @@ import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
 import kotlin.math.abs
+import kotlin.math.roundToInt
+import kotlin.time.TimeSource
+
+private val readerLogger = KotlinLogging.logger {}
 
 /**
  * Общий на весь ридер кэш растров страниц для врезок-картинок ([FigureView]),
@@ -687,35 +698,177 @@ private fun PagedReflowContent(
                 // Без неё смена ориентации / split-screen не сбрасывает замер.
                 maxWidth,
             )
+        // Phase 0 telemetry: маркеры для трассировки открытия reader-mode.
+        // openMark — момент первой композиции страничного контента для документа;
+        // measurePassMark — момент старта невидимого прохода обмера (сбрасывается
+        // и при смене типографики/ширины, т.е. при ре-пагинации).
+        val openMark = remember(document) { TimeSource.Monotonic.markNow() }
+        val measurePassMark = remember(document, measureKey) { TimeSource.Monotonic.markNow() }
+        val firstPageLogged = remember(document) { mutableStateOf(false) }
+
+        // Ширина контентной колонки в пикселях. Используется и для бэк-обмера
+        // через TextMeasurer, и как ключ дискового layout-кэша (см. LaunchedEffect
+        // ниже). Считается из BoxWithConstraints.maxWidth с учётом
+        // maxContentWidth и горизонтального padding'а — той же формулой, что
+        // диктует фактический рендер LazyColumn внутри pager'а.
+        val contentWidthPx =
+            with(density) {
+                (maxWidth.coerceAtMost(settings.maxContentWidth) - settings.contentPadding * 2)
+                    .roundToPx()
+                    .coerceAtLeast(1)
+            }
+        // figureHeights — стейт-мап (а не remember-вычисление), потому что значение
+        // хранится в layout-кэше: после bg-measure / cache-load populate в
+        // LaunchedEffect ниже. Если бы значения пересчитывались по текущему
+        // contentWidthPx «налету», transient-колебание maxWidth на 1-2 px
+        // приводило бы к иному round(...) и второй re-paginate с visual shift
+        // после first-page. Из кэша поднимаем ровно те значения, что были при
+        // записи.
+        val figureHeights = remember(document, measureKey) { mutableStateMapOf<Int, Int>() }
+        val textBlockCount = remember(document) { document.blocks.count { it !is ReflowBlock.Figure } }
+
+        // Высоты и линейные срезы блоков, измеряемые на фоне через TextMeasurer
+        // (детерминированно по (text, style, constraints)). Старый «невидимый
+        // Compose-проход» удалён: он синхронно блокировал main-поток на 13-17 с
+        // и был источником ANR + drift'а при возврате на читанную страницу.
         val heights = remember(document, measureKey) { mutableStateMapOf<Int, Int>() }
-        // Нижние границы строк делимых блоков (для построчной раскладки страниц): снимаются
-        // в том же невидимом проходе обмера, что и высоты.
         val lineBottoms = remember(document, measureKey) { mutableStateMapOf<Int, List<Float>>() }
-        val measured = document.blocks.isEmpty() || heights.size >= document.blocks.size
+        val measured = textBlockCount == 0 || heights.size >= textBlockCount
+
+        // TextMeasurer обмера блоков. cacheSize=0 — внутренний LRU синхронизован
+        // mutex'ом и сериализует параллельные measure; для 7000 уникальных блоков
+        // он бесполезен, а память жрёт.
+        val textMeasurer = rememberTextMeasurer(cacheSize = 0)
+        // Дисковый layout-cache: тиже cr3cache в KOReader. Считаем раскладку один
+        // раз на сочетание (содержимое × ширина × типографика), при повторном
+        // открытии — мгновенно поднимаем готовые heights/lineBottoms.
+        val layoutCache = LocalReflowLayoutCache.current
+        val docFingerprint = remember(document) { fingerprintDocument(document) }
+        LaunchedEffect(document, measureKey, contentWidthPx, layoutCache) {
+            if (textBlockCount == 0 || contentWidthPx <= 0) return@LaunchedEffect
+            val cacheKey =
+                LayoutCacheKey(
+                    docFingerprint = docFingerprint,
+                    contentWidthPx = contentWidthPx,
+                    fontFamilyId = settings.fontFamily.toString(),
+                    fontSizeSp = settings.fontSize.value,
+                    lineHeightMultiplier = settings.lineHeightMultiplier,
+                    letterSpacingSp = settings.letterSpacing.value,
+                    wordSpacingSp = settings.wordSpacing.value,
+                    hyphenation = settings.hyphenation,
+                    align = settings.align.name,
+                    bionic = settings.bionic,
+                    columnChars = settings.columnChars,
+                    contentPaddingDp = settings.contentPadding.value,
+                )
+            val cached = layoutCache.read(cacheKey)
+            if (cached != null) {
+                // Все три карты пишем АТОМАРНО в один snapshot — иначе первая
+                // рекомпозиция увидит heights:populated, figureHeights:empty
+                // → blockLayouts с figureHeights=0 → paginate с неверным
+                // page-count → re-paginate после второго putAll → visual shift.
+                figureHeights.putAll(cached.figureHeights)
+                heights.putAll(cached.textHeights)
+                lineBottoms.putAll(cached.textLineBottoms)
+                readerLogger.info {
+                    "PdfReflow: layout-cache populated text=${cached.textHeights.size} " +
+                        "figures=${cached.figureHeights.size} " +
+                        "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
+                }
+                return@LaunchedEffect
+            }
+            // На cache MISS вычисляем figureHeights аналитически (round(width / aspect)
+            // — детерминированно для заданной contentWidthPx) и складываем рядом с
+            // bg-measure-результатом текстовых блоков. Пишем всё в кэш одним блоком.
+            val newFigureHeights = HashMap<Int, Int>()
+            document.blocks.forEachIndexed { index, block ->
+                if (block is ReflowBlock.Figure) {
+                    val ratio = block.aspectRatio.takeIf { it > 0f } ?: 1f
+                    newFigureHeights[index] = (contentWidthPx / ratio).roundToInt().coerceAtLeast(1)
+                }
+            }
+            readerLogger.info {
+                "PdfReflow: bg-measure-start blocks=${document.blocks.size} " +
+                    "text=$textBlockCount widthPx=$contentWidthPx " +
+                    "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
+            }
+            val mark = TimeSource.Monotonic.markNow()
+            val (newHeights, newLineBottoms) =
+                withContext(Dispatchers.Default) {
+                    val h = HashMap<Int, Int>(textBlockCount)
+                    val lb = HashMap<Int, List<Float>>(textBlockCount)
+                    document.blocks.forEachIndexed { index, block ->
+                        if (block is ReflowBlock.Figure) return@forEachIndexed
+                        val m =
+                            BlockHeightCalculator.measure(
+                                block = block,
+                                index = index,
+                                contentWidthPx = contentWidthPx,
+                                settings = settings,
+                                textMeasurer = textMeasurer,
+                                density = density,
+                                figureHeights = newFigureHeights,
+                            )
+                        h[index] = m.heightPx
+                        if (m.lineBottoms.isNotEmpty()) lb[index] = m.lineBottoms
+                        // Cooperative cancellation: бэк-обмер 7000 блоков на mid-range
+                        // Huawei ≈ 1-2 секунды; даём шанс отменить, если пользователь
+                        // вышел из reader-mode / переключил типографику.
+                        if (index and 0x3F == 0) currentCoroutineContext().ensureActive()
+                    }
+                    h to lb
+                }
+            figureHeights.putAll(newFigureHeights)
+            heights.putAll(newHeights)
+            lineBottoms.putAll(newLineBottoms)
+            readerLogger.info {
+                "PdfReflow: bg-measure-done blocks=$textBlockCount " +
+                    "took=${mark.elapsedNow().inWholeMilliseconds}ms " +
+                    "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
+            }
+            // Записываем в кэш ПОСЛЕ обновления state (страница уже отрисовалась)
+            // — пользователь не ждёт I/O записи. Ошибки/cancellation залогируются
+            // и проглотятся внутри cache.write.
+            layoutCache.write(
+                cacheKey,
+                CachedLayout(
+                    textHeights = newHeights,
+                    textLineBottoms = newLineBottoms,
+                    figureHeights = newFigureHeights,
+                ),
+            )
+        }
+        LaunchedEffect(measured, document, measureKey) {
+            if (measured) {
+                readerLogger.info {
+                    "PdfReflow: measured blocks=${document.blocks.size} " +
+                        "measure=${measurePassMark.elapsedNow().inWholeMilliseconds}ms " +
+                        "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
+                }
+            }
+        }
 
         if (!measured) {
-            Box(Modifier.fillMaxSize().clipToBounds().alpha(0f)) {
-                Column(
-                    modifier =
-                        Modifier
-                            .align(Alignment.TopCenter)
-                            .widthIn(max = settings.maxContentWidth)
-                            .fillMaxWidth()
-                            .padding(horizontal = settings.contentPadding),
-                ) {
-                    document.blocks.forEachIndexed { index, block ->
-                        Box(Modifier.fillMaxWidth().onSizeChanged { heights[index] = it.height }) {
-                            ReflowBlockView(
-                                block,
-                                anchorsByBlock[index].orEmpty(),
-                                settings,
-                                renderPage,
-                                blockIndex = index,
-                                onLines = { lineBottoms[index] = it },
-                            )
-                        }
-                    }
-                }
+            // Лоадер вместо «невидимого Compose-прохода»: пока [BlockHeightCalculator]
+            // считает высоты на фоновом диспетчере, main-поток свободен. Жесты
+            // потребляются (consume) — иначе тап-зоны родителя сработали бы на
+            // экране, где ещё ничего не отрисовано.
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume() }
+                        },
+                contentAlignment = Alignment.Center,
+            ) {
+                BasicText(
+                    text = "Готовим читалку…",
+                    style =
+                        settings
+                            .paragraphStyle()
+                            .copy(color = settings.textColor.copy(alpha = FIGURE_LABEL_ALPHA)),
+                )
             }
             return@BoxWithConstraints
         }
@@ -731,15 +884,30 @@ private fun PagedReflowContent(
                     block is ReflowBlock.Paragraph ||
                         block is ReflowBlock.ListItem ||
                         block is ReflowBlock.Blockquote
+                // Figure: высота строго из figureHeights (round(contentWidthPx /
+                // aspectRatio)). Остальные блоки — из onSizeChanged-обмера.
+                val heightPx =
+                    if (block is ReflowBlock.Figure) {
+                        figureHeights[index]?.toFloat() ?: 0f
+                    } else {
+                        (heights[index] ?: 0).toFloat()
+                    }
                 ReaderPagination.BlockLayout(
-                    heightPx = (heights[index] ?: 0).toFloat(),
+                    heightPx = heightPx,
                     lineBottomsPx = if (splittable) lineBottoms[index].orEmpty() else emptyList(),
                     breakAfter = block !is ReflowBlock.Heading,
                 )
             }
         val windows =
             remember(pageHeightPx, spacingPx, blockLayouts) {
-                ReaderPagination.pageWindows(blockLayouts, pageHeightPx, spacingPx)
+                val paginateMark = TimeSource.Monotonic.markNow()
+                val computed = ReaderPagination.pageWindows(blockLayouts, pageHeightPx, spacingPx)
+                readerLogger.info {
+                    "PdfReflow: paginate windows=${computed.size} blocks=${blockLayouts.size} " +
+                        "took=${paginateMark.elapsedNow().inWholeMilliseconds}ms " +
+                        "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
+                }
+                computed
             }
         if (windows.isEmpty()) return@BoxWithConstraints
 
@@ -809,6 +977,17 @@ private fun PagedReflowContent(
                     .padding(top = settings.topMargin, bottom = settings.bottomMargin)
                     .clipToBounds(),
         ) { pageIndex ->
+            if (!firstPageLogged.value) {
+                SideEffect {
+                    if (!firstPageLogged.value) {
+                        firstPageLogged.value = true
+                        readerLogger.info {
+                            "PdfReflow: first-page-composed page=$pageIndex windows=${windows.size} " +
+                                "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
+                        }
+                    }
+                }
+            }
             val pageWindow = windows[pageIndex]
             // Высота окна обрезана по границе строки: нижняя строка не режется пополам, а внизу
             // остаётся зазор меньше строки (поле, как в книге), а не целый незаполненный абзац.
@@ -835,13 +1014,15 @@ private fun PagedReflowContent(
                     verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
                 ) {
                     itemsIndexed(document.blocks) { index, block ->
-                        // onSizeChanged ловит дорастание блока после первого замера (FigureView
-                        // подгружает растр позже) → ре-пагинация. Гвард против лишней записи.
-                        Box(
-                            Modifier.fillMaxWidth().onSizeChanged { size ->
-                                if (heights[index] != size.height) heights[index] = size.height
-                            },
-                        ) {
+                        // onSizeChanged больше не используется: высоты блоков заданы
+                        // детерминированно (BlockHeightCalculator на фоне +
+                        // figureHeights аналитически), а ре-замер на render-фазе
+                        // — главный источник layout drift'а при возврате на читанную
+                        // страницу (defect b). Если TextMeasurer-обмер расходится
+                        // с BasicText-рендером, корень — в TextStyle (см.
+                        // DeterministicLineHeight / readerPlatformTextStyle), не
+                        // в auto-correction после рендера.
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             ReflowBlockView(
                                 block,
                                 anchorsByBlock[index].orEmpty(),
@@ -1058,8 +1239,12 @@ private fun FigureView(
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
 ) {
+    // Истинный aspect берётся из figure.aspectRatio (поле PDF-уровня) — он
+    // детерминирован и одинаков для placeholder и Canvas, поэтому подгрузка
+    // растра не меняет высоту блока и не дёргает пагинацию.
+    val ratio = figure.aspectRatio.takeIf { it > 0f } ?: 1f
     if (renderPage == null) {
-        FigurePlaceholder(settings)
+        FigurePlaceholder(settings, ratio)
         return
     }
     // Засеиваем начальным значением из общего кэша: при ре-композиции фигуры
@@ -1071,7 +1256,7 @@ private fun FigureView(
     }
     val bitmap = pageBitmap
     if (bitmap == null) {
-        FigurePlaceholder(settings)
+        FigurePlaceholder(settings, ratio)
         return
     }
     val bounds = figure.bounds
@@ -1079,7 +1264,7 @@ private fun FigureView(
     val srcTop = (bounds.top * bitmap.height).toInt().coerceIn(0, bitmap.height - 1)
     val srcWidth = (bounds.width * bitmap.width).toInt().coerceIn(1, bitmap.width - srcLeft)
     val srcHeight = (bounds.height * bitmap.height).toInt().coerceIn(1, bitmap.height - srcTop)
-    Canvas(modifier = Modifier.fillMaxWidth().aspectRatio(srcWidth.toFloat() / srcHeight.toFloat())) {
+    Canvas(modifier = Modifier.fillMaxWidth().aspectRatio(ratio)) {
         drawImage(
             image = bitmap,
             srcOffset = IntOffset(srcLeft, srcTop),
@@ -1214,11 +1399,15 @@ private fun RhythmPause(settings: ReflowReaderSettings) {
 }
 
 @Composable
-private fun FigurePlaceholder(settings: ReflowReaderSettings) {
+private fun FigurePlaceholder(
+    settings: ReflowReaderSettings,
+    aspectRatio: Float,
+) {
     Box(
         modifier =
             Modifier
                 .fillMaxWidth()
+                .aspectRatio(aspectRatio)
                 .background(settings.textColor.copy(alpha = FIGURE_PLACEHOLDER_ALPHA)),
     ) {
         BasicText(
@@ -1229,7 +1418,24 @@ private fun FigurePlaceholder(settings: ReflowReaderSettings) {
     }
 }
 
-private fun ReflowReaderSettings.paragraphStyle(): TextStyle =
+// Явный LineHeightStyle фиксирует высоту строки одинаково между TextMeasurer
+// (фоновый обмер блока, см. BlockHeightCalculator) и BasicText (рендер).
+// Trim.Both убирает «лишний воздух» сверху первой строки и снизу последней (как
+// делает традиционная книжная типографика), оставляя только межстрочный
+// интервал внутри абзаца. Это и предотвращает разрежённый вид (Trim.None
+// добавляет ~20-30% к высоте каждого блока), и сводит к нулю drift между
+// измерением и рендером — иначе верхняя строка следующей страницы «срезалась»
+// после переноса по границе блока. PlatformTextStyle(includeFontPadding=false)
+// на Android дополнительно убирает Android-специфичный fontPadding (см.
+// [readerPlatformTextStyle]).
+@Suppress("DEPRECATION")
+private val DeterministicLineHeight =
+    LineHeightStyle(
+        alignment = LineHeightStyle.Alignment.Proportional,
+        trim = LineHeightStyle.Trim.Both,
+    )
+
+internal fun ReflowReaderSettings.paragraphStyle(): TextStyle =
     TextStyle(
         color = textColor,
         fontFamily = resolveReaderFontFamily(fontFamily),
@@ -1238,9 +1444,11 @@ private fun ReflowReaderSettings.paragraphStyle(): TextStyle =
         letterSpacing = letterSpacing,
         textAlign = if (align == ReaderAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start,
         hyphens = if (hyphenation) Hyphens.Auto else Hyphens.None,
+        lineHeightStyle = DeterministicLineHeight,
+        platformStyle = readerPlatformTextStyle(),
     )
 
-private fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
+internal fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
     val scale =
         when (level) {
             1 -> HEADING_SCALE_1
@@ -1254,6 +1462,8 @@ private fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
         fontSize = size.sp,
         lineHeight = (size * HEADING_LINE_HEIGHT_MULTIPLIER).sp,
         fontWeight = FontWeight.SemiBold,
+        lineHeightStyle = DeterministicLineHeight,
+        platformStyle = readerPlatformTextStyle(),
     )
 }
 
@@ -1262,7 +1472,7 @@ private fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
  * [source], межсловный трекинг, bionic-выделение начал слов и фон-подсветку
  * [anchors]. Подсветка накладывается последней, поэтому перекрывает фон inline-кода.
  */
-private fun styledText(
+internal fun styledText(
     text: String,
     source: List<SourceSpan>,
     anchors: List<TextAnchor>,
@@ -1412,12 +1622,12 @@ private const val RULER_BAND_ALPHA = 0.06f
 private const val RULER_LINE_ALPHA = 0.18f
 private val NIGHT_TINT = Color(0xFFFF7A1A)
 
-private val TABLE_BORDER_WIDTH = 1.dp
-private val TABLE_CELL_PADDING = 8.dp
+internal val TABLE_BORDER_WIDTH = 1.dp
+internal val TABLE_CELL_PADDING = 8.dp
 private const val TABLE_BORDER_ALPHA = 0.22f
 private const val TABLE_HEADER_ALPHA = 0.06f
 
-private val BLOCKQUOTE_BAR_WIDTH = 3.dp
+internal val BLOCKQUOTE_BAR_WIDTH = 3.dp
 private const val BLOCKQUOTE_BAR_ALPHA = 0.3f
 private const val DIVIDER_LINE_FRACTION = 0.2f
 private const val DIVIDER_LINE_ALPHA = 0.25f

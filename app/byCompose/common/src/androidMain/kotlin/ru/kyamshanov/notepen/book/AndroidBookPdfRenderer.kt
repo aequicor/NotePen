@@ -418,6 +418,7 @@ object AndroidBookPdfRenderer {
                             right = (x + width).toFloat() / PAGE_WIDTH,
                             bottom = (cursorY + height).toFloat() / PAGE_HEIGHT,
                         ),
+                    aspectRatio = if (height > 0) width.toFloat() / height else 1f,
                 )
             cursorY += height + IMAGE_GAP
             return figure
