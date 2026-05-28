@@ -17,12 +17,18 @@ import ru.kyamshanov.notepen.sync.domain.port.PeerServer
  * Owns the [HostQrPairingCoordinator] lifecycle and forwards per-peer actions
  * (approve / reject / disconnect) to the underlying [PeerServer]. The view
  * subscribes to [state] and calls action methods on user input.
+ *
+ * The [PeerServer] is fetched lazily via [peerServerProvider] so the heavy
+ * sync stack can stay un-instantiated until the user actually clicks
+ * «Разрешить подключение по QR». [onStop], if supplied, tears that stack
+ * down again when the server is stopped.
  */
 class HostQrPairingViewModel(
-    private val peerServer: PeerServer,
+    private val peerServerProvider: suspend () -> PeerServer,
     private val qrEncoder: QrEncoder,
     private val hostDeviceName: String,
     private val scope: CoroutineScope,
+    private val onStop: (suspend () -> Unit)? = null,
 ) {
     private val _state = MutableStateFlow<HostQrPairingCoordinator.State?>(null)
     val state: StateFlow<HostQrPairingCoordinator.State?> = _state.asStateFlow()
@@ -39,6 +45,7 @@ class HostQrPairingViewModel(
         _state.value = null
         runJob =
             scope.launch {
+                val peerServer = peerServerProvider()
                 val coordinator =
                     HostQrPairingCoordinator(
                         peerServer = peerServer,
@@ -61,18 +68,21 @@ class HostQrPairingViewModel(
         runJob?.cancel()
         runJob = null
         _state.value = null
-        scope.launch { peerServer.stop() }
+        scope.launch {
+            peerServerProvider().stop()
+            onStop?.invoke()
+        }
     }
 
     /** Approves the pending peer with the given id; no-op if none. */
     fun approve(peerId: String) {
-        scope.launch { peerServer.approve(peerId) }
+        scope.launch { peerServerProvider().approve(peerId) }
     }
 
     /** Rejects the pending peer with the given id; no-op if none. */
     fun reject(peerId: String) {
         scope.launch {
-            peerServer.reject(peerId)
+            peerServerProvider().reject(peerId)
             // Dismiss the approval dialog — reject produces no connectedPeers signal.
             approvalResolutions.emit(peerId)
         }
@@ -80,11 +90,11 @@ class HostQrPairingViewModel(
 
     /** Disconnects one connected peer; the server keeps running for the others. */
     fun disconnect(peerId: String) {
-        scope.launch { peerServer.disconnect(peerId) }
+        scope.launch { peerServerProvider().disconnect(peerId) }
     }
 
     /** Disconnects every connected peer; the server keeps running. */
     fun disconnectAll() {
-        scope.launch { peerServer.disconnectAll() }
+        scope.launch { peerServerProvider().disconnectAll() }
     }
 }
