@@ -14,13 +14,13 @@ import androidx.compose.ui.unit.dp
 internal val GlassCornerRadius = 24.dp
 
 /**
- * Blur applied to the captured backdrop. Light enough to keep the panel transparent,
- * strong enough that text bleeding through doesn't collide with the panel's own content.
+ * Blur applied to the captured backdrop. Strong enough to read as a clear "frosted glass"
+ * refraction over a vibrant background, while keeping panel content sharp on top.
  */
-internal val GlassBlurRadius = 12.dp
+internal val GlassBlurRadius = 20.dp
 
-/** Luminosity tint baked into the glass; low so it reads as transparent but still delineated. */
-internal const val GLASS_TINT_ALPHA = 0.2f
+/** Luminosity tint baked into the glass; gives surfaces a clearly visible frosted look. */
+internal const val GLASS_TINT_ALPHA = 0.35f
 
 /**
  * Vibrancy: how far the backdrop's luminance range is compressed toward the panel's tint

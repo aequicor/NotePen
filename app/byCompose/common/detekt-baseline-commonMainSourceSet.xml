@@ -2,7 +2,6 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:ClientPairingPanel.android.kt:@Composable actual fun CameraScanSlot</ID>
     <ID>CyclomaticComplexMethod:DetailsContent.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun DetailsContent</ID>
     <ID>CyclomaticComplexMethod:EditorPanel.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun EditorPanel</ID>
     <ID>CyclomaticComplexMethod:EditorPanel.kt:private fun handlePanelEraseFinished</ID>
@@ -17,7 +16,6 @@
     <ID>CyclomaticComplexMethod:TabBar.kt:@Composable fun TabBar</ID>
     <ID>CyclomaticComplexMethod:TabBar.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun TabChip</ID>
     <ID>ExplicitItLambdaMultipleParameters:PeerCatalogContent.kt:{ idx, it -&gt; "${idx}_${it.documentId}" }</ID>
-    <ID>LongMethod:ClientPairingPanel.android.kt:@Composable actual fun CameraScanSlot</ID>
     <ID>LongMethod:ClientPairingPanel.kt:@Composable fun ClientPairingPanel</ID>
     <ID>LongMethod:ClientPairingPanel.kt:@Composable private fun ConnectionsScreen</ID>
     <ID>LongMethod:DetailsContent.kt:@Composable private fun BoxScope.FocusedPanelMenus</ID>
@@ -25,8 +23,8 @@
     <ID>LongMethod:EditorPanel.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun EditorPanel</ID>
     <ID>LongMethod:FolderCard.kt:@Composable fun FolderCard</ID>
     <ID>LongMethod:FolderContent.kt:@Composable fun FolderContent</ID>
-    <ID>LongMethod:MainContent.kt:@Composable private fun RecentFilesAndFoldersList</ID>
     <ID>LongMethod:MainContent.kt:@Composable fun MainContent</ID>
+    <ID>LongMethod:MainContent.kt:@Composable private fun RecentFilesAndFoldersList</ID>
     <ID>LongMethod:PageIndicatorAirbar.kt:@Composable private fun EditablePageNumber</ID>
     <ID>LongMethod:PageThumbnailsSidebar.kt:@Composable fun PageThumbnailsSidebar</ID>
     <ID>LongMethod:PageThumbnailsSidebar.kt:@Composable private fun FilterModeChip</ID>
@@ -43,17 +41,11 @@
     <ID>LongMethod:ToolRail.kt:internal fun systemControlEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LongMethod:ToolRail.kt:internal fun unifiedToolWheelEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LongMethod:ToolSettingsFloatingPanel.kt:internal fun toolPresetEntries: List&lt;WheelEntry&gt;</ID>
-    <ID>LoopWithTooManyJumpStatements:AndroidPdfExporter.kt:AndroidPdfExporter$for</ID>
-    <ID>LoopWithTooManyJumpStatements:JvmPdfExporter.kt:JvmPdfExporter$for</ID>
     <ID>LoopWithTooManyJumpStatements:PeerCatalogViewModel.kt:PeerCatalogViewModel$for</ID>
     <ID>MatchingDeclarationName:BookFileTypes.kt:BookFormat</ID>
     <ID>MatchingDeclarationName:ClientPairingPanel.kt:ClientPairingScreen</ID>
     <ID>MatchingDeclarationName:PageThumbnailsSidebar.kt:PageFilterMode</ID>
     <ID>MatchingDeclarationName:PeerCatalogComponent.kt:PeerCatalogComponentImpl : PeerCatalogComponentComponentContext</ID>
-    <ID>MaxLineLength:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer.PageComposer$canvas.drawLine(MARGIN.toFloat(), cursorY.toFloat(), (PAGE_WIDTH - MARGIN).toFloat(), cursorY.toFloat(), paint)</ID>
-    <ID>MaxLineLength:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer.PageComposer$paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)</ID>
-    <ID>MaxLineLength:AndroidDocumentLoader.kt:AndroidDocumentLoader$override suspend fun load: PdfDocument</ID>
-    <ID>MaxLineLength:AndroidPdfExporter.kt:AndroidPdfExporter$val pageInfo = PdfDocument.PageInfo.Builder(bitmapWidth, bitmapHeight, i + 1).create()</ID>
     <ID>MaxLineLength:DetailsContent.kt:modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp)</ID>
     <ID>MaxLineLength:DetailsContent.kt:vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))</ID>
     <ID>MaxLineLength:DetailsContent.kt:vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))</ID>
@@ -64,12 +56,9 @@
     <ID>MaxLineLength:EditorPanel.kt:if (magnifierState.attachment != ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN) return@LaunchedEffect</ID>
     <ID>MaxLineLength:EditorPanel.kt:val result = pdfExporter.export(sourcePdfPath = filePath, annotations = annotations, outputPath = outputPath)</ID>
     <ID>MaxLineLength:GridContainer.kt:GridColumn(layout, p[1], p[3], onSetRatio, onFocusPanel, content, heightPx, Modifier.weight(1f - layout.ratios[0]))</ID>
-    <ID>MaxLineLength:JmDnsServiceRegistrar.kt:JmDnsServiceRegistrar$logger.info { "mDNS registered: ${device.name} port=${device.port} bind=${bindAddress?.hostAddress ?: "default"}" }</ID>
-    <ID>MaxLineLength:JvmBookPdfRenderer.kt:JvmBookPdfRenderer.PageComposer$paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)</ID>
-    <ID>MaxLineLength:JvmDocumentLoader.kt:JvmDocumentLoader$override suspend fun load: PdfDocument</ID>
     <ID>MaxLineLength:MainScreenViewModel.kt:MainScreenViewModel$if (m.id == intent.existingId) m.copy(availabilityStatus = AvailabilityStatus.FILE_ERROR) else m</ID>
-    <ID>MaxLineLength:PdfExporterJvm.kt:actual fun createPdfExporter: PdfExporter</ID>
-    <ID>MaxLineLength:ReaderSettingsRepositoryAndroid.kt:actual fun createReaderSettingsRepository: ReaderSettingsRepository</ID>
+    <ID>MaxLineLength:Res.kt:Res$public</ID>
+    <ID>MaxLineLength:Res.kt:Res$public suspend</ID>
     <ID>MaxLineLength:RootContent.kt:?:</ID>
     <ID>MaxLineLength:TabBar.kt:.</ID>
     <ID>MaxLineLength:TabSession.kt:TabSession$val tab = DocumentTab(id = idGenerator.next(), filePath = ts.filePath, displayName = ts.displayName)</ID>
@@ -86,26 +75,12 @@
     <ID>ReturnCount:TabSession.kt:TabSession$fun moveTabToNewPanel</ID>
     <ID>ReturnCount:WorkspaceLayout.kt:WorkspaceLayout$fun withPanelTabs: WorkspaceLayout?</ID>
     <ID>SwallowedException:MainScreenViewModel.kt:MainScreenViewModel$e: FileDuplicateInFolderException</ID>
-    <ID>ThrowsCount:FolderRepositoryAndroid.kt:FolderRepositoryAndroid$private fun validateName</ID>
-    <ID>ThrowsCount:FolderRepositoryDesktop.kt:FolderRepositoryDesktop$private fun validateName</ID>
-    <ID>TooGenericExceptionCaught:AndroidPdfDocumentLoader.kt:AndroidPdfDocumentLoader$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DragEventReader.android.kt:e: Exception</ID>
-    <ID>TooGenericExceptionCaught:DragEventReader.jvm.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:EditorPanel.kt:e: Exception</ID>
     <ID>TooGenericExceptionCaught:FolderContentsViewModel.kt:FolderContentsViewModel$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:JvmImageDocumentLoader.kt:JvmImageDocumentLoader$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:JvmPdfDocumentLoader.kt:JvmPdfDocumentLoader$e: Exception</ID>
     <ID>TooGenericExceptionCaught:MainScreenViewModel.kt:MainScreenViewModel$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:ThumbnailRepositoryAndroid.kt:ThumbnailRepositoryAndroid$e: Exception</ID>
-    <ID>TooGenericExceptionCaught:ThumbnailRepositoryDesktop.kt:ThumbnailRepositoryDesktop$e: Exception</ID>
-    <ID>TooManyFunctions:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer$PageComposer</ID>
     <ID>TooManyFunctions:FolderContentsViewModel.kt:FolderContentsViewModel</ID>
-    <ID>TooManyFunctions:FolderRepositoryAndroid.kt:FolderRepositoryAndroid : FolderRepository</ID>
-    <ID>TooManyFunctions:FolderRepositoryDesktop.kt:FolderRepositoryDesktop : FolderRepository</ID>
     <ID>TooManyFunctions:GridContainer.kt:ru.kyamshanov.notepen.tabs.GridContainer.kt</ID>
-    <ID>TooManyFunctions:JvmBookPdfRenderer.kt:JvmBookPdfRenderer$PageComposer</ID>
     <ID>TooManyFunctions:MainScreenViewModel.kt:MainScreenViewModel</ID>
-    <ID>TooManyFunctions:SessionRepositoryDesktop.kt:SessionRepositoryDesktop : SessionRepository</ID>
     <ID>TooManyFunctions:TabSession.kt:TabSession</ID>
     <ID>TooManyFunctions:ToolSettingsFloatingPanel.kt:ru.kyamshanov.notepen.ToolSettingsFloatingPanel.kt</ID>
   </CurrentIssues>

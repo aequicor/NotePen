@@ -14,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -35,6 +34,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.LiquidGlassAlertDialog
 import ru.kyamshanov.notepen.qrconnect.application.HostQrPairingCoordinator
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 
@@ -241,7 +241,7 @@ private fun ClientApprovalDialog(
     onAccept: () -> Unit,
     onReject: () -> Unit,
 ) {
-    AlertDialog(
+    LiquidGlassAlertDialog(
         onDismissRequest = onReject,
         title = { Text("Разрешить подключение?") },
         text = {

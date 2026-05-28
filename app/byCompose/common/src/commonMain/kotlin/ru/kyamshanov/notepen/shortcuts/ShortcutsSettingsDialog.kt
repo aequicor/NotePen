@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -38,6 +37,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.flow.StateFlow
+import ru.kyamshanov.notepen.LiquidGlassAlertDialog
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
 
@@ -63,7 +63,7 @@ fun ShortcutsSettingsDialog(
     blurEnabled: Boolean,
     onBlurEnabledChange: (Boolean) -> Unit,
 ) {
-    AlertDialog(
+    LiquidGlassAlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("Готово") }

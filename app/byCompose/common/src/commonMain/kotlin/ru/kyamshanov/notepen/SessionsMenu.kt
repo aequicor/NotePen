@@ -7,8 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.material3.Button
-import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -90,7 +89,7 @@ fun SessionsMenu(
         value = sessionRepository.listNamed()
     }
 
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+    LiquidGlassDropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         Column(
             modifier =
                 Modifier
@@ -145,7 +144,7 @@ private fun RestoreLastSessionButton(
     lastSession: SessionData?,
     onRestore: (SessionData) -> Unit,
 ) {
-    Button(
+    FilledTonalButton(
         onClick = { lastSession?.let(onRestore) },
         enabled = lastSession != null,
         modifier = Modifier.fillMaxWidth(),
@@ -169,7 +168,7 @@ private fun SaveSessionSection(
     val coroutineScope = rememberCoroutineScope()
     var entering by remember { mutableStateOf(false) }
     if (!entering) {
-        Button(onClick = { entering = true }, modifier = Modifier.fillMaxWidth()) {
+        FilledTonalButton(onClick = { entering = true }, modifier = Modifier.fillMaxWidth()) {
             Text("Сохранить текущую…")
         }
     } else {
@@ -183,10 +182,10 @@ private fun SaveSessionSection(
         )
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Button(
+            FilledTonalButton(
                 onClick = {
                     val name = newSessionName.trim()
-                    if (name.isEmpty()) return@Button
+                    if (name.isEmpty()) return@FilledTonalButton
                     coroutineScope.launch {
                         sessionRepository.saveNamed(
                             NamedSession(

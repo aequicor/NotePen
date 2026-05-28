@@ -11,9 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CreateNewFolder
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -31,6 +28,8 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.LiquidGlassCard
+import ru.kyamshanov.notepen.LiquidGlassDropdownMenu
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.model.FolderUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
@@ -75,7 +74,7 @@ fun RecentFileCard(
             }
         }
 
-    Card(
+    LiquidGlassCard(
         onClick = onClick,
         modifier =
             modifier
@@ -97,7 +96,6 @@ fun RecentFileCard(
                         Modifier
                     },
                 ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
     ) {
         Column(
             Modifier
@@ -122,7 +120,7 @@ fun RecentFileCard(
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        DropdownMenu(
+                        LiquidGlassDropdownMenu(
                             expanded = menuExpanded,
                             onDismissRequest = { menuExpanded = false },
                         ) {
@@ -140,10 +138,13 @@ fun RecentFileCard(
                 }
             }
             Spacer(Modifier.height(8.dp))
+            // minLines=2 фиксирует высоту подписи независимо от длины имени —
+            // карусель «Недавние» выходит уже строго прямоугольной.
             Text(
                 text = model.displayName,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 2,
+                minLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
             StatusBadge(

@@ -1,10 +1,10 @@
 package ru.kyamshanov.notepen.mainscreen.ui.dialog
 
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import ru.kyamshanov.notepen.LiquidGlassAlertDialog
 import ru.kyamshanov.notepen.mainscreen.ui.model.CreateFolderDialogState
 
 /**
@@ -22,7 +22,7 @@ fun CreateFolderDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    LiquidGlassAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Новая папка") },
         text = {

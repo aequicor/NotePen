@@ -1,6 +1,5 @@
 package ru.kyamshanov.notepen.mainscreen.ui.component
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,8 +9,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudQueue
 import androidx.compose.material.icons.outlined.Folder
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -20,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.LiquidGlassCard
 import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteEntryUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteFolderUiModel
 
@@ -35,12 +33,9 @@ fun RemoteEntryCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
+    LiquidGlassCard(
+        modifier = modifier.fillMaxWidth(),
+        onClick = onClick,
     ) {
         Row(
             modifier =
@@ -94,12 +89,9 @@ fun RemoteFolderCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
-        colors =
-            CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-            ),
+    LiquidGlassCard(
+        modifier = modifier.fillMaxWidth(),
+        onClick = onClick,
     ) {
         Row(
             modifier =

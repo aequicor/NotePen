@@ -30,7 +30,6 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -353,7 +352,7 @@ private fun FilterModeChip(
                 )
             }
         }
-        DropdownMenu(
+        LiquidGlassDropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {

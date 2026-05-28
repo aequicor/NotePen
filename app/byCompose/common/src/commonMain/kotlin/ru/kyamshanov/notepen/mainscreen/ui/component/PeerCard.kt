@@ -1,6 +1,5 @@
 package ru.kyamshanov.notepen.mainscreen.ui.component
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -17,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.LiquidGlassCard
 import ru.kyamshanov.notepen.mainscreen.ui.model.PeerSummaryUiModel
 
 /**
@@ -34,8 +33,9 @@ fun PeerCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+    LiquidGlassCard(
+        modifier = modifier.fillMaxWidth(),
+        onClick = onClick,
     ) {
         Row(
             Modifier.padding(12.dp),

@@ -1,18 +1,24 @@
 package ru.kyamshanov.notepen.mainscreen.ui.screen
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -20,24 +26,23 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -56,7 +61,16 @@ import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.LIQUID_GLASS_TOP_BAR_HEIGHT
+import ru.kyamshanov.notepen.LiquidGlassTopBar
+import ru.kyamshanov.notepen.NotePenIcons
+import ru.kyamshanov.notepen.RailOrientation
 import ru.kyamshanov.notepen.SessionsMenu
+import ru.kyamshanov.notepen.WheelScrollButtons
+import ru.kyamshanov.notepen.blur.GlassBackdropProvider
+import ru.kyamshanov.notepen.blur.glassSource
+import ru.kyamshanov.notepen.fadingEdges
+import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
@@ -81,9 +95,8 @@ import ru.kyamshanov.notepen.session.createSessionRepository
 import ru.kyamshanov.notepen.session.seedFilePath
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
+import ru.kyamshanov.notepen.wheelItem
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 private val RECENT_CARD_WIDTH: Dp = 132.dp
@@ -104,7 +117,6 @@ private val RECENT_CARD_WIDTH: Dp = 132.dp
  * @param peerClient Клиент синхронизации для индикатора статуса и панели подключения.
  * @param modifier Модификатор компонента.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainContent(
     state: MainScreenUiState,
@@ -167,17 +179,112 @@ fun MainContent(
     }
 
     val titleBarInteraction = LocalTitleBarInteraction.current
-    val titleBarStartInset = LocalTitleBarStartInset.current
-    val titleBarEndInset = LocalTitleBarEndInset.current
-    Scaffold(
-        topBar = {
-            val barModifier = Modifier.fillMaxWidth()
-            TopAppBar(
-                modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
-                title = { Text("NotePen") },
-                windowInsets =
-                    WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
-                        .union(TopAppBarDefaults.windowInsets),
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val topBarTotal = statusBarTop + LIQUID_GLASS_TOP_BAR_HEIGHT
+    var isExternalDropHovered by remember { mutableStateOf(false) }
+    val libraryDropTarget =
+        remember(onIntent) {
+            object : DragAndDropTarget {
+                override fun onDrop(event: DragAndDropEvent): Boolean {
+                    isExternalDropHovered = false
+                    val uris = extractExternalFileUris(event)
+                    return if (uris.isNotEmpty()) {
+                        onIntent(MainScreenIntent.ExternalFilesDroppedOnLibrary(uris))
+                        true
+                    } else {
+                        false
+                    }
+                }
+
+                override fun onEntered(event: DragAndDropEvent) {
+                    isExternalDropHovered = true
+                }
+
+                override fun onExited(event: DragAndDropEvent) {
+                    isExternalDropHovered = false
+                }
+
+                override fun onEnded(event: DragAndDropEvent) {
+                    isExternalDropHovered = false
+                }
+            }
+        }
+    GlassBackdropProvider {
+        Box(modifier = modifier.fillMaxSize()) {
+            // Hero-фон: единственный glassSource. Все glass-поверхности (бар,
+            // карточки) преломляют именно градиент, а не сам список — это даёт
+            // спокойное стекло, не "дрожащее" под прокруткой.
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .liquidGlassHero()
+                        .glassSource(),
+            )
+            // Контент над фоном — список с карточками, drag-and-drop, hover-border.
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (isDragAndDropSupported) {
+                                Modifier.dragAndDropTarget(
+                                    shouldStartDragAndDrop = { event -> event.isExternalFileDrop() },
+                                    target = libraryDropTarget,
+                                )
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .border(
+                            width = if (isExternalDropHovered) 2.dp else 0.dp,
+                            color =
+                                if (isExternalDropHovered) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    Color.Transparent
+                                },
+                        ),
+            ) {
+                when {
+                    state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                    state.recentFiles.isEmpty() && state.folders.isEmpty() && state.peers.isEmpty() ->
+                        EmptyState(
+                            onOpenFile = { onIntent(MainScreenIntent.OpenFilePicker) },
+                            modifier = Modifier.fillMaxSize().padding(top = topBarTotal),
+                        )
+                    else -> RecentFilesAndFoldersList(state, onIntent, isWide, topInset = topBarTotal)
+                }
+            }
+
+            LiquidGlassTopBar(
+                modifier = Modifier.align(Alignment.TopCenter),
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        // NotePen brand mark: project's pen-brush glyph on a tinted
+                        // primaryContainer chip — a lightweight stand-in until a
+                        // dedicated logo vector ships in composeResources.
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier =
+                                Modifier
+                                    .size(28.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        shape = RoundedCornerShape(8.dp),
+                                    ),
+                        ) {
+                            Icon(
+                                imageVector = NotePenIcons.Brush,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text("NotePen")
+                    }
+                },
                 navigationIcon = {
                     if (onBack != null) {
                         IconButton(
@@ -215,9 +322,6 @@ fun MainContent(
                         ) {
                             Icon(Icons.Default.Layers, contentDescription = "Сессии")
                         }
-                        // Restore-only: the library has no live workspace, so onCaptureCurrent is null
-                        // (the save section is hidden). Picking a session stashes it as a pending
-                        // restore, then opens the editor on its primary document, which consumes it.
                         SessionsMenu(
                             expanded = sessionsExpanded,
                             sessionRepository = sessionRepository,
@@ -244,79 +348,27 @@ fun MainContent(
                     )
                 },
             )
-        },
-        floatingActionButton = {
+
             if (!isWide) {
-                FloatingActionButton(onClick = { onIntent(MainScreenIntent.OpenFilePicker) }) {
+                FloatingActionButton(
+                    onClick = { onIntent(MainScreenIntent.OpenFilePicker) },
+                    modifier =
+                        Modifier
+                            .align(Alignment.BottomEnd)
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(16.dp),
+                ) {
                     Icon(Icons.Default.Add, contentDescription = "Открыть файл")
                 }
             }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        modifier = modifier,
-    ) { padding ->
-        var isExternalDropHovered by remember { mutableStateOf(false) }
-        val libraryDropTarget =
-            remember(onIntent) {
-                object : DragAndDropTarget {
-                    override fun onDrop(event: DragAndDropEvent): Boolean {
-                        isExternalDropHovered = false
-                        val uris = extractExternalFileUris(event)
-                        return if (uris.isNotEmpty()) {
-                            onIntent(MainScreenIntent.ExternalFilesDroppedOnLibrary(uris))
-                            true
-                        } else {
-                            false
-                        }
-                    }
 
-                    override fun onEntered(event: DragAndDropEvent) {
-                        isExternalDropHovered = true
-                    }
-
-                    override fun onExited(event: DragAndDropEvent) {
-                        isExternalDropHovered = false
-                    }
-
-                    override fun onEnded(event: DragAndDropEvent) {
-                        isExternalDropHovered = false
-                    }
-                }
-            }
-
-        Box(
-            Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .then(
-                    if (isDragAndDropSupported) {
-                        Modifier.dragAndDropTarget(
-                            shouldStartDragAndDrop = { event -> event.isExternalFileDrop() },
-                            target = libraryDropTarget,
-                        )
-                    } else {
-                        Modifier
-                    },
-                )
-                .border(
-                    width = if (isExternalDropHovered) 2.dp else 0.dp,
-                    color =
-                        if (isExternalDropHovered) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color.Transparent
-                        },
-                ),
-        ) {
-            when {
-                state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                state.recentFiles.isEmpty() && state.folders.isEmpty() && state.peers.isEmpty() ->
-                    EmptyState(
-                        onOpenFile = { onIntent(MainScreenIntent.OpenFilePicker) },
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                else -> RecentFilesAndFoldersList(state, onIntent, isWide)
-            }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars),
+            )
         }
     }
 
@@ -367,13 +419,22 @@ private fun RecentFilesAndFoldersList(
     state: MainScreenUiState,
     onIntent: (MainScreenIntent) -> Unit,
     isWide: Boolean,
+    topInset: Dp = 0.dp,
 ) {
     if (isWide) {
         LazyVerticalGrid(
             columns = GridCells.Adaptive(minSize = 280.dp),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding =
+                PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = topInset + 8.dp,
+                    bottom = 16.dp,
+                ),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            // 8dp pulls section headers tight to their content; the wider 16dp
+            // section break is added explicitly as a Spacer between sections.
+            verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
             if (state.peers.isNotEmpty()) {
@@ -409,7 +470,16 @@ private fun RecentFilesAndFoldersList(
             }
         }
     } else {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding =
+                PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = topInset + 8.dp,
+                    bottom = 16.dp,
+                ),
+        ) {
             if (state.peers.isNotEmpty()) {
                 item { SectionHeader("Подключённые устройства") }
                 items(state.peers, key = { "peer_${it.peerId}" }) { peer ->
@@ -458,33 +528,65 @@ private fun RecentFilesRow(
     state: MainScreenUiState,
     onIntent: (MainScreenIntent) -> Unit,
 ) {
-    LazyRow(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        contentPadding = PaddingValues(vertical = 4.dp),
-    ) {
-        items(state.recentFiles, key = { it.id }) { file ->
-            RecentFileCard(
-                model = file,
-                onClick = { onIntent(MainScreenIntent.OpenRecentFile(file.id)) },
-                onDragStarted = {
-                    onIntent(
-                        MainScreenIntent.DragStarted(
-                            fileId = file.id,
-                            fileUri = file.uri,
-                            displayName = file.displayName,
-                        ),
-                    )
-                },
-                onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
-                isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
-                folders = state.folders,
-                onAddToFolder = { folderId ->
-                    onIntent(MainScreenIntent.AddFileToFolder(folderId, file.uri))
-                },
-                modifier = Modifier.width(RECENT_CARD_WIDTH),
-            )
+    // Wheel-effect: крайние плитки уменьшаются и тускнеют (см. wheelItem в uikit),
+    // делая полосу «Недавние» полноценной каруселью, а не плоским скроллом.
+    val listState = rememberLazyListState()
+    val naturalSizes = remember { mutableMapOf<Int, Int>() }
+    Box(modifier = Modifier.fillMaxWidth()) {
+        LazyRow(
+            state = listState,
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    // Растворяющиеся края скрывают "разрез" крайних плиток на скролле
+                    // и подменяют резкое выпадание контента из viewport плавным fade.
+                    // Fade гасится у того края, где скроллить больше некуда (стоп).
+                    .fadingEdges(
+                        orientation = RailOrientation.HORIZONTAL,
+                        edgeWidth = 72.dp,
+                        fadeStart = listState.canScrollBackward,
+                        fadeEnd = listState.canScrollForward,
+                    ),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentPadding = PaddingValues(vertical = 4.dp),
+        ) {
+            itemsIndexed(state.recentFiles, key = { _, file -> file.id }) { index, file ->
+                RecentFileCard(
+                    model = file,
+                    onClick = { onIntent(MainScreenIntent.OpenRecentFile(file.id)) },
+                    onDragStarted = {
+                        onIntent(
+                            MainScreenIntent.DragStarted(
+                                fileId = file.id,
+                                fileUri = file.uri,
+                                displayName = file.displayName,
+                            ),
+                        )
+                    },
+                    onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
+                    isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
+                    folders = state.folders,
+                    onAddToFolder = { folderId ->
+                        onIntent(MainScreenIntent.AddFileToFolder(folderId, file.uri))
+                    },
+                    modifier =
+                        Modifier
+                            .width(RECENT_CARD_WIDTH)
+                            .wheelItem(
+                                listState = listState,
+                                index = index,
+                                naturalSizes = naturalSizes,
+                            ),
+                )
+            }
         }
+        // Desktop chevrons на левом/правом крае карусели; visible только когда
+        // canScrollBackward/Forward (на тач-устройствах no-op).
+        WheelScrollButtons(
+            state = listState,
+            tint = MaterialTheme.colorScheme.onSurface,
+            background = MaterialTheme.colorScheme.surfaceContainerHigh,
+        )
     }
 }
 
@@ -492,8 +594,11 @@ private fun RecentFilesRow(
 private fun SectionHeader(text: String) {
     Text(
         text = text,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.outline,
-        modifier = Modifier.padding(bottom = 8.dp),
+        // headlineSmall + Bold + full-opacity onSurface: на пастельном hero-градиенте
+        // ничто слабее уже не "пробивает". Шрифт намеренно крупнее карточечного
+        // bodyMedium, чтобы заголовок прочно читался как раздел.
+        style = MaterialTheme.typography.headlineSmall,
+        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+        color = MaterialTheme.colorScheme.onSurface,
     )
 }

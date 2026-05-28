@@ -20,7 +20,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,6 +50,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.LiquidGlassDropdownMenu
 import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
@@ -379,7 +379,7 @@ private fun TabChip(
             }
         }
         if (hasMenu) {
-            DropdownMenu(
+            LiquidGlassDropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = { menuExpanded = false },
                 offset = with(density) { DpOffset(menuOffset.x.toDp(), menuOffset.y.toDp() - TAB_BAR_HEIGHT) },

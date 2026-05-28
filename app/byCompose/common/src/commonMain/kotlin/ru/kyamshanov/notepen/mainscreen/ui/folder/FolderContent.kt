@@ -8,10 +8,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.union
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -23,20 +26,15 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.LibraryAdd
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -52,6 +50,12 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import ru.kyamshanov.notepen.LIQUID_GLASS_TOP_BAR_HEIGHT
+import ru.kyamshanov.notepen.LiquidGlassAlertDialog
+import ru.kyamshanov.notepen.LiquidGlassTopBar
+import ru.kyamshanov.notepen.blur.GlassBackdropProvider
+import ru.kyamshanov.notepen.blur.glassSource
+import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.component.FolderCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RecentFileCard
@@ -61,11 +65,8 @@ import ru.kyamshanov.notepen.mainscreen.ui.dialog.CreateFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.dialog.DeleteFolderDialog
 import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
 import ru.kyamshanov.notepen.resolveDocumentDisplayName
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarEndInset
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
-import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FolderContent(
     component: FolderContentsComponentImpl,
@@ -91,17 +92,113 @@ fun FolderContent(
     }
 
     val titleBarInteraction = LocalTitleBarInteraction.current
-    val titleBarStartInset = LocalTitleBarStartInset.current
-    val titleBarEndInset = LocalTitleBarEndInset.current
-    Scaffold(
-        topBar = {
-            val barModifier = Modifier.fillMaxWidth()
-            TopAppBar(
-                modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val topBarTotal = statusBarTop + LIQUID_GLASS_TOP_BAR_HEIGHT
+    var isExternalDropHovered by remember { mutableStateOf(false) }
+    val dropTarget =
+        remember(component) {
+            object : DragAndDropTarget {
+                override fun onDrop(event: DragAndDropEvent): Boolean {
+                    isExternalDropHovered = false
+                    val uris = extractExternalFileUris(event)
+                    return if (uris.isNotEmpty()) {
+                        component.viewModel.addExternalFiles(uris)
+                        true
+                    } else {
+                        false
+                    }
+                }
+
+                override fun onEntered(event: DragAndDropEvent) {
+                    isExternalDropHovered = true
+                }
+
+                override fun onExited(event: DragAndDropEvent) {
+                    isExternalDropHovered = false
+                }
+
+                override fun onEnded(event: DragAndDropEvent) {
+                    isExternalDropHovered = false
+                }
+            }
+        }
+    GlassBackdropProvider {
+        Box(modifier = modifier.fillMaxSize()) {
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .liquidGlassHero()
+                        .glassSource(),
+            )
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .then(
+                            if (isDragAndDropSupported) {
+                                Modifier.dragAndDropTarget(
+                                    shouldStartDragAndDrop = { event -> event.isExternalFileDrop() },
+                                    target = dropTarget,
+                                )
+                            } else {
+                                Modifier
+                            },
+                        )
+                        .border(
+                            width = if (isExternalDropHovered) 2.dp else 0.dp,
+                            color =
+                                if (isExternalDropHovered) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    Color.Transparent
+                                },
+                        ),
+            ) {
+                if (state.subfolders.isEmpty() && state.files.isEmpty()) {
+                    Text(
+                        text = if (state.isLoading) "Загрузка…" else "Папка пуста",
+                        modifier = Modifier.align(Alignment.Center).padding(top = topBarTotal),
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Adaptive(minSize = 160.dp),
+                        contentPadding =
+                            PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = topBarTotal + 8.dp,
+                                bottom = 16.dp,
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        items(
+                            state.subfolders,
+                            key = { "folder_${it.id}" },
+                            span = { GridItemSpan(maxLineSpan) },
+                        ) { folder ->
+                            FolderCard(
+                                model = folder,
+                                onClick = { component.viewModel.openSubfolder(folder.id, folder.name) },
+                                onDelete = { component.viewModel.requestDeleteSubfolder(folder.id) },
+                            )
+                        }
+                        items(state.files, key = { it.id }) { file ->
+                            RecentFileCard(
+                                model = file,
+                                onClick = { component.viewModel.openFile(file.uri, file.lastPageIndex) },
+                            )
+                        }
+                    }
+                }
+            }
+
+            LiquidGlassTopBar(
+                modifier = Modifier.align(Alignment.TopCenter),
                 title = { Text(state.folderName) },
-                windowInsets =
-                    WindowInsets(left = titleBarStartInset, right = titleBarEndInset)
-                        .union(TopAppBarDefaults.windowInsets),
                 navigationIcon = {
                     IconButton(
                         onClick = component.onBack,
@@ -125,100 +222,25 @@ fun FolderContent(
                     }
                 },
             )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { component.viewModel.requestImport() }) {
+
+            FloatingActionButton(
+                onClick = { component.viewModel.requestImport() },
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(16.dp),
+            ) {
                 Icon(Icons.Filled.Add, contentDescription = "Добавить файл")
             }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        modifier = modifier,
-    ) { padding ->
-        var isExternalDropHovered by remember { mutableStateOf(false) }
-        val dropTarget =
-            remember(component) {
-                object : DragAndDropTarget {
-                    override fun onDrop(event: DragAndDropEvent): Boolean {
-                        isExternalDropHovered = false
-                        val uris = extractExternalFileUris(event)
-                        return if (uris.isNotEmpty()) {
-                            component.viewModel.addExternalFiles(uris)
-                            true
-                        } else {
-                            false
-                        }
-                    }
 
-                    override fun onEntered(event: DragAndDropEvent) {
-                        isExternalDropHovered = true
-                    }
-
-                    override fun onExited(event: DragAndDropEvent) {
-                        isExternalDropHovered = false
-                    }
-
-                    override fun onEnded(event: DragAndDropEvent) {
-                        isExternalDropHovered = false
-                    }
-                }
-            }
-
-        Box(
-            Modifier
-                .fillMaxSize()
-                .then(
-                    if (isDragAndDropSupported) {
-                        Modifier.dragAndDropTarget(
-                            shouldStartDragAndDrop = { event -> event.isExternalFileDrop() },
-                            target = dropTarget,
-                        )
-                    } else {
-                        Modifier
-                    },
-                )
-                .border(
-                    width = if (isExternalDropHovered) 2.dp else 0.dp,
-                    color =
-                        if (isExternalDropHovered) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            Color.Transparent
-                        },
-                ),
-        ) {
-            if (state.subfolders.isEmpty() && state.files.isEmpty()) {
-                Text(
-                    text = if (state.isLoading) "Загрузка…" else "Папка пуста",
-                    modifier = Modifier.align(Alignment.Center).padding(16.dp),
-                    color = MaterialTheme.colorScheme.outline,
-                )
-            } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 160.dp),
-                    contentPadding = PaddingValues(16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                ) {
-                    items(
-                        state.subfolders,
-                        key = { "folder_${it.id}" },
-                        span = { GridItemSpan(maxLineSpan) },
-                    ) { folder ->
-                        FolderCard(
-                            model = folder,
-                            onClick = { component.viewModel.openSubfolder(folder.id, folder.name) },
-                            onDelete = { component.viewModel.requestDeleteSubfolder(folder.id) },
-                        )
-                    }
-                    items(state.files, key = { it.id }) { file ->
-                        RecentFileCard(
-                            model = file,
-                            onClick = { component.viewModel.openFile(file.uri, file.lastPageIndex) },
-                        )
-                    }
-                }
-            }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier =
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .windowInsetsPadding(WindowInsets.navigationBars),
+            )
         }
     }
 
@@ -262,7 +284,7 @@ private fun AddExistingFilesDialog(
     onDismiss: () -> Unit,
 ) {
     val selected = remember(candidates) { mutableStateListOf<String>() }
-    AlertDialog(
+    LiquidGlassAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Добавить из недавних") },
         text = {
