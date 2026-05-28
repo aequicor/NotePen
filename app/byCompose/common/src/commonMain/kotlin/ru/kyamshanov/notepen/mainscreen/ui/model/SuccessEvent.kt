@@ -13,4 +13,7 @@ sealed class SuccessEvent {
 
     /** Файл уже находится в данной папке (дубликат — не является ошибкой, AC-5). */
     object FileAlreadyInFolder : SuccessEvent()
+
+    /** Файл скопирован в общую папку «Библиотека» и стал доступен подключённым устройствам. */
+    object FileAddedToLibrary : SuccessEvent()
 }

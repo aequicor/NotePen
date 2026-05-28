@@ -221,4 +221,24 @@ sealed class MainScreenIntent {
     data class RestoreSession(
         val seedUri: String,
     ) : MainScreenIntent()
+
+    /**
+     * Скопировать файл в общую папку «Библиотека» (раздаётся подключённым
+     * устройствам). Источник может быть как карточкой из «Недавних» / папки
+     * (drag-and-drop), так и внешним файлом из ОС.
+     *
+     * @property sourceUri Канонический путь / URI файла-источника.
+     */
+    data class AddToLibrary(
+        val sourceUri: String,
+    ) : MainScreenIntent()
+
+    /**
+     * Открыть элемент из секции «Библиотека» в редакторе.
+     *
+     * @property itemId Идентификатор элемента в [ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder].
+     */
+    data class OpenLibraryItem(
+        val itemId: String,
+    ) : MainScreenIntent()
 }

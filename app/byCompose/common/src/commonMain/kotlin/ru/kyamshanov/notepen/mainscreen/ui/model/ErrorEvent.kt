@@ -34,4 +34,7 @@ sealed class ErrorEvent {
 
     /** Общая ошибка при попытке открыть удалённый документ. */
     object RemoteDocumentFailed : ErrorEvent()
+
+    /** Не удалось скопировать файл в общую папку «Библиотека». */
+    object LibraryCopyFailed : ErrorEvent()
 }

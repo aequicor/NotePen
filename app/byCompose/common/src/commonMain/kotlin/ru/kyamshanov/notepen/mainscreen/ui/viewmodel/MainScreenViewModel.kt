@@ -27,6 +27,8 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
 import ru.kyamshanov.notepen.mainscreen.domain.model.RecentFile
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
+import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
+import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolderItem
 import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
 import ru.kyamshanov.notepen.mainscreen.domain.port.ThumbnailRepository
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
@@ -40,6 +42,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.DeleteFolderDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.FolderUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.LibraryShelfUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.model.PeerSummaryUiModel
@@ -89,6 +92,11 @@ class MainScreenViewModel(
      * считаем всех известных пиров онлайн.
      */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
+    /**
+     * Общая папка «Библиотека», расшариваемая пирам. На платформах, где она
+     * не поддерживается (Android), передаётся `null` и секция в UI скрывается.
+     */
+    private val libraryFolder: LibraryFolder? = null,
     private val nowMillis: () -> Long = { currentTimeMillis() },
 ) {
     private val logger = KotlinLogging.logger {}
@@ -101,6 +109,13 @@ class MainScreenViewModel(
     val state: StateFlow<MainScreenUiState> = _state.asStateFlow()
 
     init {
+        libraryFolder?.let { folder ->
+            scope.launch {
+                folder.items.collect { items ->
+                    _state.update { it.copy(library = items.map(LibraryFolderItem::toUiModel)) }
+                }
+            }
+        }
         remoteCatalogsFlow?.let { catalogsFlow ->
             val onlineFlow = onlinePeerIdsFlow ?: flowOf(null)
             scope.launch {
@@ -176,7 +191,32 @@ class MainScreenViewModel(
             is MainScreenIntent.OpenPeer -> openPeer(intent.peerId, intent.displayName)
             is MainScreenIntent.OpenFolder -> openFolder(intent.folderId, intent.folderName)
             is MainScreenIntent.RestoreSession -> restoreSession(intent.seedUri)
+            is MainScreenIntent.AddToLibrary -> addToLibrary(intent.sourceUri)
+            is MainScreenIntent.OpenLibraryItem -> openLibraryItem(intent.itemId)
         }
+    }
+
+    private suspend fun addToLibrary(sourceUri: String) {
+        val folder = libraryFolder ?: return
+        if (_state.value.isLoading) return
+        // Если drag-операция была активна — сбросим её, как делает [handleDropOnFolder].
+        _state.update { it.copy(dragState = DragState.None) }
+        folder.addCopy(sourceUri).fold(
+            onSuccess = {
+                _state.update { it.copy(successEvent = SuccessEvent.FileAddedToLibrary) }
+            },
+            onFailure = { e ->
+                logger.warn(e) { "addToLibrary failed: ${e::class.simpleName}" }
+                _state.update { it.copy(errorEvent = ErrorEvent.LibraryCopyFailed) }
+            },
+        )
+    }
+
+    private fun openLibraryItem(itemId: String) {
+        if (isNavigating) return
+        val item = _state.value.library?.firstOrNull { it.id == itemId } ?: return
+        isNavigating = true
+        _state.update { it.copy(navigationTarget = NavigationTarget.Editor(item.uri, 0)) }
     }
 
     /**
@@ -763,6 +803,15 @@ private fun Folder.toUiModel(fileCount: Int) =
         fileCount = fileCount,
         createdAt = createdAt,
         lastFileOpenedAt = null,
+    )
+
+private fun LibraryFolderItem.toUiModel() =
+    LibraryShelfUiModel(
+        id = id,
+        uri = uri,
+        displayName = displayName,
+        sizeBytes = sizeBytes,
+        modifiedAt = modifiedAt,
     )
 
 /** Platform-provided current time in milliseconds since Unix epoch. */

@@ -17,16 +17,16 @@
     <ID>CyclomaticComplexMethod:TabBar.kt:@Composable fun TabBar</ID>
     <ID>CyclomaticComplexMethod:TabBar.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun TabChip</ID>
     <ID>ExplicitItLambdaMultipleParameters:PeerCatalogContent.kt:{ idx, it -&gt; "${idx}_${it.documentId}" }</ID>
+    <ID>LargeClass:MainScreenViewModel.kt:MainScreenViewModel</ID>
     <ID>LongMethod:ClientPairingPanel.android.kt:@Composable actual fun CameraScanSlot</ID>
     <ID>LongMethod:ClientPairingPanel.kt:@Composable fun ClientPairingPanel</ID>
     <ID>LongMethod:ClientPairingPanel.kt:@Composable private fun ConnectionsScreen</ID>
     <ID>LongMethod:DetailsContent.kt:@Composable private fun BoxScope.FocusedPanelMenus</ID>
     <ID>LongMethod:DetailsContent.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun DetailsContent</ID>
     <ID>LongMethod:EditorPanel.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun EditorPanel</ID>
-    <ID>LongMethod:FolderCard.kt:@Composable fun FolderCard</ID>
     <ID>LongMethod:FolderContent.kt:@Composable fun FolderContent</ID>
-    <ID>LongMethod:MainContent.kt:@Composable private fun RecentFilesAndFoldersList</ID>
     <ID>LongMethod:MainContent.kt:@Composable fun MainContent</ID>
+    <ID>LongMethod:MainContent.kt:@Composable private fun RecentFilesAndFoldersList</ID>
     <ID>LongMethod:PageIndicatorAirbar.kt:@Composable private fun EditablePageNumber</ID>
     <ID>LongMethod:PageThumbnailsSidebar.kt:@Composable fun PageThumbnailsSidebar</ID>
     <ID>LongMethod:PageThumbnailsSidebar.kt:@Composable private fun FilterModeChip</ID>

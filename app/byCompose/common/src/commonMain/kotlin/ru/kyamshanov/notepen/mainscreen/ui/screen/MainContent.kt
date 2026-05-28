@@ -75,6 +75,7 @@ import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
 import ru.kyamshanov.notepen.mainscreen.ui.component.FolderCard
+import ru.kyamshanov.notepen.mainscreen.ui.component.LibraryShelf
 import ru.kyamshanov.notepen.mainscreen.ui.component.PeerCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RecentFileCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.extractExternalFileUris
@@ -158,6 +159,7 @@ fun MainContent(
             ErrorEvent.RemoteDocumentNotFound -> "Документ удалён на хосте"
             ErrorEvent.RemoteDocumentTimeout -> "Хост не отвечает — попробуйте ещё раз"
             ErrorEvent.RemoteDocumentFailed -> "Не удалось получить файл с хоста"
+            ErrorEvent.LibraryCopyFailed -> "Не удалось добавить в Библиотеку"
             null -> null
         }
 
@@ -173,6 +175,7 @@ fun MainContent(
             when (successEvent) {
                 is SuccessEvent.FileAddedToFolder -> "Файл добавлен в «${successEvent.folderName}»"
                 SuccessEvent.FileAlreadyInFolder -> "Файл уже есть в этой папке"
+                SuccessEvent.FileAddedToLibrary -> "Книга добавлена в Библиотеку"
             }
         snackbarHostState.showSnackbar(message)
         onIntent(MainScreenIntent.OnSuccessEventHandled)
@@ -248,7 +251,10 @@ fun MainContent(
             ) {
                 when {
                     state.isLoading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                    state.recentFiles.isEmpty() && state.folders.isEmpty() && state.peers.isEmpty() ->
+                    state.recentFiles.isEmpty() &&
+                        state.folders.isEmpty() &&
+                        state.peers.isEmpty() &&
+                        state.library == null ->
                         EmptyState(
                             onOpenFile = { onIntent(MainScreenIntent.OpenFilePicker) },
                             modifier = Modifier.fillMaxSize().padding(top = topBarTotal),
@@ -454,6 +460,12 @@ private fun RecentFilesAndFoldersList(
                     RecentFilesRow(state, onIntent)
                 }
             }
+            state.library?.let { libraryItems ->
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Библиотека") }
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    LibraryShelfSection(items = libraryItems, onIntent = onIntent)
+                }
+            }
             if (state.folders.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Папки") }
                 items(state.folders, key = { "folder_${it.id}" }) { folder ->
@@ -499,6 +511,11 @@ private fun RecentFilesAndFoldersList(
             if (state.recentFiles.isNotEmpty()) {
                 item { SectionHeader("Недавние файлы") }
                 item { RecentFilesRow(state, onIntent) }
+            }
+            state.library?.let { libraryItems ->
+                item { Spacer(Modifier.height(24.dp)) }
+                item { SectionHeader("Библиотека") }
+                item { LibraryShelfSection(items = libraryItems, onIntent = onIntent) }
             }
             if (state.folders.isNotEmpty()) {
                 item { Spacer(Modifier.height(24.dp)) }
@@ -588,6 +605,24 @@ private fun RecentFilesRow(
             background = MaterialTheme.colorScheme.surfaceContainerHigh,
         )
     }
+}
+
+@Composable
+private fun LibraryShelfSection(
+    items: List<ru.kyamshanov.notepen.mainscreen.ui.model.LibraryShelfUiModel>,
+    onIntent: (MainScreenIntent) -> Unit,
+) {
+    LibraryShelf(
+        items = items,
+        onItemClick = { id -> onIntent(MainScreenIntent.OpenLibraryItem(id)) },
+        onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(uri)) },
+        onDropExternalFiles = { uris ->
+            // Каждый внешний файл копируется в библиотеку отдельной операцией —
+            // VM сама агрегирует snackbar'ы. Подавляем дубликаты в самом источнике.
+            uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(it)) }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 @Composable

@@ -79,6 +79,7 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
+import ru.kyamshanov.notepen.mainscreen.infrastructure.FileSystemLibraryFolder
 import ru.kyamshanov.notepen.sync.infrastructure.FileSystemLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
@@ -258,13 +259,22 @@ fun main(args: Array<String>) {
             ?.let(::File)
             ?: File(System.getProperty("user.home"), "NotePen Library")
     libraryRoot.mkdirs()
+    val isBook: (File) -> Boolean = { file ->
+        val name = file.name.lowercase()
+        OPENABLE_EXTENSIONS.any { name.endsWith(".$it") }
+    }
     val libraryManifestProvider =
         FileSystemLibraryManifestProvider(
             root = libraryRoot,
-            isBook = { file ->
-                val name = file.name.lowercase()
-                OPENABLE_EXTENSIONS.any { name.endsWith(".$it") }
-            },
+            isBook = isBook,
+        )
+    val libraryFolder =
+        FileSystemLibraryFolder(
+            root = libraryRoot,
+            isBook = isBook,
+            notifier = catalogChangeNotifier,
+            scope = appScope,
+            ioDispatcher = Dispatchers.IO,
         )
 
     // In-memory state holders are cheap; we expose them to the UI from the
@@ -497,6 +507,7 @@ fun main(args: Array<String>) {
                         onOpenFolder = onOpenFolder,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
+                        libraryFolder = libraryFolder,
                     )
                 },
                 peerCatalogComponentFactory = { ctx, peerId, displayName, onBack, onOpenEditor ->

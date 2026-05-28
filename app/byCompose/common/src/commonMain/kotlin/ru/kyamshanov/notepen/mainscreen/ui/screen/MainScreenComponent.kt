@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.Flow
 import ru.kyamshanov.notepen.MainComponent
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
+import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
 import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
 import ru.kyamshanov.notepen.mainscreen.domain.port.ThumbnailRepository
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
@@ -50,6 +51,11 @@ class MainScreenComponent(
     private val remoteCatalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>? = null,
     /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
+    /**
+     * Общая папка «Библиотека» для расшаривания книг подключённым устройствам.
+     * `null` — фича не поддерживается на платформе и секция в UI скрывается.
+     */
+    private val libraryFolder: LibraryFolder? = null,
 ) : MainComponent,
     ComponentContext by componentContext {
     /** ViewModel главного экрана, привязанная к жизненному циклу компонента. */
@@ -65,5 +71,6 @@ class MainScreenComponent(
             thumbnailGenerator = thumbnailGenerator,
             remoteCatalogsFlow = remoteCatalogsFlow,
             onlinePeerIdsFlow = onlinePeerIdsFlow,
+            libraryFolder = libraryFolder,
         )
 }
