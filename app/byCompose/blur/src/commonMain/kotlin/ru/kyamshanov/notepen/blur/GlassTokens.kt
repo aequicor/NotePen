@@ -42,3 +42,27 @@ internal const val GLASS_FILL_ALPHA_OPAQUE = 0.95f
 /** Outline alpha for the crisp hairline edge (and the blur-off fallback border). */
 internal const val GLASS_BORDER_ALPHA = 0.4f
 internal val GlassBorderWidth = 1.dp
+
+/**
+ * Refraction edge band width, as a fraction of the panel's corner radius. The shader
+ * displaces samples only inside this band, leaving the deep interior a 1:1 copy of the
+ * backdrop. A value near `1.0` puts the lens entirely within the rounded corner; larger
+ * values bleed the lens further into the panel for a softer rim.
+ */
+internal const val GLASS_EDGE_BAND_FACTOR = 1.0f
+
+/**
+ * Peak displacement at the rim, as a fraction of the corner radius. `0.30` keeps the
+ * lens visibly curved at rounded corners without "swallowing" content. The shader also
+ * gates displacement by corner proximity, so a long bar with small corner radius gets
+ * almost no displacement along its flat edges regardless of this value.
+ */
+internal const val GLASS_REFRACTION_STRENGTH_FACTOR = 0.30f
+
+/**
+ * Pad ring drawn around the visible glass shape that gives the refraction shader real
+ * backdrop pixels to sample beyond the rim. Must be at least the worst-case displacement
+ * (currently corner_radius × [GLASS_REFRACTION_STRENGTH_FACTOR]); 24dp covers every glass
+ * surface we render at typical scales.
+ */
+internal val GLASS_REFRACTION_PAD = 24.dp
