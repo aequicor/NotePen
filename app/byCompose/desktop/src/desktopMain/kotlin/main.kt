@@ -27,6 +27,8 @@ import org.jetbrains.compose.resources.painterResource
 import ru.kyamshanov.notepen.App
 import ru.kyamshanov.notepen.DefaultRootComponent
 import ru.kyamshanov.notepen.RootComponent
+import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
+import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
 import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
@@ -287,9 +289,9 @@ fun main(args: Array<String>) {
             DefaultRootComponent(
                 componentContext = DefaultComponentContext(lifecycle = lifecycle),
                 historyRepository = historyRepo,
-                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, onOpenLib ->
+                mainComponentFactory = { ctx, onEditor, onPeer, onFolder, onLib, onSettings ->
                     MainScreenComponent(
-                        componentContext = componentContext,
+                        componentContext = ctx,
                         historyRepository = historyRepo,
                         folderRepository = folderRepo,
                         addToHistory = AddToHistoryUseCase(historyRepo),
@@ -297,11 +299,12 @@ fun main(args: Array<String>) {
                         openRecentFileUseCase = OpenRecentFileUseCase(availabilityChecker),
                         thumbnailRepository = thumbnailRepo,
                         thumbnailGenerator = thumbnailGenerator,
-                        onOpenEditor = onOpenEditor,
+                        onOpenEditor = onEditor,
                         onOpenFilePicker = { FilePicker().pickDocument() },
-                        onOpenPeerCatalog = onOpenPeerCatalog,
-                        onOpenFolder = onOpenFolder,
-                        onOpenLibraryFolder = onOpenLib,
+                        onOpenPeerCatalog = onPeer,
+                        onOpenFolder = onFolder,
+                        onOpenSettings = onSettings,
+                        onOpenLibraryFolder = onLib,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
                         libraryFolder = libraryFolder,
@@ -345,6 +348,13 @@ fun main(args: Array<String>) {
                         libraryFolder = libraryFolder,
                         onBack = onBack,
                         onOpenEditor = onOpenEditor,
+                    )
+                },
+                settingsComponentFactory = { ctx, onBack ->
+                    SettingsComponentImpl(
+                        componentContext = ctx,
+                        repository = defaultAppSettingsRepository(),
+                        onBackListener = onBack,
                     )
                 },
             )

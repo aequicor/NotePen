@@ -16,6 +16,7 @@ import ru.kyamshanov.notepen.RootComponent.Child.FolderContentsChild
 import ru.kyamshanov.notepen.RootComponent.Child.LibraryFolderContentsChild
 import ru.kyamshanov.notepen.RootComponent.Child.MainChild
 import ru.kyamshanov.notepen.RootComponent.Child.PeerCatalogChild
+import ru.kyamshanov.notepen.RootComponent.Child.SettingsChild
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 
 /**
@@ -40,6 +41,7 @@ class DefaultRootComponent(
         onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
         onOpenFolder: (folderId: String, folderName: String) -> Unit,
         onOpenLibraryFolder: () -> Unit,
+        onOpenSettings: () -> Unit,
     ) -> MainComponent,
     private val peerCatalogComponentFactory: (
         componentContext: ComponentContext,
@@ -68,6 +70,14 @@ class DefaultRootComponent(
             onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
         ) -> LibraryFolderComponent
     )? = null,
+    /**
+     * Фабрика экрана настроек приложения. Конструирует [SettingsComponent] —
+     * реализация живёт в `:common`, чтобы `:shared` не зависел от Compose.
+     */
+    private val settingsComponentFactory: (
+        componentContext: ComponentContext,
+        onBack: () -> Unit,
+    ) -> SettingsComponent,
 ) : RootComponent,
     ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -93,6 +103,7 @@ class DefaultRootComponent(
                 is Config.PeerCatalog -> config.instanceId
                 is Config.FolderContents -> config.instanceId
                 is Config.LibraryFolderContents -> config.instanceId
+                is Config.Settings -> config.instanceId
                 else -> -1L
             }
         } + 1L
@@ -143,6 +154,7 @@ class DefaultRootComponent(
             is Config.FolderContents -> FolderContentsChild(folderContentsComponent(ctx, config))
             is Config.LibraryFolderContents ->
                 LibraryFolderContentsChild(libraryFolderContentsComponent(ctx))
+            is Config.Settings -> SettingsChild(settingsComponent(ctx))
         }
 
     @OptIn(DelicateDecomposeApi::class)
@@ -153,6 +165,7 @@ class DefaultRootComponent(
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
             { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
+            { navigation.push(Config.Settings(nextInstanceId())) },
         )
 
     /**
@@ -167,6 +180,7 @@ class DefaultRootComponent(
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
             { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
+            { navigation.push(Config.Settings(nextInstanceId())) },
         )
 
     @OptIn(DelicateDecomposeApi::class)
@@ -232,6 +246,12 @@ class DefaultRootComponent(
         ) { uri, lastPageIndex -> openEditorOrAddTab(uri, lastPageIndex) }
     }
 
+    private fun settingsComponent(ctx: ComponentContext): SettingsComponent =
+        settingsComponentFactory(
+            ctx,
+            navigation::pop,
+        )
+
     override fun onBackClicked(toIndex: Int) {
         navigation.popTo(index = toIndex)
     }
@@ -284,6 +304,15 @@ class DefaultRootComponent(
          */
         @Serializable
         data class LibraryFolderContents(
+            val instanceId: Long = 0L,
+        ) : Config
+
+        /**
+         * Экран глобальных настроек приложения. `instanceId` позволяет
+         * множественные push'ы из разных мест без коллизий конфигов.
+         */
+        @Serializable
+        data class Settings(
             val instanceId: Long = 0L,
         ) : Config
     }

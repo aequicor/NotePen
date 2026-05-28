@@ -44,6 +44,8 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroi
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
+import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
+import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImageDocumentLoader
@@ -315,7 +317,7 @@ class MainActivity : ComponentActivity() {
                 componentContext = defaultComponentContext(),
                 historyRepository = historyRepo,
                 mainComponentFactory = {
-                        componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _ ->
+                        componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _, onOpenSettings ->
                     // libraryFolder=null на Android → onOpenLibraryFolder тоже не нужен;
                     // компонент не показывает карточку «Библиотека», навигация туда
                     // никогда не инициируется.
@@ -332,6 +334,7 @@ class MainActivity : ComponentActivity() {
                         onOpenFilePicker = { filePicker.pickDocument() },
                         onOpenPeerCatalog = onOpenPeerCatalog,
                         onOpenFolder = onOpenFolder,
+                        onOpenSettings = onOpenSettings,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
                     )
@@ -366,6 +369,13 @@ class MainActivity : ComponentActivity() {
                         onOpenFilePicker = { filePicker.pickDocument() },
                         onOpenEditor = onOpenEditor,
                         onOpenFolder = onOpenFolder,
+                    )
+                },
+                settingsComponentFactory = { ctx, onBack ->
+                    SettingsComponentImpl(
+                        componentContext = ctx,
+                        repository = defaultAppSettingsRepository(),
+                        onBackListener = onBack,
                     )
                 },
             )

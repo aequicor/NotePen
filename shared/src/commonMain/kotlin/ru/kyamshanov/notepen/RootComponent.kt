@@ -38,5 +38,9 @@ interface RootComponent {
         class LibraryFolderContentsChild(
             val component: LibraryFolderComponent,
         ) : Child()
+
+        class SettingsChild(
+            val component: SettingsComponent,
+        ) : Child()
     }
 }

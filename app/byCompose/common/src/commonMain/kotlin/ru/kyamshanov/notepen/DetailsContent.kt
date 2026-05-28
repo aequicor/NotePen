@@ -599,7 +599,6 @@ fun DetailsContent(
     EditorBackHandler(enabled = true) { onBackWithSave() }
 
     ImmersiveEditorMode()
-    KeepScreenOn(readerStored.current.keepScreenOn)
 
     // Громкость листает ридер только в режиме чтения; перехват снимается, едва он
     // выключится, чтобы клавиши громкости в остальном работали штатно. На десктопе

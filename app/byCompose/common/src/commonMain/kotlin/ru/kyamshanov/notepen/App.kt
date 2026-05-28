@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.Flow
+import ru.kyamshanov.notepen.appsettings.rememberAppSettings
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -75,6 +76,10 @@ fun App(
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
+    val appSettings = rememberAppSettings()
+    // Глобальный always-on-display: пока [App] в композиции, экран не гаснет.
+    // На десктопе actual — no-op (см. [KeepScreenOn]).
+    KeepScreenOn(appSettings.alwaysOnDisplay)
     ComposableAppTheme {
         Surface {
             RootContent(

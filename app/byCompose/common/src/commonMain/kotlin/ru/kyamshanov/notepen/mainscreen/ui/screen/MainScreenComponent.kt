@@ -48,6 +48,8 @@ class MainScreenComponent(
     val onOpenFilePicker: suspend () -> String?,
     val onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
     val onOpenFolder: (folderId: String, folderName: String) -> Unit,
+    /** Колбэк навигации на экран глобальных настроек приложения. */
+    val onOpenSettings: () -> Unit,
     /**
      * Колбэк навигации на sub-экран общей папки «Библиотека». `null` —
      * фича не подключена (Android), карточка «Библиотека» в этом случае не показывается.

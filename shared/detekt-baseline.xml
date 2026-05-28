@@ -9,5 +9,6 @@
     <ID>TooGenericExceptionCaught:CheckAvailabilityUseCase.kt:CheckAvailabilityUseCase$e: Exception</ID>
     <ID>TooGenericExceptionCaught:DefaultDetailsComponent.kt:DefaultDetailsComponent$e: Exception</ID>
     <ID>TooGenericExceptionCaught:OpenRecentFileUseCase.kt:OpenRecentFileUseCase$e: Exception</ID>
+    <ID>TooManyFunctions:DefaultRootComponent.kt:DefaultRootComponent : RootComponentComponentContext</ID>
   </CurrentIssues>
 </SmellBaseline>

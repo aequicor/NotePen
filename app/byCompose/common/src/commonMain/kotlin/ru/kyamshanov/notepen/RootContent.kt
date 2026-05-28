@@ -10,6 +10,8 @@ import com.arkivanov.decompose.extensions.compose.stack.animation.fade
 import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import kotlinx.coroutines.flow.Flow
+import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
+import ru.kyamshanov.notepen.appsettings.SettingsContent
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContent
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
@@ -129,6 +131,7 @@ fun RootContent(
                         } else {
                             null
                         },
+                    onOpenSettings = mainScreenComponent.onOpenSettings,
                     hostQrViewModel = hostQrViewModel,
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
@@ -167,6 +170,20 @@ fun RootContent(
                     child.component as? FolderContentsComponentImpl
                         ?: error("FolderContentsChild.component must be FolderContentsComponentImpl — check DefaultRootComponent factory")
                 FolderContent(component = impl, modifier = modifier)
+            }
+            is RootComponent.Child.SettingsChild -> {
+                val impl =
+                    child.component as? SettingsComponentImpl
+                        ?: error("SettingsChild.component must be SettingsComponentImpl — check DefaultRootComponent factory")
+                SettingsContent(
+                    component = impl,
+                    hostQrViewModel = hostQrViewModel,
+                    clientScanViewModel = clientScanViewModel,
+                    manualConnectViewModel = manualConnectViewModel,
+                    peerServer = peerServer,
+                    peerClient = peerClient,
+                    modifier = modifier,
+                )
             }
             is RootComponent.Child.LibraryFolderContentsChild -> {
                 val impl =

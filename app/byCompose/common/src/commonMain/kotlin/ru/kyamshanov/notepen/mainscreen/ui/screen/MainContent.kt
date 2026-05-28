@@ -35,6 +35,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -126,6 +127,7 @@ fun MainContent(
     state: MainScreenUiState,
     onIntent: (MainScreenIntent) -> Unit,
     onBack: (() -> Unit)? = null,
+    onOpenSettings: (() -> Unit)? = null,
     hostQrViewModel: HostQrPairingViewModel? = null,
     clientScanViewModel: ClientQrScanViewModel? = null,
     manualConnectViewModel: ManualConnectViewModel? = null,
@@ -355,6 +357,14 @@ fun MainContent(
                         peerServer = peerServer,
                         peerClient = peerClient,
                     )
+                    if (onOpenSettings != null) {
+                        IconButton(
+                            onClick = onOpenSettings,
+                            modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                        ) {
+                            Icon(Icons.Default.Settings, contentDescription = "Настройки")
+                        }
+                    }
                 },
             )
 
