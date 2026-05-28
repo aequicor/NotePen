@@ -256,6 +256,11 @@ compose.desktop {
 
         jvmArgs +=
             listOf(
+                // Skiko (and JNA) load native libs via System.load(), which JDK 24+
+                // flags as a restricted operation. Granting native access to the
+                // unnamed module silences the warning and future-proofs against the
+                // "blocked in a future release" deprecation.
+                "--enable-native-access=ALL-UNNAMED",
                 "-Dorg.slf4j.simpleLogger.defaultLogLevel=DEBUG",
                 // PDFBox печатает WARN на каждый незашитый в PDF шрифт/глиф (подстановка
                 // fallback-шрифта — штатное поведение при рендере чужих PDF, чинить нечего).
@@ -279,6 +284,17 @@ compose.desktop {
         if (hostOs.contains("mac") || hostOs.contains("darwin")) {
             jvmArgs += "-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon.icns").asFile.absolutePath}"
         }
+    }
+}
+
+// The Kotlin/JVM target auto-generates a `desktopRun` JvmRun task that IntelliJ uses
+// when launching the app via "Run". It does NOT inherit jvmArgs from
+// `compose.desktop.application {}` (which configures the separate `:run` task), so the
+// --enable-native-access flag has to be applied here too. Otherwise IDE runs still emit
+// the JDK 25 restricted-method warnings from Skiko/JNA native loaders.
+tasks.withType<JavaExec>().configureEach {
+    if (name == "desktopRun") {
+        jvmArgs("--enable-native-access=ALL-UNNAMED")
     }
 }
 
