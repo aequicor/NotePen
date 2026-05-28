@@ -19,8 +19,14 @@ internal val GlassCornerRadius = 24.dp
  */
 internal val GlassBlurRadius = 20.dp
 
-/** Luminosity tint baked into the glass; gives surfaces a clearly visible frosted look. */
-internal const val GLASS_TINT_ALPHA = 0.35f
+/**
+ * Luminosity tint baked into the glass. Platform-specific because `BlurEffect` is only
+ * dependable on desktop (Skia) — Android SDK 31+ reports support, but EMUI/HarmonyOS and
+ * other OEM builds silently ignore `RenderEffect`, leaving PDF text readable through any
+ * transparent bar. Desktop gets a real frosted-glass tint; Android stays opaque so panels
+ * always mask content beneath them regardless of OEM support.
+ */
+internal expect val GLASS_TINT_ALPHA: Float
 
 /**
  * Vibrancy: how far the backdrop's luminance range is compressed toward the panel's tint
@@ -31,7 +37,7 @@ internal const val GLASS_TINT_ALPHA = 0.35f
 internal const val GLASS_BACKDROP_CONTRAST = 0.40f
 
 /** Fill alpha when blur is off (weak device / disabled): denser so controls stay legible. */
-internal const val GLASS_FILL_ALPHA_OPAQUE = 0.55f
+internal const val GLASS_FILL_ALPHA_OPAQUE = 0.95f
 
 /** Outline alpha for the crisp hairline edge (and the blur-off fallback border). */
 internal const val GLASS_BORDER_ALPHA = 0.4f

@@ -26,7 +26,7 @@ import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarStartInset
 
 /** Visible height of [LiquidGlassTopBar] above the status-bar inset. */
-val LIQUID_GLASS_TOP_BAR_HEIGHT: Dp = 56.dp
+val LIQUID_GLASS_TOP_BAR_HEIGHT: Dp = 44.dp
 
 /**
  * Edge-to-edge frosted top bar that floats over the screen content. The content
@@ -89,7 +89,7 @@ fun LiquidGlassTopBar(
                 CompositionLocalProvider(
                     LocalContentColor provides MaterialTheme.colorScheme.onSurface,
                 ) {
-                    ProvideTextStyle(MaterialTheme.typography.titleLarge) {
+                    ProvideTextStyle(MaterialTheme.typography.titleMedium) {
                         title()
                     }
                 }

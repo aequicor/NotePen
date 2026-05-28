@@ -279,20 +279,20 @@ fun MainContent(
                             contentAlignment = Alignment.Center,
                             modifier =
                                 Modifier
-                                    .size(28.dp)
+                                    .size(22.dp)
                                     .background(
                                         color = MaterialTheme.colorScheme.primary,
-                                        shape = RoundedCornerShape(8.dp),
+                                        shape = RoundedCornerShape(6.dp),
                                     ),
                         ) {
                             Icon(
                                 imageVector = NotePenIcons.Brush,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(18.dp),
+                                modifier = Modifier.size(14.dp),
                             )
                         }
-                        Spacer(Modifier.width(10.dp))
+                        Spacer(Modifier.width(8.dp))
                         Text("NotePen")
                     }
                 },

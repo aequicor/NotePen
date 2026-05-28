@@ -25,20 +25,33 @@ val LocalGlassBackdrop = staticCompositionLocalOf<GlassBackdrop?> { null }
 val LocalBlurEnabled = staticCompositionLocalOf { true }
 
 /**
+ * `true` iff Compose's [androidx.compose.ui.graphics.BlurEffect] is honored by the
+ * platform's `graphicsLayer.renderEffect`. On Android, `RenderEffect` requires API 31
+ * (Android 12); below that the effect is silently dropped and the layer renders the
+ * captured backdrop unblurred. Desktop (Skia) always supports it.
+ */
+expect fun isBlurEffectSupported(): Boolean
+
+/**
  * Hosts a [GlassBackdrop] for an editor screen and exposes it to descendant glass
  * panels. Wrap the screen that contains both the backdrop ([Modifier.glassSource])
  * and the floating [GlassSurface] panels.
+ *
+ * When the platform doesn't support [BlurEffect] (Android < 12), the backdrop layer
+ * is skipped entirely — there's no point recording each frame into a layer whose
+ * blur will be ignored. Panels fall back to the opaque-tint path automatically.
  */
 @Composable
 fun GlassBackdropProvider(
     blurEnabled: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    val layer = if (blurEnabled) rememberGraphicsLayer() else null
+    val effectiveBlur = blurEnabled && isBlurEffectSupported()
+    val layer = if (effectiveBlur) rememberGraphicsLayer() else null
     val backdrop = remember(layer) { GlassBackdrop(layer) }
     CompositionLocalProvider(
         LocalGlassBackdrop provides backdrop,
-        LocalBlurEnabled provides blurEnabled,
+        LocalBlurEnabled provides effectiveBlur,
         content = content,
     )
 }
