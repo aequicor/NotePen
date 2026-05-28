@@ -145,7 +145,14 @@ fun TabBar(
         modifier = titleBarInteraction?.dragArea(barModifier) ?: barModifier,
         shape = RectangleShape,
         tint = tint ?: MaterialTheme.colorScheme.surfaceContainerLow,
-        fillAlpha = 0.35f,
+        // В режиме чтения (tint != null) текст ридера лежит ПОД полосой вкладок —
+        // см. tabStripReserve в EditorPanel: reserve = 0, текст fullscreen, TabBar
+        // overlay'ом сверху. При полупрозрачности 0.35 верхняя строка текста
+        // просвечивала бы сквозь стекло (≈65% bleed) — читается как грязный артефакт.
+        // Поднимаем до почти-непрозрачного: тинт уже совпадает с фоном ридера, так
+        // что визуально это сплошной фон с чипами тaбов поверх. Вне reading mode
+        // оставляем 0.35 — там TabBar по дизайну «стекло» поверх PDF-страницы.
+        fillAlpha = if (tint != null) 0.95f else 0.35f,
     ) {
         Row(modifier = Modifier.fillMaxWidth().padding(start = appliedStart, end = appliedEnd)) {
             // One sessions button per window — only the panel at the window's left edge.
