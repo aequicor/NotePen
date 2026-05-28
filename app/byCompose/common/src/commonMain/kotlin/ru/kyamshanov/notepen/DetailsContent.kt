@@ -520,8 +520,23 @@ fun DetailsContent(
             !focusedReaderState.readerBarVisible
     // Цвета активной темы ридера: не null только в режиме чтения. Хром (рельса,
     // airbar, вкладки) перекрашивается под них; null — сохраняем цвета темы.
-    val readerBackground = controls?.readerBackground
-    val readerContentColor = controls?.readerContentColor
+    //
+    // Берём НАПРЯМУЮ из (1) per-tab readingMode сфокусированной панели и (2) глобального
+    // `readerStored` — без посредничества `PanelControls`. Раньше эти два поля гонялись
+    // через канал per-panel SideEffect-publish: при включении режима чтения хром (аирбары,
+    // рельса, top-bar) обновлялся не одновременно с фоном, а через цепочку
+    // recomposeEditorPanel → SideEffect → focusedControls := new → recomposeDetailsContent,
+    // что под нагрузкой (например, тяжёлый reflow.extract на старте) растягивалось до
+    // появления текста — выглядело как «мерцание» (default → reader). Поскольку и фон, и
+    // хром теперь читают один и тот же синхронный источник, переход — одним кадром.
+    val readerRenderForChrome =
+        if (focusedReaderState?.readingMode == true && readerStoredLoaded) {
+            readerStored.current.toRenderSettings()
+        } else {
+            null
+        }
+    val readerBackground = readerRenderForChrome?.background
+    val readerContentColor = readerRenderForChrome?.textColor
 
     // ---- Sync availability + status tint ----------------------------------
     // Кнопка синхронизации живёт в колесе настроек (см. systemControlEntries) —
@@ -678,14 +693,10 @@ fun DetailsContent(
 
     // Под скрытым хромом (режим чтения + airbar спрятан тапом) область над панелью —
     // status-bar inset + резерв под TAB_BAR_HEIGHT — заполняется ИМЕННО этим фоном.
-    // В режиме чтения при загруженной теме переключаем на фон ридера, иначе там
-    // проступает дефолтный colorScheme.background и читается как «полоска сверху».
-    val rootBackground =
-        if (readingModeEnabled && readerStoredLoaded) {
-            readerStored.current.toRenderSettings().background
-        } else {
-            MaterialTheme.colorScheme.background
-        }
+    // Берём `readerBackground`, который вычислен выше из того же per-tab+global источника,
+    // что и цвета хрома — гарантия, что фон и аирбары переключаются одним кадром, без
+    // визуального лага «фон уже сменился, аирбары ещё нет».
+    val rootBackground = readerBackground ?: MaterialTheme.colorScheme.background
     GlassBackdropProvider(blurEnabled = readerStored.blurEnabled) {
         Box(
             modifier

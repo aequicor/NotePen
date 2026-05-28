@@ -163,14 +163,6 @@ class PanelControls(
     val readingModeAvailable: Boolean,
     /** `true` в режиме чтения, когда airbar скрыт тапом — родитель прячет весь хром. */
     val chromeHidden: Boolean,
-    /**
-     * Фон активной темы ридера; не `null` ТОЛЬКО в режиме чтения. Хром
-     * (рельса, airbar, вкладки) перекрашивается под него; `null` — хром
-     * сохраняет цвета [androidx.compose.material3.MaterialTheme].
-     */
-    val readerBackground: Color?,
-    /** Цвет контента активной темы ридера; парный к [readerBackground] (см. его). */
-    val readerContentColor: Color?,
     val quickLoupeArmed: Boolean,
     val scrollMode: ScrollMode,
     val zoomIn: () -> Unit,
@@ -1138,13 +1130,6 @@ fun EditorPanel(
         // Read the outline here so a republish fires when it loads asynchronously
         // (the TOC button hides until then).
         val tocAvailable = pdfState.outline.isNotEmpty()
-        // Reader theme colours, resolved the same way ReaderAirbar does
-        // (StoredReaderSettings.current.toRenderSettings()). Only published in
-        // reading mode AND when the stored settings have been loaded from disk;
-        // otherwise null so the chrome keeps its MaterialTheme look and we avoid
-        // a default→saved flicker once the async load resolves.
-        val readerRender =
-            if (readingModeVisible && readerStoredLoaded) readerStored.current.toRenderSettings() else null
         SideEffect {
             onControlsChanged(
                 PanelControls(
@@ -1160,8 +1145,6 @@ fun EditorPanel(
                     readingModeEnabled = readingModeVisible,
                     readingModeAvailable = readingModeAvailable,
                     chromeHidden = readingModeVisible && !readerBarVisible,
-                    readerBackground = readerRender?.background,
-                    readerContentColor = readerRender?.textColor,
                     quickLoupeArmed = quickLoupeArmed.value,
                     scrollMode = currentScrollMode,
                     zoomIn = onZoomIn,
