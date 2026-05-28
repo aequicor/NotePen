@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -44,6 +45,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +58,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
@@ -67,9 +70,10 @@ import ru.kyamshanov.notepen.NotePenIcons
 import ru.kyamshanov.notepen.RailOrientation
 import ru.kyamshanov.notepen.SessionsMenu
 import ru.kyamshanov.notepen.WheelScrollButtons
-import ru.kyamshanov.notepen.blur.GlassBackdropProvider
-import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.fadingEdges
+import ru.kyamshanov.notepen.blur.GlassBackdropProvider
+import ru.kyamshanov.notepen.blur.LocalBlurEnabled
+import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
@@ -97,7 +101,6 @@ import ru.kyamshanov.notepen.session.seedFilePath
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
-import ru.kyamshanov.notepen.wheelItem
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 private val RECENT_CARD_WIDTH: Dp = 132.dp
@@ -545,56 +548,67 @@ private fun RecentFilesRow(
     state: MainScreenUiState,
     onIntent: (MainScreenIntent) -> Unit,
 ) {
-    // Wheel-effect: крайние плитки уменьшаются и тускнеют (см. wheelItem в uikit),
-    // делая полосу «Недавние» полноценной каруселью, а не плоским скроллом.
+    // Карусельный спад: плитки уменьшаются и тускнеют по мере приближения к
+    // краям viewport. Реализовано через [recentCardCarouselFalloff] — он
+    // меняет только graphicsLayer (layout footprint не трогаем, чтобы не
+    // дёргать видимый диапазон) и при выходе плитки из visibleItemsInfo
+    // фиксируется в КОНЕЧНОМ состоянии (minScale + alpha 0), а не возвращает
+    // scale=1: ровно отсюда росли "пропы" в стандартном wheelItem.
     val listState = rememberLazyListState()
-    val naturalSizes = remember { mutableMapOf<Int, Int>() }
     Box(modifier = Modifier.fillMaxWidth()) {
-        LazyRow(
-            state = listState,
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    // Растворяющиеся края скрывают "разрез" крайних плиток на скролле
-                    // и подменяют резкое выпадание контента из viewport плавным fade.
-                    // Fade гасится у того края, где скроллить больше некуда (стоп).
-                    .fadingEdges(
-                        orientation = RailOrientation.HORIZONTAL,
-                        edgeWidth = 72.dp,
-                        fadeStart = listState.canScrollBackward,
-                        fadeEnd = listState.canScrollForward,
-                    ),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(vertical = 4.dp),
-        ) {
-            itemsIndexed(state.recentFiles, key = { _, file -> file.id }) { index, file ->
-                RecentFileCard(
-                    model = file,
-                    onClick = { onIntent(MainScreenIntent.OpenRecentFile(file.id)) },
-                    onDragStarted = {
-                        onIntent(
-                            MainScreenIntent.DragStarted(
-                                fileId = file.id,
-                                fileUri = file.uri,
-                                displayName = file.displayName,
-                            ),
-                        )
-                    },
-                    onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
-                    isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
-                    folders = state.folders,
-                    onAddToFolder = { folderId ->
-                        onIntent(MainScreenIntent.AddFileToFolder(folderId, file.uri))
-                    },
-                    modifier =
-                        Modifier
-                            .width(RECENT_CARD_WIDTH)
-                            .wheelItem(
-                                listState = listState,
-                                index = index,
-                                naturalSizes = naturalSizes,
-                            ),
-                )
+        // Внутри скроллящейся полосы отключаем live-сэмплинг backdrop у
+        // GlassSurface: каждая карточка обновляет `positionInWindow` через
+        // `onGloballyPositioned` — асинхронно draw-pass'у, и под быстрым
+        // скроллом блюр успевает сэмплить по устаревшей координате на 1 кадр
+        // → визуально мерцает. Flat fallback (tint + outline) выглядит так же
+        // "frosted", но без рассинхронизации и без 8× сэмплинга backdrop.
+        CompositionLocalProvider(LocalBlurEnabled provides false) {
+            LazyRow(
+                state = listState,
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        // Viewport-level кромочная маска: даже после falloff'а
+                        // (scale + alpha) у плитки прямо на кромке остаётся
+                        // ненулевая видимость → визуальный "разрез". Этот
+                        // DstIn-градиент дотягивает альфу до 0 на самой кромке
+                        // viewport, скрывая клиппинг. Гасим маску с той
+                        // стороны, где скроллить больше некуда (стоп) — там
+                        // нечего скрывать, плитки полноразмерны.
+                        .fadingEdges(
+                            orientation = RailOrientation.HORIZONTAL,
+                            edgeWidth = 56.dp,
+                            fadeStart = listState.canScrollBackward,
+                            fadeEnd = listState.canScrollForward,
+                        ),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(vertical = 4.dp),
+            ) {
+                itemsIndexed(state.recentFiles, key = { _, file -> file.id }) { index, file ->
+                    RecentFileCard(
+                        model = file,
+                        onClick = { onIntent(MainScreenIntent.OpenRecentFile(file.id)) },
+                        onDragStarted = {
+                            onIntent(
+                                MainScreenIntent.DragStarted(
+                                    fileId = file.id,
+                                    fileUri = file.uri,
+                                    displayName = file.displayName,
+                                ),
+                            )
+                        },
+                        onDragCancelled = { onIntent(MainScreenIntent.DragCancelled) },
+                        isBeingDragged = (state.dragState as? DragState.Active)?.fileId == file.id,
+                        folders = state.folders,
+                        onAddToFolder = { folderId ->
+                            onIntent(MainScreenIntent.AddFileToFolder(folderId, file.uri))
+                        },
+                        modifier =
+                            Modifier
+                                .width(RECENT_CARD_WIDTH)
+                                .recentCardCarouselFalloff(listState = listState, index = index),
+                    )
+                }
             }
         }
         // Desktop chevrons на левом/правом крае карусели; visible только когда
@@ -606,6 +620,60 @@ private fun RecentFilesRow(
         )
     }
 }
+
+/**
+ * Плавный карусельный спад: масштаб 1→[minScale] и альфа 1→[minAlpha] по мере
+ * того как viewport «отрезает» край плитки. Применяется ТОЛЬКО через
+ * `graphicsLayer` — layout slot остаётся фиксированным, поэтому членство в
+ * [LazyListLayoutInfo.visibleItemsInfo] не зависит от значения трансформы и не
+ * "осциллирует" под скроллом (это была причина мерцания в общем `wheelItem`).
+ *
+ * **Модель: clipping-ratio.** Считаем долю плитки, реально обрезанную краем
+ * viewport. Полностью видимые плитки → `t = 0` (никакой трансформы). Когда
+ * плитка начинает резаться кромкой — `t` плавно набирает до `1` к моменту
+ * полного выхода. Это даёт ровно тот эффект "карточка тускнеет/уменьшается по
+ * мере исчезновения" — без посторонней деформации центральных плиток и без
+ * скачка при отлипании от стопа: на стопе крайняя плитка ещё не обрезана →
+ * `t = 0` сам собой, специальный anchor не нужен.
+ *
+ * **Кривая:** smootherstep `6t⁵−15t⁴+10t³` (C² на обоих концах) — медленный
+ * старт у `clip ≈ 0` (только-только начинает резаться → trans-форма
+ * практически нулевая), ускоренное падение в середине, ровный финиш у `clip = 1`.
+ *
+ * Когда плитка покидает `visibleItemsInfo` (один-два кадра перед утилизацией),
+ * модификатор фиксирует её в конечном состоянии (`scale = minScale`,
+ * `alpha = minAlpha`), без возврата в 1.
+ */
+private fun Modifier.recentCardCarouselFalloff(
+    listState: LazyListState,
+    index: Int,
+    minScale: Float = 0.78f,
+    minAlpha: Float = 0f,
+): Modifier =
+    this.graphicsLayer {
+        val info = listState.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.index == index }
+        val t =
+            if (item == null) {
+                1f
+            } else {
+                val itemStart = item.offset.toFloat()
+                val itemEnd = itemStart + item.size
+                val itemSize = item.size.toFloat().coerceAtLeast(1f)
+                // Сколько процентов плитки уже за левой/правой кромкой viewport.
+                // [0, 1]: 0 — целиком внутри, 1 — целиком снаружи.
+                val leftClip = ((info.viewportStartOffset - itemStart) / itemSize).coerceIn(0f, 1f)
+                val rightClip = ((itemEnd - info.viewportEndOffset) / itemSize).coerceIn(0f, 1f)
+                val clip = kotlin.math.max(leftClip, rightClip)
+                // smootherstep: при `clip ≈ 0` производная нулевая — лёгкий заход
+                // в обрезание почти не меняет трансформу. К `clip = 1` ускоряется.
+                clip * clip * clip * (clip * (clip * 6f - 15f) + 10f)
+            }
+        val scale = androidx.compose.ui.util.lerp(1f, minScale, t)
+        scaleX = scale
+        scaleY = scale
+        alpha = androidx.compose.ui.util.lerp(1f, minAlpha, t)
+    }
 
 @Composable
 private fun LibraryShelfSection(
