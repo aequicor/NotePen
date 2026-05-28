@@ -14,10 +14,11 @@ import androidx.compose.ui.unit.dp
 internal val GlassCornerRadius = 24.dp
 
 /**
- * Blur applied to the captured backdrop. Strong enough to read as a clear "frosted glass"
- * refraction over a vibrant background, while keeping panel content sharp on top.
+ * Blur applied to the captured backdrop before the refraction shader samples it. Sized
+ * for editor airbars over dense PDF text: 32dp turns body text into pastel smudges, so
+ * the rim refraction sampling further-out pixels can't surface recognisable glyphs.
  */
-internal val GlassBlurRadius = 20.dp
+internal val GlassBlurRadius = 2.dp
 
 /**
  * Luminosity tint baked into the glass. Platform-specific because `BlurEffect` is only

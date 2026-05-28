@@ -113,6 +113,17 @@ internal fun Modifier.glassBackdropLayer(
             // Translate the captured backdrop so the visible shape lines up with the
             // panel's window position; the pad ring around it picks up real backdrop
             // pixels that the shader reaches for at the rim.
+            //
+            // Fill the whole drawScope with opaque tint *first*: when the panel sits
+            // outside the glassSource'd element's bounds (e.g. a toolrail in editor
+            // chrome over a viewer-sized source), the pad zone on the source-edge
+            // side has no recorded pixels and would otherwise stay transparent. The
+            // blur's CLAMP tile mode then extends that transparency inward, and the
+            // shader samples it on the rim — producing the one-sided "transparent on
+            // the left, dense on the right" look. With the opaque fill, source's own
+            // pixels cover it where they exist; outside source, the tint stays
+            // visible so both rims sample a consistent colour.
+            if (tint.isSpecified) drawRect(color = tint.copy(alpha = 1f))
             val offX = shapeOrigin.x - backdrop.sourceOriginInWindow.x - padPx
             val offY = shapeOrigin.y - backdrop.sourceOriginInWindow.y - padPx
             translate(-offX, -offY) { drawLayer(sourceLayer) }
@@ -155,6 +166,7 @@ private fun glassRenderEffect(
     density: Density,
     @Suppress("UNUSED_PARAMETER") layoutDirection: LayoutDirection,
 ): RenderEffect? {
+    val blurPx = with(density) { GlassBlurRadius.toPx() }
     val refraction =
         if (shapeWidthPx > 0f && shapeHeightPx > 0f) {
             val cornerPx = shapeCornerPx(shape, shapeWidthPx, shapeHeightPx, density)
@@ -169,14 +181,12 @@ private fun glassRenderEffect(
                 cornerRadiusPx = cornerPx,
                 edgeBandPx = edgeBandPx,
                 strengthPx = strengthPx,
+                blurSigmaPx = blurPx,
             )
         } else {
             null
         }
     // Platforms without runtime shaders (Android < 13) and the first pre-measure frame
     // fall back to a plain blur so panels don't render as flat translucent plates.
-    return refraction ?: with(density) {
-        val blurPx = GlassBlurRadius.toPx()
-        BlurEffect(blurPx, blurPx, TileMode.Clamp)
-    }
+    return refraction ?: BlurEffect(blurPx, blurPx, TileMode.Clamp)
 }

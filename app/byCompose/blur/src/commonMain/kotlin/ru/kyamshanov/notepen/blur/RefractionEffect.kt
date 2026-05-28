@@ -24,6 +24,10 @@ import androidx.compose.ui.graphics.RenderEffect
  * @param cornerRadiusPx rounded-rect corner radius in pixels (use `min(w,h)/2` for circle).
  * @param edgeBandPx width of the refraction band measured inward from the rim.
  * @param strengthPx maximum displacement at the rim, in pixels.
+ * @param blurSigmaPx Gaussian sigma applied to the backdrop *before* the refraction
+ *        shader samples it. `0` skips the blur stage. Used so high-contrast content
+ *        under the panel (PDF text, sharp gradients) doesn't bleed into the icons
+ *        sitting on top — the panel reads as a uniform glass instead.
  */
 expect fun refractionRenderEffect(
     innerWidthPx: Float,
@@ -34,6 +38,7 @@ expect fun refractionRenderEffect(
     cornerRadiusPx: Float,
     edgeBandPx: Float,
     strengthPx: Float,
+    blurSigmaPx: Float,
 ): RenderEffect?
 
 /**

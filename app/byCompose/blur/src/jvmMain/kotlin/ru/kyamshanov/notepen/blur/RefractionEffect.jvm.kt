@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.blur
 
 import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import org.jetbrains.skia.FilterTileMode
 import org.jetbrains.skia.ImageFilter
 import org.jetbrains.skia.RuntimeEffect
 import org.jetbrains.skia.RuntimeShaderBuilder
@@ -19,6 +20,7 @@ actual fun refractionRenderEffect(
     cornerRadiusPx: Float,
     edgeBandPx: Float,
     strengthPx: Float,
+    blurSigmaPx: Float,
 ): RenderEffect? {
     val measured =
         innerWidthPx > 0f && innerHeightPx > 0f && shapeWidthPx > 0f && shapeHeightPx > 0f
@@ -30,15 +32,27 @@ actual fun refractionRenderEffect(
     builder.uniform("uRadius", cornerRadiusPx)
     builder.uniform("uEdge", edgeBandPx)
     builder.uniform("uStrength", strengthPx)
-    // Single child shader named "content"; null input → the layer's own content is
-    // substituted by Skia at composition time. This is what lets the renderEffect see
-    // the GraphicsLayer's pre-effect drawing (i.e. the drawn backdrop + tint) as the
-    // sampling source for the displacement.
+    // Blur the layer's pre-effect content first, then sample it as `content` from the
+    // runtime shader. With CLAMP we extend edge pixels into the displacement reach so
+    // the rim never falls off into decal-transparent territory; the shape mask in the
+    // shader still hides the pad ring.
+    val blurFilter =
+        if (blurSigmaPx > 0f) {
+            ImageFilter.makeBlur(
+                sigmaX = blurSigmaPx,
+                sigmaY = blurSigmaPx,
+                mode = FilterTileMode.CLAMP,
+                input = null,
+                crop = null,
+            )
+        } else {
+            null
+        }
     val filter =
         ImageFilter.makeRuntimeShader(
             runtimeShaderBuilder = builder,
             shaderName = "content",
-            input = null,
+            input = blurFilter,
         )
     return filter.asComposeRenderEffect()
 }
