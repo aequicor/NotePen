@@ -193,6 +193,30 @@ class MainScreenViewModel(
             is MainScreenIntent.RestoreSession -> restoreSession(intent.seedUri)
             is MainScreenIntent.AddToLibrary -> addToLibrary(intent.sourceUri)
             is MainScreenIntent.OpenLibraryItem -> openLibraryItem(intent.itemId)
+            is MainScreenIntent.DeleteRecentFile -> deleteRecentFile(intent.id)
+            is MainScreenIntent.OpenLibraryFolder -> openLibraryFolder()
+        }
+    }
+
+    private fun openLibraryFolder() {
+        if (isNavigating) return
+        if (libraryFolder == null) return
+        isNavigating = true
+        _state.update { it.copy(navigationTarget = NavigationTarget.LibraryFolder) }
+    }
+
+    private suspend fun deleteRecentFile(id: String) {
+        val record = _state.value.recentFiles.firstOrNull { it.id == id } ?: return
+        // Оптимистично убираем из UI; на ошибке I/O возвращать запись не имеет смысла —
+        // следующий ScreenVisible её всё равно перечитает с диска (LWW по факту записи).
+        _state.update { s -> s.copy(recentFiles = s.recentFiles.filterNot { it.id == id }) }
+        try {
+            historyRepository.rollbackUpsert(record.uri)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.warn { "deleteRecentFile failed: ${e::class.simpleName}" }
+            _state.update { it.copy(errorEvent = ErrorEvent.HistoryFlushFailed) }
         }
     }
 

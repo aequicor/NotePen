@@ -48,6 +48,11 @@ class MainScreenComponent(
     val onOpenFilePicker: suspend () -> String?,
     val onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
     val onOpenFolder: (folderId: String, folderName: String) -> Unit,
+    /**
+     * Колбэк навигации на sub-экран общей папки «Библиотека». `null` —
+     * фича не подключена (Android), карточка «Библиотека» в этом случае не показывается.
+     */
+    val onOpenLibraryFolder: (() -> Unit)? = null,
     private val remoteCatalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>? = null,
     /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,

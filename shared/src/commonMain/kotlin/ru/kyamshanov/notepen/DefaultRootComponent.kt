@@ -13,6 +13,7 @@ import com.arkivanov.decompose.value.Value
 import kotlinx.serialization.Serializable
 import ru.kyamshanov.notepen.RootComponent.Child.DetailsChild
 import ru.kyamshanov.notepen.RootComponent.Child.FolderContentsChild
+import ru.kyamshanov.notepen.RootComponent.Child.LibraryFolderContentsChild
 import ru.kyamshanov.notepen.RootComponent.Child.MainChild
 import ru.kyamshanov.notepen.RootComponent.Child.PeerCatalogChild
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
@@ -38,6 +39,7 @@ class DefaultRootComponent(
         onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
         onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
         onOpenFolder: (folderId: String, folderName: String) -> Unit,
+        onOpenLibraryFolder: () -> Unit,
     ) -> MainComponent,
     private val peerCatalogComponentFactory: (
         componentContext: ComponentContext,
@@ -54,6 +56,18 @@ class DefaultRootComponent(
         onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
         onOpenFolder: (folderId: String, folderName: String) -> Unit,
     ) -> FolderComponent,
+    /**
+     * Фабрика sub-экрана общей папки «Библиотека». `null` — фича не доступна на
+     * платформе (например, Android — без файловой библиотечной папки),
+     * навигация на этот sub-экран в стек не добавляется.
+     */
+    private val libraryFolderComponentFactory: (
+        (
+            componentContext: ComponentContext,
+            onBack: () -> Unit,
+            onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
+        ) -> LibraryFolderComponent
+    )? = null,
 ) : RootComponent,
     ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -78,6 +92,7 @@ class DefaultRootComponent(
                 is Config.Details -> config.instanceId
                 is Config.PeerCatalog -> config.instanceId
                 is Config.FolderContents -> config.instanceId
+                is Config.LibraryFolderContents -> config.instanceId
                 else -> -1L
             }
         } + 1L
@@ -126,6 +141,8 @@ class DefaultRootComponent(
             is Config.Details -> DetailsChild(detailsComponent(ctx, config))
             is Config.PeerCatalog -> PeerCatalogChild(peerCatalogComponent(ctx, config))
             is Config.FolderContents -> FolderContentsChild(folderContentsComponent(ctx, config))
+            is Config.LibraryFolderContents ->
+                LibraryFolderContentsChild(libraryFolderContentsComponent(ctx))
         }
 
     @OptIn(DelicateDecomposeApi::class)
@@ -135,6 +152,7 @@ class DefaultRootComponent(
             { uri, lastPageIndex -> navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId())) },
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
+            { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
         )
 
     /**
@@ -148,6 +166,7 @@ class DefaultRootComponent(
             { uri, lastPageIndex -> openEditorOrAddTab(uri, lastPageIndex) },
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
+            { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
         )
 
     @OptIn(DelicateDecomposeApi::class)
@@ -193,6 +212,26 @@ class DefaultRootComponent(
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
         )
 
+    /**
+     * Sub-экран общей папки «Библиотека». Фабрика обязана быть выставлена,
+     * если в стек попал [Config.LibraryFolderContents] — это инвариант
+     * платформенной сборки, навигация туда возможна только когда фича
+     * сконфигурирована.
+     */
+    @OptIn(DelicateDecomposeApi::class)
+    private fun libraryFolderContentsComponent(ctx: ComponentContext): LibraryFolderComponent {
+        val factory =
+            libraryFolderComponentFactory
+                ?: error(
+                    "Config.LibraryFolderContents reached child(), but libraryFolderComponentFactory is null. " +
+                        "Wire MainScreenComponent.onOpenLibraryFolder only on platforms with a LibraryFolder.",
+                )
+        return factory(
+            ctx,
+            navigation::pop,
+        ) { uri, lastPageIndex -> openEditorOrAddTab(uri, lastPageIndex) }
+    }
+
     override fun onBackClicked(toIndex: Int) {
         navigation.popTo(index = toIndex)
     }
@@ -235,6 +274,16 @@ class DefaultRootComponent(
         data class FolderContents(
             val folderId: String,
             val folderName: String,
+            val instanceId: Long = 0L,
+        ) : Config
+
+        /**
+         * Sub-экран общей папки «Библиотека». Единственный экземпляр на устройство,
+         * но конфиг помечен [instanceId] для уникальности при множественном push'е
+         * (например, открыта поверх детали).
+         */
+        @Serializable
+        data class LibraryFolderContents(
             val instanceId: Long = 0L,
         ) : Config
     }

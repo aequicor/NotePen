@@ -314,7 +314,11 @@ class MainActivity : ComponentActivity() {
             DefaultRootComponent(
                 componentContext = defaultComponentContext(),
                 historyRepository = historyRepo,
-                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder ->
+                mainComponentFactory = {
+                        componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _ ->
+                    // libraryFolder=null на Android → onOpenLibraryFolder тоже не нужен;
+                    // компонент не показывает карточку «Библиотека», навигация туда
+                    // никогда не инициируется.
                     MainScreenComponent(
                         componentContext = componentContext,
                         historyRepository = historyRepo,

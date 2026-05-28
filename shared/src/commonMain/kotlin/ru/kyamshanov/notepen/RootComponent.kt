@@ -34,5 +34,9 @@ interface RootComponent {
         class FolderContentsChild(
             val component: FolderComponent,
         ) : Child()
+
+        class LibraryFolderContentsChild(
+            val component: LibraryFolderComponent,
+        ) : Child()
     }
 }

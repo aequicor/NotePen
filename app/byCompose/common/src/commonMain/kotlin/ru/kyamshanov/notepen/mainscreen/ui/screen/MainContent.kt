@@ -79,7 +79,7 @@ import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
 import ru.kyamshanov.notepen.mainscreen.ui.component.EmptyState
 import ru.kyamshanov.notepen.mainscreen.ui.component.FolderCard
-import ru.kyamshanov.notepen.mainscreen.ui.component.LibraryShelf
+import ru.kyamshanov.notepen.mainscreen.ui.component.LibraryFolderCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.PeerCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.RecentFileCard
 import ru.kyamshanov.notepen.mainscreen.ui.component.extractExternalFileUris
@@ -463,14 +463,27 @@ private fun RecentFilesAndFoldersList(
                     RecentFilesRow(state, onIntent)
                 }
             }
-            state.library?.let { libraryItems ->
-                item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Библиотека") }
-                item(span = { GridItemSpan(maxLineSpan) }) {
-                    LibraryShelfSection(items = libraryItems, onIntent = onIntent)
-                }
-            }
-            if (state.folders.isNotEmpty()) {
+            // «Библиотека» закреплена первой плиткой в секции «Папки»
+            // — общая папка, расшариваемая пирам, визуально живёт рядом
+            // с обычными папками, но отдельным горизонтальным шельфом.
+            val hasLibrary = state.library != null
+            if (hasLibrary || state.folders.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Папки") }
+                state.library?.let { libraryItems ->
+                    // Без GridItemSpan(maxLineSpan): карточка библиотеки
+                    // встаёт в обычную ячейку Adaptive-грида рядом с
+                    // другими папками — а не растягивается на всю строку.
+                    item(key = "library_folder_card") {
+                        LibraryFolderCard(
+                            itemCount = libraryItems.size,
+                            onClick = { onIntent(MainScreenIntent.OpenLibraryFolder) },
+                            onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(uri)) },
+                            onDropExternalFiles = { uris ->
+                                uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(it)) }
+                            },
+                        )
+                    }
+                }
                 items(state.folders, key = { "folder_${it.id}" }) { folder ->
                     FolderCard(
                         model = folder,
@@ -515,14 +528,28 @@ private fun RecentFilesAndFoldersList(
                 item { SectionHeader("Недавние файлы") }
                 item { RecentFilesRow(state, onIntent) }
             }
-            state.library?.let { libraryItems ->
-                item { Spacer(Modifier.height(24.dp)) }
-                item { SectionHeader("Библиотека") }
-                item { LibraryShelfSection(items = libraryItems, onIntent = onIntent) }
-            }
-            if (state.folders.isNotEmpty()) {
+            // «Библиотека» закреплена первой плиткой в секции «Папки» —
+            // см. развёрнутую логику выше в широком layout'е.
+            val hasLibrary = state.library != null
+            if (hasLibrary || state.folders.isNotEmpty()) {
                 item { Spacer(Modifier.height(24.dp)) }
                 item { SectionHeader("Папки") }
+                state.library?.let { libraryItems ->
+                    item {
+                        LibraryFolderCard(
+                            itemCount = libraryItems.size,
+                            onClick = { onIntent(MainScreenIntent.OpenLibraryFolder) },
+                            onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(uri)) },
+                            onDropExternalFiles = { uris ->
+                                uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(it)) }
+                            },
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                        )
+                    }
+                }
                 items(state.folders, key = { "folder_${it.id}" }) { folder ->
                     FolderCard(
                         model = folder,
@@ -603,6 +630,13 @@ private fun RecentFilesRow(
                         onAddToFolder = { folderId ->
                             onIntent(MainScreenIntent.AddFileToFolder(folderId, file.uri))
                         },
+                        onAddToLibrary =
+                            if (state.library != null) {
+                                { onIntent(MainScreenIntent.AddToLibrary(file.uri)) }
+                            } else {
+                                null
+                            },
+                        onDelete = { onIntent(MainScreenIntent.DeleteRecentFile(file.id)) },
                         modifier =
                             Modifier
                                 .width(RECENT_CARD_WIDTH)
@@ -674,24 +708,6 @@ private fun Modifier.recentCardCarouselFalloff(
         scaleY = scale
         alpha = androidx.compose.ui.util.lerp(1f, minAlpha, t)
     }
-
-@Composable
-private fun LibraryShelfSection(
-    items: List<ru.kyamshanov.notepen.mainscreen.ui.model.LibraryShelfUiModel>,
-    onIntent: (MainScreenIntent) -> Unit,
-) {
-    LibraryShelf(
-        items = items,
-        onItemClick = { id -> onIntent(MainScreenIntent.OpenLibraryItem(id)) },
-        onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(uri)) },
-        onDropExternalFiles = { uris ->
-            // Каждый внешний файл копируется в библиотеку отдельной операцией —
-            // VM сама агрегирует snackbar'ы. Подавляем дубликаты в самом источнике.
-            uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(it)) }
-        },
-        modifier = Modifier.fillMaxWidth(),
-    )
-}
 
 @Composable
 private fun SectionHeader(text: String) {

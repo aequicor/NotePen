@@ -4,14 +4,19 @@ import androidx.compose.foundation.draganddrop.dragAndDropSource
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileMoveRtl
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -40,14 +45,15 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
  * Поддерживает drag-and-drop: при перетаскивании вызывает [onDragStarted] и [onDragCancelled].
  * Визуально "тускнеет" (alpha = 0.5) когда [isBeingDragged] = true (AC-1, TC-23).
  *
- * Завершение или отмена drag-сессии обнаруживается через мониторинговый [DragAndDropTarget],
- * у которого `onEnded` вызывает [onDragCancelled] (HIGH #1, AC-3, AC-4).
- *
  * @param model UI-модель файла.
  * @param onClick Обработчик нажатия на карточку.
- * @param onDragStarted Обратный вызов, вызываемый при начале перетаскивания.
- * @param onDragCancelled Обратный вызов, вызываемый при завершении или отмене перетаскивания.
+ * @param onDragStarted Обратный вызов при начале перетаскивания.
+ * @param onDragCancelled Обратный вызов при завершении или отмене перетаскивания.
  * @param isBeingDragged true, когда карточка активно перетаскивается.
+ * @param folders Список доступных папок для пункта «Переместить в папку…» в меню.
+ * @param onAddToFolder Колбэк добавления файла в выбранную папку.
+ * @param onAddToLibrary Колбэк копирования файла в общую Библиотеку. `null` — пункт скрыт.
+ * @param onDelete Колбэк удаления документа (убирает запись из истории; файл на диске остаётся).
  * @param modifier Модификатор компонента.
  */
 @Composable
@@ -59,10 +65,10 @@ fun RecentFileCard(
     isBeingDragged: Boolean = false,
     folders: List<FolderUiModel> = emptyList(),
     onAddToFolder: (folderId: String) -> Unit = {},
+    onAddToLibrary: (() -> Unit)? = null,
+    onDelete: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
-    // Monitoring target: does not accept drops (onDrop returns false), but participates in
-    // the drag session to detect when it ends via onEnded → calls onDragCancelled (AC-3, AC-4).
     val dragEndMonitor =
         remember(onDragCancelled) {
             object : DragAndDropTarget {
@@ -102,55 +108,164 @@ fun RecentFileCard(
                 .padding(12.dp)
                 .alpha(if (isBeingDragged) 0.5f else 1.0f),
         ) {
-            Box(Modifier.fillMaxWidth()) {
-                ThumbnailView(
-                    state = model.thumbnailState,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                if (folders.isNotEmpty()) {
-                    var menuExpanded by remember { mutableStateOf(false) }
-                    Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) {
-                        IconButton(
-                            onClick = { menuExpanded = true },
-                            modifier = Modifier.size(28.dp),
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.CreateNewFolder,
-                                contentDescription = "Добавить в папку",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        LiquidGlassDropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false },
-                        ) {
-                            folders.forEach { folder ->
-                                DropdownMenuItem(
-                                    text = { Text(folder.name) },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onAddToFolder(folder.id)
-                                    },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            // minLines=2 фиксирует высоту подписи независимо от длины имени —
-            // карусель «Недавние» выходит уже строго прямоугольной.
-            Text(
-                text = model.displayName,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 2,
-                minLines = 2,
-                overflow = TextOverflow.Ellipsis,
+            ThumbnailView(
+                state = model.thumbnailState,
+                modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(8.dp))
+            // Имя + меню в одной Row: имя берёт weight=1 и переносится
+            // на две строки (minLines=2 держит высоту), кнопка стоит
+            // справа по центру блока имени.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = model.displayName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 2,
+                    minLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+                DocumentMenuButton(
+                    folders = folders,
+                    onAddToFolder = onAddToFolder,
+                    onAddToLibrary = onAddToLibrary,
+                    onDelete = onDelete,
+                )
+            }
             StatusBadge(
                 status = model.availabilityStatus,
                 modifier = Modifier.padding(top = 4.dp),
             )
         }
     }
+}
+
+/**
+ * Кнопка-меню документа: трёхточечный `MoreVert`. Открывает
+ * [LiquidGlassDropdownMenu] со списком папок-приёмников, пунктом
+ * «Переместить в Библиотеку» (если доступна) и удалением.
+ */
+@Composable
+internal fun DocumentMenuButton(
+    folders: List<FolderUiModel>,
+    onAddToFolder: (folderId: String) -> Unit,
+    onAddToLibrary: (() -> Unit)?,
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Box(modifier) {
+        IconButton(
+            onClick = { menuExpanded = true },
+            modifier = Modifier.size(28.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.MoreVert,
+                contentDescription = "Меню документа",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        LiquidGlassDropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            DocumentMenuContent(
+                folders = folders,
+                onAddToFolder = { folderId ->
+                    menuExpanded = false
+                    onAddToFolder(folderId)
+                },
+                onAddToLibrary =
+                    onAddToLibrary?.let { handler ->
+                        {
+                            menuExpanded = false
+                            handler()
+                        }
+                    },
+                onDelete = {
+                    menuExpanded = false
+                    onDelete()
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun DocumentMenuContent(
+    folders: List<FolderUiModel>,
+    onAddToFolder: (folderId: String) -> Unit,
+    onAddToLibrary: (() -> Unit)?,
+    onDelete: () -> Unit,
+) {
+    val hasMoveSection = folders.isNotEmpty() || onAddToLibrary != null
+    if (hasMoveSection) {
+        MoveSectionHeader()
+        onAddToLibrary?.let { MoveToLibraryItem(onClick = it) }
+        folders.forEach { folder ->
+            MoveToFolderItem(folder) { onAddToFolder(folder.id) }
+        }
+        HorizontalDivider()
+    }
+    DeleteDocumentItem(onClick = onDelete)
+}
+
+@Composable
+private fun MoveSectionHeader() {
+    // Неинтерактивный заголовок: подписывает блок «Переместить» с папками
+    // и Библиотекой, не сливаясь с самими действиями.
+    DropdownMenuItem(
+        enabled = false,
+        text = {
+            Text(
+                text = "Переместить в",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+        onClick = {},
+    )
+}
+
+@Composable
+private fun MoveToLibraryItem(onClick: () -> Unit) {
+    DropdownMenuItem(
+        leadingIcon = {
+            Icon(imageVector = Icons.AutoMirrored.Filled.MenuBook, contentDescription = null)
+        },
+        text = { Text("Библиотека") },
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun MoveToFolderItem(
+    folder: FolderUiModel,
+    onClick: () -> Unit,
+) {
+    DropdownMenuItem(
+        leadingIcon = {
+            Icon(imageVector = Icons.Default.DriveFileMoveRtl, contentDescription = null)
+        },
+        text = { Text(folder.name) },
+        onClick = onClick,
+    )
+}
+
+@Composable
+private fun DeleteDocumentItem(onClick: () -> Unit) {
+    DropdownMenuItem(
+        leadingIcon = {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+            )
+        },
+        text = { Text(text = "Удалить", color = MaterialTheme.colorScheme.error) },
+        onClick = onClick,
+    )
 }

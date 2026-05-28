@@ -7,14 +7,13 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolderItem
 import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
 import java.io.File
 import java.net.URI
+import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 
@@ -36,7 +35,6 @@ class FileSystemLibraryFolder(
     private val ioDispatcher: CoroutineDispatcher,
 ) : LibraryFolder {
     private val rootCanonical: File = root.apply { mkdirs() }.canonicalFile
-    private val mutex = Mutex()
     private val _items = MutableStateFlow<List<LibraryFolderItem>>(emptyList())
     override val items: StateFlow<List<LibraryFolderItem>> = _items.asStateFlow()
 
@@ -63,14 +61,7 @@ class FileSystemLibraryFolder(
                 _items.value.firstOrNull { it.uri == source.canonicalFile.path }
                     ?: error("Файл уже в библиотеке, но не виден в скане: ${source.path}")
             } else {
-                val target = mutex.withLock { reserveTarget(source.name) }
-                withContext(ioDispatcher) {
-                    Files.copy(
-                        source.toPath(),
-                        target.toPath(),
-                        StandardCopyOption.COPY_ATTRIBUTES,
-                    )
-                }
+                val target = withContext(ioDispatcher) { copyWithUniqueName(source) }
                 refresh()
                 notifier.notifyChanged()
                 _items.value.firstOrNull { it.uri == target.canonicalFile.path }
@@ -79,25 +70,29 @@ class FileSystemLibraryFolder(
         }.onFailure { logger.warn(it) { "addCopy failed for $sourceUri" } }
 
     /**
-     * Подбирает свободное имя в библиотеке: при коллизии добавляет суффикс
-     * ` (2)`, ` (3)` перед расширением. Резервирование делается под [mutex],
-     * иначе два параллельных drop'а могли бы выбрать одно и то же имя.
+     * Копирует [source] в библиотеку, подбирая свободное имя суффиксом
+     * ` (2)`, ` (3)` и т. д. при коллизии. `Files.copy` без `REPLACE_EXISTING`
+     * атомарно резервирует имя через ОС: ровно один параллельный вызов
+     * выигрывает гонку, остальные ловят [FileAlreadyExistsException] и
+     * переходят к следующему суффиксу — без mutex и без пустых заглушек,
+     * которые могли бы засорить библиотеку при сбое copy.
      */
-    private fun reserveTarget(originalName: String): File {
+    private fun copyWithUniqueName(source: File): File {
+        val originalName = source.name
         val base = originalName.substringBeforeLast('.', originalName)
         val ext = originalName.substringAfterLast('.', "")
-        val suffix = if (ext.isEmpty()) "" else ".$ext"
+        val dotExt = if (ext.isEmpty()) "" else ".$ext"
+        var counter = 1
         var candidate = File(rootCanonical, originalName)
-        var counter = 2
-        while (candidate.exists()) {
-            candidate = File(rootCanonical, "$base ($counter)$suffix")
-            counter++
+        while (true) {
+            try {
+                Files.copy(source.toPath(), candidate.toPath(), StandardCopyOption.COPY_ATTRIBUTES)
+                return candidate
+            } catch (_: FileAlreadyExistsException) {
+                counter++
+                candidate = File(rootCanonical, "$base ($counter)$dotExt")
+            }
         }
-        // Создаём «заглушку» чтобы parallel-резервации видели имя занятым.
-        // Files.copy ниже всё равно перезапишет содержимое; флаг REPLACE_EXISTING
-        // не используется — мы только что сами создали пустой маркер.
-        candidate.createNewFile()
-        return candidate
     }
 
     private fun scan(): List<LibraryFolderItem> {

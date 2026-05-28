@@ -37,4 +37,12 @@ sealed class NavigationTarget {
         val folderId: String,
         val folderName: String,
     ) : NavigationTarget()
+
+    /**
+     * Открыть sub-экран содержимого общей папки «Библиотека» — единственный
+     * экземпляр на устройство (источник [ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder]).
+     * Отдельная нав-цель: книги хранятся в файловой системе, а не как
+     * FolderRepository-папка с FolderFileLink-ссылками.
+     */
+    object LibraryFolder : NavigationTarget()
 }

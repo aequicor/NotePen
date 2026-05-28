@@ -241,4 +241,17 @@ sealed class MainScreenIntent {
     data class OpenLibraryItem(
         val itemId: String,
     ) : MainScreenIntent()
+
+    /**
+     * Удалить документ из списка недавних файлов. Файл на диске НЕ удаляется —
+     * убирается только запись истории и её отображение в карусели.
+     *
+     * @property id Идентификатор записи в истории.
+     */
+    data class DeleteRecentFile(
+        val id: String,
+    ) : MainScreenIntent()
+
+    /** Открыть sub-экран общей папки «Библиотека». */
+    object OpenLibraryFolder : MainScreenIntent()
 }

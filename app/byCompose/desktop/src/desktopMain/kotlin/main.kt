@@ -47,12 +47,14 @@ import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FileAvailabilityCheckerDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FileHistoryRepositoryDesktop
+import ru.kyamshanov.notepen.mainscreen.infrastructure.FileSystemLibraryFolder
 import ru.kyamshanov.notepen.mainscreen.infrastructure.FolderRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryDesktop
 import ru.kyamshanov.notepen.mainscreen.infrastructure.getAppDataDir
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
+import ru.kyamshanov.notepen.mainscreen.ui.library.LibraryFolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmDocumentLoader
@@ -79,7 +81,6 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
-import ru.kyamshanov.notepen.mainscreen.infrastructure.FileSystemLibraryFolder
 import ru.kyamshanov.notepen.sync.infrastructure.FileSystemLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
@@ -491,7 +492,7 @@ fun main(args: Array<String>) {
             DefaultRootComponent(
                 componentContext = DefaultComponentContext(lifecycle = lifecycle),
                 historyRepository = historyRepo,
-                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder ->
+                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, onOpenLib ->
                     MainScreenComponent(
                         componentContext = componentContext,
                         historyRepository = historyRepo,
@@ -505,6 +506,7 @@ fun main(args: Array<String>) {
                         onOpenFilePicker = { FilePicker().pickDocument() },
                         onOpenPeerCatalog = onOpenPeerCatalog,
                         onOpenFolder = onOpenFolder,
+                        onOpenLibraryFolder = onOpenLib,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
                         libraryFolder = libraryFolder,
@@ -540,6 +542,14 @@ fun main(args: Array<String>) {
                         onOpenFilePicker = { FilePicker().pickDocument() },
                         onOpenEditor = onOpenEditor,
                         onOpenFolder = onOpenFolder,
+                    )
+                },
+                libraryFolderComponentFactory = { ctx, onBack, onOpenEditor ->
+                    LibraryFolderContentsComponentImpl(
+                        componentContext = ctx,
+                        libraryFolder = libraryFolder,
+                        onBack = onBack,
+                        onOpenEditor = onOpenEditor,
                     )
                 },
             )

@@ -2,7 +2,9 @@ package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -70,8 +72,15 @@ fun LiquidGlassDropdownMenu(
                 tint = MaterialTheme.colorScheme.surface,
                 fillAlpha = DROPDOWN_FILL_ALPHA,
             ) {
+                // IntrinsicSize.Max: Material3's DropdownMenuItem internally uses
+                // fillMaxWidth; without an intrinsic-width constraint on the parent,
+                // it inflates the popup to the full window width. Material3's own
+                // DropdownMenu applies the same trick — see m3 DropdownMenuContent.
                 Column(
-                    modifier = Modifier.padding(vertical = DropdownMenuVerticalPadding),
+                    modifier =
+                        Modifier
+                            .width(IntrinsicSize.Max)
+                            .padding(vertical = DropdownMenuVerticalPadding),
                     content = content,
                 )
             }

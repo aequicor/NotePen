@@ -27,14 +27,16 @@ class SuccessEventTest {
             listOf(
                 SuccessEvent.FileAddedToFolder(folderName = "Работа"),
                 SuccessEvent.FileAlreadyInFolder,
+                SuccessEvent.FileAddedToLibrary,
             )
         val results =
             events.map { event ->
                 when (event) {
                     is SuccessEvent.FileAddedToFolder -> "added:${event.folderName}"
                     is SuccessEvent.FileAlreadyInFolder -> "already"
+                    is SuccessEvent.FileAddedToLibrary -> "library"
                 }
             }
-        assertEquals(listOf("added:Работа", "already"), results)
+        assertEquals(listOf("added:Работа", "already", "library"), results)
     }
 }

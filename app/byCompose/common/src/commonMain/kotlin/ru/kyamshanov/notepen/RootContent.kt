@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.Flow
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContent
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
+import ru.kyamshanov.notepen.mainscreen.ui.library.LibraryFolderContent
+import ru.kyamshanov.notepen.mainscreen.ui.library.LibraryFolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogContent
@@ -106,6 +108,14 @@ fun RootContent(
                             mainScreenComponent.onOpenFolder(target.folderId, target.folderName)
                             mainScreenComponent.viewModel.onNavigationHandled()
                         }
+                        NavigationTarget.LibraryFolder -> {
+                            // Колбэк может быть null на платформах, где общая
+                            // библиотечная папка не сконфигурирована — тогда
+                            // навигацию просто отменяем (карточка не должна
+                            // была показаться в UI вовсе).
+                            mainScreenComponent.onOpenLibraryFolder?.invoke()
+                            mainScreenComponent.viewModel.onNavigationHandled()
+                        }
                         null -> {}
                     }
                 }
@@ -157,6 +167,15 @@ fun RootContent(
                     child.component as? FolderContentsComponentImpl
                         ?: error("FolderContentsChild.component must be FolderContentsComponentImpl — check DefaultRootComponent factory")
                 FolderContent(component = impl, modifier = modifier)
+            }
+            is RootComponent.Child.LibraryFolderContentsChild -> {
+                val impl =
+                    child.component as? LibraryFolderContentsComponentImpl
+                        ?: error(
+                            "LibraryFolderContentsChild.component must be LibraryFolderContentsComponentImpl " +
+                                "— check DefaultRootComponent factory",
+                        )
+                LibraryFolderContent(component = impl, modifier = modifier)
             }
         }
     }
