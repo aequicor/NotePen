@@ -1,6 +1,7 @@
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -24,6 +25,7 @@ import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -147,6 +149,25 @@ private object OpenFileRouter {
 /** Расширения, которые NotePen умеет открыть из аргументов запуска (Windows/Linux). */
 private val OPENABLE_EXTENSIONS = listOf("pdf", "png", "jpg", "jpeg", "epub", "fb2.zip", "fb2", "cbz", "cbr")
 
+/**
+ * Аггрегат «тяжёлых» зависимостей (сетевой стек + sync). Создаётся в фоне
+ * после показа главного окна, чтобы запуск не блокировался загрузкой классов
+ * Ktor/CIO/jmDNS/zxing и инициализацией CIO-движка.
+ *
+ * Пока `null`, экраны корректно работают: peer/sync-параметры [App] — nullable,
+ * `pendingDeltaCounts` тоже, а `remoteCatalogCache.catalogs` уже пустая мапа.
+ */
+private class HeavyDeps(
+    val peerServer: KtorPeerServer,
+    val syncClient: KtorSyncClient,
+    val syncEngineRegistry: SyncEngineRegistry,
+    val pendingDeltaQueue: SqlDelightPendingDeltaQueue,
+    val hostQrViewModel: HostQrPairingViewModel,
+    val remoteDocumentOpener: RemoteDocumentOpener,
+    val hostAnnotationProjection: HostAnnotationProjection,
+    val serviceRegistrar: JmDnsServiceRegistrar,
+)
+
 fun main(args: Array<String>) {
     // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
     // (macOS использует Apple Event "odoc", регистрируем OpenFileHandler ниже.)
@@ -228,80 +249,10 @@ fun main(args: Array<String>) {
     // же кешом, что и при открытии, иначе loadPDF падает на сыром ebook'е.
     val thumbnailGenerator = PdfThumbnailGeneratorDesktop(converter = ebookConverter, ioDispatcher = Dispatchers.IO)
 
-    val peerServer = KtorPeerServer(selfInfo = selfInfo, ioDispatcher = Dispatchers.IO)
-    val serviceRegistrar = JmDnsServiceRegistrar()
-    val wsJson = Json { classDiscriminator = "type" }
-    val httpClient =
-        HttpClient(CIO) {
-            install(WebSockets) {
-                contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
-            }
-            // Bound only the TCP connect/handshake (NOT the long-lived WS session) so
-            // a reconnect to a vanished host fails fast and the reconnect deadline is
-            // honoured instead of hanging in "reconnecting".
-            install(io.ktor.client.plugins.HttpTimeout) {
-                connectTimeoutMillis = 4_000L
-            }
-        }
-    val syncClient = KtorSyncClient(httpClient)
-
-    // Persistent offline buffer (SQLDelight-backed) — survives app restarts so
-    // edits made offline still replay after a restart + reconnect.
-    val syncDatabasePath = getAppDataDir().resolve("sync.db").absolutePath
-    // Lazy: opening SQLite (native lib + first connection) costs seconds cold —
-    // defer it off the main thread so it doesn't block the first frame.
-    val pendingDeltaQueue =
-        SqlDelightPendingDeltaQueue(
-            databaseProvider = { createSyncDatabaseJvm(syncDatabasePath) },
-            ioDispatcher = Dispatchers.IO,
-        )
-
-    // One registry per app; each open document is its own SyncEngine.
-    val syncEngineRegistry =
-        SyncEngineRegistry(
-            deviceId = selfId,
-            scope = appScope,
-            server = peerServer,
-            client = syncClient,
-            pendingQueue = pendingDeltaQueue,
-        )
-
-    // Replay buffered deltas whenever either side (re)connects.
-    // Host: trigger on first peer joining (transition `empty → non-empty`).
-    val hostPeerConnected =
-        peerServer.connectedPeers
-            .distinctUntilChanged()
-            .filter { it.isNotEmpty() }
-            .map { }
-    // Client: trigger when at least one host enters the connected set.
-    val clientConnected =
-        syncClient.connectedHosts
-            .distinctUntilChanged()
-            .filter { it.isNotEmpty() }
-            .map { }
-    PendingDeltaReplayCoordinator(
-        registry = syncEngineRegistry,
-        connectionEstablished = hostPeerConnected,
-    ).start(scope = appScope)
-    PendingDeltaReplayCoordinator(
-        registry = syncEngineRegistry,
-        connectionEstablished = clientConnected,
-    ).start(scope = appScope)
-
-    val hostQrViewModel =
-        HostQrPairingViewModel(
-            peerServer = peerServer,
-            qrEncoder = ZxingQrEncoder(),
-            hostDeviceName = selfName,
-            scope = appScope,
-        )
-
-    // Host: build & serve the library catalog to any paired tablet, and
-    // respond to on-demand DocumentOpenRequests by streaming the file.
-    // Local library: the single sandboxed folder paired tablets may borrow
-    // from. Everything else on disk stays invisible to peers. Override the
-    // location with -Dnotepen.library.root=…; defaults to a visible folder in
-    // the user home (created empty — drop books in to share them).
+    // Light, sync-only refs that the main screen depends on for the very first
+    // frame. The library root + manifest provider are needed by the heavy
+    // RemoteCatalogProvider, but their construction is cheap (no I/O beyond
+    // mkdirs / canonicalFile), so we keep them on the main path.
     val libraryRoot =
         System.getProperty("notepen.library.root")
             ?.let(::File)
@@ -315,139 +266,213 @@ fun main(args: Array<String>) {
                 OPENABLE_EXTENSIONS.any { name.endsWith(".$it") }
             },
         )
-    val remoteCatalogProvider =
-        RemoteCatalogProvider(
-            hostName = selfName,
-            manifestProvider = libraryManifestProvider,
-            folderRepository = folderRepo,
-        )
-    remoteCatalogProvider.serve(server = peerServer, scope = appScope)
-    // Symmetric direction: when this desktop is connected to another host as a
-    // client and that host requests our catalog (for its "Подключённые
-    // устройства" tile), reply over the SyncClient transport.
-    remoteCatalogProvider.serve(client = syncClient, scope = appScope)
-    // Локальные мутации каталога (создание/удаление/переименование папок,
-    // добавление/удаление файлов в истории) → push RemoteCatalogChanged всем
-    // подключённым пирам, чтобы они подтянули свежий снапшот.
-    remoteCatalogProvider.broadcastChanges(
-        notifier = catalogChangeNotifier,
-        server = peerServer,
-        client = syncClient,
-        scope = appScope,
-    )
-    DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider)
-        .start(scope = appScope)
 
-    // Host headless save: tablet-originated SaveRequest /
-    // AnnotationSnapshotRequest are now fulfilled without requiring the host
-    // to open the document in DetailsContent. Projection follows mergedDeltas
-    // (which now also mirror local edits — see SyncEngine.applyLocal).
-    val hostAnnotationRepository = createAnnotationRepository()
-    val hostAnnotationProjection =
-        HostAnnotationProjection(
-            registry = syncEngineRegistry,
-            provider = remoteCatalogProvider,
-            repository = hostAnnotationRepository,
-        )
-    HostHeadlessAnnotationHandler(
-        server = peerServer,
-        provider = remoteCatalogProvider,
-        projection = hostAnnotationProjection,
-    ).start(scope = appScope)
-
-    // Tablet role (desktop may also act as one): cache the most recent
-    // catalog this device received, keep it fresh on every reconnect, and
-    // open Remote documents on tap.
-    val receivedDir = System.getProperty("java.io.tmpdir") + "/notepen-sync"
+    // In-memory state holders are cheap; we expose them to the UI from the
+    // light path so that the main screen can subscribe before the sync stack
+    // finishes wiring. The heavy coroutine below fills these as peers connect.
     val remoteCatalogCache = InMemoryRemoteCatalogCache()
-    RemoteCatalogClientCoordinator(client = syncClient, cache = remoteCatalogCache)
-        .start(scope = appScope)
-    // Host side mirror: request a RemoteCatalog from every connected client and
-    // cache it under the same per-peer map so the main screen can list both
-    // hosts (we are a client of) AND clients (we are a host for) as tiles.
-    RemoteCatalogHostCoordinator(server = peerServer, cache = remoteCatalogCache)
-        .start(scope = appScope)
+    val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
+    val openDocumentRegistry = InMemoryOpenDocumentRegistry()
+
+    val receivedDir = System.getProperty("java.io.tmpdir") + "/notepen-sync"
     val localDocumentIdRegistry =
         JsonLocalDocumentIdRegistry(
             manifestPath = "$receivedDir/.notepen-doc-ids.json",
             ioDispatcher = Dispatchers.IO,
         )
-    val remoteDocumentOpener =
-        RemoteDocumentOpener(
+
+    // "Online peers" union — proxied through a MutableStateFlow so we can
+    // expose it to MainScreen synchronously and start piping real values into
+    // it once peerServer / syncClient exist.
+    val onlinePeerIdsFlow = MutableStateFlow<Set<String>>(emptySet())
+    // Holder for the heavy sync stack. Stays null until the background
+    // coroutine below finishes; consumers (App, factories) tolerate null.
+    val heavyDepsFlow = MutableStateFlow<HeavyDeps?>(null)
+
+    // Build the heavy sync/network stack off the UI thread so the main window
+    // can appear immediately. Touching these refs causes class-loading of
+    // Ktor server/client, CIO engine, jmDNS and zxing — collectively the
+    // biggest chunk of cold-start time on desktop.
+    appScope.launch(Dispatchers.IO) {
+        val peerServer = KtorPeerServer(selfInfo = selfInfo, ioDispatcher = Dispatchers.IO)
+        val serviceRegistrar = JmDnsServiceRegistrar()
+        val wsJson = Json { classDiscriminator = "type" }
+        val httpClient =
+            HttpClient(CIO) {
+                install(WebSockets) {
+                    contentConverter = KotlinxWebsocketSerializationConverter(wsJson)
+                }
+                // Bound only the TCP connect/handshake (NOT the long-lived WS session) so
+                // a reconnect to a vanished host fails fast and the reconnect deadline is
+                // honoured instead of hanging in "reconnecting".
+                install(io.ktor.client.plugins.HttpTimeout) {
+                    connectTimeoutMillis = 4_000L
+                }
+            }
+        val syncClient = KtorSyncClient(httpClient)
+
+        // Persistent offline buffer (SQLDelight-backed) — survives app restarts so
+        // edits made offline still replay after a restart + reconnect.
+        val syncDatabasePath = getAppDataDir().resolve("sync.db").absolutePath
+        val pendingDeltaQueue =
+            SqlDelightPendingDeltaQueue(
+                databaseProvider = { createSyncDatabaseJvm(syncDatabasePath) },
+                ioDispatcher = Dispatchers.IO,
+            )
+
+        val syncEngineRegistry =
+            SyncEngineRegistry(
+                deviceId = selfId,
+                scope = appScope,
+                server = peerServer,
+                client = syncClient,
+                pendingQueue = pendingDeltaQueue,
+            )
+
+        val hostPeerConnected =
+            peerServer.connectedPeers
+                .distinctUntilChanged()
+                .filter { it.isNotEmpty() }
+                .map { }
+        val clientConnected =
+            syncClient.connectedHosts
+                .distinctUntilChanged()
+                .filter { it.isNotEmpty() }
+                .map { }
+        PendingDeltaReplayCoordinator(
+            registry = syncEngineRegistry,
+            connectionEstablished = hostPeerConnected,
+        ).start(scope = appScope)
+        PendingDeltaReplayCoordinator(
+            registry = syncEngineRegistry,
+            connectionEstablished = clientConnected,
+        ).start(scope = appScope)
+
+        val hostQrViewModel =
+            HostQrPairingViewModel(
+                peerServer = peerServer,
+                qrEncoder = ZxingQrEncoder(),
+                hostDeviceName = selfName,
+                scope = appScope,
+            )
+
+        val remoteCatalogProvider =
+            RemoteCatalogProvider(
+                hostName = selfName,
+                manifestProvider = libraryManifestProvider,
+                folderRepository = folderRepo,
+            )
+        remoteCatalogProvider.serve(server = peerServer, scope = appScope)
+        remoteCatalogProvider.serve(client = syncClient, scope = appScope)
+        remoteCatalogProvider.broadcastChanges(
+            notifier = catalogChangeNotifier,
+            server = peerServer,
             client = syncClient,
-            catalogs = remoteCatalogCache.catalogs,
-            destDir = receivedDir,
-            documentIdRegistry = localDocumentIdRegistry,
+            scope = appScope,
         )
-    // Track per-document orphan flags as host signals come in.
-    val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
-    DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
-        .start(scope = appScope)
-    // Also mark orphans passively: catalog drops a doc that has pending edits.
-    CatalogDiffOrphanDetector(
-        catalogs = remoteCatalogCache.catalogs,
-        queue = pendingDeltaQueue,
-        registry = remoteDocumentStatusRegistry,
-    ).start(scope = appScope)
+        DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider)
+            .start(scope = appScope)
 
-    // Реестр открытых в редакторе документов + автоудаление кеш-копии после
-    // успешного отправления накопленных offline-правок.
-    val openDocumentRegistry = InMemoryOpenDocumentRegistry()
-    LocalCachedDocumentCleaner(
-        receivedPdfDir = receivedDir,
-        pendingCounts = pendingDeltaQueue.pendingCounts(),
-        catalogsFlow = remoteCatalogCache.catalogs,
-        openDocuments = openDocumentRegistry,
-        documentIdRegistry = localDocumentIdRegistry,
-    ).start(scope = appScope)
+        val hostAnnotationRepository = createAnnotationRepository()
+        val hostAnnotationProjection =
+            HostAnnotationProjection(
+                registry = syncEngineRegistry,
+                provider = remoteCatalogProvider,
+                repository = hostAnnotationRepository,
+            )
+        HostHeadlessAnnotationHandler(
+            server = peerServer,
+            provider = remoteCatalogProvider,
+            projection = hostAnnotationProjection,
+        ).start(scope = appScope)
 
-    // Union of "online peers" — for desktop, that's hosts we are paired to plus
-    // clients paired to us. Drives the offline-marker on Peer tiles.
-    val onlinePeerIds =
-        combine(
-            syncClient.connectedHosts,
-            peerServer.connectedPeers,
-        ) { hosts, peers ->
-            (hosts.map { it.id } + peers.map { it.id }).toSet()
+        RemoteCatalogClientCoordinator(client = syncClient, cache = remoteCatalogCache)
+            .start(scope = appScope)
+        RemoteCatalogHostCoordinator(server = peerServer, cache = remoteCatalogCache)
+            .start(scope = appScope)
+        val remoteDocumentOpener =
+            RemoteDocumentOpener(
+                client = syncClient,
+                catalogs = remoteCatalogCache.catalogs,
+                destDir = receivedDir,
+                documentIdRegistry = localDocumentIdRegistry,
+            )
+        DocumentStatusCoordinator(client = syncClient, registry = remoteDocumentStatusRegistry)
+            .start(scope = appScope)
+        CatalogDiffOrphanDetector(
+            catalogs = remoteCatalogCache.catalogs,
+            queue = pendingDeltaQueue,
+            registry = remoteDocumentStatusRegistry,
+        ).start(scope = appScope)
+
+        LocalCachedDocumentCleaner(
+            receivedPdfDir = receivedDir,
+            pendingCounts = pendingDeltaQueue.pendingCounts(),
+            catalogsFlow = remoteCatalogCache.catalogs,
+            openDocuments = openDocumentRegistry,
+            documentIdRegistry = localDocumentIdRegistry,
+        ).start(scope = appScope)
+
+        // Pipe combined connected hosts + peers into the public onlinePeerIdsFlow.
+        appScope.launch {
+            combine(
+                syncClient.connectedHosts,
+                peerServer.connectedPeers,
+            ) { hosts, peers ->
+                (hosts.map { it.id } + peers.map { it.id }).toSet()
+            }.collect { onlinePeerIdsFlow.value = it }
         }
 
-    // Demultiplex incoming stroke deltas by documentId — one engine per doc.
-    appScope.launch {
-        peerServer.incomingMessages.collect { peerMessage ->
-            val msg = peerMessage.message
-            if (msg is NetworkMessage.StrokeDeltaMessage) {
-                syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
-                // Накапливаем штрих в headless-проекции сразу, не дожидаясь
-                // первого SaveRequest — иначе правки, сделанные на планшете до
-                // запроса сохранения, не попадут в сохранённый на хосте файл.
-                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta, appScope)
-            }
-        }
-    }
-    appScope.launch {
-        syncClient.incomingMessages.collect { hostMessage ->
-            val msg = hostMessage.message
-            if (msg is NetworkMessage.StrokeDeltaMessage) {
-                syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
-                hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta, appScope)
-            }
-        }
-    }
-
-    // Register/unregister mDNS service as the server lifecycle changes.
-    appScope.launch {
-        peerServer.lifecycle.collect { state ->
-            withContext(Dispatchers.IO) {
-                when (state) {
-                    is ServerLifecycleState.Running ->
-                        serviceRegistrar.register(selfInfo.copy(host = state.host, port = state.port))
-                    is ServerLifecycleState.Idle,
-                    is ServerLifecycleState.Stopped,
-                    -> serviceRegistrar.unregister()
-                    else -> Unit
+        // Demultiplex incoming stroke deltas by documentId — one engine per doc.
+        appScope.launch {
+            peerServer.incomingMessages.collect { peerMessage ->
+                val msg = peerMessage.message
+                if (msg is NetworkMessage.StrokeDeltaMessage) {
+                    syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
+                    // Накапливаем штрих в headless-проекции сразу, не дожидаясь
+                    // первого SaveRequest — иначе правки, сделанные на планшете до
+                    // запроса сохранения, не попадут в сохранённый на хосте файл.
+                    hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta, appScope)
                 }
             }
         }
+        appScope.launch {
+            syncClient.incomingMessages.collect { hostMessage ->
+                val msg = hostMessage.message
+                if (msg is NetworkMessage.StrokeDeltaMessage) {
+                    syncEngineRegistry.get(msg.documentId).processPeer(msg.delta)
+                    hostAnnotationProjection.ingestPeerDelta(msg.documentId, msg.delta, appScope)
+                }
+            }
+        }
+
+        // Register/unregister mDNS service as the server lifecycle changes.
+        appScope.launch {
+            peerServer.lifecycle.collect { state ->
+                withContext(Dispatchers.IO) {
+                    when (state) {
+                        is ServerLifecycleState.Running ->
+                            serviceRegistrar.register(selfInfo.copy(host = state.host, port = state.port))
+                        is ServerLifecycleState.Idle,
+                        is ServerLifecycleState.Stopped,
+                        -> serviceRegistrar.unregister()
+                        else -> Unit
+                    }
+                }
+            }
+        }
+
+        heavyDepsFlow.value =
+            HeavyDeps(
+                peerServer = peerServer,
+                syncClient = syncClient,
+                syncEngineRegistry = syncEngineRegistry,
+                pendingDeltaQueue = pendingDeltaQueue,
+                hostQrViewModel = hostQrViewModel,
+                remoteDocumentOpener = remoteDocumentOpener,
+                hostAnnotationProjection = hostAnnotationProjection,
+                serviceRegistrar = serviceRegistrar,
+            )
     }
 
     // Always create the root component outside Compose on the UI thread
@@ -471,7 +496,7 @@ fun main(args: Array<String>) {
                         onOpenPeerCatalog = onOpenPeerCatalog,
                         onOpenFolder = onOpenFolder,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
-                        onlinePeerIdsFlow = onlinePeerIds,
+                        onlinePeerIdsFlow = onlinePeerIdsFlow,
                     )
                 },
                 peerCatalogComponentFactory = { ctx, peerId, displayName, onBack, onOpenEditor ->
@@ -480,8 +505,11 @@ fun main(args: Array<String>) {
                         peerId = peerId,
                         displayName = displayName,
                         catalogsFlow = remoteCatalogCache.catalogs,
-                        onlinePeerIdsFlow = onlinePeerIds,
-                        remoteDocumentOpener = remoteDocumentOpener,
+                        onlinePeerIdsFlow = onlinePeerIdsFlow,
+                        // Heavy stack may still be wiring on the first frame; by the
+                        // time the user navigates here it's always ready (sync init
+                        // finishes well before any tap can land).
+                        remoteDocumentOpener = heavyDepsFlow.value?.remoteDocumentOpener,
                         receivedPdfDir = receivedDir,
                         onBack = onBack,
                         onOpenEditor = onOpenEditor,
@@ -520,7 +548,7 @@ fun main(args: Array<String>) {
 
         Window(
             onCloseRequest = {
-                serviceRegistrar.unregister()
+                heavyDepsFlow.value?.serviceRegistrar?.unregister()
                 // exitApplication() tears down Compose/AWT asynchronously, leaving the JVM
                 // alive long enough for macOS to flash the parent process icon (Terminal.app)
                 // in the Dock. exitProcess terminates the JVM immediately after cleanup.
@@ -599,6 +627,10 @@ fun main(args: Array<String>) {
                 }
             }
 
+            // Heavy deps swap in once the background wiring coroutine finishes;
+            // the App composable handles null gracefully for all sync params.
+            val heavyDeps by heavyDepsFlow.collectAsState()
+
             CompositionLocalProvider(
                 LocalTitleBarInteraction provides titleBarInteraction,
                 LocalTitleBarStartInset provides titleBarStartInset,
@@ -610,11 +642,11 @@ fun main(args: Array<String>) {
                     pdfDocumentLoader = pdfDocumentLoader,
                     pdfPageRenderer = pdfPageRenderer,
                     outlineProvider = ebookConverter,
-                    syncEngineFor = syncEngineRegistry::get,
-                    peerServer = peerServer,
-                    peerClient = syncClient,
-                    pendingDeltaCounts = pendingDeltaQueue.pendingCounts(),
-                    hostQrViewModel = hostQrViewModel,
+                    syncEngineFor = heavyDeps?.syncEngineRegistry?.let { reg -> reg::get },
+                    peerServer = heavyDeps?.peerServer,
+                    peerClient = heavyDeps?.syncClient,
+                    pendingDeltaCounts = heavyDeps?.pendingDeltaQueue?.pendingCounts(),
+                    hostQrViewModel = heavyDeps?.hostQrViewModel,
                     // Client VMs are null on desktop — the scan / manual panes
                     // stay hidden, leaving only the host QR panel.
                     clientScanViewModel = null,
@@ -626,9 +658,10 @@ fun main(args: Array<String>) {
                     // состояние из headless-проекции (in-memory), а не только
                     // диск — так заметка, только что сделанная на планшете, видна
                     // сразу, без гонки с дисковым flush'ем.
-                    hostAnnotationSnapshotFor = { docId ->
-                        hostAnnotationProjection.snapshotDtos(docId).orEmpty()
-                    },
+                    hostAnnotationSnapshotFor =
+                        heavyDeps?.hostAnnotationProjection?.let { projection ->
+                            { docId -> projection.snapshotDtos(docId).orEmpty() }
+                        },
                 )
             }
         }
