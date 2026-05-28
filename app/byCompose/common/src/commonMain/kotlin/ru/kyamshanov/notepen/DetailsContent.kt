@@ -1197,6 +1197,8 @@ fun DetailsContent(
                 (if (SupportsQuickLoupe) 1 else 0) +
                     (if (showScrollModeButton) 1 else 0)
             if (airbarButtonCount > 0 && !chromeHidden) {
+                val inactiveTint = readerContentColor ?: MaterialTheme.colorScheme.onSurface
+                val activeTint = readerContentColor ?: MaterialTheme.colorScheme.primary
                 GlassSurface(
                     modifier =
                         Modifier
@@ -1209,6 +1211,7 @@ fun DetailsContent(
                         } else {
                             CircleShape
                         },
+                    tint = readerBackground ?: MaterialTheme.colorScheme.surface,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         if (SupportsQuickLoupe) {
@@ -1217,12 +1220,7 @@ fun DetailsContent(
                                 Icon(
                                     imageVector = Icons.Default.ZoomIn,
                                     contentDescription = "Быстрая лупа: выделить область",
-                                    tint =
-                                        if (armed) {
-                                            MaterialTheme.colorScheme.primary
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurface
-                                        },
+                                    tint = if (armed) activeTint else inactiveTint,
                                 )
                             }
                         }
@@ -1242,12 +1240,7 @@ fun DetailsContent(
                                             ScrollMode.VERTICAL -> "Скролл: только по вертикали"
                                             ScrollMode.NONE -> "Скролл выключен"
                                         },
-                                    tint =
-                                        if (mode == ScrollMode.BOTH) {
-                                            MaterialTheme.colorScheme.onSurface
-                                        } else {
-                                            MaterialTheme.colorScheme.primary
-                                        },
+                                    tint = if (mode == ScrollMode.BOTH) inactiveTint else activeTint,
                                 )
                             }
                         }

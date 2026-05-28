@@ -1524,10 +1524,12 @@ fun EditorPanel(
                         )
                     }
                 } else {
-                    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
+                    val readerRender = readerStored.current.toRenderSettings()
+                    Box(Modifier.fillMaxSize().background(readerRender.background)) {
                         Text(
                             text = "Готовим режим чтения…",
                             style = MaterialTheme.typography.bodyMedium,
+                            color = readerRender.textColor,
                             modifier = Modifier.align(Alignment.Center),
                         )
                     }
