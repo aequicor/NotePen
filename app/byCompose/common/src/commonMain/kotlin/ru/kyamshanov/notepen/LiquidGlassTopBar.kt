@@ -54,11 +54,11 @@ fun LiquidGlassTopBar(
     val titleBarInteraction = LocalTitleBarInteraction.current
     val startInset = LocalTitleBarStartInset.current
     val endInset = LocalTitleBarEndInset.current
-    val barOuter =
-        modifier
-            .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.statusBars)
-            .height(LIQUID_GLASS_TOP_BAR_HEIGHT)
+    // GlassSurface должен рисоваться и за статус-баром — иначе системный бар
+    // показывает фон скролл-контента, а не тинт тулбара, и цвета не совпадают.
+    // Поэтому windowInsetsPadding(statusBars) применяем к внутреннему Row, а не
+    // к самому модификатору GlassSurface.
+    val barOuter = modifier.fillMaxWidth()
     GlassSurface(
         modifier = titleBarInteraction?.dragArea(barOuter) ?: barOuter,
         shape = RectangleShape,
@@ -67,7 +67,9 @@ fun LiquidGlassTopBar(
         Row(
             modifier =
                 Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .height(LIQUID_GLASS_TOP_BAR_HEIGHT)
                     .padding(start = startInset, end = endInset)
                     .padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
