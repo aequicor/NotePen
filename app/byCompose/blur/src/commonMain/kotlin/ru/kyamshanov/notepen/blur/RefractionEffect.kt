@@ -42,6 +42,15 @@ expect fun refractionRenderEffect(
 ): RenderEffect?
 
 /**
+ * `true` iff [refractionRenderEffect] is supported on this platform/OS version.
+ * Lets the layer code pick the right path (refraction with a `.layout` grow vs.
+ * shape-clipped blur fallback) *before* it measures the panel — so it can avoid
+ * growing the inner element on platforms where the shape mask isn't available to
+ * hide the pad ring. Desktop (Skia) is always `true`; Android needs API ≥ 33.
+ */
+expect fun isRefractionSupported(): Boolean
+
+/**
  * Shared SkSL source. Compatible with AGSL on Android (same syntax for the subset used).
  * Convention: the child shader is named `content` so both Skia (`childShaderNames`) and
  * Android (`shaderName` argument of `createRuntimeShaderEffect`) can reference it.

@@ -67,8 +67,23 @@ internal fun Modifier.glassBackdropLayer(
 ): Modifier {
     val backdrop = LocalGlassBackdrop.current
     val sourceLayer = backdrop?.layer
-    if (backdrop == null || sourceLayer == null) return this
     val density = LocalDensity.current
+    // Three reasons to skip the refraction (`.layout`-grown) path:
+    //   1) no backdrop recorded — nothing to refract;
+    //   2) RectangleShape — no rounded rim for the lens to bend, and the grown
+    //      layer would draw past the panel's reported bounds;
+    //   3) platform without runtime shaders (Android < 13) — the shape mask in
+    //      the shader isn't available, so the pad ring around the panel renders
+    //      as a visible "square halo" beyond the shape.
+    // The fallback path (`simpleGlassLayer`) shape-clips a BlurEffect; the single
+    // early-return keeps detekt's `ReturnCount` happy.
+    val refractionAvailable = isRefractionSupported() && shape !== RectangleShape
+    if (backdrop == null || sourceLayer == null || !refractionAvailable) {
+        return when {
+            backdrop == null || sourceLayer == null -> this
+            else -> this.simpleGlassLayer(backdrop, sourceLayer, shape, tint)
+        }
+    }
     val layoutDirection = LocalLayoutDirection.current
     var shapeOrigin by remember { mutableStateOf(Offset.Zero) }
     var shapeSizePx by remember { mutableStateOf(IntSize.Zero) }
@@ -126,6 +141,40 @@ internal fun Modifier.glassBackdropLayer(
             if (tint.isSpecified) drawRect(color = tint.copy(alpha = 1f))
             val offX = shapeOrigin.x - backdrop.sourceOriginInWindow.x - padPx
             val offY = shapeOrigin.y - backdrop.sourceOriginInWindow.y - padPx
+            translate(-offX, -offY) { drawLayer(sourceLayer) }
+            if (tintColor.isSpecified) drawRect(color = tintColor)
+        }
+}
+
+/**
+ * Plain frosted-glass backdrop layer. Used for sharp-cornered shapes (RectangleShape —
+ * top bars, edge-to-edge sidebars) and as the fallback on platforms without runtime
+ * shaders (Android < 13). No `.layout` grow, no refraction shader: clip the layer to
+ * [shape], draw position-correct backdrop with opaque-tint fallback for the
+ * out-of-source pad zone, then blur. The clip keeps the layer's drawing inside the
+ * panel's reported bounds, so it never bleeds into content below.
+ */
+@Composable
+private fun Modifier.simpleGlassLayer(
+    backdrop: GlassBackdrop,
+    sourceLayer: GraphicsLayer,
+    shape: Shape,
+    tint: Color,
+): Modifier {
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    val tintColor = if (tint.isSpecified) tint.copy(alpha = GLASS_TINT_ALPHA) else Color.Unspecified
+    return this
+        .onGloballyPositioned { origin = it.positionInWindow() }
+        .graphicsLayer {
+            this.clip = true
+            this.shape = shape
+            val blurPx = GlassBlurRadius.toPx()
+            this.renderEffect = BlurEffect(blurPx, blurPx, TileMode.Clamp)
+        }
+        .drawBehind {
+            if (tint.isSpecified) drawRect(color = tint.copy(alpha = 1f))
+            val offX = origin.x - backdrop.sourceOriginInWindow.x
+            val offY = origin.y - backdrop.sourceOriginInWindow.y
             translate(-offX, -offY) { drawLayer(sourceLayer) }
             if (tintColor.isSpecified) drawRect(color = tintColor)
         }

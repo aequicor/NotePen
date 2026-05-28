@@ -11,6 +11,8 @@ private val refractionEffect: RuntimeEffect by lazy {
     RuntimeEffect.makeForShader(REFRACTION_SKSL)
 }
 
+actual fun isRefractionSupported(): Boolean = true
+
 actual fun refractionRenderEffect(
     innerWidthPx: Float,
     innerHeightPx: Float,

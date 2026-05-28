@@ -7,6 +7,8 @@ import androidx.annotation.RequiresApi
 import androidx.compose.ui.graphics.RenderEffect
 import androidx.compose.ui.graphics.asComposeRenderEffect
 
+actual fun isRefractionSupported(): Boolean = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
 actual fun refractionRenderEffect(
     innerWidthPx: Float,
     innerHeightPx: Float,
