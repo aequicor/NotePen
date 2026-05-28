@@ -124,7 +124,7 @@ class MainScreenViewModel(
                         PeerSummaryUiModel(
                             peerId = device.id,
                             displayName = catalog.hostName.ifBlank { device.name },
-                            itemCount = catalog.recent.size + catalog.folders.size,
+                            itemCount = catalog.recent.size,
                             isOnline = onlineIds?.contains(device.id) ?: true,
                         )
                     }.sortedWith(

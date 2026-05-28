@@ -12,9 +12,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -35,16 +33,13 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import ru.kyamshanov.notepen.EditorBackHandler
 import ru.kyamshanov.notepen.LIQUID_GLASS_TOP_BAR_HEIGHT
 import ru.kyamshanov.notepen.LiquidGlassTopBar
 import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteEntryCard
-import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteFolderCard
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
-import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.grid.itemsIndexed as gridItemsIndexed
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
@@ -56,10 +51,6 @@ fun PeerCatalogContent(
 ) {
     val state by component.viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
-
-    EditorBackHandler(enabled = state.currentFolderId != null) {
-        component.viewModel.exitFolder()
-    }
 
     LaunchedEffect(state.errorMessage) {
         val msg = state.errorMessage ?: return@LaunchedEffect
@@ -91,9 +82,9 @@ fun PeerCatalogContent(
                         .glassSource(),
             )
             Box(modifier = Modifier.fillMaxSize()) {
-                if (state.entries.isEmpty() && state.folders.isEmpty()) {
+                if (state.entries.isEmpty()) {
                     Text(
-                        text = if (state.isDisconnected) "Пир отключился" else "Каталог пуст",
+                        text = if (state.isDisconnected) "Пир отключился" else "Библиотека пуста",
                         modifier = Modifier.align(Alignment.Center).padding(16.dp),
                         color = MaterialTheme.colorScheme.outline,
                     )
@@ -105,28 +96,16 @@ fun PeerCatalogContent(
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        if (state.folders.isNotEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Папки") }
-                            gridItems(state.folders, key = { "folder_${it.folderId}" }) { folder ->
-                                RemoteFolderCard(
-                                    model = folder,
-                                    onClick = { component.viewModel.openFolder(folder.folderId) },
-                                )
-                            }
-                        }
-                        if (state.entries.isNotEmpty()) {
-                            item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Недавние файлы") }
-                            gridItemsIndexed(
-                                state.entries,
-                                key = { idx, it -> "${idx}_${it.documentId}" },
-                            ) { _, entry ->
-                                RemoteEntryCard(
-                                    model = entry,
-                                    onClick = {
-                                        component.viewModel.openEntry(entry.documentId, entry.displayName)
-                                    },
-                                )
-                            }
+                        gridItemsIndexed(
+                            state.entries,
+                            key = { idx, it -> "${idx}_${it.documentId}" },
+                        ) { _, entry ->
+                            RemoteEntryCard(
+                                model = entry,
+                                onClick = {
+                                    component.viewModel.openEntry(entry.documentId, entry.displayName)
+                                },
+                            )
                         }
                     }
                 } else {
@@ -134,27 +113,14 @@ fun PeerCatalogContent(
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = gridPadding,
                     ) {
-                        if (state.folders.isNotEmpty()) {
-                            item { SectionHeader("Папки") }
-                            items(state.folders, key = { "folder_${it.folderId}" }) { folder ->
-                                RemoteFolderCard(
-                                    model = folder,
-                                    onClick = { component.viewModel.openFolder(folder.folderId) },
-                                    modifier = Modifier.padding(vertical = 4.dp),
-                                )
-                            }
-                        }
-                        if (state.entries.isNotEmpty()) {
-                            item { SectionHeader("Недавние файлы") }
-                            itemsIndexed(state.entries, key = { idx, it -> "${idx}_${it.documentId}" }) { _, entry ->
-                                RemoteEntryCard(
-                                    model = entry,
-                                    onClick = {
-                                        component.viewModel.openEntry(entry.documentId, entry.displayName)
-                                    },
-                                    modifier = Modifier.padding(vertical = 4.dp),
-                                )
-                            }
+                        itemsIndexed(state.entries, key = { idx, it -> "${idx}_${it.documentId}" }) { _, entry ->
+                            RemoteEntryCard(
+                                model = entry,
+                                onClick = {
+                                    component.viewModel.openEntry(entry.documentId, entry.displayName)
+                                },
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
                         }
                     }
                 }
@@ -163,17 +129,12 @@ fun PeerCatalogContent(
             LiquidGlassTopBar(
                 modifier = Modifier.align(Alignment.TopCenter),
                 title = {
-                    val suffix =
-                        when {
-                            state.currentFolderName != null -> " / ${state.currentFolderName}"
-                            state.isDisconnected -> " (не в сети)"
-                            else -> ""
-                        }
-                    Text(state.peerName + suffix)
+                    val suffix = if (state.isDisconnected) " (не в сети)" else ""
+                    Text("Библиотека | ${state.peerName}$suffix")
                 },
                 navigationIcon = {
                     IconButton(
-                        onClick = { if (!component.viewModel.exitFolder()) component.onBack() },
+                        onClick = component.onBack,
                         modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
                     ) {
                         Icon(
@@ -195,12 +156,3 @@ fun PeerCatalogContent(
     }
 }
 
-@Composable
-private fun SectionHeader(text: String) {
-    Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
-        modifier = Modifier.padding(bottom = 8.dp),
-    )
-}
