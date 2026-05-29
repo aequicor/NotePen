@@ -61,6 +61,8 @@ fun RootContent(
     receivedPdfDir: String? = null,
     /** Forwarded to [DetailsContent] for open/close tracking. */
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
+    /** Forwarded to [DetailsContent] to drive the per-document live-sync toggle (M4). */
+    liveSyncController: ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController? = null,
     /** Forwarded to [DetailsContent] for remote-cached documentId lookup. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
     /** Forwarded to [DetailsContent] to warm the content-addressed wire id of open documents. */
@@ -164,6 +166,7 @@ fun RootContent(
                     manualConnectViewModel = manualConnectViewModel,
                     receivedPdfDir = receivedPdfDir,
                     openDocumentRegistry = openDocumentRegistry,
+                    liveSyncController = liveSyncController,
                     localDocumentIdRegistry = localDocumentIdRegistry,
                     documentIdentityProvider = documentIdentityProvider,
                     hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,

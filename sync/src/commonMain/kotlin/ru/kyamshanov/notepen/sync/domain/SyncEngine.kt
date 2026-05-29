@@ -3,8 +3,11 @@ package ru.kyamshanov.notepen.sync.domain
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
@@ -63,6 +66,29 @@ class SyncEngine(
 
     private var logicalClock = 0L
 
+    private val _active = MutableStateFlow(true)
+
+    /**
+     * Per-document "live sync" gate (M4). When `false`, local edits are still
+     * mirrored onto [mergedDeltas] and buffered in [pendingQueue], but NOT
+     * broadcast to peers, and peer-originated deltas in [processPeer] are
+     * ignored. When `true` (the default), the engine behaves exactly as before —
+     * actively broadcasting and applying remote changes.
+     *
+     * Toggled per document by
+     * [ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController]; defaults to
+     * `true` so every other caller (host headless projection, tests) keeps the
+     * pre-M4 always-on behaviour without opting in.
+     *
+     * No wire-protocol impact: this is a local send/apply switch only.
+     */
+    val active: StateFlow<Boolean> = _active.asStateFlow()
+
+    /** Marks this engine as actively broadcasting/applying ([active] = true) or paused (`false`). */
+    fun setActive(value: Boolean) {
+        _active.value = value
+    }
+
     /** Call when the user draws or erases a stroke on this device. */
     fun applyLocal(delta: StrokeDelta) {
         logicalClock++
@@ -117,6 +143,8 @@ class SyncEngine(
      */
     suspend fun drainAndReplay() {
         val queue = pendingQueue ?: return
+        // Paused document (live-sync OFF): keep the buffer intact, don't replay.
+        if (!_active.value) return
         val pending = queue.peek(documentId)
         if (pending.isEmpty()) return
         if (!hasReachablePeer()) {
@@ -142,6 +170,10 @@ class SyncEngine(
     }
 
     private suspend fun sendStamped(stamped: List<StrokeDelta>) {
+        // Live-sync выключен для документа (M4): правки уже отражены в mergedDeltas
+        // и положены в pendingQueue выше — но активного вещания нет, ждём, пока
+        // пользователь включит синхронизацию документа (drainAndReplay их догонит).
+        if (!_active.value) return
         // Без реального получателя `broadcast` молча проходит мимо — `runCatching`
         // вернёт success, и `markSent` сотрёт правки, которые на самом деле
         // никуда не ушли. Поэтому сначала проверяем, есть ли с кем синкаться.
@@ -175,6 +207,11 @@ class SyncEngine(
 
     /** Call for each [NetworkMessage.StrokeDeltaMessage] received from the peer. */
     fun processPeer(delta: StrokeDelta) {
+        // Live-sync выключен для документа (M4) — игнорируем входящие правки.
+        // Хост-проекция держит свой движок активным (через registry.get), так что
+        // headless-сохранение на хосте не страдает; гасим только просмотрщик,
+        // явно отключённый пользователем.
+        if (!_active.value) return
         logicalClock = maxOf(logicalClock, delta.clock) + 1
         if (shouldApply(delta)) {
             clocks[delta.strokeId] = delta.clock

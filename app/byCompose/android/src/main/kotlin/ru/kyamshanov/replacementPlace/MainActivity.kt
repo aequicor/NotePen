@@ -66,6 +66,7 @@ import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
+import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
 import ru.kyamshanov.notepen.sync.domain.LocalCachedDocumentCleaner
 import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
@@ -74,6 +75,7 @@ import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
+import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
@@ -102,6 +104,7 @@ private class HeavyDeps(
     val clientScanViewModel: ClientQrScanViewModel,
     val manualConnectViewModel: ManualConnectViewModel,
     val remoteDocumentOpener: RemoteDocumentOpener,
+    val resyncRequester: AnnotationResyncRequester,
 )
 
 class MainActivity : ComponentActivity() {
@@ -398,6 +401,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Догон при включении живой синхронизации: повторно просим у хоста полный
+            // снимок аннотаций. Переиспользует существующее wire-сообщение
+            // AnnotationSnapshotRequest (ответ ловит коллектор в EditorPanel и кладёт
+            // штрихи в drawingStates по dedupe-strokeId). Fire-and-forget на appScope;
+            // broadcast без подключённых хостов — no-op (оффлайн покрывает on-connect).
+            val resyncRequester =
+                AnnotationResyncRequester { documentId ->
+                    appScope.launch(Dispatchers.IO) {
+                        runCatching {
+                            syncClient.broadcast(NetworkMessage.AnnotationSnapshotRequest(documentId = documentId))
+                        }
+                    }
+                }
+
             heavyDepsFlow.value =
                 HeavyDeps(
                     syncClient = syncClient,
@@ -406,6 +423,7 @@ class MainActivity : ComponentActivity() {
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
                     remoteDocumentOpener = remoteDocumentOpener,
+                    resyncRequester = resyncRequester,
                 )
         }
 
@@ -509,6 +527,19 @@ class MainActivity : ComponentActivity() {
             // Heavy deps swap in once the background wiring coroutine finishes;
             // the App composable handles null gracefully for all sync params.
             val heavyDeps by heavyDepsFlow.collectAsState()
+            // Per-document live-sync controller (M4). Android is a sync client, so
+            // the toolbar toggle is available once the heavy stack is wired; null
+            // until then (toggle hidden).
+            val liveSyncController =
+                remember(heavyDeps) {
+                    heavyDeps?.let { deps ->
+                        LiveDocumentSyncController(
+                            openDocumentRegistry = openDocumentRegistry,
+                            syncEngineRegistry = deps.syncEngineRegistry,
+                            resyncRequester = deps.resyncRequester,
+                        )
+                    }
+                }
             CompositionLocalProvider(LocalTabletInputController provides tabletController) {
                 App(
                     rootComponent = root,
@@ -522,6 +553,7 @@ class MainActivity : ComponentActivity() {
                     manualConnectViewModel = heavyDeps?.manualConnectViewModel,
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
+                    liveSyncController = liveSyncController,
                     localDocumentIdRegistry = localDocumentIdRegistry,
                     documentIdentityProvider = documentIdentityProvider,
                 )

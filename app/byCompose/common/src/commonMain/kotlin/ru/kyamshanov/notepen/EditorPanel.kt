@@ -31,6 +31,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -209,6 +210,15 @@ class PanelControls(
      * (перекрывает авто-по-ширине). No-op в режиме чтения.
      */
     val toggleBookSpread: () -> Unit,
+    /**
+     * Доступна ли «синхронизация документа» (M4) — `true`, когда поднят sync-стек
+     * (есть [LiveDocumentSyncController]). Иначе тумблер скрываем.
+     */
+    val liveSyncAvailable: Boolean,
+    /** Включена ли живая синхронизация этого документа сейчас. */
+    val liveSyncEnabled: Boolean,
+    /** Переключает живую синхронизацию документа (PC ↔ планшет правки в реальном времени). */
+    val toggleLiveSync: () -> Unit,
 )
 
 /**
@@ -262,6 +272,12 @@ fun EditorPanel(
     pendingDeltaCounts: kotlinx.coroutines.flow.Flow<Map<String, Int>>?,
     receivedPdfDir: String?,
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry?,
+    /**
+     * Тонкий контроллер «синхронизации документа» (M4). Когда задан, тумблер в
+     * тулбаре включает/выключает живую синхронизацию для этого документа; `null` —
+     * sync-стек не поднят, тумблер не показываем.
+     */
+    liveSyncController: ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController?,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)?,
     showSnackbar: (String) -> Unit,
     onRestoreToolSettings: (PenSettings, MarkerSettings, EraserSettings) -> Unit,
@@ -359,6 +375,26 @@ fun EditorPanel(
     val coroutineScope = rememberCoroutineScope()
     val tabletController = LocalTabletInputController.current
     val syncEngine = remember(syncEngineFor, documentId) { syncEngineFor?.invoke(documentId) }
+
+    // Per-document live-sync toggle (M4). Default OFF: bind pauses this document's
+    // engine on open so merely opening it never starts broadcasting. The toolbar
+    // reflects [liveSyncEnabled].
+    //
+    // On close (onDispose) we `disable` the document: that flips the toggle OFF,
+    // pauses broadcasting, AND releases the CONTROLLER's enable-time pin (the
+    // ref-counted `acquire` the controller takes in `enable` to protect active-sync
+    // consistency). This is a DIFFERENT pin from the editor's own open-lifetime pin
+    // taken below in the `openDocumentRegistry` DisposableEffect (~787) — that one
+    // exists purely to prevent the file being deleted while it's open. Both are
+    // ref-counted on the same registry, so they release independently and correctly.
+    val liveSyncEnabled by produceState(false, liveSyncController, documentId) {
+        val controller = liveSyncController ?: return@produceState
+        controller.isLive(documentId).collect { value = it }
+    }
+    DisposableEffect(liveSyncController, documentId) {
+        liveSyncController?.bind(documentId)
+        onDispose { liveSyncController?.disable(documentId) }
+    }
 
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
     var showThumbnails by remember { mutableStateOf(false) }
@@ -756,6 +792,13 @@ fun EditorPanel(
         }
     }
 
+    // Editor's open-lifetime pin: held for as long as the document is OPEN in the
+    // editor, regardless of the live-sync toggle. Its sole job is to stop background
+    // services (e.g. LocalCachedDocumentCleaner) from deleting the file while it's on
+    // screen. This is SEPARATE from the controller's enable-time pin (acquired in
+    // LiveDocumentSyncController.enable, released on disable) which guards active-sync
+    // consistency only while live-sync is ON. Distinct concerns, distinct lifetimes;
+    // the registry ref-counts both so they coexist (e.g. open + live-sync-on = +2).
     DisposableEffect(openDocumentRegistry, documentId) {
         openDocumentRegistry?.acquire(documentId)
         onDispose { openDocumentRegistry?.release(documentId) }
@@ -1383,6 +1426,9 @@ fun EditorPanel(
         // Read spreadSplit in composition so toggling it republishes PanelControls
         // (the toggle button's selected state tracks it).
         val spreadSplitVisible = pdfState.spreadSplit
+        // Read live-sync state in composition so flipping the toggle republishes
+        // PanelControls and the toolbar's selected state tracks it.
+        val liveSyncVisible = liveSyncEnabled
         SideEffect {
             onControlsChanged(
                 PanelControls(
@@ -1431,6 +1477,9 @@ fun EditorPanel(
                     toggleSpreadSplit = onToggleSpreadSplit,
                     bookSpreadEnabled = bookSpreadEnabled,
                     toggleBookSpread = onToggleBookSpread,
+                    liveSyncAvailable = liveSyncController != null,
+                    liveSyncEnabled = liveSyncVisible,
+                    toggleLiveSync = { liveSyncController?.toggle(documentId) },
                 ),
             )
         }

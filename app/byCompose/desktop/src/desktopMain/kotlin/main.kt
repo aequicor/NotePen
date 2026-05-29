@@ -67,7 +67,9 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
 import ru.kyamshanov.notepen.setupJbrTitleBar
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
+import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
 import ru.kyamshanov.notepen.sync.infrastructure.FileSystemLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
@@ -600,6 +602,38 @@ fun main(args: Array<String>) {
             // but App accepts null and a missing queue means "no banner".)
             val pendingDeltaCounts =
                 remember(syncSession) { syncSession?.pendingDeltaQueue?.pendingCounts() }
+            // Per-document live-sync controller (M4). Bound to the active session's
+            // engine registry + the shared open-document registry; null until the
+            // sync stack is enabled (the toolbar toggle then stays hidden).
+            val liveSyncController =
+                remember(syncSession) {
+                    syncSession?.let { session ->
+                        // Догон при включении живой синхронизации на ПК (хосте). Пока
+                        // документ был на паузе, processPeer отбрасывал входящие дельты
+                        // планшета для ЖИВОГО вида редактора — но headless-проекция их
+                        // всё равно впитала через ingestPeerDelta и остаётся
+                        // авторитетной. На re-enable перечитываем локальную проекцию и
+                        // прогоняем штрихи через processPeer (движок уже active): SyncBridge
+                        // докинет пропущенные в drawingStates, dedupe по strokeId — мимо
+                        // уже известных (их clock>0, projection-снимок clock=0 → shouldApply=false).
+                        val reg = session.syncEngineRegistry
+                        val projection = session.hostAnnotationProjection
+                        val resyncRequester =
+                            AnnotationResyncRequester { documentId ->
+                                appScope.launch(Dispatchers.IO) {
+                                    runCatching {
+                                        projection.snapshotDtos(documentId).orEmpty()
+                                            .forEach { added -> reg.get(documentId).processPeer(added) }
+                                    }
+                                }
+                            }
+                        LiveDocumentSyncController(
+                            openDocumentRegistry = openDocumentRegistry,
+                            syncEngineRegistry = reg,
+                            resyncRequester = resyncRequester,
+                        )
+                    }
+                }
 
             CompositionLocalProvider(
                 LocalTitleBarInteraction provides titleBarInteraction,
@@ -626,6 +660,7 @@ fun main(args: Array<String>) {
                     manualConnectViewModel = null,
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
+                    liveSyncController = liveSyncController,
                     localDocumentIdRegistry = localDocumentIdRegistry,
                     documentIdentityProvider = documentIdentityProvider,
                     // При открытии документа на ПК подмешиваем самое свежее

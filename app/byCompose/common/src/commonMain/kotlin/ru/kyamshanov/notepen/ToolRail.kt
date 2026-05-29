@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
+import androidx.compose.material.icons.filled.SyncAlt
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
@@ -208,6 +209,9 @@ internal fun unifiedToolWheelEntries(
     showSyncButton: Boolean,
     syncTint: Color,
     onOpenSync: () -> Unit,
+    liveSyncAvailable: Boolean,
+    liveSyncEnabled: Boolean,
+    onToggleLiveSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
     onRotatePage: () -> Unit,
     spreadSplitEnabled: Boolean,
@@ -280,6 +284,9 @@ internal fun unifiedToolWheelEntries(
             showSyncButton = showSyncButton,
             syncTint = syncTint,
             onOpenSync = onOpenSync,
+            liveSyncAvailable = liveSyncAvailable,
+            liveSyncEnabled = liveSyncEnabled,
+            onToggleLiveSync = onToggleLiveSync,
             onOpenShortcutsSettings = onOpenShortcutsSettings,
             onRotatePage = onRotatePage,
             spreadSplitEnabled = spreadSplitEnabled,
@@ -430,6 +437,9 @@ internal fun systemControlEntries(
     showSyncButton: Boolean,
     syncTint: Color,
     onOpenSync: () -> Unit,
+    liveSyncAvailable: Boolean,
+    liveSyncEnabled: Boolean,
+    onToggleLiveSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
     onRotatePage: () -> Unit,
     spreadSplitEnabled: Boolean,
@@ -479,6 +489,18 @@ internal fun systemControlEntries(
                 tint = syncTint,
             )
         }
+    }
+    // M4: «Синхронизация документа» — per-document live-sync toggle. DISTINCT from
+    // the QR-pairing entry above (Icons.Default.Sync, opens the connection dialog):
+    // this is a stateful toggle (SyncAlt — two-device exchange glyph) that streams
+    // THIS document's edits PC ↔ tablet in real time when on.
+    val liveSyncButton: @Composable () -> Unit = {
+        ToolToggleButton(
+            icon = Icons.Default.SyncAlt,
+            contentDescription = "Синхронизация документа",
+            selected = liveSyncEnabled,
+            onClick = onToggleLiveSync,
+        )
     }
     val shortcutsButton: @Composable () -> Unit = {
         IconButton(onClick = onOpenShortcutsSettings, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
@@ -606,7 +628,10 @@ internal fun systemControlEntries(
         // Скрываем кнопку (а не дизейблим) для документов без извлекаемого текста;
         // оставляем видимой, пока режим чтения активен, чтобы из него можно было выйти.
         if (readingModeAvailable || readingModeEnabled) add(WheelEntry("sys_reading") { readingModeButton() })
-        if (showSyncButton) add(WheelEntry("sys_sync") { syncButton() })
+        // QR-вход (showSyncButton) и тумблер живой синхронизации документа
+        // (liveSyncAvailable) — оба гейтятся одним sync-стеком; собираем их одним
+        // хелпером, чтобы ветвление не раздувало CyclomaticComplexity этой функции.
+        addAll(syncWheelEntries(showSyncButton, liveSyncAvailable, syncButton, liveSyncButton))
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
         if (!readingModeEnabled) add(WheelEntry("sys_export") { exportButton() })
         // В режиме чтения масштаб страницы не применяется (reflow-поток с
@@ -618,6 +643,23 @@ internal fun systemControlEntries(
         }
     }
 }
+
+/**
+ * The two adjacent sync entries: the QR-pairing button ([showSyncButton]) and the
+ * per-document live-sync toggle ([liveSyncAvailable], M4). Both are gated on the
+ * sync stack being up; collected here so [systemControlEntries] stays under the
+ * Cyclomatic-Complexity limit.
+ */
+private fun syncWheelEntries(
+    showSyncButton: Boolean,
+    liveSyncAvailable: Boolean,
+    syncButton: @Composable () -> Unit,
+    liveSyncButton: @Composable () -> Unit,
+): List<WheelEntry> =
+    buildList {
+        if (showSyncButton) add(WheelEntry("sys_sync") { syncButton() })
+        if (liveSyncAvailable) add(WheelEntry("sys_live_sync") { liveSyncButton() })
+    }
 
 /**
  * Drawing-tool state for the tool rail: the active [toolMode] plus the per-tool
@@ -702,6 +744,12 @@ data class ToolRailSystem(
     val showSyncButton: Boolean,
     val syncTint: Color,
     val onOpenSync: () -> Unit,
+    /** Доступна ли «синхронизация документа» (M4) — поднят ли sync-стек. */
+    val liveSyncAvailable: Boolean,
+    /** Включена ли живая синхронизация текущего документа. */
+    val liveSyncEnabled: Boolean,
+    /** Переключает живую синхронизацию документа (PC ↔ планшет правки в реальном времени). */
+    val onToggleLiveSync: () -> Unit,
     val onOpenShortcutsSettings: () -> Unit,
     /** Поворачивает текущую страницу на +90° CW (кумулятивно). */
     val onRotatePage: () -> Unit,
@@ -895,6 +943,9 @@ private fun landscapeWheelEntries(
         showSyncButton = system.showSyncButton,
         syncTint = system.syncTint,
         onOpenSync = system.onOpenSync,
+        liveSyncAvailable = system.liveSyncAvailable,
+        liveSyncEnabled = system.liveSyncEnabled,
+        onToggleLiveSync = system.onToggleLiveSync,
         onOpenShortcutsSettings = system.onOpenShortcutsSettings,
         onRotatePage = system.onRotatePage,
         spreadSplitEnabled = system.spreadSplitEnabled,

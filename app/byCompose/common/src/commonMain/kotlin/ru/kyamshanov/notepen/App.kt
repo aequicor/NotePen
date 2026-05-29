@@ -70,6 +70,8 @@ fun App(
     receivedPdfDir: String? = null,
     /** Реестр открытых документов; нужен `LocalCachedDocumentCleaner`-у. */
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
+    /** Контроллер живой синхронизации документа (M4); `null` — sync-стек не поднят. */
+    liveSyncController: ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController? = null,
     /** Реестр `localPath → documentId` для remote-кешированных PDF. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
     /**
@@ -103,6 +105,7 @@ fun App(
                 manualConnectViewModel = manualConnectViewModel,
                 receivedPdfDir = receivedPdfDir,
                 openDocumentRegistry = openDocumentRegistry,
+                liveSyncController = liveSyncController,
                 localDocumentIdRegistry = localDocumentIdRegistry,
                 documentIdentityProvider = documentIdentityProvider,
                 hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,

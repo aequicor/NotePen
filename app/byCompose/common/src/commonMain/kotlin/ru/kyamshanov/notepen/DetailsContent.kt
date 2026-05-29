@@ -209,6 +209,7 @@ fun DetailsContent(
     manualConnectViewModel: ManualConnectViewModel? = null,
     receivedPdfDir: String? = null,
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
+    liveSyncController: ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController? = null,
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
     documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
@@ -566,6 +567,9 @@ fun DetailsContent(
     val showToc = controls?.showToc ?: false
     val hasToc = controls?.hasToc ?: false
     val readingModeEnabled = controls?.readingModeEnabled ?: false
+    // Per-document live-sync toggle (M4) — distinct from the QR pairing entry below.
+    val liveSyncAvailable = controls?.liveSyncAvailable ?: false
+    val liveSyncEnabled = controls?.liveSyncEnabled ?: false
     // F-6: при включении режима чтения возвращаем фокус на корневой Box, чтобы
     // стрелки и Space начинали листать сразу. До этого фокуса требовался первый
     // тап по полотну (см. Initial-pass focusRequester ниже) — а в чистом mouse-only
@@ -945,6 +949,7 @@ fun DetailsContent(
                         pendingDeltaCounts = pendingDeltaCounts,
                         receivedPdfDir = receivedPdfDir,
                         openDocumentRegistry = openDocumentRegistry,
+                        liveSyncController = liveSyncController,
                         hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                         showSnackbar = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } },
                         onRestoreToolSettings = { pen, marker, eraser ->
@@ -1147,6 +1152,9 @@ fun DetailsContent(
                                         showSyncButton = syncPaneEnabled,
                                         syncTint = syncStatusTint,
                                         onOpenSync = { showSyncPanel = true },
+                                        liveSyncAvailable = liveSyncAvailable,
+                                        liveSyncEnabled = liveSyncEnabled,
+                                        onToggleLiveSync = { controls?.toggleLiveSync?.invoke() },
                                         onOpenShortcutsSettings = { showShortcutsDialog = true },
                                         onRotatePage = { controls?.rotateCurrentPage?.invoke() },
                                         spreadSplitEnabled = controls?.spreadSplitEnabled == true,
@@ -1280,6 +1288,9 @@ fun DetailsContent(
                                 showSyncButton = syncPaneEnabled,
                                 syncTint = syncStatusTint,
                                 onOpenSync = { showSyncPanel = true },
+                                liveSyncAvailable = liveSyncAvailable,
+                                liveSyncEnabled = liveSyncEnabled,
+                                onToggleLiveSync = { controls?.toggleLiveSync?.invoke() },
                                 onOpenShortcutsSettings = { showShortcutsDialog = true },
                                 onRotatePage = { controls?.rotateCurrentPage?.invoke() },
                                 spreadSplitEnabled = controls?.spreadSplitEnabled == true,
