@@ -210,6 +210,7 @@ fun DetailsContent(
     receivedPdfDir: String? = null,
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -228,8 +229,17 @@ fun DetailsContent(
     val model by component.model.subscribeAsState()
     val initialFilePath = remember(model.title) { model.title }
 
+    // Resolves the sync wire id for a local file path. Order of preference:
+    //   1. remote-cached files → the host's id from the registry (must match the
+    //      host exactly; tablet never recomputes for these);
+    //   2. the content-addressed id warmed by [documentIdentityProvider] (the new
+    //      `<basename>#<sha256-prefix>` form — what peers also compute);
+    //   3. the legacy path-FNV-1a id, used only in the brief cold window before
+    //      warming completes (decision 3: a re-open re-syncs via last-writer-wins).
+    // Synchronous on purpose — tab/document factories run outside a coroutine; the
+    // warming LaunchedEffect below populates the provider cache so (2) hits.
     val syncDocumentIdFor: (String) -> String =
-        remember(localDocumentIdRegistry, receivedPdfDir) {
+        remember(localDocumentIdRegistry, receivedPdfDir, documentIdentityProvider) {
             { path ->
                 val fromRegistry =
                     if (receivedPdfDir != null && path.startsWith(receivedPdfDir)) {
@@ -237,7 +247,9 @@ fun DetailsContent(
                     } else {
                         null
                     }
-                fromRegistry ?: documentIdFromFilePath(path)
+                fromRegistry
+                    ?: documentIdentityProvider?.cachedWireIdForPath(path)
+                    ?: documentIdFromFilePath(path)
             }
         }
 
@@ -291,6 +303,28 @@ fun DetailsContent(
             displayName = resolveDocumentDisplayName(pendingTabUri),
         )
         component.onPendingTabHandled()
+    }
+
+    // Warm the content-addressed wire id for every open document so the
+    // synchronous [syncDocumentIdFor] resolves to the canonical id instead of
+    // the legacy fallback. Remote-cached files are skipped — their id comes from
+    // the host via [localDocumentIdRegistry] and must NOT be recomputed locally.
+    if (documentIdentityProvider != null) {
+        LaunchedEffect(tabSession, documentIdentityProvider, receivedPdfDir) {
+            snapshotFlow {
+                tabSession.layout.panels
+                    .flatMap { panel -> panel.tabs.tabs }
+                    .map { it.filePath }
+                    .toSet()
+            }.collect { paths ->
+                paths
+                    .filterNot { receivedPdfDir != null && it.startsWith(receivedPdfDir) }
+                    .forEach { path ->
+                        runCatching { documentIdentityProvider.identityForPath(path) }
+                            .onFailure { logger.warn { "Identity warm-up failed for $path: ${it::class.simpleName}" } }
+                    }
+            }
+        }
     }
 
     DisposableEffect(tabSession) {

@@ -61,6 +61,8 @@ import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
+import ru.kyamshanov.notepen.document.infrastructure.SidecarIdentityCache
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
@@ -241,6 +243,19 @@ fun main(args: Array<String>) {
     val localDocumentIdRegistry =
         JsonLocalDocumentIdRegistry(
             manifestPath = "$receivedDir/.notepen-doc-ids.json",
+            ioDispatcher = Dispatchers.IO,
+        )
+
+    // Content-addressed identity: hash the file bytes (sha256) for the sync wire
+    // id and cache the digest in a `<file>.notepen.id` sidecar next to the doc.
+    val documentIdentityProvider =
+        CachingDocumentIdentityProvider(
+            readBytes = { path -> java.io.File(path).readBytes() },
+            fingerprint = { path ->
+                val f = java.io.File(path)
+                if (f.isFile) "${f.length()}-${f.lastModified()}" else null
+            },
+            persistentCache = SidecarIdentityCache(ioDispatcher = Dispatchers.IO),
             ioDispatcher = Dispatchers.IO,
         )
 
@@ -489,6 +504,7 @@ fun main(args: Array<String>) {
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
+                    documentIdentityProvider = documentIdentityProvider,
                     // При открытии документа на ПК подмешиваем самое свежее
                     // состояние из headless-проекции (in-memory), а не только
                     // диск — так заметка, только что сделанная на планшете, видна

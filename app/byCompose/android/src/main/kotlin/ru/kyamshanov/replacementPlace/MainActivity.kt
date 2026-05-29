@@ -2,6 +2,8 @@ package ru.kyamshanov.notepen
 
 import android.content.Intent
 import android.net.Uri
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -69,6 +71,8 @@ import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
+import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
+import ru.kyamshanov.notepen.document.infrastructure.RegistryFileIdentityCache
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
@@ -186,6 +190,28 @@ class MainActivity : ComponentActivity() {
                 ioDispatcher = Dispatchers.IO,
             )
 
+        // Content-addressed identity. Documents are content URIs, so bytes are
+        // read via the ContentResolver and the digest is cached in a registry
+        // file under app-private storage (a sidecar "next to" the file is
+        // impossible for content URIs). The fingerprint uses the URI's size +
+        // last-modified when the provider exposes them; otherwise null disables
+        // the cross-run cache for that entry (the session in-memory cache still
+        // serves repeats).
+        val documentIdentityProvider =
+            CachingDocumentIdentityProvider(
+                readBytes = { path ->
+                    contentResolver.openInputStream(Uri.parse(path))?.use { it.readBytes() }
+                        ?: error("Cannot open $path")
+                },
+                fingerprint = { path -> contentUriFingerprint(path) },
+                persistentCache =
+                    RegistryFileIdentityCache(
+                        registryPath = java.io.File(context.filesDir, "doc-identities.tsv").absolutePath,
+                        ioDispatcher = Dispatchers.IO,
+                    ),
+                ioDispatcher = Dispatchers.IO,
+            )
+
         // Android is client-only: online peers = connected hosts. Proxied
         // through a MutableStateFlow so MainScreen can subscribe before the
         // sync client exists; the heavy coroutine below pipes the real flow in.
@@ -219,6 +245,10 @@ class MainActivity : ComponentActivity() {
                     databaseProvider = { createSyncDatabaseAndroid(context = context) },
                     ioDispatcher = Dispatchers.IO,
                 )
+            // One-time outbox reset for the content-addressed documentId change
+            // (M0). Idempotent — guarded by a MigrationMarker row; runs before
+            // replay so stale path-keyed deltas are never broadcast.
+            pendingDeltaQueue.runContentAddressedIdMigration()
             val syncEngineRegistry =
                 SyncEngineRegistry(
                     deviceId = selfId,
@@ -266,7 +296,11 @@ class MainActivity : ComponentActivity() {
             val remoteCatalogProvider =
                 RemoteCatalogProvider(
                     hostName = selfInfo.name,
-                    manifestProvider = RecentsLibraryManifestProvider(historyRepo),
+                    manifestProvider =
+                        RecentsLibraryManifestProvider(
+                            historyRepository = historyRepo,
+                            identityProvider = documentIdentityProvider,
+                        ),
                     folderRepository = folderRepo,
                 )
             remoteCatalogProvider.serve(client = syncClient, scope = appScope)
@@ -412,6 +446,7 @@ class MainActivity : ComponentActivity() {
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
+                    documentIdentityProvider = documentIdentityProvider,
                 )
             }
         }
@@ -445,4 +480,33 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
             else -> null
         }
+
+    /**
+     * Cheap `size-lastModified` fingerprint for a content URI, used to guard the
+     * persistent identity cache. Querying BOTH size and last-modified is required:
+     * a same-size in-place edit must invalidate the cached digest, otherwise sync
+     * would keep using the stale (wrong) documentId. Returns `null` when the
+     * metadata isn't readable (then the cross-run cache simply misses and the
+     * digest is recomputed).
+     */
+    private fun contentUriFingerprint(path: String): String? =
+        runCatching {
+            val uri = Uri.parse(path)
+            contentResolver
+                .query(
+                    uri,
+                    arrayOf(OpenableColumns.SIZE, DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                    null,
+                    null,
+                    null,
+                )
+                ?.use { cursor ->
+                    if (!cursor.moveToFirst()) return@use null
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex) else -1L
+                    val mtimeIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                    val mtime = if (mtimeIndex >= 0 && !cursor.isNull(mtimeIndex)) cursor.getLong(mtimeIndex) else 0L
+                    if (size >= 0) "$size-$mtime" else null
+                }
+        }.getOrNull()
 }

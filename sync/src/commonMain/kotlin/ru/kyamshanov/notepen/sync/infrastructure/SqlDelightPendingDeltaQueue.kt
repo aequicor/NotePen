@@ -37,8 +37,34 @@ class SqlDelightPendingDeltaQueue(
     private val ioDispatcher: CoroutineDispatcher,
     private val clock: () -> Long = { currentTimeMillis() },
 ) : PendingDeltaQueue {
-    private val queries by lazy { databaseProvider().pendingDeltaQueries }
+    private val database by lazy { databaseProvider() }
+    private val queries by lazy { database.pendingDeltaQueries }
+    private val migrationQueries by lazy { database.migrationMarkerQueries }
     private val json = Json { classDiscriminator = "type" }
+
+    /**
+     * Runs the one-time data migration for the content-addressed documentId
+     * change (M0 IDENTITY SPINE): clears the un-broadcast delta outbox exactly
+     * once, because every queued delta is keyed by the *old* path-FNV-1a
+     * documentId and would never match the new `sha256`-of-content wire id on
+     * replay. Annotations themselves are unaffected — they live in path-keyed
+     * sidecars; only this outbox is reset, and a subsequent re-open re-syncs via
+     * last-writer-wins.
+     *
+     * Idempotent: guarded by a [MigrationMarker] row, so it runs on the first
+     * launch after the change and never again. Forces the lazy DB open, so the
+     * caller should invoke it on a background dispatcher (it already hops to
+     * [ioDispatcher]).
+     */
+    suspend fun runContentAddressedIdMigration() {
+        withContext(ioDispatcher) {
+            val alreadyApplied =
+                migrationQueries.isApplied(CONTENT_ADDRESSED_ID_MIGRATION_KEY).executeAsOne() > 0
+            if (alreadyApplied) return@withContext
+            queries.clearAll()
+            migrationQueries.markApplied(CONTENT_ADDRESSED_ID_MIGRATION_KEY, clock())
+        }
+    }
 
     override suspend fun enqueue(
         documentId: String,
@@ -88,6 +114,13 @@ class SqlDelightPendingDeltaQueue(
             )
         }.flowOn(ioDispatcher)
 }
+
+/**
+ * [MigrationMarker] key for the one-time pending-delta reset triggered by the
+ * content-addressed documentId change. Bump (new key) only if another one-time
+ * reset is ever needed; never reuse this value.
+ */
+private const val CONTENT_ADDRESSED_ID_MIGRATION_KEY = "pending_delta_reset_content_addressed_id_v1"
 
 /** Platform-provided wall clock in epoch millis. */
 internal expect fun currentTimeMillis(): Long

@@ -1,0 +1,19 @@
+-- One-time data-migration markers. Each row records that a named migration has
+-- already run, so an idempotent migration can be guarded with a cheap lookup
+-- instead of re-executing on every launch. This is NOT a schema migration
+-- (those are SQLDelight `.sqm` files); it is application-level bookkeeping for
+-- one-off data fixes such as clearing the pending-delta outbox after the
+-- documentId formula changed.
+CREATE TABLE MigrationMarker (
+    key TEXT NOT NULL PRIMARY KEY,
+    applied_at INTEGER NOT NULL
+);
+
+isApplied:
+SELECT COUNT(*)
+FROM MigrationMarker
+WHERE key = ?;
+
+markApplied:
+INSERT OR IGNORE INTO MigrationMarker(key, applied_at)
+VALUES (?, ?);

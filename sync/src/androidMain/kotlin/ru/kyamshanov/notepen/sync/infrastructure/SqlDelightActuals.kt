@@ -22,5 +22,9 @@ fun createSyncDatabaseAndroid(
             context = context,
             name = databaseName,
         )
+    // MigrationMarker landed after the first releases; `.sqm` schema migrations
+    // are deliberately disabled (see CLAUDE.md), so create the table
+    // idempotently for databases predating it. No-op once present.
+    ensureMigrationMarkerTable(driver)
     return NotePenSyncDatabase(driver)
 }

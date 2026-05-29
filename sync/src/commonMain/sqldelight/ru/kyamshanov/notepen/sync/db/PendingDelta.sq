@@ -38,3 +38,6 @@ countsAll:
 SELECT document_id, COUNT(*) AS pendingCount
 FROM PendingDelta
 GROUP BY document_id;
+
+clearAll:
+DELETE FROM PendingDelta;

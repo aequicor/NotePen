@@ -152,6 +152,10 @@ class SyncRuntime(
             val syncClient = KtorSyncClient(httpClient)
             val serviceRegistrar = JmDnsServiceRegistrar()
             val pendingDeltaQueue = createPendingDeltaQueue(syncDatabasePath)
+            // One-time outbox reset for the content-addressed documentId change
+            // (M0). Idempotent — guarded by a MigrationMarker row; runs before
+            // any replay so stale path-keyed deltas are never broadcast.
+            pendingDeltaQueue.runContentAddressedIdMigration()
             val syncEngineRegistry =
                 SyncEngineRegistry(
                     deviceId = selfId,

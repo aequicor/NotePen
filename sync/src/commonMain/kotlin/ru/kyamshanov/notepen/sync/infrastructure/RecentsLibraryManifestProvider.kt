@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.sync.infrastructure
 
+import ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
 import ru.kyamshanov.notepen.sync.domain.model.BookId
@@ -12,18 +13,25 @@ import ru.kyamshanov.notepen.sync.domain.port.LibraryManifestProvider
  *
  * Preserves the pre-library behaviour for client devices that have no
  * sandboxed library directory of their own: they keep publishing their recents
- * so a connected host can browse them. [BookId] reuses the legacy path-derived
- * document id, so ids on this side stay byte-for-byte identical to before.
+ * so a connected host can browse them.
+ *
+ * The advertised [BookId] is the **content-addressed sync wire id** computed by
+ * [identityProvider] (`<basename>#<sha256-prefix>`). This is what a peer uses to
+ * address the document, so it MUST match the id both ends compute for the same
+ * bytes — hence content-addressing rather than the legacy path hash. When the
+ * id can't be computed (e.g. the recent file is no longer readable) the entry
+ * falls back to the legacy path-derived id so the file still appears.
  */
 class RecentsLibraryManifestProvider(
     private val historyRepository: FileHistoryRepository,
+    private val identityProvider: DocumentIdentityProvider,
 ) : LibraryManifestProvider {
     override suspend fun current(): LibraryManifest =
         LibraryManifest(
             books =
                 historyRepository.getAll().map { file ->
                     LibraryBook(
-                        id = BookId(documentIdFromFilePath(file.uri)),
+                        id = BookId(wireIdFor(file.uri)),
                         relativePath = file.uri,
                         displayName = file.displayName,
                         fileSize = file.fileSize,
@@ -35,6 +43,10 @@ class RecentsLibraryManifestProvider(
     override suspend fun resolveAbsolutePath(id: BookId): String? =
         historyRepository
             .getAll()
-            .firstOrNull { documentIdFromFilePath(it.uri) == id.value }
+            .firstOrNull { wireIdFor(it.uri) == id.value }
             ?.uri
+
+    private suspend fun wireIdFor(uri: String): String =
+        runCatching { identityProvider.identityForPath(uri).wireId }
+            .getOrElse { documentIdFromFilePath(uri) }
 }

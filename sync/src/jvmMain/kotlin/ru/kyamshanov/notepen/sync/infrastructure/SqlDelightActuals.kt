@@ -22,5 +22,10 @@ fun createSyncDatabaseJvm(databasePath: String): NotePenSyncDatabase {
     if (freshInstall) {
         NotePenSyncDatabase.Schema.create(driver)
     }
+    // MigrationMarker landed after the first releases, but JVM only runs
+    // Schema.create() on a fresh file (and `.sqm` schema migrations are
+    // deliberately disabled — see CLAUDE.md). Create the table idempotently so
+    // pre-existing databases gain it without a schema-version bump.
+    ensureMigrationMarkerTable(driver)
     return NotePenSyncDatabase(driver)
 }

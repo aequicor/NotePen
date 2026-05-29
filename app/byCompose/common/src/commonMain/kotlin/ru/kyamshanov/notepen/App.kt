@@ -72,6 +72,13 @@ fun App(
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     /** Реестр `localPath → documentId` для remote-кешированных PDF. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /**
+     * Content-addressed identity provider. Warms the canonical
+     * `<basename>#<sha256-prefix>` wire id for open documents so the editor
+     * advertises the same id a peer computes for the same bytes. `null` keeps
+     * the legacy path-derived id (sync still works locally but won't match peers).
+     */
+    documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     /** Host-side провайдер накопленных проекцией штрихов; см. [RootContent]. */
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
@@ -97,6 +104,7 @@ fun App(
                 receivedPdfDir = receivedPdfDir,
                 openDocumentRegistry = openDocumentRegistry,
                 localDocumentIdRegistry = localDocumentIdRegistry,
+                documentIdentityProvider = documentIdentityProvider,
                 hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                 modifier = Modifier.fillMaxSize(),
             )

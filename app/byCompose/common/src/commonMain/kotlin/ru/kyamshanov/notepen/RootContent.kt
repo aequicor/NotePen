@@ -61,6 +61,8 @@ fun RootContent(
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     /** Forwarded to [DetailsContent] for remote-cached documentId lookup. */
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
+    /** Forwarded to [DetailsContent] to warm the content-addressed wire id of open documents. */
+    documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     /** Forwarded to [DetailsContent] to seed host-side projection strokes on local open. */
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier,
@@ -160,6 +162,7 @@ fun RootContent(
                     receivedPdfDir = receivedPdfDir,
                     openDocumentRegistry = openDocumentRegistry,
                     localDocumentIdRegistry = localDocumentIdRegistry,
+                    documentIdentityProvider = documentIdentityProvider,
                     hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                     modifier = modifier,
                 )
