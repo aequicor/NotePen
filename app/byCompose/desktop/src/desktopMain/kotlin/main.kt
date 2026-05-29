@@ -33,9 +33,14 @@ import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
 import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
 import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
+import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
+import ru.kyamshanov.notepen.document.infrastructure.SidecarIdentityCache
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
 import ru.kyamshanov.notepen.library.impl.LocalFolderLibraryBackend
+import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
+import ru.kyamshanov.notepen.library.infrastructure.JvmLibraryConnectionStore
+import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -66,8 +71,6 @@ import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
-import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
-import ru.kyamshanov.notepen.document.infrastructure.SidecarIdentityCache
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
@@ -129,6 +132,29 @@ private object OpenFileRouter {
 private val OPENABLE_EXTENSIONS = listOf("pdf", "png", "jpg", "jpeg", "epub", "fb2.zip", "fb2", "cbz", "cbr")
 
 private val mainLogger = KotlinLogging.logger {}
+
+/**
+ * Shows a native "choose a folder" dialog and returns the picked directory's canonical path, or
+ * `null` when cancelled. Used by the LibrarySources screen to add another local-folder library.
+ *
+ * Runs the (blocking) Swing chooser on the AWT EDT via [java.awt.EventQueue.invokeAndWait], off the
+ * UI thread of the caller (the ViewModel launches it on its own scope).
+ */
+private suspend fun pickLibraryFolder(): String? =
+    kotlinx.coroutines.withContext(Dispatchers.IO) {
+        var picked: String? = null
+        java.awt.EventQueue.invokeAndWait {
+            val chooser =
+                javax.swing.JFileChooser().apply {
+                    fileSelectionMode = javax.swing.JFileChooser.DIRECTORIES_ONLY
+                    dialogTitle = "Выберите папку библиотеки"
+                }
+            if (chooser.showOpenDialog(null) == javax.swing.JFileChooser.APPROVE_OPTION) {
+                picked = chooser.selectedFile?.canonicalPath
+            }
+        }
+        picked
+    }
 
 fun main(args: Array<String>) {
     // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
@@ -238,37 +264,6 @@ fun main(args: Array<String>) {
             ioDispatcher = Dispatchers.IO,
         )
 
-    // The library shelf is now sourced through the :library abstraction. In M1 there is exactly one
-    // local-folder library — the user's `~/NotePen Library`. The backend factory reuses the existing
-    // [libraryFolder] instance for that root so the registry and the "Library" drill-down share a
-    // single scan/state (the drill-down still talks to [libraryFolder] directly). Behaviour and the
-    // rendered shelf are unchanged versus reading LibraryFolder.items directly.
-    val libraryRegistry =
-        DefaultLibraryRegistry(
-            backends =
-                listOf(
-                    LocalFolderLibraryBackend { rootPath, _ ->
-                        if (File(rootPath).canonicalPath == libraryRoot.canonicalPath) {
-                            libraryFolder
-                        } else {
-                            FileSystemLibraryFolder(
-                                root = File(rootPath),
-                                isBook = isBook,
-                                notifier = catalogChangeNotifier,
-                                scope = appScope,
-                                ioDispatcher = Dispatchers.IO,
-                            )
-                        }
-                    },
-                ),
-            scope = appScope,
-            ioDispatcher = Dispatchers.IO,
-        )
-    appScope.launch {
-        libraryRegistry.connect(LibraryConnection.Local(libraryRoot.canonicalPath))
-            .onFailure { e -> mainLogger.warn(e) { "Failed to connect local library at startup" } }
-    }
-
     // In-memory state holders are cheap; we expose them to the UI from the
     // light path so that the main screen can subscribe before the sync stack
     // finishes wiring. SyncRuntime fills these as peers connect once the user
@@ -336,13 +331,65 @@ fun main(args: Array<String>) {
     // is disabled; flips to the live host+client union once enable() lands.
     val onlinePeerIdsFlow = syncRuntime.onlinePeerIds()
 
+    // The library shelf is sourced through the :library abstraction. Two backends are registered:
+    //  - Local: the one local-folder library (`~/NotePen Library`); the factory reuses the existing
+    //    [libraryFolder] for that root so the registry and the "Library" drill-down share one scan.
+    //  - PeerLan (M2a): projects a connected peer's shared catalog as a read-only library. It reuses
+    //    the existing sync infra — the client-side catalog cache for listing and the (lazily built)
+    //    RemoteDocumentOpener for streaming. No peer is connected here; that happens via LibrarySources
+    //    (M2c) calling registry.connect(LibraryConnection.PeerLan(...)).
+    // Saved user-added libraries (PeerLan/GitHub) persist to library_connections.json under the app
+    // data dir; the always-on local library below is wired explicitly and NOT persisted there.
+    val libraryConnectionStore = JvmLibraryConnectionStore()
+    val libraryRegistry =
+        DefaultLibraryRegistry(
+            backends =
+                listOf(
+                    LocalFolderLibraryBackend { rootPath, _ ->
+                        if (File(rootPath).canonicalPath == libraryRoot.canonicalPath) {
+                            libraryFolder
+                        } else {
+                            FileSystemLibraryFolder(
+                                root = File(rootPath),
+                                isBook = isBook,
+                                notifier = catalogChangeNotifier,
+                                scope = appScope,
+                                ioDispatcher = Dispatchers.IO,
+                            )
+                        }
+                    },
+                    PeerLanLibraryBackend(
+                        catalogs = remoteCatalogCache.catalogs,
+                        documentOpenerProvider = { syncRuntime.session.value?.remoteDocumentOpener },
+                        onlinePeerIds = onlinePeerIdsFlow,
+                    ),
+                ),
+            scope = appScope,
+            ioDispatcher = Dispatchers.IO,
+            connectionStore = libraryConnectionStore,
+        )
+    appScope.launch {
+        // The always-connected local library (M1) stays wired explicitly every launch.
+        libraryRegistry.connect(LibraryConnection.Local(libraryRoot.canonicalPath))
+            .onFailure { e -> mainLogger.warn(e) { "Failed to connect local library at startup" } }
+        // M2b: when "open library at startup" is on, auto-reconnect the user's saved (PeerLan/GitHub)
+        // libraries. Non-blocking — the local library is already up; saved ones connect in the
+        // background as their backends become reachable.
+        if (defaultAppSettingsRepository().load().openLibraryAtStartup) {
+            libraryRegistry.savedConnections().forEach { spec ->
+                libraryRegistry.connect(spec)
+                    .onFailure { e -> mainLogger.warn(e) { "Failed to auto-connect saved library $spec" } }
+            }
+        }
+    }
+
     // Always create the root component outside Compose on the UI thread
     val root: RootComponent =
         runOnUiThread {
             DefaultRootComponent(
                 componentContext = DefaultComponentContext(lifecycle = lifecycle),
                 historyRepository = historyRepo,
-                mainComponentFactory = { ctx, onEditor, onPeer, onFolder, onLib, onSettings ->
+                mainComponentFactory = { ctx, onEditor, onPeer, onFolder, onLib, onSettings, onLibrarySources ->
                     MainScreenComponent(
                         componentContext = ctx,
                         historyRepository = historyRepo,
@@ -357,6 +404,7 @@ fun main(args: Array<String>) {
                         onOpenPeerCatalog = onPeer,
                         onOpenFolder = onFolder,
                         onOpenSettings = onSettings,
+                        onOpenLibrarySources = onLibrarySources,
                         onOpenLibraryFolder = onLib,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
@@ -408,6 +456,23 @@ fun main(args: Array<String>) {
                         componentContext = ctx,
                         repository = defaultAppSettingsRepository(),
                         onBackListener = onBack,
+                    )
+                },
+                // M2c: the LibrarySources screen drives the same registry/store/settings as the shelf.
+                // - onServeOverLan enables the heavy sync stack (Ktor server + mDNS), which IS
+                //   serving-over-LAN: peers can then discover + read this desktop's catalog.
+                // - onPickLocalFolder shows a native directory chooser so the user can add another
+                //   local-folder library (the always-on one is wired separately at startup).
+                librarySourcesComponentFactory = { ctx, onBack ->
+                    LibrarySourcesComponentImpl(
+                        componentContext = ctx,
+                        registry = libraryRegistry,
+                        settingsRepository = defaultAppSettingsRepository(),
+                        catalogsFlow = remoteCatalogCache.catalogs,
+                        onlinePeerIdsFlow = onlinePeerIdsFlow,
+                        onServeOverLan = { appScope.launch { syncRuntime.enable() } },
+                        onPickLocalFolder = { pickLibraryFolder() },
+                        onBack = onBack,
                     )
                 },
             )

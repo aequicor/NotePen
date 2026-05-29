@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Layers
@@ -128,6 +129,7 @@ fun MainContent(
     onIntent: (MainScreenIntent) -> Unit,
     onBack: (() -> Unit)? = null,
     onOpenSettings: (() -> Unit)? = null,
+    onOpenLibrarySources: (() -> Unit)? = null,
     hostQrViewModel: HostQrPairingViewModel? = null,
     clientScanViewModel: ClientQrScanViewModel? = null,
     manualConnectViewModel: ManualConnectViewModel? = null,
@@ -357,6 +359,17 @@ fun MainContent(
                         peerServer = peerServer,
                         peerClient = peerClient,
                     )
+                    if (onOpenLibrarySources != null) {
+                        IconButton(
+                            onClick = onOpenLibrarySources,
+                            modifier = titleBarInteraction?.interactive(Modifier) ?: Modifier,
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.LibraryBooks,
+                                contentDescription = "Источники библиотек",
+                            )
+                        }
+                    }
                     if (onOpenSettings != null) {
                         IconButton(
                             onClick = onOpenSettings,

@@ -12,6 +12,9 @@ import kotlinx.coroutines.test.runTest
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolderItem
+import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
+import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -97,6 +100,53 @@ class DefaultLibraryRegistryTest {
             assertEquals(null, merged.first().entry.identity, "identity is null in M1")
             val libId = registry.libraries.value.single().descriptor.id
             assertEquals(listOf(listOf(libId), listOf(libId)), merged.map { it.libraryIds })
+            scope.cancel()
+        }
+
+    @Test
+    fun connectingLocalAndPeerLan_mergedBooksContainsBothLibrariesBooks() =
+        runTest {
+            // M2 shelf goal: books from MULTIPLE connected libraries (local + a LAN peer) all
+            // surface in the single merged listing, each tagged with its owning library.
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val folder = FakeLibraryFolder(listOf(item("local.pdf", "Local Book")))
+            val peerId = "peer-42"
+            val catalogs =
+                MutableStateFlow(
+                    mapOf(
+                        DeviceInfo(id = peerId, name = "Tablet", host = "10.0.0.9", port = 0) to
+                            RemoteCatalog(
+                                hostName = "Tablet",
+                                recent =
+                                    listOf(
+                                        RemoteEntry(documentId = "remote#1", displayName = "Peer Book", fileSize = 5, lastOpenedAt = 3),
+                                    ),
+                                folders = emptyList(),
+                                folderLinks = emptyList(),
+                            ),
+                    ),
+                )
+            val registry =
+                DefaultLibraryRegistry(
+                    backends =
+                        listOf(
+                            LocalFolderLibraryBackend { _, _ -> folder },
+                            PeerLanLibraryBackend(catalogs = catalogs, documentOpenerProvider = { null }),
+                        ),
+                    scope = scope,
+                    ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+                )
+
+            registry.connect(LibraryConnection.Local(rootPath)).getOrThrow()
+            registry.connect(LibraryConnection.PeerLan(peerId = peerId, host = "10.0.0.9")).getOrThrow()
+
+            assertEquals(2, registry.libraries.value.size, "two libraries connected")
+            val merged = registry.mergedBooks.value
+            assertEquals(
+                setOf("Local Book", "Peer Book"),
+                merged.map { it.entry.displayName }.toSet(),
+                "books from both the local folder and the LAN peer appear in the merged shelf",
+            )
             scope.cancel()
         }
 

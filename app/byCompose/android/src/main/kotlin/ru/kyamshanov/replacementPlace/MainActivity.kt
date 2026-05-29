@@ -2,9 +2,9 @@ package ru.kyamshanov.notepen
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
-import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -35,6 +35,12 @@ import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
 import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
 import ru.kyamshanov.notepen.book.AndroidEbookToPdfConverter
 import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
+import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
+import ru.kyamshanov.notepen.document.infrastructure.RegistryFileIdentityCache
+import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
+import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
+import ru.kyamshanov.notepen.library.infrastructure.AndroidLibraryConnectionStore
+import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -71,8 +77,6 @@ import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
-import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
-import ru.kyamshanov.notepen.document.infrastructure.RegistryFileIdentityCache
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
@@ -220,6 +224,40 @@ class MainActivity : ComponentActivity() {
         // coroutine below finishes; consumers (App, factories) tolerate null.
         val heavyDepsFlow = MutableStateFlow<HeavyDeps?>(null)
 
+        // The library shelf is sourced through the :library abstraction. Android is client-only
+        // (decision 4): it never hosts a local-folder library, so only the PeerLan backend is
+        // registered. The backend reuses the existing sync infra — the client-side catalog cache for
+        // listing and the (lazily built) RemoteDocumentOpener for streaming. No peer is connected
+        // here; that happens via LibrarySources (M2c) calling registry.connect(PeerLan(...)). With no
+        // connected library mergedBooks stays empty, so the shelf looks identical to before.
+        // Saved PeerLan libraries persist to library_connections.json under filesDir. Android is
+        // client-only, so no Local connection is ever persisted (Local backend isn't registered).
+        val libraryConnectionStore = AndroidLibraryConnectionStore(context)
+        val libraryRegistry =
+            DefaultLibraryRegistry(
+                backends =
+                    listOf(
+                        PeerLanLibraryBackend(
+                            catalogs = remoteCatalogCache.catalogs,
+                            documentOpenerProvider = { heavyDepsFlow.value?.remoteDocumentOpener },
+                            onlinePeerIds = onlinePeerIdsFlow,
+                        ),
+                    ),
+                scope = appScope,
+                ioDispatcher = Dispatchers.IO,
+                connectionStore = libraryConnectionStore,
+            )
+        // M2b: when "open library at startup" is on, auto-reconnect saved PeerLan libraries. The
+        // PeerLan backend only projects the catalog cache (tolerates a not-yet-ready opener), so this
+        // is safe to run before HeavyDeps finishes wiring. Non-blocking — runs on appScope.
+        appScope.launch {
+            if (defaultAppSettingsRepository().load().openLibraryAtStartup) {
+                libraryRegistry.savedConnections().forEach { spec ->
+                    libraryRegistry.connect(spec)
+                }
+            }
+        }
+
         // Build the heavy sync/network stack off the main thread so the first
         // frame can paint before Ktor/CIO/SQLDelight classes are touched.
         appScope.launch(Dispatchers.IO) {
@@ -354,7 +392,8 @@ class MainActivity : ComponentActivity() {
             DefaultRootComponent(
                 componentContext = defaultComponentContext(),
                 historyRepository = historyRepo,
-                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _, onOpenSettings ->
+                mainComponentFactory = {
+                    componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _, onOpenSettings, onOpenLibrarySources ->
                     // libraryFolder=null на Android → onOpenLibraryFolder тоже не нужен;
                     // компонент не показывает карточку «Библиотека», навигация туда
                     // никогда не инициируется.
@@ -372,8 +411,10 @@ class MainActivity : ComponentActivity() {
                         onOpenPeerCatalog = onOpenPeerCatalog,
                         onOpenFolder = onOpenFolder,
                         onOpenSettings = onOpenSettings,
+                        onOpenLibrarySources = onOpenLibrarySources,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
+                        libraryRegistry = libraryRegistry,
                     )
                 },
                 peerCatalogComponentFactory = { ctx, peerId, displayName, onBack, onOpenEditor ->
@@ -413,6 +454,21 @@ class MainActivity : ComponentActivity() {
                         componentContext = ctx,
                         repository = defaultAppSettingsRepository(),
                         onBackListener = onBack,
+                    )
+                },
+                // M2c: Android is client-only (decision 4). LibrarySources manages PeerLan
+                // connections + the startup toggle, but cannot serve over LAN or add a local
+                // folder — both callbacks are null, hiding those actions in the UI.
+                librarySourcesComponentFactory = { ctx, onBack ->
+                    LibrarySourcesComponentImpl(
+                        componentContext = ctx,
+                        registry = libraryRegistry,
+                        settingsRepository = defaultAppSettingsRepository(),
+                        catalogsFlow = remoteCatalogCache.catalogs,
+                        onlinePeerIdsFlow = onlinePeerIdsFlow,
+                        onServeOverLan = null,
+                        onPickLocalFolder = null,
+                        onBack = onBack,
                     )
                 },
             )

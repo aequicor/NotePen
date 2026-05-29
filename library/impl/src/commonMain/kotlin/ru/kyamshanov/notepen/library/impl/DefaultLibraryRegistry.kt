@@ -17,6 +17,7 @@ import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryBackend
 import ru.kyamshanov.notepen.library.api.LibraryBackendKind
 import ru.kyamshanov.notepen.library.api.LibraryConnection
+import ru.kyamshanov.notepen.library.api.LibraryConnectionStore
 import ru.kyamshanov.notepen.library.api.LibraryEntry
 import ru.kyamshanov.notepen.library.api.LibraryId
 import ru.kyamshanov.notepen.library.api.LibraryRegistry
@@ -30,15 +31,28 @@ import ru.kyamshanov.notepen.library.api.MergedLibraryEntry
  * library's books one-to-one (no cross-library dedup yet — that lands with canonical identity in a
  * later milestone). The combine logic is already written for N libraries.
  *
+ * ## Persistence (M2b)
+ * Successfully connected specs accepted by [shouldPersist] are written to the [connectionStore] so
+ * they can be auto-reconnected at startup. By default the **always-on local** library is *not*
+ * persisted — it is wired explicitly by the DI layer with a platform-specific root and re-added on
+ * every launch, so storing it would be redundant and could pin a stale root. User-added PeerLan /
+ * GitHub / Cloud libraries are persisted. [disconnect] removes the matching spec from the store.
+ *
  * @param backends the available backends, one per [LibraryBackendKind].
  * @param scope long-lived scope keeping [libraries] / [mergedBooks] hot and owning each connected
  *   library's work.
  * @param ioDispatcher dispatcher for the (potentially blocking) connect/probe calls.
+ * @param connectionStore durable store of saved connections; `null` disables persistence
+ *   (e.g. in tests), so [savedConnections] returns empty and connects are not recorded.
+ * @param shouldPersist predicate deciding which successfully-connected specs are saved; defaults to
+ *   persisting everything except [LibraryConnection.Local].
  */
 public class DefaultLibraryRegistry(
     backends: List<LibraryBackend>,
     private val scope: CoroutineScope,
     private val ioDispatcher: CoroutineDispatcher,
+    private val connectionStore: LibraryConnectionStore? = null,
+    private val shouldPersist: (LibraryConnection) -> Boolean = { it !is LibraryConnection.Local },
 ) : LibraryRegistry {
     private val backendsByKind = backends.associateBy { it.kind }
     private val connectMutex = Mutex()
@@ -48,6 +62,12 @@ public class DefaultLibraryRegistry(
 
     private val mergedBooksState = MutableStateFlow<List<MergedLibraryEntry>>(emptyList())
     override val mergedBooks: StateFlow<List<MergedLibraryEntry>> = mergedBooksState.asStateFlow()
+
+    /**
+     * The spec each connected library was created from, keyed by [LibraryId]. Lets [disconnect]
+     * (which only carries an id) remove the right entry from the [connectionStore].
+     */
+    private val specsById = mutableMapOf<LibraryId, LibraryConnection>()
 
     /**
      * The coroutine currently mirroring the combined book listing into [mergedBooksState]. Replaced
@@ -66,20 +86,27 @@ public class DefaultLibraryRegistry(
             val result = withContext(ioDispatcher) { backend.connect(spec, scope) }
             result.onSuccess { library ->
                 val id = library.descriptor.id
+                specsById[id] = spec
                 // Replace any existing library with the same id (idempotent reconnect).
                 updateLibraries(librariesState.value.filterNot { it.descriptor.id == id } + library)
+                if (shouldPersist(spec)) {
+                    connectionStore?.add(spec)
+                }
             }
         }
 
     override suspend fun disconnect(id: LibraryId) {
         connectMutex.withLock {
             updateLibraries(librariesState.value.filterNot { it.descriptor.id == id })
+            specsById.remove(id)?.let { spec ->
+                if (shouldPersist(spec)) {
+                    connectionStore?.remove(spec)
+                }
+            }
         }
     }
 
-    // M1: connections are wired explicitly at startup by the DI layer; nothing is persisted yet.
-    // Connection persistence (JSON, atomic-write) lands in M2.
-    override suspend fun savedConnections(): List<LibraryConnection> = emptyList()
+    override suspend fun savedConnections(): List<LibraryConnection> = connectionStore?.load().orEmpty()
 
     /** Publishes a new library set and re-points [mergeJob] at the new combined book listing. */
     private fun updateLibraries(libs: List<Library>) {

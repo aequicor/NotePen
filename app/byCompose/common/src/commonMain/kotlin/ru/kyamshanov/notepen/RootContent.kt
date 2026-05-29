@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.Flow
 import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
 import ru.kyamshanov.notepen.appsettings.SettingsContent
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
+import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
+import ru.kyamshanov.notepen.library.ui.LibrarySourcesContent
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContent
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.library.LibraryFolderContent
@@ -138,6 +140,7 @@ fun RootContent(
                             null
                         },
                     onOpenSettings = mainScreenComponent.onOpenSettings,
+                    onOpenLibrarySources = mainScreenComponent.onOpenLibrarySources,
                     hostQrViewModel = hostQrViewModel,
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
@@ -200,6 +203,15 @@ fun RootContent(
                                 "— check DefaultRootComponent factory",
                         )
                 LibraryFolderContent(component = impl, modifier = modifier)
+            }
+            is RootComponent.Child.LibrarySourcesChild -> {
+                val impl =
+                    child.component as? LibrarySourcesComponentImpl
+                        ?: error(
+                            "LibrarySourcesChild.component must be LibrarySourcesComponentImpl " +
+                                "— check DefaultRootComponent factory",
+                        )
+                LibrarySourcesContent(component = impl, modifier = modifier)
             }
         }
     }

@@ -14,6 +14,7 @@ import kotlinx.serialization.Serializable
 import ru.kyamshanov.notepen.RootComponent.Child.DetailsChild
 import ru.kyamshanov.notepen.RootComponent.Child.FolderContentsChild
 import ru.kyamshanov.notepen.RootComponent.Child.LibraryFolderContentsChild
+import ru.kyamshanov.notepen.RootComponent.Child.LibrarySourcesChild
 import ru.kyamshanov.notepen.RootComponent.Child.MainChild
 import ru.kyamshanov.notepen.RootComponent.Child.PeerCatalogChild
 import ru.kyamshanov.notepen.RootComponent.Child.SettingsChild
@@ -42,6 +43,7 @@ class DefaultRootComponent(
         onOpenFolder: (folderId: String, folderName: String) -> Unit,
         onOpenLibraryFolder: () -> Unit,
         onOpenSettings: () -> Unit,
+        onOpenLibrarySources: () -> Unit,
     ) -> MainComponent,
     private val peerCatalogComponentFactory: (
         componentContext: ComponentContext,
@@ -78,6 +80,17 @@ class DefaultRootComponent(
         componentContext: ComponentContext,
         onBack: () -> Unit,
     ) -> SettingsComponent,
+    /**
+     * Фабрика экрана «Источники библиотек» — управление подключёнными
+     * библиотеками (локальная папка, LAN-пир, GitHub). Реализация
+     * `LibrarySourcesComponentImpl` живёт в `:common` и держит ссылки на
+     * `LibraryRegistry` / `LibraryConnectionStore` / `AppSettingsRepository`,
+     * чтобы `:shared` не зависел от `:library`/Compose.
+     */
+    private val librarySourcesComponentFactory: (
+        componentContext: ComponentContext,
+        onBack: () -> Unit,
+    ) -> LibrarySourcesComponent,
 ) : RootComponent,
     ComponentContext by componentContext {
     private val navigation = StackNavigation<Config>()
@@ -104,6 +117,7 @@ class DefaultRootComponent(
                 is Config.FolderContents -> config.instanceId
                 is Config.LibraryFolderContents -> config.instanceId
                 is Config.Settings -> config.instanceId
+                is Config.LibrarySources -> config.instanceId
                 else -> -1L
             }
         } + 1L
@@ -155,6 +169,7 @@ class DefaultRootComponent(
             is Config.LibraryFolderContents ->
                 LibraryFolderContentsChild(libraryFolderContentsComponent(ctx))
             is Config.Settings -> SettingsChild(settingsComponent(ctx))
+            is Config.LibrarySources -> LibrarySourcesChild(librarySourcesComponent(ctx))
         }
 
     @OptIn(DelicateDecomposeApi::class)
@@ -166,6 +181,7 @@ class DefaultRootComponent(
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
             { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
             { navigation.push(Config.Settings(nextInstanceId())) },
+            { navigation.push(Config.LibrarySources(nextInstanceId())) },
         )
 
     /**
@@ -181,6 +197,7 @@ class DefaultRootComponent(
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
             { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
             { navigation.push(Config.Settings(nextInstanceId())) },
+            { navigation.push(Config.LibrarySources(nextInstanceId())) },
         )
 
     @OptIn(DelicateDecomposeApi::class)
@@ -252,6 +269,12 @@ class DefaultRootComponent(
             navigation::pop,
         )
 
+    private fun librarySourcesComponent(ctx: ComponentContext): LibrarySourcesComponent =
+        librarySourcesComponentFactory(
+            ctx,
+            navigation::pop,
+        )
+
     override fun onBackClicked(toIndex: Int) {
         navigation.popTo(index = toIndex)
     }
@@ -313,6 +336,16 @@ class DefaultRootComponent(
          */
         @Serializable
         data class Settings(
+            val instanceId: Long = 0L,
+        ) : Config
+
+        /**
+         * Экран «Источники библиотек» — управление подключёнными библиотеками.
+         * `instanceId` обеспечивает уникальность конфига при множественном
+         * push'е (например, открыт поверх редактора).
+         */
+        @Serializable
+        data class LibrarySources(
             val instanceId: Long = 0L,
         ) : Config
     }

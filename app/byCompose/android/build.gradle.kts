@@ -75,6 +75,8 @@ dependencies {
     implementation(projects.app.byCompose.common)
     implementation(projects.rendering.api)
     implementation(projects.rendering.impl)
+    implementation(projects.library.api)
+    implementation(projects.library.impl)
 
     implementation(libs.compose.runtime)
     implementation(libs.compose.foundation)

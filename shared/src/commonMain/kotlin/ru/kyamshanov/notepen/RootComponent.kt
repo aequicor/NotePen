@@ -42,5 +42,9 @@ interface RootComponent {
         class SettingsChild(
             val component: SettingsComponent,
         ) : Child()
+
+        class LibrarySourcesChild(
+            val component: LibrarySourcesComponent,
+        ) : Child()
     }
 }

@@ -50,6 +50,8 @@ class MainScreenComponent(
     val onOpenFolder: (folderId: String, folderName: String) -> Unit,
     /** Колбэк навигации на экран глобальных настроек приложения. */
     val onOpenSettings: () -> Unit,
+    /** Колбэк навигации на экран «Источники библиотек» (управление подключениями). */
+    val onOpenLibrarySources: () -> Unit,
     /**
      * Колбэк навигации на sub-экран общей папки «Библиотека». `null` —
      * фича не подключена (Android), карточка «Библиотека» в этом случае не показывается.

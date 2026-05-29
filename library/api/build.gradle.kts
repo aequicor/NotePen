@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidKmpLibrary)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 kotlin {
@@ -25,10 +26,15 @@ kotlin {
             // OpenableDocument), so consumers must see it transitively.
             api(projects.shared)
             implementation(libs.kotlinx.coroutines.core)
+            // LibraryConnection is @Serializable (persisted as JSON by
+            // LibraryConnectionStore); the sealed-hierarchy serializer is generated here.
+            implementation(libs.kotlinx.serialization.core)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
             implementation(libs.kotlinx.coroutines.test)
+            // LibraryConnection JSON round-trip / backward-compat test.
+            implementation(libs.kotlinx.serialization.json)
         }
     }
 }
