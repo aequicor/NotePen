@@ -98,7 +98,11 @@ fun RootContent(
                                         pickedPath
                                             ?.let { resolveDocumentDisplayName(it) }
                                             ?: "",
-                                    fileSize = null,
+                                    // Real size enables the SAF fuzzy-match de-dup
+                                    // (same name+size, different content:// URI) so
+                                    // re-opening a file from the picker doesn't add a
+                                    // duplicate recents entry.
+                                    fileSize = pickedPath?.let { resolveDocumentSize(it) },
                                 ),
                             )
                         }

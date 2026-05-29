@@ -98,6 +98,42 @@ class AddToHistoryUseCaseTest {
             assertTrue(repo.upsertCalls.isEmpty(), "upsert must NOT be called on fuzzy match")
         }
 
+    /**
+     * Regression for the picker-duplicate defect: supplying the real file size
+     * (rather than the previously-hardcoded null) lets the SAF fuzzy-match net
+     * fire when SAF returns a different content:// URI for the same physical
+     * file, so re-opening from the picker de-dups instead of adding a duplicate.
+     * impl: AddToHistoryUseCase.execute (driven by RootContent resolveDocumentSize)
+     */
+    @Test
+    fun safFuzzyMatch_incomingNonNullSize_dedupsReopenedFile() =
+        runTestBlocking {
+            val existing =
+                makeFile(
+                    id = "existing-id",
+                    uri = "content://provider/document/100",
+                    displayName = "book.fb2",
+                    fileSize = 4096L,
+                )
+            val repo = FakeFileHistoryRepository(listOf(existing))
+            val useCase = AddToHistoryUseCase(repo)
+
+            // SAF hands back a *different* URI for the same physical file; the
+            // picker now passes the resolved size instead of null.
+            val result =
+                useCase
+                    .execute(
+                        uri = "content://provider/document/777",
+                        displayName = "book.fb2",
+                        fileSize = 4096L,
+                        openedAt = 300L,
+                    ).getOrThrow()
+
+            val detected = assertIs<AddHistoryResult.SafFuzzyMatchDetected>(result)
+            assertEquals(existing, detected.existing)
+            assertTrue(repo.upsertCalls.isEmpty(), "duplicate must NOT be persisted")
+        }
+
     // -----------------------------------------------------------------------
     // AC-5b: fileSize = null → no fuzzy match (size required for match)
     // -----------------------------------------------------------------------

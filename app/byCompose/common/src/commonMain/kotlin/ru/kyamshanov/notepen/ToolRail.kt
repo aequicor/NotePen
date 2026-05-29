@@ -9,6 +9,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +21,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
@@ -46,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -283,10 +287,13 @@ internal fun unifiedToolWheelEntries(
             add(WheelEntry("div_presets", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
             addAll(presets)
         }
-        // Системные кнопки заполняют колесо, когда нет настроек/пресетов активного
-        // инструмента: либо инструмент не выбран, либо это скрытое в чтении перо.
-        // При активном маркере/ластике их место занимают настройки и пресеты.
-        if (settings.isEmpty() && presets.isEmpty() && system.isNotEmpty()) {
+        // Системные кнопки (миниатюры, режим чтения, лупа, зум, экспорт, undo/redo…)
+        // ВСЕГДА в колесе — даже при активном инструменте. Раньше их вытесняли
+        // настройки/пресеты активного пера/маркера/ластика, и кнопки вида (миниатюры,
+        // режим чтения) пропадали до повторного тапа по инструменту. [WheelStrip] —
+        // прокручиваемый LazyRow/LazyColumn, поэтому лишние элементы уезжают в скролл,
+        // а не исчезают.
+        if (system.isNotEmpty()) {
             add(WheelEntry("div_system", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
             addAll(system)
         }
@@ -318,10 +325,69 @@ internal fun RailDivider(orientation: RailOrientation) {
 }
 
 /**
+ * Undo + redo as two PINNED, always-visible buttons laid out along [orientation]
+ * (a [Column] in the vertical landscape rail, a [Row] in the portrait top bar).
+ * Kept OUTSIDE the scrollable [WheelStrip] so undoing the just-drawn stroke — the
+ * single most common action — is always one tap away and never scrolls off behind
+ * an active tool's settings. Each button is an [IconButton] that dims its icon
+ * (rather than disappearing) when its stack is empty ([undoEnabled] /
+ * [redoEnabled]), matching the export button's disabled style; they are the only
+ * touch-reachable trigger for the undo engine (no Ctrl+Z on a stylus tablet).
+ */
+@Composable
+internal fun PinnedHistoryButtons(
+    orientation: RailOrientation,
+    undoEnabled: Boolean,
+    onUndo: () -> Unit,
+    redoEnabled: Boolean,
+    onRedo: () -> Unit,
+) {
+    val button:
+        @Composable (icon: ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) -> Unit =
+        { icon, description, enabled, onClick ->
+            IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = description,
+                    tint =
+                        if (enabled) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SYSTEM_DISABLED_ALPHA)
+                        },
+                )
+            }
+        }
+    val undoButton: @Composable () -> Unit = {
+        button(Icons.AutoMirrored.Filled.Undo, "Отменить", undoEnabled, onUndo)
+    }
+    val redoButton: @Composable () -> Unit = {
+        button(Icons.AutoMirrored.Filled.Redo, "Вернуть", redoEnabled, onRedo)
+    }
+    when (orientation) {
+        RailOrientation.HORIZONTAL ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                undoButton()
+                redoButton()
+            }
+        RailOrientation.VERTICAL ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                undoButton()
+                redoButton()
+            }
+    }
+}
+
+/**
  * System (non-drawing) controls as wheel entries: pencil mode (optional),
  * magnifier, page thumbnails, table of contents, reading mode, shortcuts, sync,
  * PDF export and a zoom cluster. Appended to the unified wheel so the phone bar
  * needs no `⋮` overflow menu.
+ *
+ * Undo / redo are deliberately NOT here — they render as pinned, always-visible
+ * buttons adjacent to the wheel (see [PinnedHistoryButtons]) so undoing the
+ * just-drawn stroke is always one tap away and never scrolls off behind the
+ * active tool's settings.
  *
  * In reading mode the drawing-adjacent controls (pencil mode, magnifier, export)
  * are dropped — only navigation / reading controls remain. The ToC button is
@@ -474,6 +540,9 @@ internal fun systemControlEntries(
         }
     }
     return buildList {
+        // Отмена/повтор больше НЕ в колесе: они вынесены в закреплённые кнопки
+        // ([HistoryButton]) рядом с колесом, чтобы «Отменить» всегда было в одном
+        // касании и не уезжало в скролл за настройками активного инструмента.
         // Инструменты рисования и их спутники (стилус, лупа, экспорт) в режиме
         // чтения не нужны — оставляем только навигацию и контролы чтения.
         if (showPencilModeButton && !readingModeEnabled) add(WheelEntry("sys_pencil") { pencilModeButton() })
@@ -528,9 +597,13 @@ data class ToolRailTools(
 /**
  * Non-drawing ("system") controls for the tool rail — export, zoom, page
  * thumbnails, table of contents, reading mode, pencil mode, magnifier, sync and
- * the shortcuts settings. Mirrors the parameters of [systemControlEntries]; the
- * rail unpacks it when building that wheel section.
+ * the shortcuts settings — plus the undo / redo wiring. The wheel section is
+ * built from these via [systemControlEntries]; undo / redo are rendered
+ * separately as the pinned [PinnedHistoryButtons] (not as wheel entries).
  *
+ * @property undoEnabled / @property onUndo undo button enabled state + callback;
+ *   feeds the pinned undo button — the touch-reachable trigger for the undo engine.
+ * @property redoEnabled / @property onRedo redo counterpart of [undoEnabled] / [onUndo].
  * @property hasAnnotations enables the PDF export button.
  * @property isExporting shows the export progress spinner.
  * @property onExport invoked when the export button is tapped.
@@ -549,6 +622,10 @@ data class ToolRailTools(
  * @property onOpenShortcutsSettings opens the keyboard-shortcuts settings.
  */
 data class ToolRailSystem(
+    val undoEnabled: Boolean,
+    val onUndo: () -> Unit,
+    val redoEnabled: Boolean,
+    val onRedo: () -> Unit,
     val hasAnnotations: Boolean,
     val isExporting: Boolean,
     val onExport: () -> Unit,
@@ -648,32 +725,60 @@ fun LandscapeToolRail(
                         }
                     },
             )
-        GlassSurface(
-            tint = readerTheme.background ?: MaterialTheme.colorScheme.surface,
+        LandscapeToolRailIsland(
+            entries = entries,
+            system = system,
+            selectedKey = selectedToolWheelKey(tools.toolMode),
+            readerTheme = readerTheme,
             modifier = Modifier.onSizeChanged { onRailWidthChanged(with(density) { it.width.toDp() }) },
-        ) {
-            MaterialTheme(
-                colorScheme =
-                    railSelectionColorScheme(
-                        MaterialTheme.colorScheme,
-                        readerTheme.contentColor,
-                        readerTheme.background,
-                    ),
-            ) {
-                WheelStrip(
-                    entries = entries,
-                    orientation = RailOrientation.VERTICAL,
-                    modifier = Modifier.padding(ISLAND_PADDING),
-                    selectedKey = selectedToolWheelKey(tools.toolMode),
-                )
-            }
-        }
+        )
         ToolRailBuddingPanel(
             visible = toolActive && expansion.expandedIndex != null,
             anchor = ToolRailAnchor(buttonCenterY, panelHeightPx, onPanelHeightChange = { panelHeightPx = it }),
             tools = tools,
             slotIndex = expansion.lastExpanded,
         )
+    }
+}
+
+/**
+ * The landscape rail's glass island: the scrollable vertical [WheelStrip] of
+ * [entries] with the pinned undo / redo [PinnedHistoryButtons] fixed below it, so
+ * undo is always visible regardless of how far the wheel is scrolled. Recolours
+ * to the reader palette in reading mode via [railSelectionColorScheme].
+ */
+@Composable
+private fun LandscapeToolRailIsland(
+    entries: List<WheelEntry>,
+    system: ToolRailSystem,
+    selectedKey: Any?,
+    readerTheme: ToolRailReaderTheme,
+    modifier: Modifier = Modifier,
+) {
+    GlassSurface(
+        tint = readerTheme.background ?: MaterialTheme.colorScheme.surface,
+        modifier = modifier,
+    ) {
+        MaterialTheme(
+            colorScheme =
+                railSelectionColorScheme(MaterialTheme.colorScheme, readerTheme.contentColor, readerTheme.background),
+        ) {
+            // Колесо прокручивается, а отмена/повтор — ЗАКРЕПЛЁННЫЕ кнопки снизу
+            // острова: всегда видны независимо от прокрутки и активного инструмента.
+            Column(
+                modifier = Modifier.padding(ISLAND_PADDING),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                WheelStrip(entries = entries, orientation = RailOrientation.VERTICAL, selectedKey = selectedKey)
+                PinnedHistoryButtons(
+                    orientation = RailOrientation.VERTICAL,
+                    undoEnabled = system.undoEnabled,
+                    onUndo = system.onUndo,
+                    redoEnabled = system.redoEnabled,
+                    onRedo = system.onRedo,
+                )
+            }
+        }
     }
 }
 

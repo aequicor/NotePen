@@ -41,6 +41,13 @@ actual class FilePicker {
                 "application/x-fictionbook+xml",
                 "application/vnd.comicbook+zip",
                 "application/vnd.comicbook-rar",
+                // ACTION_OPEN_DOCUMENT filters strictly by the DocumentsProvider's
+                // reported MIME (extensions are ignored). Real .fb2 (and many
+                // .cbz/.cbr) are reported as application/octet-stream by the
+                // Downloads/Storage providers, so without this entry those rows
+                // render disabled. Generic-MIME picks are resolved by extension
+                // downstream (detectBookFormat over the resolved display name).
+                "application/octet-stream",
             ),
         )
         return resultChannel.receive()

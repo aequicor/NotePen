@@ -51,6 +51,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.SafMergeDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState
 import ru.kyamshanov.notepen.resolveDocumentDisplayName
+import ru.kyamshanov.notepen.resolveDocumentSize
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
 
@@ -342,7 +343,10 @@ class MainScreenViewModel(
             addToHistory.execute(
                 uri = uri,
                 displayName = displayName,
-                fileSize = null,
+                // Real size enables the SAF fuzzy-match de-dup (same name+size,
+                // different content:// URI) so a dropped file already in recents
+                // isn't duplicated.
+                fileSize = resolveDocumentSize(uri),
                 openedAt = nowMillis(),
                 lastPageIndex = 0,
             )
@@ -628,6 +632,10 @@ class MainScreenViewModel(
             addToHistory.execute(
                 uri = intent.newUri,
                 displayName = newDisplayName,
+                // Deliberately null: the user just rejected merging with the existing
+                // (now FILE_ERROR) record, which still carries the same name+size.
+                // Supplying the real size here would re-trigger the fuzzy-match net
+                // and silently drop this intended-fresh entry.
                 fileSize = null,
                 openedAt = nowMillis(),
             )

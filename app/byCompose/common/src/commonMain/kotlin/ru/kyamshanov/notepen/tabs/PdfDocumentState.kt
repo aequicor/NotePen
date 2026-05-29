@@ -80,6 +80,13 @@ class PdfDocumentState internal constructor(
      * like [sharedDrawingStates] so a highlight made in one tab shows in the other.
      */
     sharedHighlights: SnapshotStateMap<Int, List<StickyHighlight>> = mutableStateMapOf(),
+    /**
+     * Snapshot-observable counter bumped on every [undoStack] / [redoStack]
+     * mutation so Compose-derived `canUndo` / `canRedo` (the toolbar button
+     * enabled flags) recompute — the deques themselves are plain (not
+     * snapshot) collections. Shared across same-file tabs like the stacks.
+     */
+    sharedUndoVersion: MutableState<Int> = mutableStateOf(0),
 ) {
     private val pdfDocumentState = mutableStateOf<PdfDocument?>(null)
 
@@ -124,6 +131,27 @@ class PdfDocumentState internal constructor(
 
     /** Redo counterpart of [undoStack]. */
     val redoStack: ArrayDeque<UndoEntry> = sharedRedoStack
+
+    private val undoVersionState: MutableState<Int> = sharedUndoVersion
+
+    /**
+     * `true` when [undo] would do something. Reading this in a composition
+     * subscribes to [undoVersionState], so the undo button's `enabled` flag
+     * recomputes when a gesture / undo / redo mutates the (non-observable)
+     * [undoStack].
+     */
+    val canUndo: Boolean
+        get() {
+            undoVersionState.value // establish snapshot read dependency
+            return undoStack.isNotEmpty()
+        }
+
+    /** Redo counterpart of [canUndo]. */
+    val canRedo: Boolean
+        get() {
+            undoVersionState.value // establish snapshot read dependency
+            return redoStack.isNotEmpty()
+        }
 
     /** Magnifier overlay state. One instance per tab — always independent. */
     val magnifierState: MagnifierState = MagnifierState()
@@ -180,8 +208,13 @@ class PdfDocumentState internal constructor(
      * calling [ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader.load]
      * for the same tab simultaneously. All reads and writes happen on the
      * main dispatcher so no atomics are needed.
+     *
+     * Snapshot-backed so the editor can drive a "preparing document" overlay
+     * from it: opening an EPUB first converts it to PDF and rasterises page 0,
+     * during which [pdfDocument] is still `null` — without this flag the viewer
+     * would render a blank page with no feedback (Defect H).
      */
-    var isPdfLoading: Boolean = false
+    var isPdfLoading: Boolean by mutableStateOf(false)
         internal set
 
     /**
@@ -196,6 +229,41 @@ class PdfDocumentState internal constructor(
     ) {
         undoStack.addLast(UndoEntry(pageIndex, snapshot, highlights[pageIndex].orEmpty()))
         redoStack.clear()
+        undoVersionState.value++
+    }
+
+    /**
+     * Pops the most recent [UndoEntry] off [undoStack], pushes the current
+     * strokes + highlights of that page onto [redoStack], and restores the
+     * snapshot (strokes via [PdfDrawingState.restoreSnapshot] and sticky-marker
+     * [highlights]) so a sticky-marker swipe reverts as one step. No-op when
+     * [undoStack] is empty. Touch toolbars and the Ctrl+Z key handler share this.
+     */
+    fun undo() {
+        if (undoStack.isEmpty()) return
+        val entry = undoStack.removeLast()
+        val current = drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
+        val currentHighlights = highlights[entry.pageIndex].orEmpty()
+        redoStack.addLast(UndoEntry(entry.pageIndex, current, currentHighlights))
+        drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+        highlights[entry.pageIndex] = entry.highlights
+        undoVersionState.value++
+    }
+
+    /**
+     * Pops the most recent [UndoEntry] off [redoStack], pushes it back onto
+     * [undoStack], and re-applies the redone snapshot. Inverse of [undo]; no-op
+     * when [redoStack] is empty. (Mirrors the previous inline Ctrl+Shift+Z
+     * handler exactly: the entry re-pushed onto [undoStack] is the redone state,
+     * not a fresh pre-redo capture.)
+     */
+    fun redo() {
+        if (redoStack.isEmpty()) return
+        val entry = redoStack.removeLast()
+        undoStack.addLast(UndoEntry(entry.pageIndex, entry.paths, entry.highlights))
+        drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
+        highlights[entry.pageIndex] = entry.highlights
+        undoVersionState.value++
     }
 
     /**
@@ -257,6 +325,7 @@ class PdfDocumentState internal constructor(
                 sharedRedoStack = from.redoStack,
                 sharedAnnotationsLoaded = from.annotationsLoadedState,
                 sharedHighlights = from.highlights,
+                sharedUndoVersion = from.undoVersionState,
             ).also { it.skipPageRestore = true }
     }
 }

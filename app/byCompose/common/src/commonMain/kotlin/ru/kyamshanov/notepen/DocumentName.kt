@@ -12,3 +12,19 @@ package ru.kyamshanov.notepen
  * fallback label).
  */
 expect fun resolveDocumentDisplayName(filePathOrUri: String): String?
+
+/**
+ * Resolves the size, in bytes, of a document from a file path or URI.
+ *
+ * Used to strengthen recents de-duplication: Android SAF can hand back a
+ * different `content://` URI for the same physical file across picks, so the
+ * fuzzy-match safety net keys on display name + size. Without a size the net
+ * cannot fire and a duplicate recents entry is created.
+ *
+ * On Android a picked document is a `content://` URI; the implementation queries
+ * `OpenableColumns.SIZE` via the `ContentResolver`. Desktop (and any
+ * non-`content://` path) reads the filesystem length.
+ *
+ * Returns `null` when the size cannot be determined.
+ */
+expect fun resolveDocumentSize(filePathOrUri: String): Long?

@@ -62,8 +62,9 @@ import ru.kyamshanov.notepen.blur.GlassSurface
  *
  * A back button and page counter on the left, then a single horizontal
  * [WheelStrip] holding tool toggles, the active tool's settings slots and
- * presets, and the system controls (see [unifiedToolWheelEntries]). Entries fade
- * towards the bar's edges and scroll when they overflow, so a phone needs no `⋮`.
+ * presets, and the system controls — undo / redo, thumbnails, reading mode, zoom,
+ * etc. (see [unifiedToolWheelEntries]). Entries fade towards the bar's edges and
+ * scroll when they overflow, so a phone needs no `⋮`.
  *
  * Tapping a settings slot opens its slider / color picker in a panel that
  * animates DOWN below the bar.
@@ -84,6 +85,10 @@ fun PortraitTopBar(
     toolPresets: StoredToolPresets,
     onToolPresetsChange: (StoredToolPresets) -> Unit,
     onPresetApplied: ((id: String) -> Unit)? = null,
+    undoEnabled: Boolean,
+    onUndo: () -> Unit,
+    redoEnabled: Boolean,
+    onRedo: () -> Unit,
     hasAnnotations: Boolean,
     isExporting: Boolean,
     onExport: () -> Unit,
@@ -167,13 +172,30 @@ fun PortraitTopBar(
                         tint = readerContentColor ?: MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                PortraitPageCounter(
-                    currentPage = currentPage,
-                    totalPages = totalPages,
-                    onNavigateToPage = onNavigateToPage,
-                    contentColor = readerContentColor,
-                    modifier = Modifier.padding(horizontal = PORTRAIT_BAR_PAGE_PADDING),
+                // Отмена/повтор — ЗАКРЕПЛЁННЫЕ кнопки сразу за «Назад», вне
+                // прокручиваемого колеса: «Отменить» только что нарисованный штрих
+                // всегда в одно касание и не уезжает в скролл за настройками
+                // активного инструмента.
+                PinnedHistoryButtons(
+                    orientation = RailOrientation.HORIZONTAL,
+                    undoEnabled = undoEnabled,
+                    onUndo = onUndo,
+                    redoEnabled = redoEnabled,
+                    onRedo = onRedo,
                 )
+                // Пока документ грузится (`totalPages <= 0`, напр. EPUB ещё
+                // конвертируется в PDF) не показываем счётчик — иначе он рисует
+                // вводящее в заблуждение «1 / 0» (Defect H). Появится, как только
+                // страницы посчитаны. Так же гейтится landscape-airbar в DetailsContent.
+                if (totalPages > 0) {
+                    PortraitPageCounter(
+                        currentPage = currentPage,
+                        totalPages = totalPages,
+                        onNavigateToPage = onNavigateToPage,
+                        contentColor = readerContentColor,
+                        modifier = Modifier.padding(horizontal = PORTRAIT_BAR_PAGE_PADDING),
+                    )
+                }
                 // Инструменты, настройки, пресеты и системные кнопки — в ОДНОМ
                 // горизонтальном колесе (затухание к краям). Так на телефоне всё
                 // помещается без ⋮-меню — лишнее прокручивается.

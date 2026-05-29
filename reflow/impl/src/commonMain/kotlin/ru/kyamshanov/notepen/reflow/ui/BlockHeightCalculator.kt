@@ -45,10 +45,10 @@ internal data class MeasuredBlock(
  *
  * Divider — `2*blockSpacing + 1.dp`.
  *
- * Table — упрощённый обмер: для каждой строки `max(cell heights)` при ширине
- * ячейки = `(contentWidth - borders) / cellCount`, плюс рамки и padding.
- * Это приблизительная оценка (Table-структура в нашем pipeline всё равно часто
- * восстановлена эвристически и подлежит редизайну в P7).
+ * Table — для каждой строки `max(cell heights)`, плюс рамки и padding. Ширина
+ * каждой ячейки берётся из общего с рендером базиса [tableColumnWeights]
+ * (колонки пропорциональны содержимому, не равны) — иначе обмеренная высота
+ * неделимой таблицы разошлась бы с нарисованной и сломала пагинацию.
  */
 internal object BlockHeightCalculator {
     fun measure(
@@ -241,17 +241,29 @@ internal object BlockHeightCalculator {
         density: Density,
     ): MeasuredBlock {
         if (block.rows.isEmpty()) return MeasuredBlock(0)
-        val maxCellsPerRow = block.rows.maxOf { it.cells.size }.coerceAtLeast(1)
         val borderPx = with(density) { TABLE_BORDER_WIDTH.roundToPx() }
         val paddingPx = with(density) { TABLE_CELL_PADDING.roundToPx() }
-        val cellInnerWidth =
-            ((contentWidthPx - borderPx * (maxCellsPerRow + 1)) / maxCellsPerRow - paddingPx * 2)
-                .coerceAtLeast(1)
+        // ЕДИНЫЙ базис ширин с TableView (Modifier.weight): колонки делят
+        // contentWidthPx пропорционально tableColumnWeights, а не поровну. Если бы
+        // здесь остался равный делёж, измеренная высота неделимой таблицы разошлась
+        // бы с нарисованной (перенос строк в узких колонках другой) и пагинация
+        // сломалась бы. border у Compose рисуется внутри bounds и НЕ съедает layout —
+        // поэтому ширину под текст уменьшаем только на padding с двух сторон.
+        val weights = tableColumnWeights(block)
         val rowStyle = settings.paragraphStyle()
         var total = 0
         for (row in block.rows) {
+            // Row(fillMaxWidth) раздаёт ширину между ячейками ИМЕННО этого ряда
+            // пропорционально весам их колонок — делим на сумму весов присутствующих.
+            val rowWeightSum =
+                row.cells.indices
+                    .sumOf { col -> weights.getOrElse(col) { 1f }.toDouble() }
+                    .coerceAtLeast(1.0)
             var maxCellHeight = 0
-            for (cell in row.cells) {
+            row.cells.forEachIndexed { col, cell ->
+                val colWeight = weights.getOrElse(col) { 1f }.toDouble()
+                val outerWidth = (colWeight / rowWeightSum * contentWidthPx).toInt()
+                val cellInnerWidth = (outerWidth - paddingPx * 2).coerceAtLeast(1)
                 val annotated = styledText(cell.text, cell.source, emptyList(), settings)
                 val result =
                     textMeasurer.measure(

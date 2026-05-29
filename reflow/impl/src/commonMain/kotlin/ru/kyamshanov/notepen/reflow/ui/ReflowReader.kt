@@ -86,6 +86,7 @@ import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -166,6 +167,13 @@ internal val LocalFigureBitmapCache: ProvidableCompositionLocal<SnapshotStateMap
  * @param onReadingAnchorChange колбэк изменения якоря чтения — для персиста на диск
  *   (writer перевёрстки, режим страница/скролл, ре-пагинация). Сюда летят и «логические»
  *   обновления (paged.snapshotFlow, scroll.firstVisibleItem), и первичная инициализация.
+ * @param topInset статический отступ сверху, резервируемый под плавающую панель редактора
+ *   (верхний бар / чип «Страница N/M»), чтобы H1 и первые строки не уходили под хром.
+ *   По умолчанию `0.dp` — standalone-вызовы (тесты) не затрагиваются.
+ * @param startInset статический отступ слева, резервируемый под боковой tool-rail на
+ *   планшете, чтобы первые символы строк не перекрывались. По умолчанию `0.dp`.
+ *   Резерв статический (не анимируется с видимостью хрома): иначе каждое скрытие/показ
+ *   панели вызывало бы ре-пагинацию из-за смены высоты вьюпорта.
  *
  * Выделение текста для создания подсветок доступно в режиме чтения всегда и охватывает
  * несколько абзацев (сквозной жест на контейнере, см. [reflowSelectionDrag]); на
@@ -191,6 +199,8 @@ public fun ReflowReader(
     onFirstBlockChange: (Int) -> Unit = {},
     initialAnchor: TextAnchor = TextAnchor.START,
     onReadingAnchorChange: (TextAnchor) -> Unit = {},
+    topInset: Dp = 0.dp,
+    startInset: Dp = 0.dp,
 ) {
     // Высота вьюпорта ридера в px — нужна и для зажима вертикальных полей (ниже), и для
     // шага «листнуть страницу» в скролл-режиме. Меряем корневой Box (см. onSizeChanged).
@@ -362,6 +372,11 @@ public fun ReflowReader(
     Box(
         modifier =
             modifier
+                // Статический резерв под плавающий хром редактора (верхний бар/чип, боковой
+                // tool-rail). До fillMaxSize/onSizeChanged, чтобы вьюпорт ридера (LazyColumn/
+                // пейджер) ужался и тап-зоны пересчитались от нового размера. Пользовательские
+                // topMargin/contentPadding остаются внутри и складываются с этим резервом.
+                .padding(top = topInset, start = startInset)
                 .fillMaxSize()
                 .background(effectiveBackground)
                 .onSizeChanged { viewportHeightPx = it.height }
@@ -1373,8 +1388,11 @@ private fun DividerView(settings: ReflowReaderSettings) {
 }
 
 /**
- * Рендерит [ReflowBlock.Table] сеткой: каждая строка — [Row] ячеек равной
- * ширины, ячейки с тонкой рамкой и общей высотой строки ([IntrinsicSize.Min]).
+ * Рендерит [ReflowBlock.Table] сеткой: каждая строка — [Row] ячеек, ширина
+ * колонок пропорциональна их содержимому ([tableColumnWeights]), а не делится
+ * поровну — иначе узкие колонки заставляли бы текст рваться по символам
+ * («piano» → «pia»/«no»). Ячейки с тонкой рамкой и общей высотой строки
+ * ([IntrinsicSize.Min]). Базис ширин общий с [BlockHeightCalculator.measureTable].
  */
 @Composable
 private fun TableView(
@@ -1382,14 +1400,15 @@ private fun TableView(
     settings: ReflowReaderSettings,
 ) {
     val borderColor = settings.textColor.copy(alpha = TABLE_BORDER_ALPHA)
+    val weights = tableColumnWeights(table)
     Column(modifier = Modifier.fillMaxWidth()) {
         table.rows.forEach { row ->
             Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
-                row.cells.forEach { cell ->
+                row.cells.forEachIndexed { col, cell ->
                     Box(
                         modifier =
                             Modifier
-                                .weight(1f)
+                                .weight(weights.getOrElse(col) { 1f })
                                 .fillMaxHeight()
                                 .border(TABLE_BORDER_WIDTH, borderColor)
                                 .background(
@@ -1853,6 +1872,41 @@ internal val TABLE_BORDER_WIDTH = 1.dp
 internal val TABLE_CELL_PADDING = 8.dp
 private const val TABLE_BORDER_ALPHA = 0.22f
 private const val TABLE_HEADER_ALPHA = 0.06f
+
+/**
+ * Минимальный «вес» колонки в [tableColumnWeights]: даже пустая/однобуквенная
+ * колонка не схлопывается в нечитаемую полоску. Подобран так, чтобы узкие
+ * колонки оставались кликабельными, но не отъедали ширину у содержательных.
+ */
+private const val TABLE_MIN_COL_WEIGHT = 3f
+
+/**
+ * Доля ширины колонки от самой длинной ячейки в ней — по числу символов её
+ * [ReflowBlock.TableCell.text] (с минимумом [TABLE_MIN_COL_WEIGHT]).
+ *
+ * Это ЕДИНЫЙ источник пропорций колонок для таблицы: им пользуются и
+ * [TableView] при рендере (`Modifier.weight(weights[col])`), и
+ * [BlockHeightCalculator.measureTable] при обмере высоты (та же ширина ячейки
+ * → тот же перенос строк → та же высота). Если render и measure разойдутся в
+ * базисе ширин, измеренная высота неделимой таблицы поедет относительно
+ * нарисованной и сломается пагинация — поэтому функция одна на оба пути.
+ *
+ * Вес — это число символов (а не доли, суммирующиеся в 1): Compose `weight`
+ * раздаёт ширину пропорционально, а measure нормирует на сумму сам. Длина
+ * считается по самой широкой строке во всех рядах для данной колонки, чтобы
+ * колонка вмещала свою крупнейшую ячейку.
+ *
+ * @return список длиной `maxOf { row.cells.size }`; индекс — номер колонки.
+ */
+internal fun tableColumnWeights(table: ReflowBlock.Table): List<Float> {
+    val columnCount = table.rows.maxOfOrNull { it.cells.size } ?: 0
+    if (columnCount == 0) return emptyList()
+    return List(columnCount) { col ->
+        val maxLen =
+            table.rows.maxOfOrNull { row -> row.cells.getOrNull(col)?.text?.length ?: 0 } ?: 0
+        maxLen.toFloat().coerceAtLeast(TABLE_MIN_COL_WEIGHT)
+    }
+}
 
 internal val BLOCKQUOTE_BAR_WIDTH = 3.dp
 private const val BLOCKQUOTE_BAR_ALPHA = 0.3f

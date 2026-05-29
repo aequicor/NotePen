@@ -30,6 +30,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.ThumbnailState
 import ru.kyamshanov.notepen.mainscreen.ui.viewmodel.currentTimeMillis
 import ru.kyamshanov.notepen.resolveDocumentDisplayName
+import ru.kyamshanov.notepen.resolveDocumentSize
 
 /**
  * ViewModel sub-экрана содержимого папки.
@@ -257,7 +258,9 @@ class FolderContentsViewModel(
                 addToHistory.execute(
                     uri = uri,
                     displayName = displayName,
-                    fileSize = null,
+                    // Real size enables the SAF fuzzy-match de-dup so re-picking a
+                    // file already in this folder's recents isn't duplicated.
+                    fileSize = resolveDocumentSize(uri),
                     openedAt = nowMillis(),
                     lastPageIndex = 0,
                 )
@@ -297,7 +300,8 @@ class FolderContentsViewModel(
                     addToHistory.execute(
                         uri = uri,
                         displayName = displayName,
-                        fileSize = null,
+                        // Real size enables the SAF fuzzy-match de-dup for dropped files.
+                        fileSize = resolveDocumentSize(uri),
                         openedAt = nowMillis(),
                         lastPageIndex = 0,
                     )

@@ -108,6 +108,7 @@
     <ID>TooManyFunctions:MainScreenViewModel.kt:MainScreenViewModel</ID>
     <ID>TooManyFunctions:SessionRepositoryDesktop.kt:SessionRepositoryDesktop : SessionRepository</ID>
     <ID>TooManyFunctions:TabSession.kt:TabSession</ID>
+    <ID>TooManyFunctions:ToolRail.kt:ru.kyamshanov.notepen.ToolRail.kt</ID>
     <ID>TooManyFunctions:ToolSettingsFloatingPanel.kt:ru.kyamshanov.notepen.ToolSettingsFloatingPanel.kt</ID>
   </CurrentIssues>
 </SmellBaseline>

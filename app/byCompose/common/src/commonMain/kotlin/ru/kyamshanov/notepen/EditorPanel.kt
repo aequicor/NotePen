@@ -10,12 +10,15 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -140,6 +143,9 @@ private const val PANEL_AUTOSAVE_DEBOUNCE = 2_000L
 private const val PANEL_HIGH_RES_DIM_PX = 4000
 private const val FIGURE_PAGE_RENDER_WIDTH_PX = 1600
 private const val PANEL_SIDEBAR_ANIM_MS = 220
+
+/** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
+private val PREPARING_INDICATOR_SPACING = 12.dp
 
 /**
  * Per-panel actions and read-outs the unified toolbar drives for the focused
@@ -371,7 +377,6 @@ fun EditorPanel(
             }
                 .onFailure { e -> panelLogger.warn { "Reflow reading build failed: ${e::class.simpleName}" } }
                 .getOrNull()
-        reflowReading = reading
         if (reading != null) {
             if (reflowDocCacheState.value == null) reflowDocCacheState.value = reading.document
             // На самом первом входе с восстановленной позицией пропускаем маппинг
@@ -380,11 +385,25 @@ fun EditorPanel(
             val consumeRestored = useRestoredAnchorOnFirstEnter
             useRestoredAnchorOnFirstEnter = false
             if (!consumeRestored) {
+                // Mid-session toggle PDF→reading: seed the DURABLE anchor (а не только
+                // волатильный one-shot navigateToBlock). initialAnchor = currentReadingAnchor
+                // читается, когда ридер впервые компонуется, поэтому pager сразу садится на
+                // окно нужной страницы — без гонки с фоновой загрузкой и без page-0 feedback,
+                // который раньше тянул и PDF-вьюер назад на страницу 0. Делаем ДО
+                // `reflowReading = reading`, чтобы анкер был выставлен до композиции ридера.
                 ReflowPageLocator
                     .blockIndexForPage(reading.document, targetPage)
-                    ?.let { reflowNavigateToBlock.value = it }
+                    ?.let { block ->
+                        currentReadingAnchor = TextAnchor.ofBlock(block)
+                        // One-shot оставляем для надёжности (если анкер по какой-то причине
+                        // не отработает на первом кадре) — он идемпотентен с анкер-сидом.
+                        reflowNavigateToBlock.value = block
+                    }
             }
         }
+        // Триггерим композицию ридера ПОСЛЕ сидирования durable-анкера выше, чтобы
+        // initialAnchor прочитал уже корректную позицию (см. Defect F).
+        reflowReading = reading
     }
 
     // Фоновое извлечение reflow-текста для снаппинга «липкого маркера» в редакторе:
@@ -1590,6 +1609,11 @@ fun EditorPanel(
                             },
                             initialAnchor = currentReadingAnchor,
                             onReadingAnchorChange = { currentReadingAnchor = it },
+                            // Статический резерв под плавающий хром редактора (верхний
+                            // бар/чип «Страница N/M» и боковой tool-rail), чтобы текст не
+                            // уходил под него (Defect C). Те же инсеты, что использует PDF-путь.
+                            topInset = fitWidthTopInset,
+                            startInset = fitWidthStartInset,
                         )
                     }
                 } else {
@@ -1605,6 +1629,26 @@ fun EditorPanel(
                             style = MaterialTheme.typography.bodyMedium,
                             color = placeholderText,
                             modifier = Modifier.align(Alignment.Center),
+                        )
+                    }
+                }
+            } else if (pdfDocument == null && pages.isEmpty() && pdfState.isPdfLoading) {
+                // Открытие EPUB сперва конвертирует книгу в PDF и растеризует первую
+                // страницу — пока документ грузится, PdfPagesViewer рисует пустой
+                // SubcomposeLayout. Без индикатора пользователь видит лишь пустой фон
+                // и счётчик «1 / 0» (Defect H). Показываем центрированный спиннер поверх
+                // readingChromeBg. В режиме чтения этим занимается ветка-плейсхолдер выше.
+                Box(Modifier.fillMaxSize()) {
+                    Column(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(PREPARING_INDICATOR_SPACING),
+                    ) {
+                        CircularProgressIndicator()
+                        Text(
+                            text = "Открываем книгу…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }

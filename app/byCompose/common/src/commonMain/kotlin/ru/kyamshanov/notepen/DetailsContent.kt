@@ -491,6 +491,10 @@ fun DetailsContent(
 
     var landscapeToolbarWidthDp by remember { mutableStateOf(FLOATING_TOOLBAR_WIDTH) }
     var landscapePageCounterHeightDp by remember { mutableStateOf(TAB_BAR_HEIGHT) }
+    // Measured height of the portrait top bar (status-bar inset + toolbar row). Reused as the
+    // reading-mode top inset so the reader text clears the floating bar (Defect C). Seeded with
+    // TAB_BAR_HEIGHT so the reserve is sane before the first measure.
+    var portraitTopBarHeightDp by remember { mutableStateOf(TAB_BAR_HEIGHT) }
 
     // ---- Focused-panel controls bridge ------------------------------------
     var focusedControls by remember { mutableStateOf<PanelControls?>(null) }
@@ -673,7 +677,7 @@ fun DetailsContent(
     // landscape (single-panel FULL layout). Double-tap fit-to-width subtracts it
     // so the page lands beside the rail/menu, not under it. The portrait top bar
     // spans the full width and steals no horizontal room, so the inset is 0 there.
-    val fitWidthStartInset =
+    val pdfFitWidthStartInset =
         if (isLandscape && layout.template == LayoutTemplate.FULL) {
             val sidebar =
                 when {
@@ -691,12 +695,44 @@ fun DetailsContent(
     // panel's top-centre in landscape. The airbar sits 8.dp below the viewer's
     // top edge; double-tap fit-to-width pushes the page below it (plus a 16.dp
     // gap) so the page top doesn't slide under the counter.
-    val fitWidthTopInset =
+    val pdfFitWidthTopInset =
         if (isLandscape && layout.template == LayoutTemplate.FULL) {
             8.dp + landscapePageCounterHeightDp + 16.dp
         } else {
             0.dp
         }
+
+    // Defect C — reading-mode chrome reserve. The reflow reader, unlike the PDF
+    // page path, reserved no room for the floating chrome, so the H1/first lines
+    // hid under the top bar / «Страница N/M» chip and (on tablets) the left tool
+    // rail clipped the first chars of every line. We reserve a STATIC inset (it
+    // must NOT animate with chrome visibility — a changing reader viewport would
+    // force re-pagination on every tap). In reading mode the focused panel shows
+    // the reader, not the PDF viewer, so reusing the same EditorPanel inset params
+    // doesn't regress fit-to-width.
+    //   • Landscape uses LandscapeToolRail for ALL landscape (not only FULL), so we
+    //     reserve the rail strip (its 16.dp start pad + measured width + 16.dp gap to
+    //     clear the first glyphs) regardless of the strict width>height FULL gate.
+    //   • Portrait uses the full-width PortraitTopBar — no horizontal room, top inset
+    //     = its measured height (status-bar inset + toolbar row).
+    val readingStartInset =
+        if (isLandscape) {
+            16.dp + landscapeToolbarWidthDp + 16.dp
+        } else {
+            0.dp
+        }
+    val readingTopInset =
+        if (isLandscape) {
+            8.dp + landscapePageCounterHeightDp + 16.dp
+        } else {
+            portraitTopBarHeightDp
+        }
+
+    // In reading mode the chrome insets clear the reader; otherwise keep the exact
+    // PDF fit-to-width behaviour. Both feed the same EditorPanel params (#256-257),
+    // which route them to the reader or PDF viewer depending on the active mode.
+    val fitWidthStartInset = if (readingModeEnabled) readingStartInset else pdfFitWidthStartInset
+    val fitWidthTopInset = if (readingModeEnabled) readingTopInset else pdfFitWidthTopInset
 
     // Под скрытым хромом (режим чтения + airbar спрятан тапом) область над панелью —
     // status-bar inset + резерв под TAB_BAR_HEIGHT — заполняется ИМЕННО этим фоном.
@@ -766,32 +802,11 @@ fun DetailsContent(
                             false
                         }
                         e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && !shiftHeld -> {
-                            tabSession.focusedActiveState?.let { st ->
-                                if (st.undoStack.isNotEmpty()) {
-                                    val entry = st.undoStack.removeLast()
-                                    val current =
-                                        st.drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
-                                    val currentHighlights = st.highlights[entry.pageIndex].orEmpty()
-                                    st.redoStack.addLast(
-                                        PdfDocumentState.UndoEntry(entry.pageIndex, current, currentHighlights),
-                                    )
-                                    st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
-                                    st.highlights[entry.pageIndex] = entry.highlights
-                                }
-                            }
+                            tabSession.focusedActiveState?.undo()
                             true
                         }
                         e.type == KeyEventType.KeyDown && e.key == Key.Z && e.isCtrlPressed && shiftHeld -> {
-                            tabSession.focusedActiveState?.let { st ->
-                                if (st.redoStack.isNotEmpty()) {
-                                    val entry = st.redoStack.removeLast()
-                                    st.undoStack.addLast(
-                                        PdfDocumentState.UndoEntry(entry.pageIndex, entry.paths, entry.highlights),
-                                    )
-                                    st.drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
-                                    st.highlights[entry.pageIndex] = entry.highlights
-                                }
-                            }
+                            tabSession.focusedActiveState?.redo()
                             true
                         }
                         // Перелистывание ридера хардварными клавишами — только в режиме
@@ -1031,6 +1046,10 @@ fun DetailsContent(
                                     ),
                                 system =
                                     ToolRailSystem(
+                                        undoEnabled = tabSession.focusedActiveState?.canUndo == true,
+                                        onUndo = { tabSession.focusedActiveState?.undo() },
+                                        redoEnabled = tabSession.focusedActiveState?.canRedo == true,
+                                        onRedo = { tabSession.focusedActiveState?.redo() },
                                         hasAnnotations = hasAnnotations,
                                         isExporting = isExporting,
                                         onExport = { controls?.export?.invoke() },
@@ -1164,6 +1183,10 @@ fun DetailsContent(
                                 toolPresets = toolPresets,
                                 onToolPresetsChange = onToolPresetsChange,
                                 onPresetApplied = onPresetApplied,
+                                undoEnabled = tabSession.focusedActiveState?.canUndo == true,
+                                onUndo = { tabSession.focusedActiveState?.undo() },
+                                redoEnabled = tabSession.focusedActiveState?.canRedo == true,
+                                onRedo = { tabSession.focusedActiveState?.redo() },
                                 hasAnnotations = hasAnnotations,
                                 isExporting = isExporting,
                                 onExport = { controls?.export?.invoke() },
@@ -1198,6 +1221,12 @@ fun DetailsContent(
                                 onBack = onBackOrCloseThumbnails,
                                 readerBackground = readerBackground,
                                 readerContentColor = readerContentColor,
+                                // Меряем фактическую высоту бара (вместе с status-bar инсетом) —
+                                // используется как верхний резерв ридера (Defect C).
+                                modifier =
+                                    Modifier.onSizeChanged {
+                                        portraitTopBarHeightDp = with(density) { it.height.toDp() }
+                                    },
                             )
                         }
                     }

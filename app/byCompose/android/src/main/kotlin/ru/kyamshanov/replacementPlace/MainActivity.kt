@@ -29,6 +29,8 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
+import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
 import ru.kyamshanov.notepen.book.AndroidEbookToPdfConverter
 import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
@@ -44,8 +46,6 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroi
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
-import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
-import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidImageDocumentLoader
@@ -150,6 +150,10 @@ class MainActivity : ComponentActivity() {
                 context = context,
                 pdfGenerator = PdfThumbnailGeneratorAndroid(context),
                 imageGenerator = ImageThumbnailGeneratorAndroid(context),
+                // Reuse the already-constructed ebook→PDF converter so EPUB/FB2/CBZ/CBR
+                // recents render real first-page thumbnails instead of the broken-image
+                // placeholder (same cacheDir artifact the reader produces).
+                converter = ebookConverter,
             )
 
         val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -316,8 +320,7 @@ class MainActivity : ComponentActivity() {
             DefaultRootComponent(
                 componentContext = defaultComponentContext(),
                 historyRepository = historyRepo,
-                mainComponentFactory = {
-                        componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _, onOpenSettings ->
+                mainComponentFactory = { componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _, onOpenSettings ->
                     // libraryFolder=null на Android → onOpenLibraryFolder тоже не нужен;
                     // компонент не показывает карточку «Библиотека», навигация туда
                     // никогда не инициируется.

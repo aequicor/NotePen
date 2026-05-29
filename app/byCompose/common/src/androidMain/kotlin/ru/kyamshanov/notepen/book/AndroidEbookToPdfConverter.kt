@@ -8,6 +8,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
+import ru.kyamshanov.notepen.resolveDocumentDisplayName
 import java.io.File
 import java.security.MessageDigest
 
@@ -31,12 +32,12 @@ class AndroidEbookToPdfConverter(
     private val mutex = Mutex()
     private val resolver = context.contentResolver
 
-    override fun canConvert(path: String): Boolean = detectBookFormat(path, mimeOf(path)) != null
+    override fun canConvert(path: String): Boolean = detectFormat(path) != null
 
     override suspend fun ensurePdf(path: String): String =
         withContext(ioDispatcher) {
             val uri = Uri.parse(path)
-            val format = requireNotNull(detectBookFormat(path, mimeOf(path))) { "Unsupported book format: $path" }
+            val format = requireNotNull(detectFormat(path)) { "Unsupported book format: $path" }
 
             val target = cacheFileFor(path, sourceSize(uri))
             if (target.exists() && target.length() > 0L) return@withContext target.absolutePath
@@ -64,6 +65,21 @@ class AndroidEbookToPdfConverter(
                 target.absolutePath
             }
         }
+
+    /**
+     * Определяет формат книги. Для `content://` URI сам путь не содержит
+     * расширения (например, `document%3A12001`), а ContentResolver для .fb2 на
+     * Storage/Downloads-провайдерах возвращает `application/octet-stream`,
+     * поэтому extension-fallback в [detectBookFormat] над сырым URI не срабатывает.
+     * Берём реальное имя файла через [resolveDocumentDisplayName] и передаём
+     * именно его — так срабатывает определение по расширению (.fb2/.cbz/.cbr).
+     * MIME сохраняет приоритет, поэтому PDF/EPUB-источники определяются как прежде.
+     */
+    private fun detectFormat(path: String): BookFormat? {
+        val mime = mimeOf(path)
+        val name = resolveDocumentDisplayName(path)?.takeIf { it.isNotBlank() } ?: path
+        return detectBookFormat(name, mime)
+    }
 
     private fun mimeOf(path: String): String? = runCatching { resolver.getType(Uri.parse(path)) }.getOrNull()
 
