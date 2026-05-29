@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -29,7 +30,9 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -65,6 +68,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -369,6 +373,17 @@ public fun ReflowReader(
     // Синхронизируем «немедленный режим» в состояние: от него зависит блокировка скролла
     // контента (а не только активное выделение) — см. ReflowSelectionState.scrollLocked.
     SideEffect { selectionState.immediate = selection.immediate }
+    // Подтверждение выделения (не-маркерный режим): после отпускания выделение не
+    // фиксируется сразу, а ждёт выбора «Копировать»/«Выделить» через плавающую панель.
+    // confirming держит выделение «живым» и показывает панель действий + ручки-курсоры.
+    var confirming by remember(document) { mutableStateOf(false) }
+    val clipboardWriter = rememberClipboardWriter()
+    // Краткое подтверждение «Скопировано» (как лёгкий тост) — гасится по таймеру.
+    var copiedToast by remember(document) { mutableStateOf(false) }
+    val dismissConfirm: () -> Unit = {
+        confirming = false
+        selectionState.clear()
+    }
     Box(
         modifier =
             modifier
@@ -471,10 +486,25 @@ public fun ReflowReader(
                         .glassSource()
                         .background(effectiveBackground)
                         .onGloballyPositioned { selectionState.containerCoordinates = it }
-                        .reflowSelectionDrag(selection.immediate, selectionState) {
-                            val anchors = selectionState.anchorsForSelection()
-                            if (anchors.isNotEmpty()) latestSelection.onCreate(anchors)
-                        },
+                        .reflowSelectionDrag(
+                            immediate = selection.immediate,
+                            state = selectionState,
+                            // Новый жест выделения закрывает предыдущую панель подтверждения.
+                            onBegin = { confirming = false },
+                            onRelease = {
+                                val anchors = selectionState.anchorsForSelection()
+                                when {
+                                    // Маркер активен — намерение однозначно: ставим подсветку сразу.
+                                    selection.immediate -> {
+                                        if (anchors.isNotEmpty()) latestSelection.onCreate(anchors)
+                                        selectionState.clear()
+                                    }
+                                    // Иначе ждём выбор «Копировать»/«Выделить»: выделение не гасим.
+                                    anchors.isNotEmpty() -> confirming = true
+                                    else -> selectionState.clear()
+                                }
+                            },
+                        ),
             ) {
                 if (settings.paged) {
                     PagedReflowContent(
@@ -500,6 +530,36 @@ public fun ReflowReader(
                     )
                 }
             }
+        }
+
+        // Оверлей подтверждения выделения: ручки-курсоры на концах + плавающая панель
+        // «Копировать/Выделить». Тот же размер/координаты, что и контейнер контента
+        // (matchParentSize), поэтому endRect() в системе контейнера ложится один в один.
+        if (confirming) {
+            SelectionConfirmOverlay(
+                state = selectionState,
+                settings = settings,
+                onCopy = {
+                    clipboardWriter(selectedText(document, selectionState.anchorsForSelection()))
+                    copiedToast = true
+                    dismissConfirm()
+                },
+                onHighlight = {
+                    val anchors = selectionState.anchorsForSelection()
+                    if (anchors.isNotEmpty()) latestSelection.onCreate(anchors)
+                    dismissConfirm()
+                },
+                onDismiss = dismissConfirm,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
+
+        if (copiedToast) {
+            LaunchedEffect(copiedToast) {
+                delay(COPIED_TOAST_MS)
+                copiedToast = false
+            }
+            CopiedToast(settings, Modifier.align(Alignment.BottomCenter))
         }
 
         // Затемнение «внутренней яркости» и тёплый ночной тинт — оверлеем поверх
@@ -578,24 +638,28 @@ public fun ReflowReader(
  * - маркер выключен — после долгого нажатия ([detectDragGesturesAfterLongPress]), чтобы
  *   обычное чтение не «цепляло» выделение.
  *
- * В обоих случаях движение двигает конец выделения, а на отпускании вызывается [onRelease]
- * (там собираются и отдаются анкеры) и выделение сбрасывается; отмена/перехват — тоже сброс.
+ * В обоих случаях движение двигает конец выделения; в начале жеста вызывается [onBegin]
+ * (сбросить открытую панель подтверждения предыдущего выделения), на отпускании —
+ * [onRelease]. Сбрасывает ли [onRelease] выделение — решает он сам: в немедленном
+ * (маркер) режиме подсветка ставится сразу и выделение гасится; иначе выделение
+ * остаётся для подтверждения «Копировать/Выделить». Отмена/перехват жеста — всегда сброс.
  */
 private fun Modifier.reflowSelectionDrag(
     immediate: Boolean,
     state: ReflowSelectionState,
+    onBegin: () -> Unit,
     onRelease: () -> Unit,
 ): Modifier =
     pointerInput(immediate, state) {
-        val onStart: (Offset) -> Unit = { pos -> state.moveTo(pos, anchoring = true) }
+        val onStart: (Offset) -> Unit = { pos ->
+            onBegin()
+            state.moveTo(pos, anchoring = true)
+        }
         val onMove: (PointerInputChange) -> Unit = { change ->
             state.moveTo(change.position, anchoring = false)
             change.consume()
         }
-        val onEnd: () -> Unit = {
-            onRelease()
-            state.clear()
-        }
+        val onEnd: () -> Unit = { onRelease() }
         val onCancel: () -> Unit = { state.clear() }
         if (immediate) {
             // Без слопа: анкер ставим прямо на DOWN, далее ведём конец до отпускания.
@@ -1236,17 +1300,19 @@ private fun ReflowBlockView(
             // Уровень вложенности → дополнительный indent: каждый вложенный уровень
             // добавляет ещё один contentPadding слева. Самый верхний уровень (level=0)
             // — один contentPadding (как и было). Phase A: визуальный indent;
-            // bullet/numbering glyph остаётся частью block.text.
-            Box(Modifier.padding(start = settings.contentPadding * (block.level + 1))) {
-                SelectableReflowText(
-                    content = BlockContent(block.text, block.source),
-                    anchors = anchors,
-                    style = settings.paragraphStyle(),
-                    settings = settings,
-                    blockIndex = blockIndex,
-                    onLines = onLines,
-                )
-            }
+            // bullet/numbering glyph остаётся частью block.text. Отступ — параметром
+            // SelectableReflowText (на самом BasicText), без внешнего Box: иначе
+            // публикуемые координаты не совпадали бы с началом текста и хит-тест
+            // выделения промахивался по строке.
+            SelectableReflowText(
+                content = BlockContent(block.text, block.source),
+                anchors = anchors,
+                style = settings.paragraphStyle(),
+                settings = settings,
+                blockIndex = blockIndex,
+                onLines = onLines,
+                contentPadding = PaddingValues(start = settings.contentPadding * (block.level + 1)),
+            )
 
         is ReflowBlock.Blockquote ->
             BlockquoteView(block, anchors, settings, blockIndex, onLines)
@@ -1313,6 +1379,7 @@ private fun SelectableReflowText(
     settings: ReflowReaderSettings,
     blockIndex: Int,
     onLines: ((List<Float>) -> Unit)? = null,
+    contentPadding: PaddingValues = PaddingValues(),
 ) {
     val selectionState = LocalReflowSelectionState.current
     DisposableEffect(selectionState, blockIndex) {
@@ -1330,10 +1397,16 @@ private fun SelectableReflowText(
             // нужно (проход обмера в PagedReflowContent передаёт onLines).
             onLines?.invoke(List(layout.lineCount) { layout.getLineBottom(it) })
         },
+        // Отступ блока (indent списка / втяжка цитаты) — на самом BasicText и ДО
+        // onGloballyPositioned, чтобы публикуемые координаты совпадали с началом текста.
+        // Раньше отступ давал внешний Box: его координаты включали padding, и хит-тест
+        // выделения мог промахнуться по строке (defect «выделяется не та строка»).
         modifier =
-            Modifier.onGloballyPositioned { coordinates ->
-                selectionState.reportCoordinates(blockIndex, coordinates)
-            },
+            Modifier
+                .padding(contentPadding)
+                .onGloballyPositioned { coordinates ->
+                    selectionState.reportCoordinates(blockIndex, coordinates)
+                },
     )
 }
 
@@ -1357,16 +1430,198 @@ private fun BlockquoteView(
                     .fillMaxHeight()
                     .background(settings.textColor.copy(alpha = BLOCKQUOTE_BAR_ALPHA)),
         )
-        Box(Modifier.padding(start = settings.contentPadding)) {
-            SelectableReflowText(
-                content = BlockContent(block.text, block.source),
-                anchors = anchors,
-                style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic),
+        // Втяжка — параметром SelectableReflowText (на самом BasicText), без внешнего
+        // Box: координаты текста публикуются от его реального начала, и хит-тест
+        // выделения не промахивается по строке.
+        SelectableReflowText(
+            content = BlockContent(block.text, block.source),
+            anchors = anchors,
+            style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic),
+            settings = settings,
+            blockIndex = blockIndex,
+            onLines = onLines,
+            contentPadding = PaddingValues(start = settings.contentPadding),
+        )
+    }
+}
+
+/**
+ * Оверлей подтверждения выделения: editor-подобные ручки-курсоры на концах выделения
+ * (которые можно перетаскивать, доводя диапазон) + плавающая панель «Копировать/Выделить».
+ *
+ * Координаты концов берём из [ReflowSelectionState.endRect] — они в системе контейнера,
+ * та же, что и у этого оверлея (matchParentSize контейнера). Тап мимо ручек и панели
+ * закрывает подтверждение без фиксации ([onDismiss]); тап по панели — действие.
+ *
+ * @param onCopy «Копировать» — копирует выделенный текст в буфер
+ * @param onHighlight «Выделить» — создаёт подсветку (как при активном маркере)
+ * @param onDismiss тап мимо / отмена — закрыть без фиксации
+ */
+@Composable
+private fun SelectionConfirmOverlay(
+    state: ReflowSelectionState,
+    settings: ReflowReaderSettings,
+    onCopy: () -> Unit,
+    onHighlight: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val anchorRect = state.endRect(SelectionEnd.ANCHOR)
+    val focusRect = state.endRect(SelectionEnd.FOCUS)
+    Box(
+        modifier =
+            modifier.pointerInput(Unit) {
+                // Тап мимо ручек/панели закрывает подтверждение. Ручки и панель —
+                // отдельные дочерние pointerInput'ы, их события сюда не доходят.
+                detectTapGestures { onDismiss() }
+            },
+    ) {
+        // Ручки-курсоры: только после фиксации (здесь), не во время первичного drag —
+        // иначе они закрывали бы текст под пальцем.
+        anchorRect?.let { SelectionHandle(it, density, state, SelectionEnd.ANCHOR, settings) }
+        focusRect?.let { SelectionHandle(it, density, state, SelectionEnd.FOCUS, settings) }
+
+        // Панель действий — над верхним из концов выделения, по горизонтали у его начала.
+        val topRect =
+            when {
+                anchorRect == null -> focusRect
+                focusRect == null -> anchorRect
+                anchorRect.top <= focusRect.top -> anchorRect
+                else -> focusRect
+            }
+        if (topRect != null) {
+            SelectionActionBar(
+                anchorRect = topRect,
+                density = density,
                 settings = settings,
-                blockIndex = blockIndex,
-                onLines = onLines,
+                onCopy = onCopy,
+                onHighlight = onHighlight,
             )
         }
+    }
+}
+
+/**
+ * Перетаскиваемая ручка-курсор на конце выделения [end]. Рисуется кружком под нижней
+ * границей курсор-прямоугольника [rect] (координаты контейнера); drag двигает этот
+ * конец через [ReflowSelectionState.moveEnd], доводя диапазон, как в текстовом редакторе.
+ */
+@Composable
+private fun BoxScope.SelectionHandle(
+    rect: Rect,
+    density: Density,
+    state: ReflowSelectionState,
+    end: SelectionEnd,
+    settings: ReflowReaderSettings,
+) {
+    val radiusPx = with(density) { SELECTION_HANDLE_RADIUS.toPx() }
+    // Центр ручки в px (контейнерная система): по горизонтали — у конца, по вертикали —
+    // чуть ниже базовой линии курсора. Для drag ведём собственную позицию пальца.
+    var dragPos by remember(rect.left, rect.bottom) { mutableStateOf(Offset(rect.left, rect.bottom)) }
+    Box(
+        modifier =
+            Modifier
+                .offset {
+                    IntOffset(
+                        (dragPos.x - radiusPx).roundToInt(),
+                        dragPos.y.roundToInt(),
+                    )
+                }.size(SELECTION_HANDLE_RADIUS * 2)
+                .pointerInput(end, state) {
+                    detectDragGestures(
+                        onDragStart = { dragPos = Offset(rect.left, rect.bottom) },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            dragPos += amount
+                            // Целимся в середину строки чуть выше точки касания ручки,
+                            // чтобы хит-тест попадал в текст, а не в зазор под строкой.
+                            state.moveTo(Offset(dragPos.x, dragPos.y - radiusPx), anchoring = false, end = end)
+                        },
+                    )
+                }.drawBehind {
+                    drawCircle(
+                        color = settings.highlightColor.copy(alpha = SELECTION_HANDLE_ALPHA),
+                        radius = radiusPx,
+                        center = Offset(radiusPx, radiusPx),
+                    )
+                },
+    )
+}
+
+/**
+ * Плавающая панель «Копировать»/«Выделить» над верхним концом выделения [anchorRect]
+ * (координаты контейнера). Если места сверху мало — опускается под строку.
+ */
+@Composable
+private fun BoxScope.SelectionActionBar(
+    anchorRect: Rect,
+    density: Density,
+    settings: ReflowReaderSettings,
+    onCopy: () -> Unit,
+    onHighlight: () -> Unit,
+) {
+    val gapPx = with(density) { SELECTION_BAR_GAP.toPx() }
+    var barHeightPx by remember { mutableStateOf(0) }
+    Row(
+        modifier =
+            Modifier
+                .offset {
+                    // По вертикали — над строкой; если не помещается (y<0), под строкой.
+                    val above = anchorRect.top - gapPx - barHeightPx
+                    val y = if (above >= 0f) above else anchorRect.bottom + gapPx
+                    IntOffset(anchorRect.left.roundToInt(), y.roundToInt())
+                }.onSizeChanged { barHeightPx = it.height }
+                .clip(RoundedCornerShape(SELECTION_BAR_CORNER))
+                .background(settings.textColor.copy(alpha = SELECTION_BAR_BG_ALPHA))
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SelectionActionButton("Копировать", settings, onCopy)
+        SelectionActionButton("Выделить", settings, onHighlight)
+    }
+}
+
+/** Одна кнопка панели выделения: текст на инвертированном фоне панели. */
+@Composable
+private fun SelectionActionButton(
+    label: String,
+    settings: ReflowReaderSettings,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier =
+            Modifier
+                .clip(RoundedCornerShape(SELECTION_BAR_CORNER))
+                .clickable(onClick = onClick)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+    ) {
+        BasicText(
+            text = label,
+            style = TextStyle(color = settings.background, fontSize = 14.sp, fontWeight = FontWeight.Medium),
+        )
+    }
+}
+
+/** Лёгкий «тост» подтверждения копирования внизу — гасится таймером в [ReflowReader]. */
+@Composable
+private fun CopiedToast(
+    settings: ReflowReaderSettings,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier =
+            modifier
+                .padding(bottom = 32.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(settings.textColor.copy(alpha = 0.9f))
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        BasicText(
+            text = "Скопировано",
+            style = TextStyle(color = settings.background, fontSize = 13.sp),
+        )
     }
 }
 
@@ -1867,6 +2122,14 @@ private const val RULER_BAND_LINES = 1.7f
 private const val RULER_BAND_ALPHA = 0.06f
 private const val RULER_LINE_ALPHA = 0.18f
 private val NIGHT_TINT = Color(0xFFFF7A1A)
+
+// Подтверждение выделения: ручки-курсоры + панель действий.
+private val SELECTION_HANDLE_RADIUS = 7.dp
+private const val SELECTION_HANDLE_ALPHA = 0.95f
+private val SELECTION_BAR_GAP = 8.dp
+private val SELECTION_BAR_CORNER = 10.dp
+private const val SELECTION_BAR_BG_ALPHA = 0.92f
+private const val COPIED_TOAST_MS = 1500L
 
 internal val TABLE_BORDER_WIDTH = 1.dp
 internal val TABLE_CELL_PADDING = 8.dp

@@ -64,6 +64,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.PageSource
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -102,6 +103,12 @@ fun PageThumbnailsSidebar(
     onToggleFavorite: (Int) -> Unit = {},
     pagePaths: (Int) -> List<DrawingPath> = { emptyList() },
     pageHighlights: (Int) -> List<StickyHighlight> = { emptyList() },
+    /**
+     * Резолвит ЛОГИЧЕСКИЙ индекс страницы в источник (исходный индекс + вырезка)
+     * для рендера миниатюры. При выключенном разделении разворотов — тождественно
+     * (см. [SpreadSplit]); по умолчанию целая страница 1:1.
+     */
+    pageSource: (Int) -> PageSource = { PageSource(it) },
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -111,8 +118,11 @@ fun PageThumbnailsSidebar(
     // при возврате создаёт их заново, теряя локальный bitmap. Это давало
     // визуальное мигание превью верхних страниц при автоскролле сайдбара
     // (двойной scrollToItem для выравнивания по нижнему краю). Ключ — по
-    // pdfDocument, чтобы при смене документа кэш сбрасывался.
-    val bitmapCache = remember(pdfDocument) { mutableStateMapOf<Int, ImageBitmap>() }
+    // pdfDocument И числу страниц: при смене документа или переключении
+    // разделения разворотов (FEATURE #4 удваивает/сжимает индекс-пространство)
+    // кэш сбрасывается, иначе показывался бы старый растр (целая/половинная) для
+    // того же логического индекса.
+    val bitmapCache = remember(pdfDocument, pages.size) { mutableStateMapOf<Int, ImageBitmap>() }
     // Глобальный для сайдбара mutex, через который проходят ВСЕ запросы
     // renderer.renderPage из миниатюр. Так максимум одна миниатюра в
     // момент времени держит лок Android-овского PdfRenderer'а: если
@@ -260,6 +270,7 @@ fun PageThumbnailsSidebar(
                             page = page,
                             pdfDocument = pdfDocument,
                             renderer = renderer,
+                            source = pageSource(page.pageIndex),
                             pageNumber = page.pageIndex + 1,
                             isCurrentPage = page.pageIndex == displayedCurrentPage,
                             isFavorite = page.pageIndex in favoritePageIndices,
@@ -396,6 +407,7 @@ private fun ThumbnailItem(
     page: PdfPageInfo,
     pdfDocument: PdfDocument?,
     renderer: PdfPageRenderer,
+    source: PageSource,
     pageNumber: Int,
     isCurrentPage: Boolean,
     isFavorite: Boolean,
@@ -412,7 +424,7 @@ private fun ThumbnailItem(
     val thumbWidthPx = with(density) { THUMBNAIL_WIDTH.roundToPx() }
     val thumbHeightPx = (thumbWidthPx / page.aspectRatio).toInt()
 
-    LaunchedEffect(page.pageIndex, pdfDocument, cachedBitmap == null) {
+    LaunchedEffect(page.pageIndex, source, pdfDocument, cachedBitmap == null) {
         if (cachedBitmap != null) return@LaunchedEffect
         val doc = pdfDocument ?: return@LaunchedEffect
         // Гейтим рендер миниатюры дважды: ждём «PDF простаивает», берём
@@ -431,9 +443,13 @@ private fun ThumbnailItem(
                         } else {
                             renderer.renderPage(
                                 document = doc,
-                                pageIndex = page.pageIndex,
+                                pageIndex = source.sourceIndex,
                                 widthPx = thumbWidthPx,
                                 heightPx = thumbHeightPx,
+                                cropLeftN = source.crop.leftN,
+                                cropTopN = source.crop.topN,
+                                cropRightN = source.crop.rightN,
+                                cropBottomN = source.crop.bottomN,
                             ).toImageBitmap()
                         }
                     } finally {

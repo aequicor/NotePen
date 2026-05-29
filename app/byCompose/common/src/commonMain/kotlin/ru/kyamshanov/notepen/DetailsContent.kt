@@ -164,6 +164,14 @@ private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
 private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
 
+/**
+ * Порог соотношения сторон окна (ширина/высота), выше которого книжный разворот
+ * «Две страницы» (FEATURE #5) включается АВТОМАТИЧЕСКИ (если пользователь не задал
+ * явный выбор). ~1.5 — типичный «широкий» альбомный планшет/окно, где две
+ * портретные страницы рядом читаются комфортно.
+ */
+private const val SPREAD_AUTO_ASPECT_THRESHOLD = 1.5f
+
 /** Прозрачность затемнения позади модальной боковой шторки (портретный режим). */
 private const val PORTRAIT_SCRIM_ALPHA = 0.4f
 
@@ -208,6 +216,14 @@ fun DetailsContent(
     val localWindowInfo = LocalWindowInfo.current
     val windowSizeInPx = localWindowInfo.containerSize
     val isLandscape = windowSizeInPx.width > windowSizeInPx.height
+    // Широкий экран для авто-включения книжного разворота (FEATURE #5, «Две
+    // страницы»): альбомная ориентация И соотношение сторон ≥ ~1.5. На таких
+    // экранах две страницы рядом читаются комфортно; EditorPanel включает разворот
+    // автоматически, если пользователь не задал явный выбор (spreadViewOverride).
+    val wideScreenForSpread =
+        isLandscape &&
+            windowSizeInPx.height > 0 &&
+            windowSizeInPx.width.toFloat() / windowSizeInPx.height.toFloat() >= SPREAD_AUTO_ASPECT_THRESHOLD
     val density = LocalDensity.current
     val model by component.model.subscribeAsState()
     val initialFilePath = remember(model.title) { model.title }
@@ -489,12 +505,19 @@ fun DetailsContent(
         }
     }
 
-    var landscapeToolbarWidthDp by remember { mutableStateOf(FLOATING_TOOLBAR_WIDTH) }
-    var landscapePageCounterHeightDp by remember { mutableStateOf(TAB_BAR_HEIGHT) }
+    // Re-keyed on [isLandscape] so a rotation resets each measured inset to its seed
+    // instead of carrying the previous orientation's value: the landscape dims are
+    // written only by the landscape branch's onRailWidthChanged/onSizeChanged and the
+    // portrait dim only by the portrait branch, so without the key they go stale the
+    // moment the orientation flips (the other branch never re-measures them). Stale
+    // insets pushed reading-mode text and fit-to-width pages under the wrong-orientation
+    // chrome until a background/relaunch reseeded them.
+    var landscapeToolbarWidthDp by remember(isLandscape) { mutableStateOf(FLOATING_TOOLBAR_WIDTH) }
+    var landscapePageCounterHeightDp by remember(isLandscape) { mutableStateOf(TAB_BAR_HEIGHT) }
     // Measured height of the portrait top bar (status-bar inset + toolbar row). Reused as the
     // reading-mode top inset so the reader text clears the floating bar (Defect C). Seeded with
     // TAB_BAR_HEIGHT so the reserve is sane before the first measure.
-    var portraitTopBarHeightDp by remember { mutableStateOf(TAB_BAR_HEIGHT) }
+    var portraitTopBarHeightDp by remember(isLandscape) { mutableStateOf(TAB_BAR_HEIGHT) }
 
     // ---- Focused-panel controls bridge ------------------------------------
     var focusedControls by remember { mutableStateOf<PanelControls?>(null) }
@@ -938,6 +961,7 @@ fun DetailsContent(
                         onControlsChanged = { c -> if (panel.id == layout.focusedPanelId) focusedControls = c },
                         fitWidthStartInset = fitWidthStartInset,
                         fitWidthTopInset = fitWidthTopInset,
+                        wideScreenForSpread = wideScreenForSpread,
                     )
                 }
             }
@@ -1090,6 +1114,11 @@ fun DetailsContent(
                                         syncTint = syncStatusTint,
                                         onOpenSync = { showSyncPanel = true },
                                         onOpenShortcutsSettings = { showShortcutsDialog = true },
+                                        onRotatePage = { controls?.rotateCurrentPage?.invoke() },
+                                        spreadSplitEnabled = controls?.spreadSplitEnabled == true,
+                                        onToggleSpreadSplit = { controls?.toggleSpreadSplit?.invoke() },
+                                        bookSpreadEnabled = controls?.bookSpreadEnabled == true,
+                                        onToggleBookSpread = { controls?.toggleBookSpread?.invoke() },
                                     ),
                                 readerTheme =
                                     ToolRailReaderTheme(
@@ -1218,6 +1247,11 @@ fun DetailsContent(
                                 syncTint = syncStatusTint,
                                 onOpenSync = { showSyncPanel = true },
                                 onOpenShortcutsSettings = { showShortcutsDialog = true },
+                                onRotatePage = { controls?.rotateCurrentPage?.invoke() },
+                                spreadSplitEnabled = controls?.spreadSplitEnabled == true,
+                                onToggleSpreadSplit = { controls?.toggleSpreadSplit?.invoke() },
+                                bookSpreadEnabled = controls?.bookSpreadEnabled == true,
+                                onToggleBookSpread = { controls?.toggleBookSpread?.invoke() },
                                 onBack = onBackOrCloseThumbnails,
                                 readerBackground = readerBackground,
                                 readerContentColor = readerContentColor,
@@ -1600,6 +1634,10 @@ private fun BoxScope.FocusedPanelMenus(
             },
             pagePaths = pagePaths,
             pageHighlights = { idx -> focusedState.highlights[idx] ?: emptyList() },
+            pageSource = { logical ->
+                ru.kyamshanov.notepen.annotation.domain.model.SpreadSplit
+                    .sourceFor(logical, focusedState.spreadSplit)
+            },
         )
     }
     AnimatedVisibility(

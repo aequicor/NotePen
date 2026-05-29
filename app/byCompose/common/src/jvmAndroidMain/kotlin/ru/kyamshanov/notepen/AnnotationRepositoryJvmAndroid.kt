@@ -105,6 +105,16 @@ private data class AnnotationViewStateDto(
     // что эквивалентно «открыть с начала» (так же, как для свежего документа).
     val reflowAnchorBlockIndex: Int = 0,
     val reflowAnchorCharStart: Int = 0,
+    // Пользовательский поворот страниц (четверти CW) по индексу. Отсутствие ключа
+    // у легаси-сайдкаров даёт пустую карту — повороты добавлены позже.
+    val pageRotations: Map<String, Int> = emptyMap(),
+    // Разделение разворотов (FEATURE #4). Отсутствие поля у легаси-сайдкаров даёт
+    // false — обычное отображение 1:1.
+    val spreadSplit: Boolean = false,
+    // Явный выбор пользователя по книжному развороту (FEATURE #5): null — авто
+    // (по ширине экрана), true/false — принудительно. Отсутствие у легаси-сайдкаров
+    // даёт null = авто, что эквивалентно поведению до появления фичи.
+    val spreadViewOverride: Boolean? = null,
 )
 
 @Serializable
@@ -253,6 +263,15 @@ class AnnotationRepositoryJvmAndroid(
                             readingMode = preserved.readingMode,
                             reflowAnchorBlockIndex = preserved.reflowAnchorBlockIndex,
                             reflowAnchorCharStart = preserved.reflowAnchorCharStart,
+                            // Поворот принадлежит сайдкару вида (его пишет saveViewState);
+                            // при перезаписи штрихов сохраняем уже записанные повороты.
+                            pageRotations = preserved.pageRotations,
+                            // Разделение разворотов тоже принадлежит сайдкару вида —
+                            // сохраняем уже записанное при перезаписи штрихов.
+                            spreadSplit = preserved.spreadSplit,
+                            // Книжный разворот (FEATURE #5) — тоже поле вида; сохраняем
+                            // явный выбор пользователя при перезаписи штрихов.
+                            spreadViewOverride = preserved.spreadViewOverride,
                         )
                     writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
                 }
@@ -328,6 +347,12 @@ class AnnotationRepositoryJvmAndroid(
                             readingMode = dto.readingMode,
                             reflowAnchorBlockIndex = dto.reflowAnchorBlockIndex,
                             reflowAnchorCharStart = dto.reflowAnchorCharStart,
+                            pageRotations =
+                                dto.pageRotations.mapNotNull { (k, v) ->
+                                    k.toIntOrNull()?.let { it to v }
+                                }.toMap(),
+                            spreadSplit = dto.spreadSplit,
+                            spreadViewOverride = dto.spreadViewOverride,
                         ),
                     )
                 }
@@ -353,6 +378,12 @@ class AnnotationRepositoryJvmAndroid(
                             readingMode = viewState.readingMode,
                             reflowAnchorBlockIndex = viewState.reflowAnchorBlockIndex,
                             reflowAnchorCharStart = viewState.reflowAnchorCharStart,
+                            pageRotations =
+                                viewState.pageRotations
+                                    .filterValues { it != 0 }
+                                    .mapKeys { it.key.toString() },
+                            spreadSplit = viewState.spreadSplit,
+                            spreadViewOverride = viewState.spreadViewOverride,
                         )
                     writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
                 }
@@ -380,6 +411,9 @@ class AnnotationRepositoryJvmAndroid(
                         readingMode = dto.readingMode,
                         reflowAnchorBlockIndex = dto.reflowAnchorBlockIndex,
                         reflowAnchorCharStart = dto.reflowAnchorCharStart,
+                        pageRotations = dto.pageRotations,
+                        spreadSplit = dto.spreadSplit,
+                        spreadViewOverride = dto.spreadViewOverride,
                     )
                 }
             }.getOrDefault(PreservedReadingState.Empty)
@@ -391,9 +425,12 @@ class AnnotationRepositoryJvmAndroid(
         val readingMode: Boolean,
         val reflowAnchorBlockIndex: Int,
         val reflowAnchorCharStart: Int,
+        val pageRotations: Map<String, Int>,
+        val spreadSplit: Boolean,
+        val spreadViewOverride: Boolean?,
     ) {
         companion object {
-            val Empty = PreservedReadingState(false, 0, 0)
+            val Empty = PreservedReadingState(false, 0, 0, emptyMap(), false, null)
         }
     }
 

@@ -78,6 +78,7 @@ private const val ZOOM_BASE = 1.075f
  * горизонтальнее, чем вертикально — подавляет случайный дрейф при вертикальном
  * двухпальцевом свайпе на тачпаде.
  */
+
 /**
  * Минимальный |delta.x| для горизонтального скролла — отсекает абсолютный
  * шум тачпада (значения ≤ 0.05 практически не несут намерения).
@@ -299,6 +300,8 @@ actual fun PdfPagesViewer(
     modifier: Modifier,
     gestureModifier: Modifier,
     primaryDragPanEnabled: (position: Offset) -> Boolean,
+    userRotationQuarters: (pageIndex: Int) -> Int,
+    pageSource: (logicalIndex: Int) -> PageSourceSpec,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
@@ -372,13 +375,30 @@ actual fun PdfPagesViewer(
                     zoom = state.zoom,
                     viewportHeight = state.viewportSize.height.toFloat(),
                 )
+            val first = (range.first - BUFFER_PAGES).coerceAtLeast(0)
+            val last = (range.last + BUFFER_PAGES).coerceAtMost(state.pages.lastIndex)
             VisibleSnapshot(
-                first = (range.first - BUFFER_PAGES).coerceAtLeast(0),
-                last = (range.last + BUFFER_PAGES).coerceAtMost(state.pages.lastIndex),
+                first = first,
+                last = last,
                 // Растеризуем до layoutCap; зум сверх него — GPU-апскейл.
                 scalePercent = state.renderScalePercent,
                 basePageWidthPx = state.basePageWidthPx,
                 viewportSize = state.viewportSize,
+                // Хэш поворотов видимых страниц: его смена дёргает ре-рендер.
+                rotationSignature =
+                    if (last >= first) {
+                        (first..last).sumOf { userRotationQuarters(it) * 31 + it }
+                    } else {
+                        0
+                    },
+                // Хэш вырезок видимых страниц (разделение разворотов): смена
+                // дёргает ре-рендер так же, как поворот.
+                cropSignature =
+                    if (last >= first) {
+                        (first..last).sumOf { cropSignatureOf(pageSource(it)) * 131 + it }
+                    } else {
+                        0
+                    },
             )
         }
             .distinctUntilChanged()
@@ -396,8 +416,13 @@ actual fun PdfPagesViewer(
                     maxScaleRatio = STALE_SCALE_RATIO_THRESHOLD,
                 )
                 for (i in snap.first..snap.last) {
+                    val rotation = userRotationQuarters(i)
+                    val src = pageSource(i)
+                    val cropSig = cropSignatureOf(src)
                     val cached = cache.get(i)
-                    if (cached != null && cached.renderedAtScalePercent >= snap.scalePercent) continue
+                    if (cached != null && cache.isFresh(cached, snap.scalePercent, rotation, cropSig)) {
+                        continue
+                    }
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
                     val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
@@ -425,14 +450,25 @@ actual fun PdfPagesViewer(
                     launch {
                         val bitmap =
                             withContext(renderDispatcher) {
-                                renderer.renderPage(doc, i, targetWidthPx, targetHeightPx)
-                                    .toImageBitmap()
+                                renderer.renderPage(
+                                    doc,
+                                    src.sourceIndex,
+                                    targetWidthPx,
+                                    targetHeightPx,
+                                    rotation,
+                                    src.cropLeftN,
+                                    src.cropTopN,
+                                    src.cropRightN,
+                                    src.cropBottomN,
+                                ).toImageBitmap()
                             }
                         cache.put(
                             i,
                             RenderedPage(
                                 bitmap = bitmap,
                                 renderedAtScalePercent = snap.scalePercent,
+                                renderedAtRotationQuarters = rotation,
+                                renderedAtCropSignature = cropSig,
                             ),
                         )
                     }
@@ -550,7 +586,8 @@ actual fun PdfPagesViewer(
                                 )
                             with(scope) { pageContent() }
                         }.map { it.measure(Constraints.fixed(w, h)) }
-                    val slotX = ((pan.x + ext.left * layout.basePageWidthPx * zoom) / rs).roundToInt()
+                    val slotX =
+                        ((pan.x + (layout.pageLeftsPx[i] + ext.left * layout.basePageWidthPx) * zoom) / rs).roundToInt()
                     val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
                     pagePlaceables.forEach { items.add(Item(slotX, slotY, it)) }
                 }
@@ -604,6 +641,8 @@ private data class VisibleSnapshot(
     val scalePercent: Int,
     val basePageWidthPx: Float,
     val viewportSize: IntSize,
+    val rotationSignature: Int = 0,
+    val cropSignature: Int = 0,
 )
 
 private data class ImmutablePdfPageScope(

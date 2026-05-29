@@ -146,6 +146,34 @@ class MultiPageDrawingController(
         reset()
     }
 
+    /**
+     * Переход активного жеста на другую страницу в книжном развороте
+     * (FEATURE #5): соседние страницы лежат бок-о-бок, вертикальная сшивка
+     * [handBoundary] для них некорректна, поэтому просто завершаем текущий штрих
+     * и начинаем новый на [newPageIndex] в точке `(nx, ny)`.
+     */
+    private fun handSpreadBoundary(
+        newPageIndex: Int,
+        nx: Float,
+        ny: Float,
+        pressure: Float,
+        tilt: Float,
+    ) {
+        when (activeMode) {
+            Mode.DRAW -> {
+                finishDraw()
+                val state = drawingStates.getOrPut(newPageIndex) { PdfDrawingState() }
+                startDraw(newPageIndex, state, nx, ny, pressure, tilt)
+            }
+            Mode.ERASE -> {
+                finishErase()
+                val state = drawingStates.getOrPut(newPageIndex) { PdfDrawingState() }
+                startErase(newPageIndex, state, nx, ny)
+            }
+            Mode.NONE -> Unit
+        }
+    }
+
     private fun handBoundary(
         viewportPos: Offset,
         newPageIndex: Int,
@@ -154,6 +182,15 @@ class MultiPageDrawingController(
         pressure: Float,
         tilt: Float,
     ) {
+        // Книжный разворот (FEATURE #5): соседние страницы пары лежат бок-о-бок
+        // (горизонтальная граница через корешок), а вертикальная сшивка ниже
+        // рассчитана на верх/низ-стекинг и для side-by-side некорректна. MVP:
+        // завершаем текущий штрих и начинаем новый на новой странице чисто, без
+        // экстраполяции через границу (штрих через корешок не сшивается).
+        if (geometry.isSpread) {
+            handSpreadBoundary(newPageIndex, nx, ny, pressure, tilt)
+            return
+        }
         // Сшиваем штрих в одной геометрической точке на границе через
         // интерполяцию между [lastViewportPos] и [viewportPos]: snap по X
         // текущего sample'а оставляет излом, потому что фактическая
@@ -373,7 +410,7 @@ class MultiPageDrawingController(
         // клампим в [0, n-1] для случая, когда палец ушёл выше первой
         // страницы или ниже последней (extent одной из крайних страниц
         // может покрывать эту зону).
-        val pageIndex =
+        var pageIndex =
             when {
                 docY <= geometry.pageTopPx(0) -> 0
                 else -> {
@@ -386,8 +423,24 @@ class MultiPageDrawingController(
                     lo
                 }
             }
+        // Книжный разворот (FEATURE #5): пара страниц делит один Y-ряд, бинпоиск
+        // по docY попадает на ЛЕВУЮ страницу пары. Если docX лёг в правую колонку
+        // (за её левым краем pageLeftPx) и в паре есть правая страница (тот же
+        // pageTopPx) — переключаемся на неё, чтобы перо рисовало на правой
+        // странице. Иначе остаёмся на левой.
+        if (geometry.isSpread) {
+            val sibling = pageIndex + 1
+            if (sibling < n &&
+                geometry.pageTopPx(sibling) == geometry.pageTopPx(pageIndex) &&
+                docX >= geometry.pageLeftPx(sibling)
+            ) {
+                pageIndex = sibling
+            }
+        }
         val pdfH = geometry.pdfHeightPx(pageIndex)
-        val nx = docX / geometry.basePageWidthPx
+        // nx считаем относительно ЛЕВОГО края колонки этой страницы (в развороте
+        // правая колонка смещена на pageLeftPx; в одностраничном он == 0).
+        val nx = (docX - geometry.pageLeftPx(pageIndex)) / geometry.basePageWidthPx
         val ny = (docY - geometry.pageTopPx(pageIndex)) / pdfH
         return Triple(pageIndex, nx, ny)
     }

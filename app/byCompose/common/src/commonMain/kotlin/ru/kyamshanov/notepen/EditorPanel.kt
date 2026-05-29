@@ -192,6 +192,23 @@ class PanelControls(
     val readerPageDelta: (Int) -> Unit,
     val toggleQuickLoupe: () -> Unit,
     val cycleScrollMode: () -> Unit,
+    /** Поворачивает текущую (первую видимую) страницу на +90° CW кумулятивно. */
+    val rotateCurrentPage: () -> Unit,
+    /** Включено ли разделение разворотов (FEATURE #4). */
+    val spreadSplitEnabled: Boolean,
+    /** Переключает разделение разворотов на левую/правую логические страницы. */
+    val toggleSpreadSplit: () -> Unit,
+    /**
+     * Активен ли книжный разворот «Две страницы» (FEATURE #5) — эффективное
+     * состояние (авто-по-ширине ИЛИ явный выбор пользователя). Управляет
+     * selected-состоянием кнопки.
+     */
+    val bookSpreadEnabled: Boolean,
+    /**
+     * Переключает книжный разворот вкл/выкл как ЯВНЫЙ выбор пользователя
+     * (перекрывает авто-по-ширине). No-op в режиме чтения.
+     */
+    val toggleBookSpread: () -> Unit,
 )
 
 /**
@@ -261,6 +278,12 @@ fun EditorPanel(
     sessionsMenu: @Composable (expanded: Boolean, onDismiss: () -> Unit) -> Unit,
     fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
     fitWidthTopInset: androidx.compose.ui.unit.Dp = 0.dp,
+    /**
+     * `true`, когда экран «широкий» (альбомный, aspect ≥ ~1.5) — критерий
+     * авто-включения книжного разворота «Две страницы» (FEATURE #5). Эффективный
+     * разворот = `spreadViewOverride ?: (wideScreenForSpread && !readingMode)`.
+     */
+    wideScreenForSpread: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val openDocs = panel.tabs
@@ -273,13 +296,65 @@ fun EditorPanel(
     val filePath = pdfState.filePath
     val documentId = pdfState.documentId
     val pdfDocument = pdfState.pdfDocument
-    val pages = pdfState.pages
     val drawingStates = pdfState.drawingStates
     val favoritePageIndices = pdfState.favoritePageIndices
     val pdfViewerState: PdfViewerState = pdfState.pdfViewerState
     val magnifierState = pdfState.magnifierState
     val globalUndoStack = pdfState.undoStack
     val globalRedoStack = pdfState.redoStack
+    val pageRotations = pdfState.pageRotations
+    // Включено ли разделение разворотов (FEATURE #4). Читаем наблюдаемое поле,
+    // поэтому переключение пере-строит pages и резолвер источника ниже.
+    val spreadSplit = pdfState.spreadSplit
+    // Книжный разворот «Две страницы» (FEATURE #5) — отдельный от #4 и reflow
+    // механизм. Эффективное состояние: явный выбор пользователя (если задан),
+    // иначе авто по ширине экрана. В режиме чтения разворот неприменим (reflow —
+    // одноколоночный текст), поэтому форсим SINGLE — это и есть выполнение
+    // пользовательского требования «разворот ≠ режим чтения».
+    val spreadViewOverride = pdfState.spreadViewOverride
+    val bookSpreadEnabled =
+        !pdfState.readingMode && (spreadViewOverride ?: wideScreenForSpread)
+
+    // Пользовательский поворот страницы по ЛОГИЧЕСКОМУ индексу (читает наблюдаемую
+    // карту, поэтому смена дёргает релэйаут/ре-рендер). Передаётся и в рендерер
+    // растра, и в раскладку (через «эффективные» pages ниже).
+    val userRotationOf: (Int) -> Int = { idx -> pageRotations[idx] ?: 0 }
+    // Резолвер ЛОГИЧЕСКИЙ индекс → (исходный индекс + вырезка). При выключенном
+    // разделении тождественный; при включённом каждая логическая половина
+    // отображается в исходную страницу + левую/правую вырезку (см. SpreadSplit).
+    val pageSourceOf: (Int) -> ru.kyamshanov.notepen.pdfviewer.PageSourceSpec = { logical ->
+        val src =
+            ru.kyamshanov.notepen.annotation.domain.model.SpreadSplit
+                .sourceFor(logical, spreadSplit)
+        ru.kyamshanov.notepen.pdfviewer.PageSourceSpec(
+            sourceIndex = src.sourceIndex,
+            cropLeftN = src.crop.leftN,
+            cropTopN = src.crop.topN,
+            cropRightN = src.crop.rightN,
+            cropBottomN = src.crop.bottomN,
+        )
+    }
+    // «Эффективные» страницы для раскладки: aspectRatio должен учитывать
+    // суммарный поворот (собственный PDF + пользовательский). Поле rotation
+    // здесь — только для расчёта aspectRatio слота; рендерер берёт собственный
+    // поворот из самого документа, а пользовательский — отдельным параметром,
+    // поэтому двойного учёта нет.
+    val pages by remember(pdfState) {
+        derivedStateOf {
+            pdfState.pages.map { info ->
+                val user = pageRotations[info.pageIndex] ?: 0
+                if (user == 0) {
+                    info
+                } else {
+                    info.copy(
+                        rotation =
+                            ru.kyamshanov.notepen.annotation.domain.model.PageRotation
+                                .effectiveDegrees(info.rotation, user),
+                    )
+                }
+            }
+        }
+    }
 
     val coroutineScope = rememberCoroutineScope()
     val tabletController = LocalTabletInputController.current
@@ -439,6 +514,16 @@ fun EditorPanel(
     SideEffect {
         pdfViewerState.fitWidthInsetStartPx = with(density) { fitWidthStartInset.toPx() }
         pdfViewerState.fitWidthInsetTopPx = with(density) { fitWidthTopInset.toPx() }
+        // Книжный разворот (FEATURE #5): пробрасываем эффективный режим в вьювер.
+        // Смена пере-строит layout (пейринг логических страниц по X) и дёргает
+        // релэйаут — координаты штрихов при этом НЕ меняются (разворот чисто
+        // визуальный, в отличие от FEATURE #4 split).
+        pdfViewerState.spreadMode =
+            if (bookSpreadEnabled) {
+                ru.kyamshanov.notepen.pdfviewer.SpreadMode.SPREAD
+            } else {
+                ru.kyamshanov.notepen.pdfviewer.SpreadMode.SINGLE
+            }
     }
     val firstVisiblePage by remember(pdfState) { derivedStateOf { pdfViewerState.firstVisiblePageIndex } }
     val currentScalePercent by remember(pdfState) { derivedStateOf { pdfViewerState.scalePercent } }
@@ -713,6 +798,28 @@ fun EditorPanel(
                     currentReadingAnchor = TextAnchor.ofBlock(view.reflowAnchorBlockIndex)
                     useRestoredAnchorOnFirstEnter = true
                 }
+                // Разделение разворотов (FEATURE #4) восстанавливаем ДО штрихов:
+                // оно задаёт логическое индекс-пространство, в котором штрихи и
+                // повороты на диске уже лежат. На вторичном табе того же файла
+                // (skipPageRestore) состояние shared — уже выставлено первой
+                // вкладкой, поэтому не трогаем.
+                if (!pdfState.skipPageRestore) {
+                    pdfState.spreadSplit = view.spreadSplit
+                    // Книжный разворот (FEATURE #5): восстанавливаем ЯВНЫЙ выбор
+                    // пользователя (null = авто-по-ширине). Отдельно от #4 и reflow.
+                    pdfState.spreadViewOverride = view.spreadViewOverride
+                }
+                // Пользовательский поворот страниц персистентен — восстанавливаем
+                // (штрихи на диске уже в повёрнутой/разделённой системе координат,
+                // так что пере-трансформировать не нужно: поворот применяется к
+                // растру и раскладке). Карта shared между табами одного файла,
+                // поэтому заполняем её один раз — первой активной вкладкой.
+                if (pageRotations.isEmpty()) {
+                    view.pageRotations.forEach { (idx, q) ->
+                        val n = ru.kyamshanov.notepen.annotation.domain.model.PageRotation.normalizeQuarters(q)
+                        if (n != 0) pageRotations[idx] = n
+                    }
+                }
             }
         val projectionStrokes =
             hostAnnotationSnapshotFor
@@ -826,6 +933,9 @@ fun EditorPanel(
                 readingMode = pdfState.readingMode,
                 reflowAnchorBlockIndex = currentReadingAnchor.blockIndex,
                 reflowAnchorCharStart = currentReadingAnchor.charStart,
+                pageRotations = pageRotations.toMap(),
+                spreadSplit = pdfState.spreadSplit,
+                spreadViewOverride = pdfState.spreadViewOverride,
             )
         }.drop(1)
             .distinctUntilChanged()
@@ -1006,7 +1116,14 @@ fun EditorPanel(
                     .viewportToPanelLocal(magnifierState, viewportPos + viewerOriginInWindow.value)
             val mc = magnifierInputControllerHolder.value
             if (panelLocal != null && mc != null) {
-                mc.onDown(panelLocal, magnifierState.panelSize, pressure, tilt)
+                // `panelLocal` измерена относительно `contentBoundsInViewport`
+                // (фактический прямоугольник content-области панели), поэтому
+                // контроллеру передаём ровно её размер — тот же reference, что
+                // и у touch-ветки (`size` Canvas'а) и у рендера. Если передать
+                // логический `panelSize`, делитель и измеренная координата
+                // относятся к разным reference'ам, и при ресайзе ввод уезжает
+                // относительно содержимого по обеим осям.
+                mc.onDown(panelLocal, magnifierState.contentBoundsInViewport.size, pressure, tilt)
                 gestureRoute.value = PanelGestureRoute.MAGNIFIER
                 return
             }
@@ -1051,7 +1168,10 @@ fun EditorPanel(
                     ru.kyamshanov.notepen.magnifier
                         .viewportToPanelLocal(magnifierState, viewportPos + viewerOriginInWindow.value)
                 val mc = magnifierInputControllerHolder.value
-                if (panelLocal != null && mc != null) mc.onMove(panelLocal, magnifierState.panelSize, pressure, tilt)
+                // Тот же content-bounds reference, что и в `routedOnDown`.
+                if (panelLocal != null && mc != null) {
+                    mc.onMove(panelLocal, magnifierState.contentBoundsInViewport.size, pressure, tilt)
+                }
             }
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onMove(viewportPos)
             PanelGestureRoute.NONE -> Unit
@@ -1065,7 +1185,8 @@ fun EditorPanel(
                 quickLoupeArmed.value = false
             }
             PanelGestureRoute.DRAWING -> drawingController.onUp()
-            PanelGestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value?.onUp(magnifierState.panelSize)
+            PanelGestureRoute.MAGNIFIER ->
+                magnifierInputControllerHolder.value?.onUp(magnifierState.contentBoundsInViewport.size)
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onUp()
             PanelGestureRoute.NONE -> Unit
         }
@@ -1185,6 +1306,55 @@ fun EditorPanel(
                 ScrollMode.NONE -> ScrollMode.BOTH
             }
     }
+    // Поворот текущей (первой видимой) страницы на +90° CW, кумулятивно. В режиме
+    // чтения — no-op (reflow это поток текста, поворот к нему неприменим). Штрихи и
+    // выделения страницы поворачиваются вместе с растром; персист — через autosave
+    // pageRotations. Толщину штриха корректируем по aspect ДО поворота.
+    val onRotateCurrentPage: () -> Unit = rotate@{
+        if (pdfState.readingMode) return@rotate
+        val idx = pdfViewerState.firstVisiblePageIndex
+        if (idx !in pdfState.pages.indices) return@rotate
+        val aspectBefore = pages.getOrNull(idx)?.aspectRatio?.takeIf { it > 0f } ?: 1f
+        pdfState.rotatePageClockwise(pageIndex = idx, pageAspectBeforeRotation = aspectBefore)
+    }
+    // Переключает разделение разворотов (FEATURE #4). В режиме чтения — no-op
+    // (reflow это поток текста; вырезка половины страницы к нему неприменима).
+    // Перед переключением запоминаем исходную страницу, чтобы прокрутка осталась
+    // примерно на том же содержимом после удвоения/сжатия индекс-пространства.
+    val onToggleSpreadSplit: () -> Unit = split@{
+        if (pdfState.readingMode) return@split
+        val enabling = !pdfState.spreadSplit
+        val srcPage =
+            if (pdfState.spreadSplit) {
+                ru.kyamshanov.notepen.annotation.domain.model.SpreadSplit
+                    .sourceIndexOf(pdfViewerState.firstVisiblePageIndex)
+            } else {
+                pdfViewerState.firstVisiblePageIndex
+            }
+        pdfState.toggleSpreadSplit()
+        val targetLogical =
+            if (enabling) {
+                ru.kyamshanov.notepen.annotation.domain.model.SpreadSplit.leftLogical(srcPage)
+            } else {
+                srcPage
+            }
+        pdfViewerState.scrollToPage(targetLogical, 0)
+    }
+    // Переключает книжный разворот «Две страницы» (FEATURE #5) как ЯВНЫЙ выбор
+    // пользователя — он перекрывает авто-по-ширине. В режиме чтения — no-op
+    // (reflow это одноколоночный текст; разворот к нему неприменим — это и
+    // обеспечивает отличие от режима чтения). Запоминаем текущую страницу, чтобы
+    // пере-садить на левую страницу её пары после смены раскладки.
+    val onToggleBookSpread: () -> Unit = bookSpread@{
+        if (pdfState.readingMode) return@bookSpread
+        val current = pdfViewerState.firstVisiblePageIndex
+        // Явный выбор = инверсия ТЕКУЩЕГО эффективного состояния, чтобы один тап
+        // всегда видимо переключал (даже если авто уже включило разворот).
+        pdfState.spreadViewOverride = !bookSpreadEnabled
+        // Пере-садка на левую страницу пары произойдёт через scrollToPage:
+        // в развороте он сам приводит индекс к левой половине ряда.
+        pdfViewerState.scrollToPage(current, 0)
+    }
 
     // В режиме чтения с тапом-скрытым хромом панель с единственной вкладкой прячет и
     // полосу вкладок: одиночная вкладка не несёт навигационной ценности, а при >1
@@ -1210,6 +1380,9 @@ fun EditorPanel(
         // Read the outline here so a republish fires when it loads asynchronously
         // (the TOC button hides until then).
         val tocAvailable = pdfState.outline.isNotEmpty()
+        // Read spreadSplit in composition so toggling it republishes PanelControls
+        // (the toggle button's selected state tracks it).
+        val spreadSplitVisible = pdfState.spreadSplit
         SideEffect {
             onControlsChanged(
                 PanelControls(
@@ -1253,6 +1426,11 @@ fun EditorPanel(
                     readerPageDelta = { delta -> reflowPageDelta.value?.invoke(delta) },
                     toggleQuickLoupe = onToggleQuickLoupe,
                     cycleScrollMode = onCycleScrollMode,
+                    rotateCurrentPage = onRotateCurrentPage,
+                    spreadSplitEnabled = spreadSplitVisible,
+                    toggleSpreadSplit = onToggleSpreadSplit,
+                    bookSpreadEnabled = bookSpreadEnabled,
+                    toggleBookSpread = onToggleBookSpread,
                 ),
             )
         }
@@ -1285,6 +1463,8 @@ fun EditorPanel(
                 pdfDocument = pdfDocument,
                 pages = pages,
                 renderer = renderer,
+                userRotationQuarters = userRotationOf,
+                pageSource = pageSourceOf,
                 modifier =
                     Modifier
                         .fillMaxSize()

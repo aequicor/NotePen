@@ -59,6 +59,8 @@ actual class PdfViewerState internal constructor(
 
     actual var scrollMode: ScrollMode by mutableStateOf(ScrollMode.BOTH)
 
+    actual var spreadMode: SpreadMode by mutableStateOf(SpreadMode.SINGLE)
+
     actual var fitWidthInsetStartPx: Float by mutableFloatStateOf(0f)
     actual var fitWidthInsetTopPx: Float by mutableFloatStateOf(0f)
     actual var fitWidthInsetEndPx: Float by mutableFloatStateOf(0f)
@@ -92,6 +94,7 @@ actual class PdfViewerState internal constructor(
             basePageWidthPx = basePageWidthPx,
             extents = pages.indices.map { provider(it) },
             pageSpacingPx = 0f,
+            spreadMode = spreadMode,
         )
     }
 
@@ -304,7 +307,11 @@ actual class PdfViewerState internal constructor(
         offsetPx: Int,
     ) {
         if (pages.isEmpty()) return
-        val idx = pageIndex.coerceIn(0, pages.lastIndex)
+        // В развороте навигация «садится» на ЛЕВУЮ страницу пары (пейджинг по 2):
+        // ←/→ и ввод номера приводят к левой половине ряда.
+        val idx =
+            PdfViewerMath
+                .spreadLeftPageOf(layout, pageIndex.coerceIn(0, pages.lastIndex))
         val newPan =
             PdfViewerMath.panForPageScroll(
                 layout = layout,
@@ -318,7 +325,10 @@ actual class PdfViewerState internal constructor(
 
     actual fun doubleTapZoom(focus: Offset) {
         if (viewportSize.width <= 0 || pages.isEmpty()) return
-        val base = layout.basePageWidthPx
+        // В развороте fit-width укладывает ВЕСЬ ряд (пара страниц + корешок) в
+        // свободную область — каждая страница ~полэкрана. В одностраничном —
+        // одну PDF-колонку, как раньше.
+        val base = PdfViewerMath.rowWidthPx(layout)
         if (base <= 0f || zoom <= 0f) return
         val availableWidth = viewportSize.width - fitWidthInsetStartPx - fitWidthInsetEndPx
         val target =

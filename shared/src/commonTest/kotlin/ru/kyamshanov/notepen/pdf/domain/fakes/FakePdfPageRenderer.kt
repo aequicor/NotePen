@@ -10,6 +10,11 @@ internal class FakePdfPageRenderer : PdfPageRenderer {
         pageIndex: Int,
         widthPx: Int,
         heightPx: Int,
+        rotationQuarters: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
     ): PdfPageData {
         if (pageIndex < 0 || pageIndex >= document.info.pageCount) {
             throw IndexOutOfBoundsException("pageIndex $pageIndex out of [0, ${document.info.pageCount})")

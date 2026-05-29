@@ -52,8 +52,66 @@ expect fun PdfPagesViewer(
      * рамка-цель лупы), где drag уходит в их собственный жест.
      */
     primaryDragPanEnabled: (position: Offset) -> Boolean = { false },
+    /**
+     * Пользовательский поворот страницы по её индексу — четверти оборота `[0, 3]`
+     * по часовой стрелке **поверх** собственного поворота PDF. Передаётся в
+     * [PdfPageRenderer.renderPage] и участвует в ключе кэша растров, поэтому
+     * смена поворота инвалидирует кэш и перерисовывает страницу. `0` для всех
+     * страниц по умолчанию. Соотношение сторон слотов (раскладка) должно
+     * учитывать тот же поворот — вызывающий передаёт уже «эффективные» [pages]
+     * (см. `EditorPanel`).
+     */
+    userRotationQuarters: (pageIndex: Int) -> Int = { 0 },
+    /**
+     * Резолвит ЛОГИЧЕСКИЙ индекс страницы в её источник: индекс ИСХОДНОЙ страницы
+     * PDF + нормированную вырезку (FEATURE #4, разделение разворотов). При
+     * выключенном разделении — тождественное отображение (`sourceIndex ==
+     * logicalIndex`, [PageSourceSpec.FULL] вырезка). Передаётся в
+     * [PdfPageRenderer.renderPage] (исходный индекс + crop) и участвует в ключе
+     * кэша растров (смена вырезки инвалидирует кэш половины). Соотношение сторон
+     * слотов берётся из «эффективных» [pages] (см. `EditorPanel`).
+     */
+    pageSource: (logicalIndex: Int) -> PageSourceSpec = { PageSourceSpec(it) },
     pageContent: PdfPageContent,
 )
+
+/**
+ * Источник логической страницы для рендера: индекс ИСХОДНОЙ страницы PDF и
+ * нормированная вырезка из неё (доли `[0, 1]` ширины/высоты исходной страницы в
+ * её собственной — до пользовательского поворота — системе координат, ось Y вниз).
+ *
+ * Платформенно-нейтральная DTO внутри `:rendering:impl`, чтобы не тащить
+ * `:drawing:api` (где живёт `PageCropRect`/`SpreadSplit`) в публичный контракт
+ * вьювера. Вызывающий (`EditorPanel`) строит её из `SpreadSplit`.
+ *
+ * @property sourceIndex нулевой индекс исходной страницы PDF.
+ * @property cropLeftN/@property cropTopN/@property cropRightN/@property cropBottomN
+ *   границы вырезки; по умолчанию вся страница `(0,0,1,1)`.
+ */
+data class PageSourceSpec(
+    val sourceIndex: Int,
+    val cropLeftN: Float = 0f,
+    val cropTopN: Float = 0f,
+    val cropRightN: Float = 1f,
+    val cropBottomN: Float = 1f,
+)
+
+/**
+ * Стабильная сигнатура вырезки [src] для ключа кэша / триггера ре-рендера.
+ * Целая страница (`FULL`) даёт `0`; разные половины разворота — разные значения,
+ * чтобы переключение разделения разворотов инвалидировало кэш растров так же,
+ * как смена поворота. Общая для обеих платформенных реализаций вьювера.
+ */
+internal fun cropSignatureOf(src: PageSourceSpec): Int {
+    val full = src.cropLeftN <= 0f && src.cropTopN <= 0f && src.cropRightN >= 1f && src.cropBottomN >= 1f
+    if (full) return 0
+    var h = 1
+    h = 31 * h + (src.cropLeftN * 1000f).toInt()
+    h = 31 * h + (src.cropTopN * 1000f).toInt()
+    h = 31 * h + (src.cropRightN * 1000f).toInt()
+    h = 31 * h + (src.cropBottomN * 1000f).toInt()
+    return h
+}
 
 /**
  * Режим скролла (одно-пальцевый drag на touch, колесо на десктопе). Зум и
@@ -159,6 +217,16 @@ expect class PdfViewerState {
      * drag на touch, колесо на десктопе).
      */
     var scrollMode: ScrollMode
+
+    /**
+     * Режим раскладки страниц (FEATURE #5): [SpreadMode.SINGLE] — одна
+     * центрированная колонка; [SpreadMode.SPREAD] — две соседние ЛОГИЧЕСКИЕ
+     * страницы бок-о-бок (книжный разворот для широких экранов). Наблюдаемое:
+     * смена пере-строит [layout] и дёргает релэйаут. В развороте навигация и
+     * счётчик «садятся» на ЛЕВУЮ страницу пары, а пейджинг идёт парами (по 2).
+     * Отдельно и независимо от FEATURE #4 (split) и режима чтения (reflow).
+     */
+    var spreadMode: SpreadMode
 
     /**
      * Insets (px) свободной области вьюпорта, занятой плавающими панелями:

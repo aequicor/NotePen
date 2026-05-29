@@ -19,6 +19,9 @@ internal data class SelPoint(
     val charOffset: Int,
 )
 
+/** Конец выделения, который тянет ручка-курсор: [ANCHOR] — начало, [FOCUS] — конец. */
+internal enum class SelectionEnd { ANCHOR, FOCUS }
+
 /**
  * Состояние сквозного (между блоками) выделения ридера. Один экземпляр живёт на
  * корневом контейнере контента; блоки регистрируют через него свою раскладку
@@ -97,17 +100,29 @@ internal class ReflowSelectionState {
 
     /**
      * Двигает выделение в позицию [pos] (координаты контейнера): хит-тестит блок и
-     * переводит позицию в смещение символа. При [anchoring] = `true` (начало жеста)
-     * задаёт и начало, и конец; иначе двигает только конец. Вне блоков — no-op
-     * (предыдущая точка сохраняется).
+     * переводит позицию в смещение символа. Вне блоков — no-op (предыдущая точка
+     * сохраняется).
+     *
+     * Режим зависит от [end]:
+     * - `null` (жест выделения): при [anchoring] = `true` (начало) задаёт и начало, и
+     *   конец; иначе двигает только конец;
+     * - [SelectionEnd] (перетаскивание ручки-курсора после фиксации): двигает именно
+     *   этот конец, сохраняя другой на месте; [anchoring] игнорируется.
      */
     fun moveTo(
         pos: Offset,
         anchoring: Boolean,
+        end: SelectionEnd? = null,
     ) {
         val point = pointAt(pos) ?: return
-        if (anchoring) anchor = point
-        focus = point
+        when (end) {
+            SelectionEnd.ANCHOR -> anchor = point
+            SelectionEnd.FOCUS -> focus = point
+            null -> {
+                if (anchoring) anchor = point
+                focus = point
+            }
+        }
     }
 
     /** Сбрасывает выделение (отмена/после фиксации). */
@@ -164,39 +179,75 @@ internal class ReflowSelectionState {
 
     /**
      * Хит-тест позиции [pos] (координаты контейнера) в [SelPoint]: среди готовых к
-     * выделению блоков ([usableBlocks]) берёт тот, чьи границы накрывают `y` (между
-     * блоками — ближайший по `y`), и переводит позицию в смещение символа. Так как
+     * выделению блоков (есть и раскладка, и живые координаты) берёт тот, чьи границы
+     * накрывают `y` (между блоками — ближайший по `y`), и переводит позицию в смещение
+     * символа. Так как
      * кандидаты заведомо имеют и границы, и раскладку, ближайший по `y` блок всегда
      * даёт [SelPoint] — старт жеста чуть выше/ниже строки всё равно цепляет соседнюю.
      * `null`, если ни один блок ещё не пригоден.
+     *
+     * Грубый выбор блока (какой именно текст) идёт по `y`-полосе из габаритов
+     * ([localBoundingBoxOf]); но точное смещение символа считается уже **не** вычитанием
+     * угла этого габарита, а переводом [pos] прямо в локальную систему координат
+     * `BasicText`-узла ([LayoutCoordinates.localPositionOf]). Иначе расхождение между
+     * `top` габарита и истинным началом текстового узла (округление, `LineHeightStyle`)
+     * сдвигало `getOffsetForPosition` на строку выше/ниже выбранной — это и был дефект
+     * «выделяется не та строка».
      */
     private fun pointAt(pos: Offset): SelPoint? {
-        val usable = usableBlocks()
-        val inside = usable.entries.firstOrNull { (_, rect) -> pos.y >= rect.top && pos.y <= rect.bottom }
+        val container = containerCoordinates?.takeIf { it.isAttached } ?: return null
+        // Пригодные блоки → их габариты в системе контейнера. Считаем на месте хит-теста,
+        // где контейнер заведомо позиционирован; отсоединённые/без раскладки пропускаем.
+        val usable =
+            blockCoordinates.mapNotNull { (index, coordinates) ->
+                if (index !in layouts || !coordinates.isAttached) return@mapNotNull null
+                index to container.localBoundingBoxOf(coordinates, clipBounds = false)
+            }
+        val inside = usable.firstOrNull { (_, rect) -> pos.y >= rect.top && pos.y <= rect.bottom }
         val hit =
-            inside ?: usable.entries.minByOrNull { (_, rect) ->
+            inside ?: usable.minByOrNull { (_, rect) ->
                 if (pos.y < rect.top) rect.top - pos.y else pos.y - rect.bottom
             }
-        return hit?.let { (index, rect) ->
+        return hit?.let { (index, _) ->
             val layout = layouts.getValue(index)
-            SelPoint(index, layout.getOffsetForPosition(Offset(pos.x - rect.left, pos.y - rect.top)))
+            val coordinates = blockCoordinates[index]?.takeIf { it.isAttached } ?: return@let null
+            // pos выражена относительно контейнера; localPositionOf переводит её в
+            // собственную систему текстового узла — ровно то, что ждёт getOffsetForPosition.
+            val local = coordinates.localPositionOf(container, pos)
+            SelPoint(index, layout.getOffsetForPosition(local))
         }
     }
 
     /**
-     * Блоки, пригодные для выделения прямо сейчас (`index → Rect`): есть и раскладка
-     * ([layouts]), и считаемые из живых координат границы в системе контейнера. Считается
-     * на месте хит-теста, где контейнер заведомо позиционирован; отсоединённые блоки
-     * (вышли из композиции / ещё не позиционированы) пропускаются. Поскольку в выборку
-     * попадают только блоки с раскладкой, в [pointAt] её чтение безопасно.
+     * Прямоугольник одного из концов выделения ([SelectionEnd.ANCHOR]/[SelectionEnd.FOCUS])
+     * в координатах контейнера — для размещения ручек-курсоров и плавающей панели действий.
+     * `null`, если выделения нет либо блок конца ещё не позиционирован/не имеет раскладки.
+     *
+     * Берётся курсор-прямоугольник символа конца ([TextLayoutResult.getCursorRect]) и
+     * переводится из локальной системы текстового узла в систему контейнера — той же,
+     * в которой ведётся жест и рисуется оверлей ручек.
      */
-    private fun usableBlocks(): Map<Int, Rect> {
-        val container = containerCoordinates?.takeIf { it.isAttached } ?: return emptyMap()
-        return blockCoordinates
-            .mapNotNull { (index, coordinates) ->
-                if (index !in layouts || !coordinates.isAttached) return@mapNotNull null
-                index to container.localBoundingBoxOf(coordinates, clipBounds = false)
-            }.toMap()
+    fun endRect(end: SelectionEnd): Rect? {
+        val point = if (end == SelectionEnd.ANCHOR) anchor else focus
+        val container = containerCoordinates?.takeIf { it.isAttached }
+        val coordinates = point?.let { blockCoordinates[it.blockIndex] }?.takeIf { it.isAttached }
+        val layout = point?.let { layouts[it.blockIndex] }
+        // Единый «успешный» путь по nullable-цепочке — без множественных return-guard'ов
+        // (ReturnCount) и без длинного условия (ComplexCondition).
+        return point?.let { p ->
+            container?.let { c ->
+                coordinates?.let { coords ->
+                    layout?.let { l ->
+                        val length = l.layoutInput.text.length
+                        val cursor = l.getCursorRect(p.charOffset.coerceIn(0, length))
+                        Rect(
+                            c.localPositionOf(coords, cursor.topLeft),
+                            c.localPositionOf(coords, cursor.bottomRight),
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private companion object {
@@ -212,3 +263,34 @@ internal class ReflowSelectionState {
  */
 internal val LocalReflowSelectionState: ProvidableCompositionLocal<ReflowSelectionState> =
     staticCompositionLocalOf { ReflowSelectionState() }
+
+/**
+ * Собирает выделенный текст из [document] по списку [anchors] (по одному на блок,
+ * упорядочены по индексу блока — как отдаёт [ReflowSelectionState.anchorsForSelection]).
+ * Диапазоны зажимаются по фактической длине текста блока; блоки без собственного текста
+ * (картинки/разделители/таблицы) пропускаются. Куски разных блоков склеиваются переводом
+ * строки — это «то, что выделил пользователь» для буфера обмена.
+ */
+internal fun selectedText(
+    document: ru.kyamshanov.notepen.reflow.api.ReflowDocument,
+    anchors: List<TextAnchor>,
+): String =
+    anchors
+        .mapNotNull { anchor ->
+            val text = blockText(document.blocks.getOrNull(anchor.blockIndex)) ?: return@mapNotNull null
+            val start = anchor.charStart.coerceIn(0, text.length)
+            val end = anchor.charEnd.coerceIn(start, text.length)
+            if (end > start) text.substring(start, end) else null
+        }.joinToString("\n")
+
+/** Собственный текст блока (для извлечения выделения), либо `null` — у блока его нет. */
+private fun blockText(block: ru.kyamshanov.notepen.reflow.api.ReflowBlock?): String? =
+    when (block) {
+        is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Heading -> block.text
+        is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Paragraph -> block.text
+        is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Blockquote -> block.text
+        is ru.kyamshanov.notepen.reflow.api.ReflowBlock.ListItem -> block.text
+        is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Code -> block.text
+        is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Footnote -> block.text
+        else -> null
+    }

@@ -12,6 +12,11 @@ style:
   MagicNumber:
     # Compose UI code is dense with dp/sp literals; flagging each one is noise.
     active: false
+  MaxLineLength:
+    # Align with the project's .editorconfig (`max_line_length = 140`, used by
+    # ktlint). detekt defaults to 120, which contradicts that standard and makes
+    # ktlintFormat (collapses ≤140) fight detekt (flags >120) on the same line.
+    maxLineLength: 140
   # detekt 2.0 split UnusedPrivateMember into these finer-grained rules.
   UnusedParameter:
     ignoreAnnotated: ['Composable', 'Preview']

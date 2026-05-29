@@ -5,6 +5,29 @@ import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 
 /**
+ * Режим раскладки страниц (FEATURE #5 — книжный разворот / two-up).
+ *
+ * - [SINGLE] — одна вертикальная стопка центрированных страниц (поведение по
+ *   умолчанию, как было до фичи): X-левый край каждой PDF-страницы = 0.
+ * - [SPREAD] — две соседние ЛОГИЧЕСКИЕ страницы кладутся бок-о-бок в один Y-ряд:
+ *   пара `(2k, 2k+1)` делит верх (`pageTopsPx` одинаков), левая занимает левую
+ *   половину, правая — правую, между ними — зазор-«корешок» [SPREAD_GUTTER_PX].
+ *   Висячая нечётная последняя страница занимает левую половину одна. Высота
+ *   ряда = max высот пары. Это **отдельный** от FEATURE #4 (split) и режима
+ *   чтения (reflow) механизм: spread пейринг идёт по уже ЛОГИЧЕСКИМ страницам.
+ *
+ *   MVP-упрощение: жёсткий left-first пейринг (страница 0 — слева, 1 — справа).
+ *   Никакого odd/even-spine выравнивания обложки.
+ */
+enum class SpreadMode {
+    /** Одна вертикальная стопка центрированных страниц. */
+    SINGLE,
+
+    /** Две соседние логические страницы бок-о-бок (книжный разворот). */
+    SPREAD,
+}
+
+/**
  * Координатные пространства, с которыми работает viewer:
  *
  * - **Document space** (Y, units = "base px"): вертикальная стопка страничных
@@ -50,6 +73,19 @@ data class PdfPagesLayout(
     val pageHeightsPx: FloatArray,
     /** Y верха PDF-страницы i в document space (по PDF-стекингу). */
     val pageTopsPx: FloatArray,
+    /**
+     * X левого края PDF-колонки страницы i в document space (px).
+     *
+     * В [SpreadMode.SINGLE] всегда `0f` — единая центрированная колонка (X=0 —
+     * её левый край для ВСЕХ страниц, центрирование делает `pan.x`). В
+     * [SpreadMode.SPREAD] левая страница пары имеет `0f`, правая —
+     * `basePageWidthPx + `[SPREAD_GUTTER_PX] (ряд центрируется целиком через
+     * `pan.x`, см. [PdfViewerMath.panForPageTop]). Слот страницы со
+     * [PageExtent] сдвигается на `pageLeftsPx[i] + extent.left * basePageWidthPx`.
+     */
+    val pageLeftsPx: FloatArray,
+    /** Режим раскладки (одностраничный / разворот). */
+    val spreadMode: SpreadMode,
     /** Высота, занятая всеми PDF-страницами (без учёта расширений). */
     val totalHeightPx: Float,
     /** Левая граница самого «торчащего влево» слота (≤ 0). */
@@ -63,8 +99,16 @@ data class PdfPagesLayout(
 ) {
     companion object {
         /**
+         * Зазор-«корешок» между левой и правой страницами разворота
+         * ([SpreadMode.SPREAD]) в document-space пикселях при `zoom = 1`.
+         */
+        const val SPREAD_GUTTER_PX: Float = 16f
+
+        /**
          * Строит layout для [pages] при базовой ширине [basePageWidthPx].
          * [extents] — extent каждой страницы (отсутствующие → [PageExtent.Pdf]).
+         * [spreadMode] выбирает одностраничную стопку ([SpreadMode.SINGLE]) или
+         * книжный разворот ([SpreadMode.SPREAD], FEATURE #5).
          *
          * **Стекинг — строго по PDF-размерам.** Слоты могут выходить за
          * пределы своего PDF-«окна» (в зоне extent), но это не влияет на
@@ -73,18 +117,30 @@ data class PdfPagesLayout(
          * текущей растёт. Перекрытие slot'ов в зоне extent визуально
          * допускается: extent-поля по умолчанию пусты у соседей, штрихи
          * рендерятся в z-порядке размещения placeables.
+         *
+         * **Разворот ([SpreadMode.SPREAD]).** Пары `(2k, 2k+1)` кладутся в один
+         * Y-ряд: левая страница на X=0, правая на `basePageWidthPx +`
+         * [SPREAD_GUTTER_PX]; верх обеих — одинаковый, следующий ряд начинается
+         * на `max` высот пары. Висячая нечётная последняя — левая половина одна.
+         * Штриховые координаты не меняются (страницы по-прежнему `[0..1]`);
+         * разнесение по X делает только раскладка через [pageLeftsPx].
          */
+        @Suppress("LongMethod", "CyclomaticComplexMethod")
         fun build(
             pages: List<PdfPageInfo>,
             basePageWidthPx: Float,
             extents: List<PageExtent> = emptyList(),
             pageSpacingPx: Float = 0f,
+            spreadMode: SpreadMode = SpreadMode.SINGLE,
         ): PdfPagesLayout {
             val n = pages.size
             val pdfHeights = FloatArray(n)
             val slotWidths = FloatArray(n)
             val tops = FloatArray(n)
+            val lefts = FloatArray(n)
             val ext = List(n) { i -> extents.getOrNull(i) ?: PageExtent.Pdf }
+            // X правой страницы пары — сразу за левой колонкой + корешок.
+            val rightColumnX = basePageWidthPx + SPREAD_GUTTER_PX
 
             var y = 0f
             var minLeft = 0f
@@ -98,12 +154,32 @@ data class PdfPagesLayout(
                 pdfHeights[i] = pdfH
                 slotWidths[i] = basePageWidthPx * e.width
                 tops[i] = y
-                // Границы слота в document space — для clamp'а вьюпорта.
-                minTop = minOf(minTop, y + e.top * pdfH)
-                maxBottom = maxOf(maxBottom, y + e.bottom * pdfH)
-                y += pdfH + if (i < pages.lastIndex) pageSpacingPx else 0f
-                minLeft = minOf(minLeft, e.left * basePageWidthPx)
-                maxRight = maxOf(maxRight, e.right * basePageWidthPx)
+                if (spreadMode == SpreadMode.SPREAD) {
+                    // Чётный индекс — левая страница пары (X=0), нечётный — правая.
+                    val isRight = i % 2 == 1
+                    lefts[i] = if (isRight) rightColumnX else 0f
+                    // Y продвигаем только после правой (или единственной висячей
+                    // левой) страницы пары: ряд высотой = max высот пары.
+                    if (isRight) {
+                        val pairTop = tops[i - 1]
+                        val rowHeight = maxOf(pdfHeights[i - 1], pdfH)
+                        tops[i] = pairTop
+                        y = pairTop + rowHeight + if (i < pages.lastIndex) pageSpacingPx else 0f
+                    } else if (i == pages.lastIndex) {
+                        y += pdfH
+                    }
+                    // Иначе (левая страница пары, не последняя) — Y продвинет
+                    // следующая итерация (правая).
+                } else {
+                    lefts[i] = 0f
+                    y += pdfH + if (i < pages.lastIndex) pageSpacingPx else 0f
+                }
+                // Границы слота в document space — для clamp'а вьюпорта (с учётом
+                // X-позиции страницы в развороте).
+                minTop = minOf(minTop, tops[i] + e.top * pdfH)
+                maxBottom = maxOf(maxBottom, tops[i] + e.bottom * pdfH)
+                minLeft = minOf(minLeft, lefts[i] + e.left * basePageWidthPx)
+                maxRight = maxOf(maxRight, lefts[i] + e.right * basePageWidthPx)
             }
             if (n == 0) maxBottom = 0f
             return PdfPagesLayout(
@@ -113,6 +189,8 @@ data class PdfPagesLayout(
                 pageWidthsPx = slotWidths,
                 pageHeightsPx = pdfHeights,
                 pageTopsPx = tops,
+                pageLeftsPx = lefts,
+                spreadMode = spreadMode,
                 totalHeightPx = y,
                 contentLeftPx = minLeft,
                 contentRightPx = maxRight,
@@ -264,10 +342,22 @@ object PdfViewerMath {
     }
 
     /**
+     * Левая страница пары разворота для логического [index] в
+     * [SpreadMode.SPREAD]: чётный индекс — он сам, нечётный (правая половина
+     * пары) — `index - 1`. В [SpreadMode.SINGLE] — тождественно [index].
+     * Навигация/счётчик/якорь в развороте «садятся» на левую страницу пары.
+     */
+    fun spreadLeftPageOf(
+        layout: PdfPagesLayout,
+        index: Int,
+    ): Int = if (layout.spreadMode == SpreadMode.SPREAD && index % 2 == 1) index - 1 else index
+
+    /**
      * Индекс первой страницы, у которой верхняя граница уже либо ниже,
      * либо равна верху вьюпорта (т.е. "первая видимая" в смысле LazyColumn).
      * Если все страницы выше — возвращает `pages.lastIndex`. Если нет
-     * страниц — `0`.
+     * страниц — `0`. В [SpreadMode.SPREAD] правая страница пары делит верх с
+     * левой — приводим результат к ЛЕВОЙ странице пары (она и есть «текущая»).
      */
     fun firstVisiblePageIndex(
         layout: PdfPagesLayout,
@@ -283,7 +373,7 @@ object PdfViewerMath {
             val top = panY + layout.pageTopsPx[i] * zoom
             if (top <= 0f) idx = i else break
         }
-        return idx
+        return spreadLeftPageOf(layout, idx)
     }
 
     /**
@@ -325,10 +415,25 @@ object PdfViewerMath {
     }
 
     /**
-     * Pan для центрирования **PDF-колонки** по горизонтали и прижатия верха
+     * Ширина одного «ряда» раскладки в document-space px при `zoom = 1`:
+     * [SpreadMode.SINGLE] — одна PDF-колонка ([PdfPagesLayout.basePageWidthPx]);
+     * [SpreadMode.SPREAD] — две колонки + корешок
+     * (`2 * basePageWidthPx + `[PdfPagesLayout.SPREAD_GUTTER_PX]). По ней
+     * центрируется горизонтально весь разворот.
+     */
+    fun rowWidthPx(layout: PdfPagesLayout): Float =
+        if (layout.spreadMode == SpreadMode.SPREAD) {
+            layout.basePageWidthPx * 2f + PdfPagesLayout.SPREAD_GUTTER_PX
+        } else {
+            layout.basePageWidthPx
+        }
+
+    /**
+     * Pan для центрирования **ряда раскладки** по горизонтали и прижатия верха
      * страницы [pageIndex] к верху вьюпорта (используется `fitToWidth` и
-     * `fitToPage`). Центрируется именно PDF (не слот) — иначе видимая
-     * страница «прыгает» вбок при росте extent.
+     * `fitToPage`). В развороте центрируется вся пара ([rowWidthPx]); в
+     * одностраничном — PDF-колонка (не слот) — иначе видимая страница «прыгает»
+     * вбок при росте extent.
      */
     fun panForPageTop(
         layout: PdfPagesLayout,
@@ -336,7 +441,7 @@ object PdfViewerMath {
         zoom: Float,
         viewportWidth: Float,
     ): Offset {
-        val centeringX = (viewportWidth - layout.basePageWidthPx * zoom) / 2f
+        val centeringX = (viewportWidth - rowWidthPx(layout) * zoom) / 2f
         val panY =
             if (pageIndex in layout.pageHeightsPx.indices) {
                 -layout.pageTopsPx[pageIndex] * zoom
@@ -423,9 +528,10 @@ object PdfViewerMath {
      * шаг clamp'а каждый тик, и при многократном wheel-зуме страница
      * "уплывает").
      *
-     * Центрируется именно PDF-колонка `[0, basePageWidthPx]` ×
-     * `[0, totalHeightPx]`, а **не** слот с [PageExtent]: иначе штрих/надпись,
-     * вылезшая за лист, утягивала бы сам лист от центра.
+     * Центрируется именно ряд раскладки `[0, `[rowWidthPx]`]` ×
+     * `[0, totalHeightPx]` (в развороте — пара колонок + корешок), а **не**
+     * слот с [PageExtent]: иначе штрих/надпись, вылезшая за лист, утягивала бы
+     * сам лист от центра.
      */
     fun centeringClamp(
         pan: Offset,
@@ -433,7 +539,7 @@ object PdfViewerMath {
         zoom: Float,
         viewportSize: FloatSize,
     ): Offset {
-        val pdfW = layout.basePageWidthPx * zoom
+        val pdfW = rowWidthPx(layout) * zoom
         val pdfH = layout.totalHeightPx * zoom
         val x = if (pdfW <= viewportSize.width) (viewportSize.width - pdfW) / 2f else pan.x
         val y = if (pdfH <= viewportSize.height) (viewportSize.height - pdfH) / 2f else pan.y
@@ -465,11 +571,12 @@ object PdfViewerMath {
     }
 
     /**
-     * Pan для double-tap «по ширине», укладывающий PDF-колонку в **свободную
+     * Pan для double-tap «по ширине», укладывающий ряд раскладки в **свободную
      * область** вьюпорта за вычетом плавающих панелей: тулрейла/настроек слева
      * ([insetStartPx]), счётчика страниц сверху ([insetTopPx]) и панели справа
-     * ([insetEndPx]). PDF-колонка центрируется по горизонтали внутри этой
-     * области, а верх страницы [pageIndex] прижимается к её верхней кромке —
+     * ([insetEndPx]). Ряд ([rowWidthPx] — одна PDF-колонка в одностраничном,
+     * пара колонок + корешок в развороте) центрируется по горизонтали внутри
+     * этой области, а верх страницы [pageIndex] прижимается к её верхней кромке —
      * чтобы страница не уходила под рельсу и под счётчик.
      */
     fun panForFitWidth(
@@ -482,7 +589,7 @@ object PdfViewerMath {
         insetEndPx: Float,
     ): Offset {
         val availableWidth = (viewportWidth - insetStartPx - insetEndPx).coerceAtLeast(1f)
-        val centeringX = insetStartPx + (availableWidth - layout.basePageWidthPx * zoom) / 2f
+        val centeringX = insetStartPx + (availableWidth - rowWidthPx(layout) * zoom) / 2f
         val panY =
             insetTopPx +
                 if (pageIndex in layout.pageHeightsPx.indices) {
@@ -493,12 +600,16 @@ object PdfViewerMath {
         return Offset(centeringX, panY)
     }
 
-    /** Zoom такой, что страница [pageIndex] занимает всю ширину вьюпорта. */
+    /**
+     * Zoom такой, что ряд раскладки занимает всю ширину вьюпорта. В развороте
+     * это укладывает ОБЕ страницы пары + корешок в ширину экрана (каждая
+     * страница — примерно полэкрана), как книга на широком экране.
+     */
     fun fitToWidthZoom(
         layout: PdfPagesLayout,
         viewportWidth: Float,
     ): Float {
-        val base = layout.basePageWidthPx
+        val base = rowWidthPx(layout)
         if (base <= 0f || viewportWidth <= 0f) return 1f
         return (viewportWidth / base).coerceIn(MIN_ZOOM, MAX_ZOOM)
     }

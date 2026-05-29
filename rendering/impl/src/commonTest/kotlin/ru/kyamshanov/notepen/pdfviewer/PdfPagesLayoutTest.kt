@@ -349,4 +349,118 @@ class PdfPagesLayoutTest {
             assertTrue(abs(visual - zoom) < 1e-4f, "zoom=$zoom reconstructed=$visual")
         }
     }
+
+    // ── FEATURE #5: книжный разворот (SpreadMode.SPREAD) ────────────────────────
+
+    @Test
+    fun `spread pairs share a Y row and split into left-right columns`() {
+        // 4 страницы, aspect 0.5 (узкие, высокие) при базовой ширине 100 → высоты 200.
+        // Пары (0,1) и (2,3): каждая пара делит верх; следующий ряд на max высот пары.
+        val layout =
+            PdfPagesLayout.build(
+                pages(0.5f, 0.5f, 0.5f, 0.5f),
+                basePageWidthPx = 100f,
+                spreadMode = SpreadMode.SPREAD,
+            )
+        // Левая и правая страницы пары делят один Y-ряд.
+        assertEquals(0f, layout.pageTopsPx[0])
+        assertEquals(0f, layout.pageTopsPx[1])
+        assertEquals(200f, layout.pageTopsPx[2])
+        assertEquals(200f, layout.pageTopsPx[3])
+        // Левая колонка на X=0, правая — за колонкой + корешок.
+        val rightX = 100f + PdfPagesLayout.SPREAD_GUTTER_PX
+        assertEquals(0f, layout.pageLeftsPx[0])
+        assertEquals(rightX, layout.pageLeftsPx[1])
+        assertEquals(0f, layout.pageLeftsPx[2])
+        assertEquals(rightX, layout.pageLeftsPx[3])
+        // Общая высота — два ряда по 200.
+        assertEquals(400f, layout.totalHeightPx)
+    }
+
+    @Test
+    fun `spread trailing odd page occupies left half alone`() {
+        // 3 страницы → пара (0,1) + висячая 2 слева одна.
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 1f, 1f),
+                basePageWidthPx = 100f,
+                spreadMode = SpreadMode.SPREAD,
+            )
+        assertEquals(0f, layout.pageTopsPx[0])
+        assertEquals(0f, layout.pageTopsPx[1])
+        assertEquals(100f, layout.pageTopsPx[2]) // следующий ряд
+        assertEquals(0f, layout.pageLeftsPx[2]) // висячая — слева
+        assertEquals(200f, layout.totalHeightPx) // два ряда по 100
+    }
+
+    @Test
+    fun `spread row height is the max of the pair heights`() {
+        // Левая страница ниже (aspect 1 → h=100), правая выше (aspect 0.5 → h=200).
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 0.5f, 1f, 1f),
+                basePageWidthPx = 100f,
+                spreadMode = SpreadMode.SPREAD,
+            )
+        // Ряд 0 высотой max(100, 200) = 200 → ряд 1 начинается на 200.
+        assertEquals(0f, layout.pageTopsPx[0])
+        assertEquals(0f, layout.pageTopsPx[1])
+        assertEquals(200f, layout.pageTopsPx[2])
+    }
+
+    @Test
+    fun `spreadLeftPageOf snaps right half to the pair's left page`() {
+        val layout = PdfPagesLayout.build(pages(1f, 1f, 1f, 1f), basePageWidthPx = 100f, spreadMode = SpreadMode.SPREAD)
+        assertEquals(0, PdfViewerMath.spreadLeftPageOf(layout, 0))
+        assertEquals(0, PdfViewerMath.spreadLeftPageOf(layout, 1)) // правая → левая пары
+        assertEquals(2, PdfViewerMath.spreadLeftPageOf(layout, 2))
+        assertEquals(2, PdfViewerMath.spreadLeftPageOf(layout, 3))
+        // В одностраничном — тождественно.
+        val single = PdfPagesLayout.build(pages(1f, 1f), basePageWidthPx = 100f)
+        assertEquals(1, PdfViewerMath.spreadLeftPageOf(single, 1))
+    }
+
+    @Test
+    fun `firstVisiblePageIndex returns the left page of the visible pair in spread`() {
+        val layout = PdfPagesLayout.build(pages(1f, 1f, 1f, 1f), basePageWidthPx = 100f, spreadMode = SpreadMode.SPREAD)
+        // Ряд 0 виден (pan.y = 0) → первая видимая = левая страница пары = 0.
+        assertEquals(0, PdfViewerMath.firstVisiblePageIndex(layout, panY = 0f, zoom = 1f))
+        // Прокрутили во второй ряд (pan.y = -100) → пара (2,3), левая = 2.
+        assertEquals(2, PdfViewerMath.firstVisiblePageIndex(layout, panY = -100f, zoom = 1f))
+    }
+
+    @Test
+    fun `rowWidthPx is one column single and two columns plus gutter in spread`() {
+        val single = PdfPagesLayout.build(pages(1f, 1f), basePageWidthPx = 100f)
+        assertEquals(100f, PdfViewerMath.rowWidthPx(single))
+        val spread = PdfPagesLayout.build(pages(1f, 1f), basePageWidthPx = 100f, spreadMode = SpreadMode.SPREAD)
+        assertEquals(200f + PdfPagesLayout.SPREAD_GUTTER_PX, PdfViewerMath.rowWidthPx(spread))
+    }
+
+    @Test
+    fun `fitToWidth in spread fits the whole pair into the viewport width`() {
+        // Пара двух колонок по 100 + корешок 16 = 216 → fit в 432 даёт зум 2.0
+        // (каждая страница ~полэкрана), а не 4.32 как было бы для одной колонки.
+        val layout = PdfPagesLayout.build(pages(1f, 1f), basePageWidthPx = 100f, spreadMode = SpreadMode.SPREAD)
+        val row = 200f + PdfPagesLayout.SPREAD_GUTTER_PX
+        assertEquals(432f / row, PdfViewerMath.fitToWidthZoom(layout, viewportWidth = 432f))
+    }
+
+    @Test
+    fun `panForFitWidth centres the whole spread row in the free band`() {
+        // Ряд = 216 при zoom 1; available = 300 → centeringX = inset + (300-216)/2.
+        val layout = PdfPagesLayout.build(pages(1f, 1f), basePageWidthPx = 100f, spreadMode = SpreadMode.SPREAD)
+        val row = 200f + PdfPagesLayout.SPREAD_GUTTER_PX
+        val pan =
+            PdfViewerMath.panForFitWidth(
+                layout = layout,
+                pageIndex = 0,
+                zoom = 1f,
+                viewportWidth = 360f,
+                insetStartPx = 60f,
+                insetTopPx = 0f,
+                insetEndPx = 0f,
+            )
+        assertTrue(abs(pan.x - (60f + (300f - row) / 2f)) < 1e-3f, "centeringX=${pan.x}")
+    }
 }

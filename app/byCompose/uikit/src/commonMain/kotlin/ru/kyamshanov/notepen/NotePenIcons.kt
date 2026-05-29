@@ -77,6 +77,42 @@ public object NotePenIcons {
         )
     }
 
+    /**
+     * Two page-columns separated by a dashed gutter — the "разделить развороты"
+     * toggle (FEATURE #4). Reads as "one sheet split into a left and a right
+     * page", distinct from the thumbnails grid and the rotate glyph.
+     */
+    public val SplitSpreads: ImageVector by lazy {
+        stroked(
+            // Outer page frame.
+            "M4,4H20V20H4Z" +
+                // Dashed central gutter (the split line).
+                "M12,5V8" +
+                "M12,11V14" +
+                "M12,17V19",
+        )
+    }
+
+    /**
+     * Two facing page-rectangles standing SIDE BY SIDE with a solid spine between
+     * them — the "две страницы" / book-spread toggle (FEATURE #5, two-up view on
+     * wide screens). Deliberately distinct from both the reflow reading-mode glyph
+     * (an open MenuBook, «Режим чтения») and the FEATURE #4 split glyph
+     * ([SplitSpreads] — ONE frame cut by a dashed gutter): this one reads as "two
+     * separate sheets shown next to each other", not "one sheet split" and not
+     * "flowing text". No visual confusion between the three controls.
+     */
+    public val BookSpread: ImageVector by lazy {
+        stroked(
+            // Left page rectangle.
+            "M3,5H10V19H3Z" +
+                // Right page rectangle (mirrored, side by side).
+                "M14,5H21V19H14Z" +
+                // Solid spine between the two pages.
+                "M12,4V20",
+        )
+    }
+
     private fun filled(pathData: String): ImageVector =
         ImageVector.Builder(
             name = "NotePen",

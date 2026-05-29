@@ -1,8 +1,10 @@
 package ru.kyamshanov.notepen.pdf.infrastructure
 
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.annotation.domain.model.PageRotation
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageData
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -23,6 +25,11 @@ class AndroidImagePageRenderer(
         pageIndex: Int,
         widthPx: Int,
         heightPx: Int,
+        rotationQuarters: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
     ): PdfPageData =
         withContext(ioDispatcher) {
             val imageDoc =
@@ -33,7 +40,10 @@ class AndroidImagePageRenderer(
                 throw IndexOutOfBoundsException("pageIndex $pageIndex out of [0, 1)")
             }
 
-            if (imageDoc.widthPx == widthPx && imageDoc.heightPx == heightPx) {
+            val q = PageRotation.normalizeQuarters(rotationQuarters)
+            val fullCrop = isFullCrop(cropLeftN, cropTopN, cropRightN, cropBottomN)
+            val sameSize = imageDoc.widthPx == widthPx && imageDoc.heightPx == heightPx
+            if (q == 0 && fullCrop && sameSize) {
                 return@withContext PdfPageData(
                     widthPx = widthPx,
                     heightPx = heightPx,
@@ -43,8 +53,18 @@ class AndroidImagePageRenderer(
 
             val source = Bitmap.createBitmap(imageDoc.widthPx, imageDoc.heightPx, Bitmap.Config.ARGB_8888)
             source.setPixels(imageDoc.pixels, 0, imageDoc.widthPx, 0, 0, imageDoc.widthPx, imageDoc.heightPx)
-            val scaled = Bitmap.createScaledBitmap(source, widthPx, heightPx, true)
-            source.recycle()
+            // CROP → ROTATE: вырезка в собственной системе координат страницы.
+            val cropped = cropBitmap(source, cropLeftN, cropTopN, cropRightN, cropBottomN)
+            val oriented =
+                if (q == 0) {
+                    cropped
+                } else {
+                    val matrix = Matrix().apply { postRotate(q * DEGREES_PER_QUARTER.toFloat()) }
+                    Bitmap.createBitmap(cropped, 0, 0, cropped.width, cropped.height, matrix, true)
+                        .also { if (it !== cropped) cropped.recycle() }
+                }
+            val scaled = Bitmap.createScaledBitmap(oriented, widthPx, heightPx, true)
+            if (scaled !== oriented) oriented.recycle()
 
             val pixels = IntArray(widthPx * heightPx)
             scaled.getPixels(pixels, 0, widthPx, 0, 0, widthPx, heightPx)
@@ -53,6 +73,29 @@ class AndroidImagePageRenderer(
             PdfPageData(widthPx = widthPx, heightPx = heightPx, pixels = pixels)
         }
 
+    private fun cropBitmap(
+        source: Bitmap,
+        leftN: Float,
+        topN: Float,
+        rightN: Float,
+        bottomN: Float,
+    ): Bitmap {
+        val l = leftN.coerceIn(0f, 1f)
+        val t = topN.coerceIn(0f, 1f)
+        val r = rightN.coerceIn(l, 1f)
+        val b = bottomN.coerceIn(t, 1f)
+        if (isFullCrop(l, t, r, b)) return source
+        val x = (l * source.width).toInt().coerceIn(0, source.width - 1)
+        val y = (t * source.height).toInt().coerceIn(0, source.height - 1)
+        val w = ((r - l) * source.width).toInt().coerceIn(1, source.width - x)
+        val h = ((b - t) * source.height).toInt().coerceIn(1, source.height - y)
+        return Bitmap.createBitmap(source, x, y, w, h).also { if (it !== source) source.recycle() }
+    }
+
     /** Возвращает `null`: документы-изображения не несут текстовой геометрии. */
     override suspend fun documentTextLineHeight(document: PdfDocument): Float? = null
+
+    private companion object {
+        const val DEGREES_PER_QUARTER = 90
+    }
 }

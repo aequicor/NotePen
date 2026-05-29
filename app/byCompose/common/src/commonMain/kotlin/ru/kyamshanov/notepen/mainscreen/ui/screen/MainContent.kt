@@ -71,10 +71,10 @@ import ru.kyamshanov.notepen.NotePenIcons
 import ru.kyamshanov.notepen.RailOrientation
 import ru.kyamshanov.notepen.SessionsMenu
 import ru.kyamshanov.notepen.WheelScrollButtons
-import ru.kyamshanov.notepen.fadingEdges
 import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.LocalBlurEnabled
 import ru.kyamshanov.notepen.blur.glassSource
+import ru.kyamshanov.notepen.fadingEdges
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent

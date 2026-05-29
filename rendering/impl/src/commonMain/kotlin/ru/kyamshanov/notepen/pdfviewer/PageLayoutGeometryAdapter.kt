@@ -20,6 +20,10 @@ fun PdfViewerState.asPageLayoutGeometry(): PageLayoutGeometry {
 
         override fun pageTopPx(index: Int): Float = viewerState.layout.pageTopsPx[index]
 
+        override fun pageLeftPx(index: Int): Float = viewerState.layout.pageLeftsPx[index]
+
+        override val isSpread: Boolean get() = viewerState.layout.spreadMode == SpreadMode.SPREAD
+
         override fun pdfHeightPx(index: Int): Float = viewerState.layout.pdfHeightsPx[index]
     }
 }

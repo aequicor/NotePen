@@ -259,33 +259,16 @@ class MagnifierInputController(
 
     /**
      * Конвертирует panel-local координату в page-normalized для конкретного
-     * сегмента. По X — линейно через [MagnifierPageSegment.targetOnPage].
-     * По Y — переводим panel-y в page-y, учитывая что сегмент занимает
-     * `panelTopFrac..panelBottomFrac` полосу панели.
+     * сегмента. Делегирует в [panelLocalToPageInSegment] — единый источник
+     * истины маппинга, обратный которому ([pageToPanelLocalInSegment])
+     * применяет рендер панели. Так ввод и отрисовка остаются согласованными
+     * при любом размере панели (в т.ч. после ресайза окна лупы).
      */
     private fun panelLocalToPage(
         panelLocal: Offset,
         panelSize: Size,
         segment: MagnifierPageSegment,
-    ): Offset {
-        val target = segment.targetOnPage
-        val nx =
-            if (panelSize.width > 0f) {
-                target.left + (panelLocal.x / panelSize.width) * (target.right - target.left)
-            } else {
-                target.left
-            }
-        val fy =
-            if (panelSize.height > 0f) {
-                (panelLocal.y / panelSize.height).coerceIn(0f, 1f)
-            } else {
-                0f
-            }
-        val segH = (segment.panelBottomFrac - segment.panelTopFrac).coerceAtLeast(1e-6f)
-        val localY = ((fy - segment.panelTopFrac) / segH).coerceIn(0f, 1f)
-        val ny = target.top + localY * (target.bottom - target.top)
-        return Offset(nx, ny)
-    }
+    ): Offset = panelLocalToPageInSegment(panelLocal, panelSize, segment)
 
     private fun loupeMagnification(
         panelSize: Size,

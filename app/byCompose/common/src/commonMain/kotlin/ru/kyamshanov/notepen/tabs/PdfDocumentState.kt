@@ -11,7 +11,14 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import ru.kyamshanov.notepen.PdfDrawingState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.PageRotation
+import ru.kyamshanov.notepen.annotation.domain.model.SpreadSplit
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import ru.kyamshanov.notepen.annotation.domain.model.mergeRotations
+import ru.kyamshanov.notepen.annotation.domain.model.mergeStrokesByPage
+import ru.kyamshanov.notepen.annotation.domain.model.splitRotations
+import ru.kyamshanov.notepen.annotation.domain.model.splitStrokesByPage
 import ru.kyamshanov.notepen.book.TocEntry
 import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -81,6 +88,24 @@ class PdfDocumentState internal constructor(
      */
     sharedHighlights: SnapshotStateMap<Int, List<StickyHighlight>> = mutableStateMapOf(),
     /**
+     * Пользовательский поворот страницы (четверти CW, `[0, 3]`) по индексу.
+     * Shared across same-file tabs — поворот, сделанный в одной вкладке,
+     * виден в другой. Отсутствие ключа эквивалентно `0`.
+     */
+    sharedPageRotations: SnapshotStateMap<Int, Int> = mutableStateMapOf(),
+    /**
+     * Включено ли разделение разворотов (FEATURE #4) — обёрнуто в [MutableState],
+     * чтобы делиться между вкладками одного файла: переключение в одной вкладке
+     * видно в другой (как штрихи/повороты). `false` по умолчанию.
+     */
+    sharedSpreadSplit: MutableState<Boolean> = mutableStateOf(false),
+    /**
+     * Явный выбор пользователя по книжному развороту (FEATURE #5): `null` — авто
+     * (по ширине экрана), `true`/`false` — принудительно вкл/выкл. Обёрнут в
+     * [MutableState] и shared между вкладками одного файла (как [sharedSpreadSplit]).
+     */
+    sharedSpreadViewOverride: MutableState<Boolean?> = mutableStateOf(null),
+    /**
      * Snapshot-observable counter bumped on every [undoStack] / [redoStack]
      * mutation so Compose-derived `canUndo` / `canRedo` (the toolbar button
      * enabled flags) recompute — the deques themselves are plain (not
@@ -97,8 +122,61 @@ class PdfDocumentState internal constructor(
             pdfDocumentState.value = value
         }
 
-    /** Pages of the loaded [pdfDocument], or empty until it loads. */
-    val pages by derivedStateOf { pdfDocument?.info?.pages.orEmpty() }
+    private val spreadSplitState: MutableState<Boolean> = sharedSpreadSplit
+
+    /**
+     * Включено ли ручное разделение разворотов (FEATURE #4): каждая исходная
+     * страница делится на левую/правую логические половины, удваивая число
+     * страниц. Shared между вкладками одного файла; персистится в сайдкаре вида.
+     * Наблюдаемое: смена пере-строит [pages] и дёргает релэйаут/ре-рендер.
+     */
+    var spreadSplit: Boolean
+        get() = spreadSplitState.value
+        set(value) {
+            spreadSplitState.value = value
+        }
+
+    private val spreadViewOverrideState: MutableState<Boolean?> = sharedSpreadViewOverride
+
+    /**
+     * Явный выбор пользователя по книжному развороту (FEATURE #5, «Две страницы»):
+     * `null` — авто (включается на широких экранах), `true`/`false` — принудительно
+     * вкл/выкл независимо от ширины. Shared между вкладками одного файла;
+     * персистится в сайдкаре вида. Отдельный и независимый от [spreadSplit]
+     * (FEATURE #4) и [readingMode] (reflow) переключатель. Наблюдаемое.
+     */
+    var spreadViewOverride: Boolean?
+        get() = spreadViewOverrideState.value
+        set(value) {
+            spreadViewOverrideState.value = value
+        }
+
+    /**
+     * ЛОГИЧЕСКИЕ страницы документа — то, что видит вьювер, навигация, штрихи и
+     * счётчик. При выключенном [spreadSplit] совпадают с исходными страницами
+     * [pdfDocument]. При включённом — каждая исходная страница `S` даёт две
+     * половины (`2S` — левая, `2S+1` — правая) с тем же [PdfPageInfo.pageIndex],
+     * что и логический индекс, и aspect, скорректированным под половинную ширину
+     * ([SpreadSplit.halfAspect]). [PdfPageInfo.rotation] оставляем собственным
+     * (рендерер крутит половину отдельно); [PdfPageInfo.widthPt]/`heightPt`
+     * оставляем исходными — они используются только для подбора DPI, который
+     * рендерер пересчитывает с учётом вырезки.
+     */
+    val pages by derivedStateOf {
+        val source = pdfDocument?.info?.pages.orEmpty()
+        if (!spreadSplit) {
+            source
+        } else {
+            buildList(source.size * SpreadSplit.HALVES_PER_PAGE) {
+                source.forEach { info ->
+                    val left = SpreadSplit.leftLogical(info.pageIndex)
+                    val right = SpreadSplit.rightLogical(info.pageIndex)
+                    add(info.copy(pageIndex = left, widthPt = info.widthPt * SpreadSplit.GUTTER_X))
+                    add(info.copy(pageIndex = right, widthPt = info.widthPt * SpreadSplit.GUTTER_X))
+                }
+            }
+        }
+    }
 
     private val outlineState = mutableStateOf<List<TocEntry>>(emptyList())
 
@@ -122,6 +200,13 @@ class PdfDocumentState internal constructor(
 
     /** Sticky-marker highlights per page index; persisted to the annotation bundle. */
     val highlights: SnapshotStateMap<Int, List<StickyHighlight>> = sharedHighlights
+
+    /**
+     * Пользовательский поворот каждой страницы в четвертях CW (`[0, 3]`),
+     * персистится в лёгкий сайдкар вида. Отсутствие ключа — `0` (без доворота).
+     * Наблюдаемое: смена дёргает релэйаут вьюера и ре-рендер растра.
+     */
+    val pageRotations: SnapshotStateMap<Int, Int> = sharedPageRotations
 
     /**
      * Undo stack: each entry is a snapshot of strokes on a specific page
@@ -267,6 +352,185 @@ class PdfDocumentState internal constructor(
     }
 
     /**
+     * Поворачивает страницу [pageIndex] на +90° по часовой стрелке кумулятивно
+     * (`0 → 1 → 2 → 3 → 0` четверти). Перемещает все штрихи, липкие выделения и
+     * рисуемую область ([PdfDrawingState.extent]) этой страницы в новую систему
+     * координат, чтобы они остались под тем же содержимым после поворота растра
+     * (см. [PageRotation.rotatePointCw] — направление совпадает с поворотом
+     * растра в рендерере).
+     *
+     * [pageAspectBeforeRotation] — соотношение сторон страницы (ширина/высота)
+     * **до** этого поворота: на четверть-обороте ширина и высота меняются
+     * местами, поэтому толщина штриха (нормирована к ширине) домножается на это
+     * значение, сохраняя видимую толщину.
+     *
+     * **Не undoable.** Поворот не кладётся в [undoStack]: это геометрическая
+     * операция над всей страницей (растр + раскладка + штрихи), которую модель
+     * пер-страничных снапшотов штрихов не отслеживает целиком. Отмена —
+     * повторный поворот до возврата к `0`.
+     */
+    fun rotatePageClockwise(
+        pageIndex: Int,
+        pageAspectBeforeRotation: Float,
+    ) {
+        val drawing = drawingStates[pageIndex]
+        if (drawing != null && drawing.currentPaths.isNotEmpty()) {
+            val rotated = drawing.currentPaths.map { PageRotation.rotatePathCw(it, pageAspectBeforeRotation) }
+            drawing.restoreSnapshot(rotated)
+        }
+        drawing?.let {
+            val ext = it.extent.value
+            if (ext != PageExtent.Pdf) {
+                it.setExtent(PageRotation.rotateExtentCw(ext))
+            }
+        }
+        highlights[pageIndex]?.let { hs ->
+            if (hs.isNotEmpty()) {
+                highlights[pageIndex] = hs.map { PageRotation.rotateHighlightCw(it) }
+            }
+        }
+        // Снапшоты undo/redo сделаны в старой системе координат и после поворота
+        // визуально некорректны — чистим, чтобы «отмена» не вернула неповёрнутые
+        // штрихи поверх повёрнутого растра.
+        undoStack.clear()
+        redoStack.clear()
+        undoVersionState.value++
+
+        val current = pageRotations[pageIndex] ?: 0
+        pageRotations[pageIndex] = PageRotation.nextQuarter(current)
+    }
+
+    /**
+     * Переключает разделение разворотов (FEATURE #4). При включении каждая
+     * исходная страница `S` делится на логические половины `2S`/`2S+1`; при
+     * выключении половины объединяются обратно. Атомарно мигрирует ВСЁ
+     * пер-страничное состояние между исходным и логическим пространством индексов:
+     * штрихи ([drawingStates]), липкие выделения ([highlights]), повороты
+     * ([pageRotations]) и рисуемую область ([PdfDrawingState.extent]).
+     *
+     * Координаты штрихов/выделений пересчитываются: при включении точка с `x<0.5`
+     * исходной страницы уходит в левую половину (`x'=x*2`), `x>=0.5` — в правую
+     * (`x'=(x-0.5)*2`), Y не меняется; штрих целиком относится к половине по X его
+     * первой точки (штрих через корешок не дробится). При выключении —
+     * обратное преобразование. См. [SpreadSplit].
+     *
+     * **Не undoable** (как и поворот): это геометрическая операция над всем
+     * документом, которую модель пер-страничных снапшотов не отслеживает целиком.
+     * Снапшоты undo/redo чистятся — они в старом пространстве индексов/координат.
+     */
+    fun toggleSpreadSplit() {
+        val enabling = !spreadSplit
+
+        // Снимаем текущее состояние, ПЕРЕД тем как менять, чтобы пересобрать карты.
+        val strokesByPage = drawingStates.mapValues { (_, s) -> s.currentPaths.toList() }
+        val highlightsByPage = highlights.toMap()
+        val extentsByPage = drawingStates.mapValues { (_, s) -> s.extent.value }
+        val rotationsByPage = pageRotations.toMap()
+
+        // Штрихи.
+        val newStrokes =
+            if (enabling) {
+                SpreadSplit.splitStrokesByPage(strokesByPage)
+            } else {
+                SpreadSplit.mergeStrokesByPage(strokesByPage)
+            }
+        drawingStates.clear()
+        newStrokes.forEach { (page, paths) ->
+            drawingStates.getOrPut(page) { PdfDrawingState() }.restoreSnapshot(paths)
+        }
+
+        // Липкие выделения (только X прямоугольников; Y не меняется).
+        val newHighlights =
+            if (enabling) {
+                splitHighlightsByPage(highlightsByPage)
+            } else {
+                mergeHighlightsByPage(highlightsByPage)
+            }
+        highlights.clear()
+        newHighlights.forEach { (page, hs) -> highlights[page] = hs }
+
+        // Области рисования (extent): при включении обе половины наследуют extent
+        // исходной страницы; при слиянии extent берётся из ЛЕВОЙ половины (правая
+        // отбрасывается — после слияния extent у объединённой страницы один).
+        // Простое корректное правило для редкого случая нестандартного extent + split.
+        extentsByPage.forEach { (page, ext) ->
+            if (ext == PageExtent.Pdf) return@forEach
+            val targets =
+                if (enabling) {
+                    listOf(SpreadSplit.leftLogical(page), SpreadSplit.rightLogical(page))
+                } else if (SpreadSplit.isRightHalf(page)) {
+                    emptyList()
+                } else {
+                    listOf(SpreadSplit.sourceIndexOf(page))
+                }
+            targets.forEach { t -> drawingStates.getOrPut(t) { PdfDrawingState() }.setExtent(ext) }
+        }
+
+        // Повороты.
+        val newRotations =
+            if (enabling) {
+                SpreadSplit.splitRotations(rotationsByPage)
+            } else {
+                SpreadSplit.mergeRotations(rotationsByPage)
+            }
+        pageRotations.clear()
+        newRotations.forEach { (page, q) -> if (q != 0) pageRotations[page] = q }
+
+        undoStack.clear()
+        redoStack.clear()
+        undoVersionState.value++
+
+        spreadSplit = enabling
+    }
+
+    private fun splitHighlightsByPage(source: Map<Int, List<StickyHighlight>>): Map<Int, List<StickyHighlight>> {
+        val result = HashMap<Int, MutableList<StickyHighlight>>()
+        source.forEach { (srcPage, hs) ->
+            hs.forEach { h ->
+                val firstRectLeft = h.rects.firstOrNull()?.left ?: 0f
+                val right = firstRectLeft >= SpreadSplit.GUTTER_X
+                val remapped =
+                    h.rects.map { r ->
+                        if (right) {
+                            r.copy(
+                                left = (r.left - SpreadSplit.GUTTER_X) / SpreadSplit.GUTTER_X,
+                                right = (r.right - SpreadSplit.GUTTER_X) / SpreadSplit.GUTTER_X,
+                            )
+                        } else {
+                            r.copy(left = r.left / SpreadSplit.GUTTER_X, right = r.right / SpreadSplit.GUTTER_X)
+                        }
+                    }
+                val target = if (right) SpreadSplit.rightLogical(srcPage) else SpreadSplit.leftLogical(srcPage)
+                result.getOrPut(target) { mutableListOf() }.add(h.copy(rects = remapped))
+            }
+        }
+        return result
+    }
+
+    private fun mergeHighlightsByPage(logical: Map<Int, List<StickyHighlight>>): Map<Int, List<StickyHighlight>> {
+        val result = HashMap<Int, MutableList<StickyHighlight>>()
+        logical.forEach { (logicalPage, hs) ->
+            val srcPage = SpreadSplit.sourceIndexOf(logicalPage)
+            val right = SpreadSplit.isRightHalf(logicalPage)
+            hs.forEach { h ->
+                val remapped =
+                    h.rects.map { r ->
+                        if (right) {
+                            r.copy(
+                                left = SpreadSplit.GUTTER_X + r.left * SpreadSplit.GUTTER_X,
+                                right = SpreadSplit.GUTTER_X + r.right * SpreadSplit.GUTTER_X,
+                            )
+                        } else {
+                            r.copy(left = r.left * SpreadSplit.GUTTER_X, right = r.right * SpreadSplit.GUTTER_X)
+                        }
+                    }
+                result.getOrPut(srcPage) { mutableListOf() }.add(h.copy(rects = remapped))
+            }
+        }
+        return result
+    }
+
+    /**
      * Snapshot of one page's strokes (re-applied via [PdfDrawingState.restoreSnapshot])
      * plus its sticky-marker [highlights] — captured together so undo/redo of a
      * sticky-marker swipe (stroke removed, highlight added) reverts as one step.
@@ -325,6 +589,9 @@ class PdfDocumentState internal constructor(
                 sharedRedoStack = from.redoStack,
                 sharedAnnotationsLoaded = from.annotationsLoadedState,
                 sharedHighlights = from.highlights,
+                sharedPageRotations = from.pageRotations,
+                sharedSpreadSplit = from.spreadSplitState,
+                sharedSpreadViewOverride = from.spreadViewOverrideState,
                 sharedUndoVersion = from.undoVersionState,
             ).also { it.skipPageRestore = true }
     }

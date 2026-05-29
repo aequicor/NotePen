@@ -112,6 +112,11 @@ fun PortraitTopBar(
     syncTint: Color,
     onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
+    onRotatePage: () -> Unit,
+    spreadSplitEnabled: Boolean,
+    onToggleSpreadSplit: () -> Unit,
+    bookSpreadEnabled: Boolean,
+    onToggleBookSpread: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /** Фон активной темы ридера для стекла бара; `null` — цвет [MaterialTheme]. */
@@ -238,6 +243,11 @@ fun PortraitTopBar(
                         syncTint = syncTint,
                         onOpenSync = onOpenSync,
                         onOpenShortcutsSettings = onOpenShortcutsSettings,
+                        onRotatePage = onRotatePage,
+                        spreadSplitEnabled = spreadSplitEnabled,
+                        onToggleSpreadSplit = onToggleSpreadSplit,
+                        bookSpreadEnabled = bookSpreadEnabled,
+                        onToggleBookSpread = onToggleBookSpread,
                     )
                 // `weight` снимаем в RowScope; [MaterialTheme] не создаёт layout-узел,
                 // поэтому вес доходит до Row и сквозь обёртку перекраски. Ширину колеса

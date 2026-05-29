@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.Redo
+import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
@@ -208,6 +209,11 @@ internal fun unifiedToolWheelEntries(
     syncTint: Color,
     onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
+    onRotatePage: () -> Unit,
+    spreadSplitEnabled: Boolean,
+    onToggleSpreadSplit: () -> Unit,
+    bookSpreadEnabled: Boolean,
+    onToggleBookSpread: () -> Unit,
     expandedButtonModifier: Modifier = Modifier,
 ): List<WheelEntry> {
     // В режиме чтения свободное рисование пером бессмысленно, но выделять текст
@@ -275,6 +281,11 @@ internal fun unifiedToolWheelEntries(
             syncTint = syncTint,
             onOpenSync = onOpenSync,
             onOpenShortcutsSettings = onOpenShortcutsSettings,
+            onRotatePage = onRotatePage,
+            spreadSplitEnabled = spreadSplitEnabled,
+            onToggleSpreadSplit = onToggleSpreadSplit,
+            bookSpreadEnabled = bookSpreadEnabled,
+            onToggleBookSpread = onToggleBookSpread,
         )
     return buildList {
         // В чтении перо скрыто, но маркер/ластик остаются (см. includePen).
@@ -420,6 +431,11 @@ internal fun systemControlEntries(
     syncTint: Color,
     onOpenSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
+    onRotatePage: () -> Unit,
+    spreadSplitEnabled: Boolean,
+    onToggleSpreadSplit: () -> Unit,
+    bookSpreadEnabled: Boolean,
+    onToggleBookSpread: () -> Unit,
 ): List<WheelEntry> {
     val pencilModeButton: @Composable () -> Unit = {
         if (showPencilModeButton) {
@@ -507,6 +523,35 @@ internal fun systemControlEntries(
             onClick = onMagnifierToggle,
         )
     }
+    val rotatePageButton: @Composable () -> Unit = {
+        IconButton(onClick = onRotatePage, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.RotateRight,
+                contentDescription = "Повернуть страницу",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    val spreadSplitButton: @Composable () -> Unit = {
+        ToolToggleButton(
+            icon = NotePenIcons.SplitSpreads,
+            contentDescription = "Разделить развороты",
+            selected = spreadSplitEnabled,
+            onClick = onToggleSpreadSplit,
+        )
+    }
+    val bookSpreadButton: @Composable () -> Unit = {
+        // FEATURE #5: книжный разворот «Две страницы». Иконка [BookSpread] (две
+        // отдельные страницы рядом) намеренно отлична и от глифа режима чтения
+        // (MenuBook, «Режим чтения»), и от глифа разделения (SplitSpreads — одна
+        // рамка с пунктирным корешком). Подпись «Две страницы» — без пересечения.
+        ToolToggleButton(
+            icon = NotePenIcons.BookSpread,
+            contentDescription = "Две страницы",
+            selected = bookSpreadEnabled,
+            onClick = onToggleBookSpread,
+        )
+    }
     // Зум разбит на ОТДЕЛЬНЫЕ элементы колеса (а не один Row), иначе в
     // вертикальной рельсе широкий горизонтальный кластер обрезался по ширине
     // полосы — «−» пропадал, а проценты съезжали.
@@ -546,7 +591,16 @@ internal fun systemControlEntries(
         // Инструменты рисования и их спутники (стилус, лупа, экспорт) в режиме
         // чтения не нужны — оставляем только навигацию и контролы чтения.
         if (showPencilModeButton && !readingModeEnabled) add(WheelEntry("sys_pencil") { pencilModeButton() })
-        if (!readingModeEnabled) add(WheelEntry("sys_magnifier") { magnifierButton() })
+        // Лупа и поворот страницы — управление видом PDF; в режиме чтения reflow их
+        // прячем (один общий гард — чтобы не плодить ветви Cyclomatic Complexity).
+        if (!readingModeEnabled) {
+            add(WheelEntry("sys_magnifier") { magnifierButton() })
+            add(WheelEntry("sys_rotate") { rotatePageButton() })
+            add(WheelEntry("sys_split") { spreadSplitButton() })
+            // Книжный разворот «Две страницы» (FEATURE #5). В режиме чтения скрыт
+            // (общий гард !readingModeEnabled) — разворот к reflow неприменим.
+            add(WheelEntry("sys_book_spread") { bookSpreadButton() })
+        }
         add(WheelEntry("sys_thumbnails") { thumbnailsButton() })
         if (showTocButton) add(WheelEntry("sys_toc") { tocButton() })
         // Скрываем кнопку (а не дизейблим) для документов без извлекаемого текста;
@@ -649,6 +703,16 @@ data class ToolRailSystem(
     val syncTint: Color,
     val onOpenSync: () -> Unit,
     val onOpenShortcutsSettings: () -> Unit,
+    /** Поворачивает текущую страницу на +90° CW (кумулятивно). */
+    val onRotatePage: () -> Unit,
+    /** Включено ли разделение разворотов (FEATURE #4). */
+    val spreadSplitEnabled: Boolean,
+    /** Переключает разделение разворотов на левую/правую логические страницы. */
+    val onToggleSpreadSplit: () -> Unit,
+    /** Активен ли книжный разворот «Две страницы» (FEATURE #5). */
+    val bookSpreadEnabled: Boolean,
+    /** Переключает книжный разворот (две страницы рядом) вкл/выкл. */
+    val onToggleBookSpread: () -> Unit,
 )
 
 /**
@@ -832,6 +896,11 @@ private fun landscapeWheelEntries(
         syncTint = system.syncTint,
         onOpenSync = system.onOpenSync,
         onOpenShortcutsSettings = system.onOpenShortcutsSettings,
+        onRotatePage = system.onRotatePage,
+        spreadSplitEnabled = system.spreadSplitEnabled,
+        onToggleSpreadSplit = system.onToggleSpreadSplit,
+        bookSpreadEnabled = system.bookSpreadEnabled,
+        onToggleBookSpread = system.onToggleBookSpread,
         expandedButtonModifier = expandedButtonModifier,
     )
 

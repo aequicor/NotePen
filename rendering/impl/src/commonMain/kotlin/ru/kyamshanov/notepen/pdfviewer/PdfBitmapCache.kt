@@ -22,6 +22,19 @@ import androidx.compose.ui.graphics.ImageBitmap
 data class RenderedPage(
     val bitmap: ImageBitmap,
     val renderedAtScalePercent: Int,
+    /**
+     * Пользовательский поворот (четверти CW), на котором отрендерен битмап.
+     * Render-loop перерисовывает страницу, если текущий поворот отличается —
+     * иначе после доворота показывалась бы старая (неповёрнутая) растеризация.
+     */
+    val renderedAtRotationQuarters: Int = 0,
+    /**
+     * Сигнатура вырезки (разделение разворотов), на которой отрендерен битмап.
+     * Render-loop перерисовывает страницу при смене вырезки — иначе после
+     * включения/выключения разделения показывалась бы старая (целая/половинная)
+     * растеризация. `0` — целая страница.
+     */
+    val renderedAtCropSignature: Int = 0,
 )
 
 class PdfBitmapCache(
@@ -119,6 +132,22 @@ class PdfBitmapCache(
         accessOrder.clear()
         entries.clear()
     }
+
+    /**
+     * `true`, если кэшированный битмап [rendered] всё ещё годится для показа на
+     * текущем масштабе/повороте/вырезке: масштаб не ниже требуемого и поворот +
+     * вырезка совпадают. Вынесено из render-loop'ов обеих платформ, чтобы их
+     * условие не разрасталось (ComplexCondition).
+     */
+    fun isFresh(
+        rendered: RenderedPage,
+        scalePercent: Int,
+        rotationQuarters: Int,
+        cropSignature: Int,
+    ): Boolean =
+        rendered.renderedAtScalePercent >= scalePercent &&
+            rendered.renderedAtRotationQuarters == rotationQuarters &&
+            rendered.renderedAtCropSignature == cropSignature
 
     companion object {
         /** ≈256 МБ при 4 байт/пиксель — комфортный потолок для desktop. */

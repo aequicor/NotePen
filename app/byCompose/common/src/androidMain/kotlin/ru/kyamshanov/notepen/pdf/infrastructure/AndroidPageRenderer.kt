@@ -18,9 +18,24 @@ class AndroidPageRenderer(
         pageIndex: Int,
         widthPx: Int,
         heightPx: Int,
+        rotationQuarters: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
     ): PdfPageData {
         val renderer = if (document is ImageBackedDocument) imageRenderer else pdfRenderer
-        return renderer.renderPage(document, pageIndex, widthPx, heightPx)
+        return renderer.renderPage(
+            document,
+            pageIndex,
+            widthPx,
+            heightPx,
+            rotationQuarters,
+            cropLeftN,
+            cropTopN,
+            cropRightN,
+            cropBottomN,
+        )
     }
 
     override suspend fun documentTextLineHeight(document: PdfDocument): Float? {
