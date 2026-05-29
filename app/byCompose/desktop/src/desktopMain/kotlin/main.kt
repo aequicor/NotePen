@@ -37,6 +37,7 @@ import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProv
 import ru.kyamshanov.notepen.document.infrastructure.SidecarIdentityCache
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
+import ru.kyamshanov.notepen.library.impl.GitHubLibraryBackend
 import ru.kyamshanov.notepen.library.impl.LocalFolderLibraryBackend
 import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
 import ru.kyamshanov.notepen.library.infrastructure.JvmLibraryConnectionStore
@@ -65,6 +66,7 @@ import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
 import ru.kyamshanov.notepen.setupJbrTitleBar
+import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.infrastructure.FileSystemLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
@@ -331,16 +333,21 @@ fun main(args: Array<String>) {
     // is disabled; flips to the live host+client union once enable() lands.
     val onlinePeerIdsFlow = syncRuntime.onlinePeerIds()
 
-    // The library shelf is sourced through the :library abstraction. Two backends are registered:
+    // The library shelf is sourced through the :library abstraction. Three backends are registered:
     //  - Local: the one local-folder library (`~/NotePen Library`); the factory reuses the existing
     //    [libraryFolder] for that root so the registry and the "Library" drill-down share one scan.
     //  - PeerLan (M2a): projects a connected peer's shared catalog as a read-only library. It reuses
     //    the existing sync infra — the client-side catalog cache for listing and the (lazily built)
     //    RemoteDocumentOpener for streaming. No peer is connected here; that happens via LibrarySources
     //    (M2c) calling registry.connect(LibraryConnection.PeerLan(...)).
+    //  - GitHub (M3): reads a repo's `books/` folder via the existing GitHubContentsCloudProvider
+    //    (no new networking). A dedicated lightweight CIO client is built lazily on first connect so
+    //    startup stays cheap; the Librarian role is granted when a write token is present.
     // Saved user-added libraries (PeerLan/GitHub) persist to library_connections.json under the app
     // data dir; the always-on local library below is wired explicitly and NOT persisted there.
     val libraryConnectionStore = JvmLibraryConnectionStore()
+    val githubCacheDir = getAppDataDir().resolve("github-library").absolutePath
+    val githubHttpClient by lazy { io.ktor.client.HttpClient(io.ktor.client.engine.cio.CIO) }
     val libraryRegistry =
         DefaultLibraryRegistry(
             backends =
@@ -362,6 +369,19 @@ fun main(args: Array<String>) {
                         catalogs = remoteCatalogCache.catalogs,
                         documentOpenerProvider = { syncRuntime.session.value?.remoteDocumentOpener },
                         onlinePeerIds = onlinePeerIdsFlow,
+                    ),
+                    GitHubLibraryBackend(
+                        providerFactory = { coords ->
+                            GitHubContentsCloudProvider(
+                                httpClient = githubHttpClient,
+                                owner = coords.owner,
+                                repo = coords.name,
+                                branch = coords.branch,
+                                bearerToken = coords.token,
+                            )
+                        },
+                        cacheDir = githubCacheDir,
+                        ioDispatcher = Dispatchers.IO,
                     ),
                 ),
             scope = appScope,

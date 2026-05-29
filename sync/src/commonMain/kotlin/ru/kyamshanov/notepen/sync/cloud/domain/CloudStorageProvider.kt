@@ -25,6 +25,25 @@ interface CloudStorageProvider {
     suspend fun download(path: String): ByteArray
 
     /**
+     * Downloads the raw bytes of a file by its content revision [sha] (a [CloudFile.sha]),
+     * bypassing any path-addressed size limit the provider's primary [download] may impose.
+     *
+     * GitHub's Contents API caps a path download at ~1 MB; the blob-by-sha endpoint
+     * (`/git/blobs/{sha}`) lifts that to ~100 MB, so large books must be fetched this way.
+     * Providers without such a limit may delegate to [download]; the default does so by
+     * treating [sha] as a path is *not* safe, so it instead requires an explicit [path] hint
+     * supplied by the caller.
+     *
+     * @param sha the file's content revision (from [CloudFile.sha]).
+     * @param fallbackPath the file's store-relative path, used by providers that have no
+     *   blob-by-sha endpoint and must fall back to [download].
+     */
+    suspend fun downloadBySha(
+        sha: String,
+        fallbackPath: String,
+    ): ByteArray = download(fallbackPath)
+
+    /**
      * Creates or updates the file at [path]. When updating an existing file,
      * [previousSha] MUST be its current [CloudFile.sha]; a stale or null sha for
      * an existing file fails (optimistic concurrency). Returns the new revision.

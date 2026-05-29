@@ -100,6 +100,29 @@ class LibrarySourcesViewModel(
         }
     }
 
+    /**
+     * Connects a GitHub library reading the `owner/name` repo's `books/` folder. A non-blank [token]
+     * (PAT or OAuth token) grants the Librarian role (upload); a blank token connects read-only.
+     * The connection (token included) persists via the registry's [LibraryConnection] store.
+     */
+    fun addGitHubLibrary(
+        repo: String,
+        token: String,
+    ) {
+        val slug = repo.trim().trim('/')
+        if (!slug.contains('/')) {
+            _state.update { it.copy(errorMessage = "Укажите репозиторий в формате owner/name") }
+            return
+        }
+        scope.launch {
+            registry.connect(LibraryConnection.GitHub(repo = slug, token = token.trim().ifBlank { null }))
+                .onFailure { e ->
+                    logger.warn(e) { "addGitHubLibrary failed: ${e::class.simpleName}" }
+                    _state.update { it.copy(errorMessage = "Не удалось подключить GitHub-библиотеку") }
+                }
+        }
+    }
+
     /** Connects a local-folder library rooted at [rootPath] (desktop only). */
     fun addLocalLibrary(rootPath: String) {
         if (rootPath.isBlank()) return

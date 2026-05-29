@@ -38,6 +38,7 @@ import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
 import ru.kyamshanov.notepen.document.infrastructure.RegistryFileIdentityCache
 import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
+import ru.kyamshanov.notepen.library.impl.GitHubLibraryBackend
 import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
 import ru.kyamshanov.notepen.library.infrastructure.AndroidLibraryConnectionStore
 import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
@@ -73,6 +74,7 @@ import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
+import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
@@ -225,14 +227,20 @@ class MainActivity : ComponentActivity() {
         val heavyDepsFlow = MutableStateFlow<HeavyDeps?>(null)
 
         // The library shelf is sourced through the :library abstraction. Android is client-only
-        // (decision 4): it never hosts a local-folder library, so only the PeerLan backend is
-        // registered. The backend reuses the existing sync infra — the client-side catalog cache for
-        // listing and the (lazily built) RemoteDocumentOpener for streaming. No peer is connected
-        // here; that happens via LibrarySources (M2c) calling registry.connect(PeerLan(...)). With no
-        // connected library mergedBooks stays empty, so the shelf looks identical to before.
-        // Saved PeerLan libraries persist to library_connections.json under filesDir. Android is
+        // (decision 4): it never hosts a local-folder library, so a local-folder backend is NOT
+        // registered. Two cloud/peer backends are:
+        //  - PeerLan: reuses the existing sync infra — the client-side catalog cache for listing and
+        //    the (lazily built) RemoteDocumentOpener for streaming. No peer is connected here; that
+        //    happens via LibrarySources (M2c) calling registry.connect(PeerLan(...)).
+        //  - GitHub (M3): a cloud client (Android is a GitHub client just like desktop). It reads a
+        //    repo's `books/` folder via the existing GitHubContentsCloudProvider over a dedicated,
+        //    lazily-built CIO client so startup stays cheap; the Librarian role follows a write token.
+        // With no connected library mergedBooks stays empty, so the shelf looks identical to before.
+        // Saved PeerLan/GitHub libraries persist to library_connections.json under filesDir. Android is
         // client-only, so no Local connection is ever persisted (Local backend isn't registered).
         val libraryConnectionStore = AndroidLibraryConnectionStore(context)
+        val githubCacheDir = java.io.File(context.cacheDir, "github-library").absolutePath
+        val githubHttpClient by lazy { HttpClient(CIO) }
         val libraryRegistry =
             DefaultLibraryRegistry(
                 backends =
@@ -241,6 +249,19 @@ class MainActivity : ComponentActivity() {
                             catalogs = remoteCatalogCache.catalogs,
                             documentOpenerProvider = { heavyDepsFlow.value?.remoteDocumentOpener },
                             onlinePeerIds = onlinePeerIdsFlow,
+                        ),
+                        GitHubLibraryBackend(
+                            providerFactory = { coords ->
+                                GitHubContentsCloudProvider(
+                                    httpClient = githubHttpClient,
+                                    owner = coords.owner,
+                                    repo = coords.name,
+                                    branch = coords.branch,
+                                    bearerToken = coords.token,
+                                )
+                            },
+                            cacheDir = githubCacheDir,
+                            ioDispatcher = Dispatchers.IO,
                         ),
                     ),
                 scope = appScope,

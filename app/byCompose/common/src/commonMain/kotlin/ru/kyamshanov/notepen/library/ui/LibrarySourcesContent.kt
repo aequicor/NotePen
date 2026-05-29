@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -33,9 +34,11 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,6 +50,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -60,8 +64,9 @@ import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 /**
  * Экран «Источники библиотек»: список подключённых библиотек (иконка типа,
  * бейдж роли, статус соединения, отключение), кнопка «Добавить библиотеку»
- * (локальная папка — desktop; LAN-пир — из уже сопряжённых; GitHub — заглушка
- * до M3), тумблер «Открывать при старте» и (desktop) «Открыть свою библиотеку».
+ * (локальная папка — desktop; LAN-пир — из уже сопряжённых; GitHub — диалог
+ * с owner/name и токеном, M3), тумблер «Открывать при старте» и (desktop)
+ * «Открыть свою библиотеку».
  *
  * Стиль повторяет [ru.kyamshanov.notepen.appsettings.SettingsContent]:
  * GlassBackdropProvider + LiquidGlassTopBar + скруглённые Surface-строки.
@@ -105,6 +110,7 @@ fun LibrarySourcesContent(
                     }
                 },
                 localFolderSupported = component.onPickLocalFolder != null,
+                onAddGitHub = component.viewModel::addGitHubLibrary,
                 onToggleStartup = component.viewModel::setOpenLibraryAtStartup,
                 onOpenMyLibrary = component.viewModel::openMyLibrary,
             )
@@ -131,6 +137,7 @@ private fun LibrarySourcesList(
     onAddLan: (peerId: String, host: String?) -> Unit,
     onAddLocal: () -> Unit,
     localFolderSupported: Boolean,
+    onAddGitHub: (repo: String, token: String) -> Unit,
     onToggleStartup: (Boolean) -> Unit,
     onOpenMyLibrary: () -> Unit,
 ) {
@@ -166,6 +173,7 @@ private fun LibrarySourcesList(
             localFolderSupported = localFolderSupported,
             onAddLan = onAddLan,
             onAddLocal = onAddLocal,
+            onAddGitHub = onAddGitHub,
         )
 
         SectionHeader("Настройки")
@@ -258,8 +266,10 @@ private fun AddLibraryRow(
     localFolderSupported: Boolean,
     onAddLan: (peerId: String, host: String?) -> Unit,
     onAddLocal: () -> Unit,
+    onAddGitHub: (repo: String, token: String) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    var gitHubDialogVisible by remember { mutableStateOf(false) }
     LibraryRowSurface(
         modifier =
             Modifier.pointerInput(Unit) {
@@ -299,8 +309,21 @@ private fun AddLibraryRow(
                     menuExpanded = false
                     onAddLocal()
                 },
+                onAddGitHub = {
+                    menuExpanded = false
+                    gitHubDialogVisible = true
+                },
             )
         }
+    }
+    if (gitHubDialogVisible) {
+        GitHubLibraryDialog(
+            onDismiss = { gitHubDialogVisible = false },
+            onConfirm = { repo, token ->
+                gitHubDialogVisible = false
+                onAddGitHub(repo, token)
+            },
+        )
     }
 }
 
@@ -312,6 +335,7 @@ private fun AddLibraryMenu(
     localFolderSupported: Boolean,
     onAddLan: (peerId: String, host: String?) -> Unit,
     onAddLocal: () -> Unit,
+    onAddGitHub: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (localFolderSupported) {
@@ -337,15 +361,71 @@ private fun AddLibraryMenu(
                 )
             }
         }
-        // GitHub backend lands in M3; the entry is shown disabled so users discover it
-        // without the option being half-wired (no token field, no read path yet).
         DropdownMenuItem(
-            text = { Text("GitHub (скоро, M3)") },
+            text = { Text("GitHub…") },
             leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null) },
-            enabled = false,
-            onClick = {},
+            onClick = onAddGitHub,
         )
     }
+}
+
+/**
+ * Dialog to add a GitHub-repo library: the user types the `owner/name` slug and an optional
+ * access token. A token grants the Librarian role (upload); leaving it blank connects read-only.
+ * The token is sent as-is to the registry and persisted in plaintext (see [LibraryConnection.GitHub]
+ * KDoc) — the field warns the user accordingly.
+ */
+@Composable
+private fun GitHubLibraryDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (repo: String, token: String) -> Unit,
+) {
+    var repo by remember { mutableStateOf("") }
+    var token by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("GitHub-библиотека") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Репозиторий читается как полка: книги берутся из папки books/.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = repo,
+                    onValueChange = { repo = it },
+                    singleLine = true,
+                    label = { Text("Репозиторий (owner/name)") },
+                    placeholder = { Text("octocat/library") },
+                )
+                OutlinedTextField(
+                    value = token,
+                    onValueChange = { token = it },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    label = { Text("Токен (для записи; необязательно)") },
+                    supportingText = {
+                        Text(
+                            "С токеном — роль Библиотекарь (загрузка). Хранится в открытом виде.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(repo, token) },
+                enabled = repo.trim().trim('/').contains('/'),
+            ) {
+                Text("Подключить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
 }
 
 @Composable

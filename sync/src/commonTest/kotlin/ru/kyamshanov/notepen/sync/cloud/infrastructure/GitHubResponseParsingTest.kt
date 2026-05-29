@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.sync.cloud.infrastructure
 import ru.kyamshanov.notepen.sync.cloud.domain.DeviceTokenResult
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFails
 import kotlin.test.assertTrue
 
 class GitHubResponseParsingTest {
@@ -68,5 +69,19 @@ class GitHubResponseParsingTest {
         assertEquals("book/layer-a.json", file.path)
         assertEquals("newsha", file.sha)
         assertEquals(34L, file.sizeBytes)
+    }
+
+    @Test
+    fun decodesBlobBytesStrippingGitHubLineWraps() {
+        // GitHub wraps blob base64 every 60 chars with newlines; the decoder must strip them.
+        // "%PDF-1.4" base64-encodes to "JVBERi0xLjQ=".
+        val json = """{"content":"JVBERi0x\nLjQ=\n","encoding":"base64"}"""
+        val bytes = decodeBlobBytes(json)
+        assertEquals("%PDF-1.4", bytes.decodeToString())
+    }
+
+    @Test
+    fun rejectsNonBase64BlobEncoding() {
+        assertFails { decodeBlobBytes("""{"content":"plain","encoding":"utf-8"}""") }
     }
 }
