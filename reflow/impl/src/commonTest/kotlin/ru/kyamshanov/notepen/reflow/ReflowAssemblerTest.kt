@@ -331,4 +331,187 @@ class ReflowAssemblerTest {
         val block = ReflowAssembler.assemble(listOf(page(line("3) third list entry", top = 100f)))).blocks.single()
         assertIs<ReflowBlock.ListItem>(block)
     }
+
+    @Test
+    fun `unicode soft hyphen joins across line break regardless of next line casing`() {
+        // U+00AD — типографская подсказка «здесь можно переносить», не часть слова.
+        // Соединяем безусловно, даже если следующая строка начинается с большой буквы
+        // (что нетипично для soft-hyphen-переноса, но возможно в собственных именах).
+        val glyphs = line("inter­", top = 100f) + line("Net", top = 112f)
+        val block = ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single()
+        val paragraph = assertIs<ReflowBlock.Paragraph>(block)
+        assertEquals("interNet", paragraph.text)
+    }
+
+    @Test
+    fun `unicode soft hyphen joins before lowercase as before`() {
+        val glyphs = line("inter­", top = 100f) + line("national", top = 112f)
+        val paragraph = assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals("international", paragraph.text)
+    }
+
+    @Test
+    fun `ascii hyphen still keeps compound word before uppercase next line`() {
+        // Регресс: оставляем существующее поведение для ASCII-дефиса в собственных
+        // словах (Plugin-Name, Anti-American) — там дефис семантический.
+        val glyphs = line("Plugin-", top = 100f) + line("Name follows", top = 112f)
+        val paragraph = assertIs<ReflowBlock.Paragraph>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals("Plugin-Name follows", paragraph.text)
+    }
+
+    @Test
+    fun `heading ensemble accepts large bold line with no terminal punctuation`() {
+        // Заголовок: крупнее body + bold + не кончается точкой. Все 3 сигнала +
+        // mandatory font-ratio — точно heading.
+        val glyphs =
+            line("Section Title", top = 50f, fontSize = 14f, bold = true) +
+                line("body paragraph follows.", top = 100f)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        val heading = assertIs<ReflowBlock.Heading>(blocks[0])
+        assertEquals("Section Title", heading.text)
+        assertIs<ReflowBlock.Paragraph>(blocks[1])
+    }
+
+    @Test
+    fun `xy-cut splits two columns on hybrid pages into reading order left then right`() {
+        // HYBRID = первая страница с текстом + вторая без текста (заставляет classify
+        // вернуть HYBRID, чтобы XY-cut применился — на TEXT_BASED PDF XY-cut пропускаем,
+        // см. ReflowAssembler.assemble).
+        // Глифы: левая колонка (X 50..200) две строки + правая (X 400..550) две строки,
+        // обе на тех же Y. Без XY-cut groupLines склеил бы левую и правую в одну Line
+        // (порядок чтения: «left right left right»). С XY-cut: сначала вся левая, потом
+        // правая.
+        val textPage =
+            page(
+                line("LeftOne", top = 100f, startX = 50f) +
+                    line("LeftTwo", top = 120f, startX = 50f) +
+                    line("RightOne", top = 100f, startX = 400f) +
+                    line("RightTwo", top = 120f, startX = 400f),
+            )
+        val emptyPage = page(glyphs = emptyList(), pageIndex = 1)
+        val blocks = ReflowAssembler.assemble(listOf(textPage, emptyPage)).blocks
+        // Порядок blocks — это «валюта» reading order: сначала все блоки левой колонки,
+        // потом правой. С Y-gap 20 pt и default font 10 pt разрывы абзацев попадают,
+        // но проверяем именно ПОРЯДОК (а не количество блоков).
+        val leftBlocks = blocks.indices.filter { idx -> blocks[idx].textOrEmpty().contains("Left") }
+        val rightBlocks = blocks.indices.filter { idx -> blocks[idx].textOrEmpty().contains("Right") }
+        assertTrue(leftBlocks.isNotEmpty(), "expected blocks containing 'Left' text")
+        assertTrue(rightBlocks.isNotEmpty(), "expected blocks containing 'Right' text")
+        assertTrue(
+            leftBlocks.max() < rightBlocks.min(),
+            "all Left blocks must precede Right blocks in reading order " +
+                "(left indices=$leftBlocks, right indices=$rightBlocks)",
+        )
+    }
+
+    /** Текст блока, если применимо; иначе пусто. Для проверки порядка XY-cut. */
+    private fun ReflowBlock.textOrEmpty(): String =
+        when (this) {
+            is ReflowBlock.Paragraph -> text
+            is ReflowBlock.Heading -> text
+            is ReflowBlock.ListItem -> text
+            is ReflowBlock.Blockquote -> text
+            else -> ""
+        }
+
+    @Test
+    fun `flat list items get level 0`() {
+        // Все элементы на одном отступе — все level 0.
+        val glyphs =
+            line("- first item", top = 100f, startX = 50f) +
+                line("- second item", top = 112f, startX = 50f) +
+                line("- third item", top = 124f, startX = 50f)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        val items = blocks.filterIsInstance<ReflowBlock.ListItem>()
+        assertEquals(3, items.size)
+        assertTrue(items.all { it.level == 0 }, "expected all level 0, got ${items.map { it.level }}")
+    }
+
+    @Test
+    fun `nested list items get level 1 by deeper indent`() {
+        // Маркер на startX=110 при ширине страницы 600 → indent ≈ 0.183.
+        // Первый маркер на 50 → 0.083. Разница 0.10 >> LIST_INDENT_TOLERANCE_NORM 0.015.
+        val glyphs =
+            line("- outer one", top = 100f, startX = 50f) +
+                line("- nested one", top = 112f, startX = 110f) +
+                line("- nested two", top = 124f, startX = 110f) +
+                line("- outer two", top = 136f, startX = 50f)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        val items = blocks.filterIsInstance<ReflowBlock.ListItem>()
+        assertEquals(4, items.size)
+        assertEquals(listOf(0, 1, 1, 0), items.map { it.level }, "outer→nested→nested→outer")
+    }
+
+    @Test
+    fun `list flow resets after paragraph interruption`() {
+        // Список → абзац → новый список: счётчик уровней начинается с 0 заново,
+        // даже если отступ нового маркера больше старого.
+        val glyphs =
+            line("- first list item", top = 100f, startX = 110f) +
+                line("regular paragraph here", top = 200f, startX = 50f) +
+                line("- second list", top = 300f, startX = 110f)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        val items = blocks.filterIsInstance<ReflowBlock.ListItem>()
+        assertEquals(2, items.size)
+        assertEquals(0, items[0].level, "первый list-элемент потока = 0")
+        assertEquals(0, items[1].level, "после абзаца счётчик обнуляется")
+    }
+
+    @Test
+    fun `heading ensemble rejects slightly larger font with terminal period and no other signals`() {
+        // Раньше: font 1.2× body → точно heading. Теперь: нужен secondary signal,
+        // которого нет (не bold, период в конце), поэтому остаётся абзацем.
+        // Защита от false positive «слегка крупнее, но не заголовок».
+        val glyphs =
+            line("Slightly bigger first sentence.", top = 50f, fontSize = 12f) +
+                line("regular body text continues here", top = 80f)
+        val blocks = ReflowAssembler.assemble(listOf(page(glyphs))).blocks
+        // Обе строки оказываются в одном Paragraph (либо в двух — главное, что не Heading).
+        assertTrue(blocks.all { it !is ReflowBlock.Heading }, "no heading expected, got $blocks")
+    }
+
+    @Test
+    fun `real four-row three-column table stays as table with high confidence`() {
+        // Чистая узкокелейная таблица: реальные данные — короткие cells, много строк,
+        // плотно заполнено. Stream-детектор должен выдать высокий confidence (>0.5) и
+        // оставить блок Table, а не подменить на Figure-фолбэк.
+        val rows =
+            listOf(
+                listOf("Name", "Type", "Default"),
+                listOf("Age", "Int", "Zero"),
+                listOf("City", "Text", "None"),
+                listOf("Tags", "List", "Empty"),
+            )
+        val starts = listOf(50f, 250f, 450f)
+        val tops = listOf(100f, 130f, 160f, 190f)
+        val glyphs =
+            rows.flatMapIndexed { rowIdx, row ->
+                row.flatMapIndexed { colIdx, text ->
+                    line(text, top = tops[rowIdx], startX = starts[colIdx])
+                }
+            }
+        val table = assertIs<ReflowBlock.Table>(ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single())
+        assertEquals(4, table.rows.size)
+        assertTrue(table.confidence > 0.5f, "expected high confidence (>0.5), got ${table.confidence}")
+    }
+
+    @Test
+    fun `wide-cell prose false-positive falls back to figure crop`() {
+        // Случай defect (a): 3 строки × 2 «колонки», каждая ячейка — длинный кусок
+        // текста (~60 символов). Stream-детектор по выровненным левым краям ставит
+        // таблицу, но lengthPenalty уводит confidence ниже порога — пост-пасс
+        // подменяет на Figure-кроп исходной страницы. Лучше показать crop, чем
+        // ломать вёрстку «таблицей», в которую втянулся соседний абзац.
+        val cellText = "A".repeat(60)
+        // charWidth=3pt → 60 chars = 180pt; стартX=50 → правый край 230;
+        // вторая колонка startX=270 (gap=40pt > COLUMN_GAP_FACTOR×fontSize=15pt).
+        val tops = listOf(100f, 130f, 160f)
+        val glyphs =
+            tops.flatMap { top ->
+                line(cellText, top = top, startX = 50f, charWidth = 3f) +
+                    line(cellText, top = top, startX = 270f, charWidth = 3f)
+            }
+        val block = ReflowAssembler.assemble(listOf(page(glyphs))).blocks.single()
+        assertIs<ReflowBlock.Figure>(block)
+    }
 }

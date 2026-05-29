@@ -71,6 +71,13 @@ public sealed interface ReflowBlock {
     public data class ListItem(
         public val text: String,
         public val source: List<SourceSpan> = emptyList(),
+        /**
+         * Уровень вложенности списка: `0` — верхний уровень, `1` — первый
+         * sub-уровень, и т.д. Определяется ассемблером по отступу маркера
+         * (см. `BlockBuilder.computeListLevel`). UI может использовать для
+         * визуального indent'а; default `0` сохраняет BC для плоских списков.
+         */
+        public val level: Int = 0,
     ) : ReflowBlock
 
     /**
@@ -79,9 +86,17 @@ public sealed interface ReflowBlock {
      * нескольких строках), поэтому реконструкция приблизительная.
      *
      * @property rows строки таблицы сверху вниз; первая обычно — заголовок
+     * @property confidence агрегатная уверенность Stream-детектора: 1f — таблица
+     *   чистая (много строк, плотно заполнена короткими ячейками, колонки строго
+     *   выровнены); 0f — почти наверняка ложное срабатывание (широкая ячейка-абзац
+     *   или OCR-шум). Reader-пайплайн при низкой уверенности подменяет таблицу
+     *   на [Figure]-кроп исходной страницы — лучше показать картинкой, чем тащить
+     *   соседний абзац в Table. Значение определяется на этапе сборки документа
+     *   и не меняется в ридере.
      */
     public data class Table(
         public val rows: List<TableRow>,
+        public val confidence: Float = 1f,
     ) : ReflowBlock
 
     /**
@@ -125,6 +140,14 @@ public sealed interface ReflowBlock {
         public val pageIndex: Int,
         public val bounds: ReflowRect,
         public val aspectRatio: Float,
+        /**
+         * Внутренний маркер пайплайна: `true`, если Figure родилась из low-confidence
+         * Stream-table fallback (см. `ReflowAssembler.tableAsFigureFallback`). Lattice-
+         * рефайнер берёт такие фигуры в работу — пытается восстановить таблицу по
+         * нарисованной сетке. UI не должен полагаться на флаг; default `false`
+         * сохраняет BC для обычных image-фигур.
+         */
+        public val wasTableFallback: Boolean = false,
     ) : ReflowBlock
 
     /**

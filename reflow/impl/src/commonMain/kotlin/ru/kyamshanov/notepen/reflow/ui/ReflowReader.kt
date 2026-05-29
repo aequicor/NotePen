@@ -75,6 +75,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -84,6 +85,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.Hyphens
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -157,6 +159,13 @@ internal val LocalFigureBitmapCache: ProvidableCompositionLocal<SnapshotStateMap
  *   страничном режиме прокручивает [HorizontalPager] до нужной страницы; в скролл-режиме
  *   — прокрутка на дельту экранов ([listState]). Нужен, чтобы аппаратные клавиши
  *   (стрелки/громкость/Space) и тап-зоны по краям листали ридер.
+ * @param initialAnchor якорь, с которого открыть документ (последняя сохранённая позиция
+ *   чтения). Читается один раз при заходе ридера в композицию для текущего [document];
+ *   далее живёт во внутреннем стейте и публикуется через [onReadingAnchorChange]. Phase A
+ *   использует только `blockIndex`; `charStart` зарезервирован под Phase B.
+ * @param onReadingAnchorChange колбэк изменения якоря чтения — для персиста на диск
+ *   (writer перевёрстки, режим страница/скролл, ре-пагинация). Сюда летят и «логические»
+ *   обновления (paged.snapshotFlow, scroll.firstVisibleItem), и первичная инициализация.
  *
  * Выделение текста для создания подсветок доступно в режиме чтения всегда и охватывает
  * несколько абзацев (сквозной жест на контейнере, см. [reflowSelectionDrag]); на
@@ -180,6 +189,8 @@ public fun ReflowReader(
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit = {},
     navigateToBlock: MutableState<Int?> = remember { mutableStateOf(null) },
     onFirstBlockChange: (Int) -> Unit = {},
+    initialAnchor: TextAnchor = TextAnchor.START,
+    onReadingAnchorChange: (TextAnchor) -> Unit = {},
 ) {
     // Высота вьюпорта ридера в px — нужна и для зажима вертикальных полей (ниже), и для
     // шага «листнуть страницу» в скролл-режиме. Меряем корневой Box (см. onSizeChanged).
@@ -255,9 +266,14 @@ public fun ReflowReader(
     val latestOnFirstBlockChange = rememberUpdatedState(onFirstBlockChange)
     LaunchedEffect(firstVisibleBlock) { latestOnFirstBlockChange.value(firstVisibleBlock) }
     // Якорь чтения, общий для обоих режимов: сохраняет место при переключении
-    // страница<->скролл. Paged пишет его через onVisibleBlockChange; скролл отслеживает
-    // первый видимый элемент (эффекты ниже).
-    var readingAnchor by remember(document) { mutableStateOf(0) }
+    // страница<->скролл и при ре-пагинации (смена шрифта/полей/ориентации) — номер
+    // страницы выводится из него, а не наоборот. Paged пишет его через
+    // onVisibleAnchorChange; скролл отслеживает первый видимый элемент (эффекты ниже).
+    // Seed — последняя сохранённая позиция (initialAnchor); по изменениям публикуется
+    // наружу через onReadingAnchorChange (см. эффект ниже).
+    var readingAnchor by remember(document) { mutableStateOf(initialAnchor) }
+    val latestOnReadingAnchorChange = rememberUpdatedState(onReadingAnchorChange)
+    LaunchedEffect(readingAnchor) { latestOnReadingAnchorChange.value(readingAnchor) }
     val progressLabel =
         remember(settings.progress, firstVisibleBlock, document) {
             progressLabel(settings.progress, firstVisibleBlock, document)
@@ -324,12 +340,13 @@ public fun ReflowReader(
         if (!positionBridgeReady) {
             positionBridgeReady = true
         } else if (!settings.paged) {
-            listState.scrollToItem(readingAnchor.coerceAtLeast(0))
+            listState.scrollToItem(readingAnchor.blockIndex.coerceAtLeast(0))
         }
     }
     LaunchedEffect(settings.paged, listState) {
         if (!settings.paged) {
-            snapshotFlow { listState.firstVisibleItemIndex }.collect { readingAnchor = it }
+            snapshotFlow { listState.firstVisibleItemIndex }
+                .collect { readingAnchor = TextAnchor.ofBlock(it) }
         }
     }
 
@@ -450,9 +467,9 @@ public fun ReflowReader(
                         anchorsByBlock = anchorsByBlock,
                         settings = settings,
                         renderPage = renderPage,
-                        initialAnchorBlock = readingAnchor,
-                        onVisibleBlockChange = {
-                            pagedFirstBlock = it
+                        initialAnchor = readingAnchor,
+                        onVisibleAnchorChange = {
+                            pagedFirstBlock = it.blockIndex
                             readingAnchor = it
                         },
                         onPageDeltaReady = setPageDelta,
@@ -641,6 +658,75 @@ private fun BoxScope.ScrollReflowContent(
 }
 
 /**
+ * Phase B precision (read-side): уточняет номер страницы внутри блока, растянутого на
+ * несколько окон. [basePage] приходит из [ReaderPagination.pageForAnchor] — это первая
+ * страница, открывающая `anchor.blockIndex`. Если `anchor.charStart > 0`, переводим его
+ * в номер строки ([BlockHeightCalculator.lineForCharStart]) и затем в Y внутри блока
+ * через закэшированные `lineBottoms`. Дальше [ReaderPagination.pageWithinBlockForY]
+ * выбирает последнее окно внутри блока с `firstBlockOffsetPx ≤ Y`.
+ *
+ * Откат к [basePage]: отсутствие блока / неделимый блок / `lineBottoms` ещё не готов /
+ * line за пределами замеренного — во всех случаях лучше встать на начало блока, чем
+ * на чужую страницу.
+ *
+ * Top-level (а не приватный метод [PagedReflowContent]): композайбл уже большой, плюс
+ * у такого вынесения нулевой ремембер-state и можно потенциально гонять на
+ * Dispatchers.Default (см. [LaunchedEffect(windows)]).
+ */
+private fun refinePageForCharStart(
+    windows: List<ReaderPagination.PageWindow>,
+    basePage: Int,
+    anchor: TextAnchor,
+    blocks: List<ReflowBlock>,
+    lineBottoms: Map<Int, List<Float>>,
+    contentWidthPx: Int,
+    settings: ReflowReaderSettings,
+    textMeasurer: TextMeasurer,
+    density: Density,
+): Int {
+    val targetY =
+        anchorLineTopY(
+            anchor = anchor,
+            blocks = blocks,
+            lineBottoms = lineBottoms,
+            contentWidthPx = contentWidthPx,
+            settings = settings,
+            textMeasurer = textMeasurer,
+            density = density,
+        ) ?: return basePage
+    return ReaderPagination.pageWithinBlockForY(windows, basePage, anchor.blockIndex, targetY)
+}
+
+/**
+ * Y верха строки якоря в системе координат блока — `lineBottoms[line-1]` (низ
+ * предыдущей строки = верх нашей). `null` означает «уточнение неприменимо»: charStart=0
+ * (начало блока), блок отсутствует/не-делимый (lineForCharStart=0), lineBottoms ещё
+ * не готов, или строка вне замеренного диапазона.
+ */
+private fun anchorLineTopY(
+    anchor: TextAnchor,
+    blocks: List<ReflowBlock>,
+    lineBottoms: Map<Int, List<Float>>,
+    contentWidthPx: Int,
+    settings: ReflowReaderSettings,
+    textMeasurer: TextMeasurer,
+    density: Density,
+): Float? {
+    val block = blocks.getOrNull(anchor.blockIndex)
+    if (anchor.charStart <= 0 || block == null) return null
+    val line =
+        BlockHeightCalculator.lineForCharStart(
+            block = block,
+            contentWidthPx = contentWidthPx,
+            settings = settings,
+            textMeasurer = textMeasurer,
+            density = density,
+            charStart = anchor.charStart,
+        )
+    return if (line <= 0) null else lineBottoms[anchor.blockIndex].orEmpty().getOrNull(line - 1)
+}
+
+/**
  * Страничный режим: измеряет высоты блоков при текущей ширине колонки, раскладывает
  * их по страницам ([ReaderPagination]) и отображает через [HorizontalPager].
  * Пейджер: padding + clipToBounds вынесены на контейнер, а не на каждую страницу —
@@ -653,8 +739,8 @@ private fun PagedReflowContent(
     anchorsByBlock: Map<Int, List<TextAnchor>>,
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
-    initialAnchorBlock: Int,
-    onVisibleBlockChange: (Int) -> Unit,
+    initialAnchor: TextAnchor,
+    onVisibleAnchorChange: (TextAnchor) -> Unit,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit,
     navigateToBlock: MutableState<Int?>,
 ) {
@@ -913,20 +999,46 @@ private fun PagedReflowContent(
 
         val lastPage = windows.lastIndex
         val scope = rememberCoroutineScope()
-        // Якорь чтения — индекс блока в начале текущей страницы. Durable: переживает
-        // ре-пагинацию (смена кегля/полей) и переключение страница<->скролл. Номер страницы
-        // выводим из него после раскладки — сам номер нестабилен при переверстке.
-        var anchorBlock by remember(document) { mutableStateOf(initialAnchorBlock) }
+        // Якорь чтения — TextAnchor начала текущей страницы. Durable: переживает
+        // ре-пагинацию (смена кегля/полей/ориентации) и переключение страница<->скролл.
+        // Номер страницы выводим из него после раскладки — сам номер нестабилен при
+        // переверстке. Phase B: учитываем charStart для блока, растянутого на много
+        // страниц (мапим строку → смещение px → нужное окно).
+        var anchor by remember(document) { mutableStateOf(initialAnchor) }
         val initialPage =
             remember(document) {
-                windows.indexOfLast { it.firstBlock <= anchorBlock }.coerceIn(0, lastPage)
+                refinePageForCharStart(
+                    windows = windows,
+                    basePage = ReaderPagination.pageForAnchor(windows, anchor),
+                    anchor = anchor,
+                    blocks = document.blocks,
+                    lineBottoms = lineBottoms,
+                    contentWidthPx = contentWidthPx,
+                    settings = settings,
+                    textMeasurer = textMeasurer,
+                    density = density,
+                )
             }
         val pagerState = rememberPagerState(initialPage = initialPage) { windows.size }
         // Ре-пагинация: встаём на страницу, открывающуюся якорным блоком (не на тот же
-        // номер) — место чтения сохраняется при смене кегля/полей.
+        // номер) — место чтения сохраняется при смене кегля/полей. Тяжёлый measure
+        // (до ~50 ms для блока-главы EPUB) уносим на Default, чтобы не блокировать main.
         LaunchedEffect(windows) {
-            val target = windows.indexOfLast { it.firstBlock <= anchorBlock }
-            val newPage = (if (target >= 0) target else pagerState.currentPage).coerceIn(0, lastPage)
+            val base = ReaderPagination.pageForAnchor(windows, anchor)
+            val newPage =
+                withContext(Dispatchers.Default) {
+                    refinePageForCharStart(
+                        windows = windows,
+                        basePage = base,
+                        anchor = anchor,
+                        blocks = document.blocks,
+                        lineBottoms = lineBottoms,
+                        contentWidthPx = contentWidthPx,
+                        settings = settings,
+                        textMeasurer = textMeasurer,
+                        density = density,
+                    )
+                }
             if (newPage != pagerState.currentPage) pagerState.scrollToPage(newPage)
         }
         val pagedBlockTarget by navigateToBlock
@@ -938,11 +1050,35 @@ private fun PagedReflowContent(
             navigateToBlock.value = null
         }
         // Первый блок текущей страницы = якорь; публикуем наружу (прогресс + смена режима).
+        // Phase B: вычисляем charStart по firstBlockOffsetPx → строка → начало строки в
+        // тексте блока (один measure firstBlock на смену страницы; Default для патологии).
         LaunchedEffect(pagerState, windows) {
             snapshotFlow { pagerState.currentPage }.collect { pageIndex ->
-                val first = windows.getOrNull(pageIndex)?.firstBlock ?: 0
-                anchorBlock = first
-                onVisibleBlockChange(first)
+                val window = windows.getOrNull(pageIndex)
+                val first = window?.firstBlock ?: 0
+                val charStart =
+                    if (window != null && window.firstBlockOffsetPx > 0) {
+                        val block = document.blocks.getOrNull(first)
+                        if (block != null) {
+                            withContext(Dispatchers.Default) {
+                                BlockHeightCalculator.charStartAtOffsetPx(
+                                    block = block,
+                                    contentWidthPx = contentWidthPx,
+                                    settings = settings,
+                                    textMeasurer = textMeasurer,
+                                    density = density,
+                                    offsetPx = window.firstBlockOffsetPx.toFloat(),
+                                )
+                            }
+                        } else {
+                            0
+                        }
+                    } else {
+                        0
+                    }
+                val next = TextAnchor(blockIndex = first, charStart = charStart, charEnd = charStart)
+                anchor = next
+                onVisibleAnchorChange(next)
             }
         }
 
@@ -1069,7 +1205,11 @@ private fun ReflowBlockView(
             )
 
         is ReflowBlock.ListItem ->
-            Box(Modifier.padding(start = settings.contentPadding)) {
+            // Уровень вложенности → дополнительный indent: каждый вложенный уровень
+            // добавляет ещё один contentPadding слева. Самый верхний уровень (level=0)
+            // — один contentPadding (как и было). Phase A: визуальный indent;
+            // bullet/numbering glyph остаётся частью block.text.
+            Box(Modifier.padding(start = settings.contentPadding * (block.level + 1))) {
                 SelectableReflowText(
                     content = BlockContent(block.text, block.source),
                     anchors = anchors,

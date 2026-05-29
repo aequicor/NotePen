@@ -101,6 +101,10 @@ private data class AnnotationViewStateDto(
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
     val readingMode: Boolean = false,
+    // Дефолты сохраняют BC с легаси-сайдкарами без reflow-якоря: read даст 0/0,
+    // что эквивалентно «открыть с начала» (так же, как для свежего документа).
+    val reflowAnchorBlockIndex: Int = 0,
+    val reflowAnchorCharStart: Int = 0,
 )
 
 @Serializable
@@ -239,9 +243,17 @@ class AnnotationRepositoryJvmAndroid(
                 // тут не передаётся (это сейв штрихов) — сохраняем уже записанный, чтобы не
                 // затереть режим чтения; его пишет отдельный saveViewState.
                 val viewFile = viewFileFor(file)
-                val preservedReadingMode = readReadingMode(viewFile)
+                val preserved = readPreservedReadingState(viewFile)
                 writeAtomically(viewFile) { out ->
-                    val viewDto = AnnotationViewStateDto(scale, currentPage, currentPageOffset, preservedReadingMode)
+                    val viewDto =
+                        AnnotationViewStateDto(
+                            scale = scale,
+                            currentPage = currentPage,
+                            currentPageOffset = currentPageOffset,
+                            readingMode = preserved.readingMode,
+                            reflowAnchorBlockIndex = preserved.reflowAnchorBlockIndex,
+                            reflowAnchorCharStart = preserved.reflowAnchorCharStart,
+                        )
                     writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
                 }
                 Result.success(Unit)
@@ -309,7 +321,14 @@ class AnnotationRepositoryJvmAndroid(
                             json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
                         }
                     Result.success(
-                        AnnotationViewState(dto.scale, dto.currentPage, dto.currentPageOffset, dto.readingMode),
+                        AnnotationViewState(
+                            scale = dto.scale,
+                            currentPage = dto.currentPage,
+                            currentPageOffset = dto.currentPageOffset,
+                            readingMode = dto.readingMode,
+                            reflowAnchorBlockIndex = dto.reflowAnchorBlockIndex,
+                            reflowAnchorCharStart = dto.reflowAnchorCharStart,
+                        ),
                     )
                 }
             } catch (e: Exception) {
@@ -332,6 +351,8 @@ class AnnotationRepositoryJvmAndroid(
                             currentPage = viewState.currentPage,
                             currentPageOffset = viewState.currentPageOffset,
                             readingMode = viewState.readingMode,
+                            reflowAnchorBlockIndex = viewState.reflowAnchorBlockIndex,
+                            reflowAnchorCharStart = viewState.reflowAnchorCharStart,
                         )
                     writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
                 }
@@ -344,18 +365,37 @@ class AnnotationRepositoryJvmAndroid(
     /** Имя лёгкого сайдкара состояния вида рядом с основным файлом аннотаций. */
     private fun viewFileFor(annotationFile: File): File = File(annotationFile.parentFile, "${annotationFile.name}.view")
 
-    /** Читает уже записанный режим чтения из сайдкара (для preserve в [save]); `false`, если файла/поля нет. */
+    /**
+     * Состояние чтения, которое нужно сохранить при перезаписи [save] (там пишутся
+     * масштаб/страница/смещение, но не reflow-поля и режим — они принадлежат
+     * отдельному [saveViewState]). Возвращает дефолты, если файла/полей нет.
+     */
     @OptIn(ExperimentalSerializationApi::class)
-    private fun readReadingMode(viewFile: File): Boolean =
+    private fun readPreservedReadingState(viewFile: File): PreservedReadingState =
         if (viewFile.exists()) {
             runCatching {
                 viewFile.inputStream().buffered().use { input ->
-                    json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
-                }.readingMode
-            }.getOrDefault(false)
+                    val dto = json.decodeFromStream(AnnotationViewStateDto.serializer(), input)
+                    PreservedReadingState(
+                        readingMode = dto.readingMode,
+                        reflowAnchorBlockIndex = dto.reflowAnchorBlockIndex,
+                        reflowAnchorCharStart = dto.reflowAnchorCharStart,
+                    )
+                }
+            }.getOrDefault(PreservedReadingState.Empty)
         } else {
-            false
+            PreservedReadingState.Empty
         }
+
+    private data class PreservedReadingState(
+        val readingMode: Boolean,
+        val reflowAnchorBlockIndex: Int,
+        val reflowAnchorCharStart: Int,
+    ) {
+        companion object {
+            val Empty = PreservedReadingState(false, 0, 0)
+        }
+    }
 
     /** Пишет [file] через временный файл + rename, чтобы прерывание не оставило битый JSON. */
     private fun writeAtomically(

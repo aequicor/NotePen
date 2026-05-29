@@ -5,6 +5,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
@@ -30,10 +31,27 @@ internal class DiskCachingPdfReflowExtractor(
 ) : PdfReflowExtractor {
     override suspend fun probe(path: String): PdfContentKind = delegate.probe(path)
 
-    override suspend fun extract(path: String): ReflowDocument {
+    override suspend fun extract(path: String): ReflowDocument = readOrExtract(path) { delegate.extract(path) }
+
+    /**
+     * Кэш-семантика для [extractWithLattice]: hit → отдаём кэш (там УЖЕ может лежать
+     * Lattice-уточнённый документ — формат сохраняет Table/Figure-структуру; флаги вроде
+     * `wasTableFallback`/`Table.confidence` теряются, но не нужны при чтении). Miss →
+     * прогоняем через делегата с Lattice и кэшируем результат. Так первая reader-mode
+     * сессия пишет уточнённый документ, а последующие открытия мгновенно его поднимают.
+     */
+    override suspend fun extractWithLattice(
+        path: String,
+        pageBitmaps: PageBitmapProvider,
+    ): ReflowDocument = readOrExtract(path) { delegate.extractWithLattice(path, pageBitmaps) }
+
+    private suspend fun readOrExtract(
+        path: String,
+        actualExtract: suspend () -> ReflowDocument,
+    ): ReflowDocument {
         val cached = cache.read(path)
         if (cached != null) return cached
-        val doc = delegate.extract(path)
+        val doc = actualExtract()
         writeScope.launch {
             runCatching { cache.write(path, doc) }
                 .onFailure { e -> decoratorLogger.warn(e) { "PdfReflow: cache write async failed" } }

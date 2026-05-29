@@ -5,6 +5,7 @@ import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
+import ru.kyamshanov.notepen.reflow.segmentation.XyCutSegmenter
 import kotlin.math.abs
 
 /**
@@ -26,8 +27,13 @@ import kotlin.math.abs
  *     символов в итоговом тексте блока.
  */
 internal object ReflowAssembler {
-    /** Кегль строки относительно основного, начиная с которого она — заголовок. */
-    private const val HEADING_RATIO = 1.2f
+    /**
+     * Минимальный кегль строки относительно основного для сигнала «крупный шрифт»
+     * в heading ensemble. Снижен с 1.2 до 1.15: раньше использовался как
+     * единственный жёсткий критерий, теперь — один из 4 сигналов (ensemble требует
+     * ≥2, см. [HEADING_ENSEMBLE_MIN_SIGNALS]).
+     */
+    private const val HEADING_RATIO = 1.15f
 
     /** Порог смены кегля (доля основного), разрывающий абзац. */
     private const val FONT_CHANGE_FRAC = 0.15f
@@ -88,11 +94,43 @@ internal object ReflowAssembler {
     /** Дефисы, снимаемые при переносе слова на конце строки: ASCII, типографский (‐), мягкий. */
     private const val HYPHEN_CHARS = "-‐­"
 
+    /** Unicode soft hyphen U+00AD — типографская подсказка, что слово можно перенести. */
+    private const val SOFT_HYPHEN = '­'
+
     /** Знаки препинания, примыкающие к предыдущему слову: перед ними пробел не ставится. */
     private const val TRAILING_PUNCT = ",.;:!?)]}»…"
 
     private const val HEADING_LEVEL_1_RATIO = 1.8f
     private const val HEADING_LEVEL_2_RATIO = 1.4f
+
+    /**
+     * Доля typicalPitch, начиная с которой зазор перед строкой считается «над
+     * заголовком». 1.5× — мягче breaksParagraph (тот аддитивный, см.
+     * PARA_PITCH_MARGIN_FRAC); ensemble требует ≥2 сигналов, так что отдельный
+     * gap-сигнал может и не закрепить heading — это допустимо.
+     */
+    private const val HEADING_GAP_FACTOR = 1.5f
+
+    /**
+     * Сколько secondary-сигналов из 3 нужно подкрепить mandatory-сигнал «крупный
+     * кегль» ([HEADING_RATIO]), чтобы строка стала заголовком:
+     * boldMajority, gapAbove≥[HEADING_GAP_FACTOR]×typicalPitch, noTerminalPunct.
+     *
+     * Подход: font-ratio ≥ 1.15 — обязателен (sentence-style секций без
+     * увеличения кегля в реальных PDF почти не бывает; их попытка детекции даёт
+     * слишком много false positives на bold-inline в обычном абзаце). Плюс ≥1
+     * secondary — отсекает «слегка крупнее» лишённые типографских признаков
+     * строки, которые раньше детектились как heading на одном font-ratio.
+     */
+    private const val HEADING_SECONDARY_SIGNALS_MIN = 1
+
+    /**
+     * Терминальные знаки конца предложения: после них строка скорее завершает
+     * абзац, а не открывает раздел. Двоеточие и точка с запятой — пограничные:
+     * иногда подзаголовок-определение (`Note:`), иногда конец списка-фразы;
+     * включаем, потому что в типичных PDF это чаще конец предложения.
+     */
+    private const val SENTENCE_TERMINATORS = ".!?…:;"
 
     /** Горизонтальный зазор (доля кегля), начиная с которого это граница колонок таблицы. */
     private const val COLUMN_GAP_FACTOR = 1.5f
@@ -105,6 +143,57 @@ internal object ReflowAssembler {
 
     /** Сколько подряд не-колоночных строк (переносы ячеек) допускается между строками таблицы. */
     private const val MAX_TABLE_GAP_LINES = 2
+
+    /**
+     * Порог числа глифов, ниже которого XY-cut сегментацию пропускаем: на маленьких
+     * страницах (заглушки, единичные строки) recursive split не даёт пользы и тратит
+     * время впустую. ≈ 20 глифов = типичная короткая строка/заголовок.
+     */
+    private const val MIN_GLYPHS_FOR_XY_CUT = 20
+
+    /**
+     * Допуск выравнивания левых краёв подряд идущих list-маркеров (нормализованный
+     * к ширине страницы): отступы в пределах этого порога считаются одним уровнем
+     * вложенности. ≈ 1.5% ширины страницы — пограничный между типичной шириной
+     * буквы (1–1.5%) и заметным indent'ом nested-списка (3–5%).
+     */
+    private const val LIST_INDENT_TOLERANCE_NORM = 0.015f
+
+    /**
+     * Полный credit `rowFactor` — c этого числа строк таблица перестаёт штрафоваться
+     * за «короткость». 2-строчная (key-value) тоже легитимна, поэтому базис rowFactor
+     * непустой (см. [computeTableConfidence]).
+     */
+    private const val TABLE_FULL_CREDIT_ROWS = 4
+
+    /**
+     * Граница средней длины ячейки (символов), на которой `lengthPenalty` обнуляется.
+     * Реальные таблицы — короткие cells (5–30 символов); 100+ — почти всегда «втянутый»
+     * абзац из соседней колонки на wide-cell/OCR случае.
+     */
+    private const val TABLE_MAX_TYPICAL_CELL_CHARS = 100f
+
+    /**
+     * Граница confidence, ниже которой таблица заменяется на [ReflowBlock.Figure]-кроп
+     * исходной страницы (см. пост-пасс в [buildPageBlocks]). 0.4 — компромисс между
+     * сохранением 2-строчных key-value таблиц с короткими ячейками (conf ~0.7) и
+     * отсечением широких false-positive с длинной прозой в ячейках (conf < 0.4).
+     */
+    private const val TABLE_CONFIDENCE_THRESHOLD = 0.4f
+
+    /**
+     * Жёсткий потолок числа колонок: при таком и более колонок «таблица»
+     * гарантированно считается false positive — реальных таблиц с 30+ колонок
+     * в типичных документах не бывает (на учебнике Барановской наблюдаемые
+     * false positives имели 30–56 колонок: pseudo-row aligned exercise-текст).
+     *
+     * Реализуется как бинарная отсечка `colsPenalty = if (cols >= LIMIT) 0 else 1` —
+     * мягкая линейная пеналь (12/20 или 15/25) уносила в Figure-фолбэк сотни
+     * легитимных таблиц с conf 0.4–0.5 (~340K символов теряли searchability).
+     * Бинарная отсечка сохраняет промежуточные ширины и фильтрует только явные
+     * аномалии.
+     */
+    private const val TABLE_COLS_HARD_LIMIT = 30
 
     /**
      * Классифицирует тип содержимого по наличию текстового слоя на страницах.
@@ -124,14 +213,54 @@ internal object ReflowAssembler {
      * страницы конкатенируются (постраничная вёрстка снимается).
      */
     fun assemble(pages: List<RawPage>): ReflowDocument {
+        val kind = classify(pages)
         val bodyFont = medianFontSize(pages.flatMap { it.glyphs })
-        val pageLines = pages.map { it to groupLines(it.glyphs, bodyFont, it) }
+        // XY-cut сегментация ДО groupLines — только для OCR/HYBRID PDF, где
+        // text-layer noisy и groupLines склеивает глифы разных колонок одной Y
+        // в одну Line (с перепутанным порядком «leftcol1 rightcol1»). Для
+        // TEXT_BASED PDF не применяем: PDFTextStripper там даёт чистую
+        // последовательность, плюс table-extraction (detectTableRanges) видит
+        // table-column gaps теми же сигналами, что XY-cut, и сегментация
+        // разрезала бы таблицы по колонкам, ломая их.
+        val flatPages =
+            if (kind == PdfContentKind.TEXT_BASED) pages else pages.flatMap { segmentPage(it) }
+        val pageLines = flatPages.map { it to groupLines(it.glyphs, bodyFont, it) }
         // Шаг строк (baseline-to-baseline) стабилен к вариации высоты глиф-бокса
         // между шрифтами/версиями PDFBox, в отличие от зазора по нижнему краю
         // бокса, — поэтому разрыв абзаца считаем по нему.
         val typicalPitch = typicalLinePitch(pageLines.map { it.second })
         val blocks = pageLines.flatMap { (page, lines) -> buildPageBlocks(page, lines, bodyFont, typicalPitch) }
-        return ReflowDocument(kind = classify(pages), blocks = blocks)
+        return ReflowDocument(kind = kind, blocks = blocks)
+    }
+
+    /**
+     * Делит [page] на регионы XY-cut'ом. Однорегионная страница возвращается как
+     * есть (нет лишних аллокаций); многорегионная — как список sub-RawPage'ей в
+     * порядке чтения. Images навешиваются на ПЕРВУЮ sub-страницу: правильное
+     * распределение по регионам — отдельная задача (multi-column docs c figures
+     * имеют known-limitation на этом этапе).
+     */
+    private fun segmentPage(page: RawPage): List<RawPage> {
+        val regions =
+            if (page.glyphs.size >= MIN_GLYPHS_FOR_XY_CUT) {
+                XyCutSegmenter.segment(
+                    glyphRects = page.glyphs.map { it.rect },
+                    pageWidthPt = page.widthPt,
+                    pageHeightPt = page.heightPt,
+                )
+            } else {
+                emptyList()
+            }
+        return if (regions.size <= 1) {
+            listOf(page)
+        } else {
+            regions.mapIndexed { regionIndex, glyphIndices ->
+                page.copy(
+                    glyphs = glyphIndices.map { page.glyphs[it] },
+                    images = if (regionIndex == 0) page.images else emptyList(),
+                )
+            }
+        }
     }
 
     private fun buildPageBlocks(
@@ -150,7 +279,10 @@ internal object ReflowAssembler {
 
         val items =
             buildList {
-                tables.forEach { (range, table) -> add(Item.Table(table, lines[range.first].top)) }
+                tables.forEach { (range, table) ->
+                    val tableLines = lines.subList(range.first, range.last + 1)
+                    add(tableOrFallbackItem(table, tableLines, page, lines[range.first].top))
+                }
                 lines.forEachIndexed { index, line -> if (!inTable[index]) add(Item.Text(line)) }
                 page.images
                     .filter {
@@ -165,9 +297,74 @@ internal object ReflowAssembler {
                 is Item.Text -> builder.addLine(item.line)
                 is Item.Image -> builder.addImage(item.rect)
                 is Item.Table -> builder.addTable(item.table)
+                is Item.PrebuiltFigure -> builder.addFigure(item.figure)
             }
         }
         return builder.build()
+    }
+
+    /**
+     * Решение «таблица или Figure-фолбэк» для одного диапазона: low-confidence таблица
+     * заменяется на crop исходной страницы (см. [tableAsFigureFallback]). Вынесено из
+     * лямбды [buildList], чтобы цикломатическая сложность [buildPageBlocks] не росла.
+     * Если bounds вычислить не удалось (теоретически невозможно) — оставляем Table.
+     */
+    private fun tableOrFallbackItem(
+        table: ReflowBlock.Table,
+        tableLines: List<Line>,
+        page: RawPage,
+        top: Float,
+    ): Item {
+        val figure =
+            if (table.confidence < TABLE_CONFIDENCE_THRESHOLD) tableAsFigureFallback(tableLines, page) else null
+        return if (figure != null) Item.PrebuiltFigure(figure, top) else Item.Table(table, top)
+    }
+
+    /**
+     * Stream-fallback для low-confidence таблицы: собирает [ReflowBlock.Figure] из union
+     * bbox'ов всех глифов table-range. Координаты bbox остаются в нормализованной
+     * `[0..1]`-системе страницы (как у обычных [ReflowBlock.Figure]); aspectRatio —
+     * по реальным размерам в PDF-точках, чтобы высота crop'а была детерминирована.
+     *
+     * `null` означает «нет глифов в диапазоне» — теоретически невозможно (table-range
+     * не строится без сегментов), но защищаемся от пустых строк.
+     */
+    private fun tableAsFigureFallback(
+        tableLines: List<Line>,
+        page: RawPage,
+    ): ReflowBlock.Figure? {
+        val bounds = unionGlyphBoundsNorm(tableLines) ?: return null
+        val widthPt = bounds.width * page.widthPt
+        val heightPt = bounds.height * page.heightPt
+        val aspectRatio = if (heightPt > 0f) widthPt / heightPt else 1f
+        // wasTableFallback=true — маркер для LatticeTableRefiner: эта Figure пришла
+        // из Stream-fallback, и если на странице есть нарисованная сетка, её можно
+        // попробовать восстановить в Table.
+        return ReflowBlock.Figure(
+            pageIndex = page.pageIndex,
+            bounds = bounds,
+            aspectRatio = aspectRatio,
+            wasTableFallback = true,
+        )
+    }
+
+    /** Union bbox'ов всех глифов в строках (нормализованные `[0..1]`-координаты). */
+    private fun unionGlyphBoundsNorm(lines: List<Line>): ReflowRect? {
+        var left = Float.POSITIVE_INFINITY
+        var top = Float.POSITIVE_INFINITY
+        var right = Float.NEGATIVE_INFINITY
+        var bottom = Float.NEGATIVE_INFINITY
+        var seen = false
+        lines.forEach { line ->
+            line.pieces.forEach { piece ->
+                seen = true
+                if (piece.bounds.left < left) left = piece.bounds.left
+                if (piece.bounds.top < top) top = piece.bounds.top
+                if (piece.bounds.right > right) right = piece.bounds.right
+                if (piece.bounds.bottom > bottom) bottom = piece.bounds.bottom
+            }
+        }
+        return if (seen) ReflowRect(left, top, right, bottom) else null
     }
 
     /**
@@ -245,7 +442,36 @@ internal object ReflowAssembler {
                         },
                 )
             }
-        return if (rows.size >= MIN_TABLE_ROWS) ReflowBlock.Table(rows) else null
+        if (rows.size < MIN_TABLE_ROWS) return null
+        return ReflowBlock.Table(rows = rows, confidence = computeTableConfidence(rows))
+    }
+
+    /**
+     * Агрегатная уверенность Stream-детектора, `[0..1]`. Три фактора, перемноженные:
+     *  - **rowFactor** — масштаб от числа строк; базис 0.5 (легитимные key-value
+     *    таблицы тоже считаем) + до 0.5 за «полноту» к [TABLE_FULL_CREDIT_ROWS];
+     *  - **fillRatio** — доля непустых ячеек: разрежённая сетка обычно означает
+     *    случайно выровненные сегменты, а не реальную таблицу;
+     *  - **lengthPenalty** — средняя длина ячейки: реальные таблицы — короткие
+     *    cells (5–40 символов), длинные — почти всегда «втянутый» абзац из соседней
+     *    колонки на OCR/wide-cell случае.
+     *
+     * Column-alignment tightness не учитываем: цена считать стандартное отклонение
+     * на этапе сборки выше, чем полезность сигнала (колонки уже отсечены по
+     * [COLUMN_ALIGN_FACTOR]). Если defect (a) не закроется — добавим в Slice 2.
+     */
+    private fun computeTableConfidence(rows: List<ReflowBlock.TableRow>): Float {
+        val totalCells = rows.sumOf { it.cells.size }
+        if (totalCells == 0) return 0f
+        val nonEmpty = rows.sumOf { row -> row.cells.count { it.text.isNotBlank() } }
+        val fillRatio = nonEmpty.toFloat() / totalCells
+        val meanCellChars = rows.sumOf { row -> row.cells.sumOf { it.text.length } }.toFloat() / totalCells
+        val rowFactor = 0.5f + 0.5f * (rows.size / TABLE_FULL_CREDIT_ROWS.toFloat()).coerceAtMost(1f)
+        val lengthPenalty = 1f - (meanCellChars / TABLE_MAX_TYPICAL_CELL_CHARS).coerceIn(0f, 1f)
+        val cols = rows.first().cells.size
+        // Бинарная отсечка по числу колонок: только явные аномалии (30+) обнуляются.
+        val colsPenalty = if (cols >= TABLE_COLS_HARD_LIMIT) 0f else 1f
+        return rowFactor * fillRatio * lengthPenalty * colsPenalty
     }
 
     /** Левые края колонок: кластеризует левые края сегментов с допуском [tolNorm]. */
@@ -450,6 +676,26 @@ internal object ReflowAssembler {
         /** true — накапливается элемент списка (строка началась с маркера). */
         private var pendingList = false
 
+        /** Уровень вложенности накапливаемого list-элемента (см. [computeListLevel]). */
+        private var pendingListLevel = 0
+
+        /**
+         * Нормализованный отступ маркера последнего эмитированного list-элемента
+         * (для сравнения с новым). `null` — list-flow прерван (после non-list
+         * блока / перед первым list-элементом страницы), уровень начинается с 0.
+         */
+        private var lastListIndent: Float? = null
+
+        /** Уровень последнего эмитированного list-элемента (см. [lastListIndent]). */
+        private var lastListLevel: Int = 0
+
+        /**
+         * Низ предыдущей текстовой строки (PDF-пункты), для подсчёта вертикального
+         * зазора как сигнала heading ensemble (см. [countHeadingSignals]). `null`
+         * означает «первая строка страницы / блока» — gap-сигнал не срабатывает.
+         */
+        private var lastLineBottom: Float? = null
+
         fun addImage(rect: ReflowRect) {
             flush()
             // aspectRatio считаем по исходным PDF-точкам ДО нормализации: после
@@ -464,8 +710,32 @@ internal object ReflowAssembler {
             blocks += table
         }
 
+        /**
+         * Кладёт уже собранную [ReflowBlock.Figure] прямо в блоки (в отличие от
+         * [addImage], которой надо денормализовать координаты). Нужна для
+         * Stream-фолбэка low-confidence таблиц на crop исходной страницы.
+         */
+        fun addFigure(figure: ReflowBlock.Figure) {
+            flush()
+            blocks += figure
+        }
+
         fun addLine(line: Line) {
-            val level = headingLevelOf(line)
+            // lastLineBottom обновляем ДО раннего return: следующая строка должна
+            // видеть актуальный нижний край этой как «предыдущей».
+            lastLineBottom = line.bottom
+            // List-маркер выигрывает над heading: типографски «Упр. 47.» или «1)
+            // Item» могут пройти heading-ensemble (font + bold + no period), но
+            // семантически это enumerated items, а не section headings. Проверяем
+            // list-pattern первым, чтобы они не «угоняли» heading-классификацию.
+            if (line.startsListItem()) {
+                flush()
+                pendingList = true
+                pendingListLevel = computeListLevel(line)
+                pending += line
+                return
+            }
+            val level = headingLevelOf(line, lastLineBottom)
             if (level > 0) {
                 if (pending.isNotEmpty() && pendingHeadingLevel == level) {
                     pending += line
@@ -474,14 +744,6 @@ internal object ReflowAssembler {
                     pendingHeadingLevel = level
                     pending += line
                 }
-                return
-            }
-            // Маркер списка всегда начинает новый блок-элемент: соседние пункты
-            // стоят плотно и иначе слиплись бы в один абзац.
-            if (line.startsListItem()) {
-                flush()
-                pendingList = true
-                pending += line
                 return
             }
             if (pending.isNotEmpty() && breaksParagraph(line)) flush()
@@ -494,12 +756,51 @@ internal object ReflowAssembler {
             return blocks
         }
 
-        private fun headingLevelOf(line: Line): Int =
-            if (bodyFont > 0f && line.fontSize >= bodyFont * HEADING_RATIO) {
+        /**
+         * Heading-уровень строки: требуется mandatory-сигнал «крупный кегль»
+         * (`fontSize ≥ bodyFont × HEADING_RATIO`) плюс хотя бы
+         * [HEADING_SECONDARY_SIGNALS_MIN] secondary-сигналов из 3 (bold majority,
+         * gap above, no terminal punctuation). Calibre-стиль без CRF.
+         *
+         * `0` означает «не заголовок» — будет абзацем или элементом списка по
+         * стандартной логике [addLine].
+         */
+        private fun headingLevelOf(
+            line: Line,
+            previousLineBottom: Float?,
+        ): Int {
+            val fontRatioMet = bodyFont > 0f && line.fontSize >= bodyFont * HEADING_RATIO
+            val secondary = if (fontRatioMet) countSecondaryHeadingSignals(line, previousLineBottom) else 0
+            return if (fontRatioMet && secondary >= HEADING_SECONDARY_SIGNALS_MIN) {
                 headingLevelForRatio(line.fontSize / bodyFont)
             } else {
                 0
             }
+        }
+
+        /**
+         * Подсчитывает secondary-сигналы heading'а (font-ratio проверяется отдельно
+         * в [headingLevelOf]):
+         *  1. bold majority — большинство кусков строки полужирным;
+         *  2. gapAbove ≥ [HEADING_GAP_FACTOR] × typicalPitch — заметный
+         *     вертикальный отрыв от предыдущей строки;
+         *  3. no terminal punctuation — строка не оканчивается на `.!?…:;`.
+         */
+        private fun countSecondaryHeadingSignals(
+            line: Line,
+            previousLineBottom: Float?,
+        ): Int {
+            var signals = 0
+            if (line.pieces.isNotEmpty() && line.pieces.count { it.bold } * 2 >= line.pieces.size) signals++
+            if (previousLineBottom != null && typicalPitch > 0f &&
+                line.top - previousLineBottom >= typicalPitch * HEADING_GAP_FACTOR
+            ) {
+                signals++
+            }
+            val lastChar = line.pieces.lastOrNull()?.text?.trimEnd()?.lastOrNull()
+            if (lastChar != null && lastChar !in SENTENCE_TERMINATORS) signals++
+            return signals
+        }
 
         /**
          * Разрыв абзаца — по **шагу строк** (baseline-to-baseline,
@@ -539,17 +840,47 @@ internal object ReflowAssembler {
             // Элемент списка склеивается как абзац (перенос строк/дефис), но
             // эмитится отдельным типом блока для отступа в ридере.
             val built = if (pendingHeadingLevel > 0) buildHeading(pending) else buildParagraph(pending)
+            val emittedListItem = pendingList && built.text.isNotEmpty()
             if (built.text.isNotEmpty()) {
                 blocks +=
                     when {
                         pendingHeadingLevel > 0 -> ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
-                        pendingList -> ReflowBlock.ListItem(built.text, built.source)
+                        pendingList -> ReflowBlock.ListItem(built.text, built.source, level = pendingListLevel)
                         else -> ReflowBlock.Paragraph(built.text, built.source)
                     }
+            }
+            // List-state: после list-item обновляем «последний», после non-list
+            // (или пустого) — обнуляем, чтобы следующий list-элемент начал с 0.
+            if (emittedListItem) {
+                lastListIndent = pending.firstOrNull()?.pieces?.firstOrNull()?.bounds?.left ?: lastListIndent
+                lastListLevel = pendingListLevel
+            } else {
+                lastListIndent = null
+                lastListLevel = 0
             }
             pending.clear()
             pendingHeadingLevel = 0
             pendingList = false
+            pendingListLevel = 0
+        }
+
+        /**
+         * Уровень вложенности новой list-строки по отступу её маркера. Сравниваем
+         * с [lastListIndent]: глубже → +1, мельче → -1 (clamp ≥ 0), в пределах
+         * [LIST_INDENT_TOLERANCE_NORM] → тот же. Первый list-элемент потока — 0.
+         */
+        private fun computeListLevel(line: Line): Int {
+            val indent = line.pieces.firstOrNull()?.bounds?.left
+            val prevIndent = lastListIndent
+            return if (indent == null || prevIndent == null) {
+                0
+            } else {
+                when {
+                    indent > prevIndent + LIST_INDENT_TOLERANCE_NORM -> lastListLevel + 1
+                    indent < prevIndent - LIST_INDENT_TOLERANCE_NORM -> (lastListLevel - 1).coerceAtLeast(0)
+                    else -> lastListLevel
+                }
+            }
         }
 
         /** Абзац: межстрочный пробел, со снятием переноса по дефису. */
@@ -561,9 +892,13 @@ internal object ReflowAssembler {
                 if (sb.isNotEmpty()) {
                     if (isSoftHyphen(sb)) {
                         // Строка кончается «буква+дефис»: слово перенесено — соединяем
-                        // без пробела. Мягкий перенос (следующая строка со строчной)
-                        // — дефис убираем; составной (`Plugin-Name`) — оставляем.
-                        if (line.startsLowercase()) {
+                        // без пробела. U+00AD (typesetter's soft hyphen) — это hint от
+                        // вёрстки «здесь можно переносить», не пунктуация → всегда
+                        // убираем. ASCII/Unicode hyphen — двусмысленно: lowercase следующая
+                        // → soft перенос, убираем; uppercase → составное слово
+                        // (`Plugin-Name`), оставляем.
+                        val unicodeSoftHyphen = sb.last() == SOFT_HYPHEN
+                        if (unicodeSoftHyphen || line.startsLowercase()) {
                             sb.deleteAt(sb.length - 1)
                             shrinkLastSpan(spans)
                         }
@@ -662,6 +997,7 @@ internal object ReflowAssembler {
                 }.trimStart()
             if (lead.isEmpty()) return false
             if (lead[0] in BULLET_CHARS) return true
+            if (matchesRussianListPrefix(lead)) return true
             val digits = lead.takeWhile { it.isDigit() }
             if (digits.isEmpty() || digits.length >= lead.length || lead[digits.length] !in NUMBER_MARKERS) {
                 return false
@@ -760,11 +1096,21 @@ internal object ReflowAssembler {
             val table: ReflowBlock.Table,
             override val top: Float,
         ) : Item
+
+        /**
+         * Заранее собранная фигура — не нуждается в нормализации (в отличие от [Image]).
+         * Используется для подмены low-confidence таблицы её crop'ом исходной страницы:
+         * union bbox'ов глифов уже посчитан в нормализованных координатах.
+         */
+        data class PrebuiltFigure(
+            val figure: ReflowBlock.Figure,
+            override val top: Float,
+        ) : Item
     }
 }
 
 /** Сколько первых символов строки сканировать на маркер списка. */
-private const val LIST_MARKER_SCAN = 6
+private const val LIST_MARKER_SCAN = 16
 
 /**
  * Символы-буллеты, открывающие элемент списка. Тире `—`/`–` сюда НЕ входят: в
@@ -773,8 +1119,53 @@ private const val LIST_MARKER_SCAN = 6
  */
 private val BULLET_CHARS = "•‣◦▪●·-*".toSet()
 
+/**
+ * Русские префиксы-маркеры элементов списка (упражнения/задания в учебниках):
+ * `Упр. N.`, `Упражнение N.`, `Задание N.` и т.п. Lowercase для case-insensitive
+ * сравнения. После префикса требуем non-letter boundary, чтобы не сматчить
+ * слова с теми же буквенными началами (например, «упрямый» не должен пройти
+ * как «упр»).
+ */
+private val RUSSIAN_LIST_PREFIXES = listOf("упр", "упражнение", "задание", "задача", "пример")
+
 /** Разделители после номера в нумерованном списке (`1.`, `2)`). */
 private const val NUMBER_MARKERS = ".)"
+
+/**
+ * Проверяет, начинается ли строка с русского списочного префикса вида
+ * `Упр. N.`, `Упражнение N.`, `Задание N.` (см. [RUSSIAN_LIST_PREFIXES]).
+ * Требования:
+ *  - префикс на lowercase-сопоставлении;
+ *  - сразу после префикса non-letter boundary (точка/пробел) — отсекает «упрямый»;
+ *  - после префикса (опц. пунктуация) — цифры, затем `.` или `)`.
+ *
+ * Используется в [Line.startsListItem]; spaces в [Line.pieces] уже удалены
+ * экстрактором, поэтому `lead` обычно вида `"Упр.47.Раскрой"`.
+ */
+private fun matchesRussianListPrefix(lead: String): Boolean {
+    val leadLower = lead.lowercase()
+    return RUSSIAN_LIST_PREFIXES.any { prefix -> prefixMatchesNumberedItem(lead, leadLower, prefix) }
+}
+
+/**
+ * Проверяет одну запись из [RUSSIAN_LIST_PREFIXES]: `prefix` совпадает с началом
+ * [lead] (case-insensitive), сразу после префикса non-letter boundary
+ * (`упр` не должен сматчить `упрямый`), затем — опциональная пунктуация и цифры,
+ * затем терминатор из [NUMBER_MARKERS]. Возвращает `true` только при полном
+ * совпадении паттерна.
+ */
+private fun prefixMatchesNumberedItem(
+    lead: String,
+    leadLower: String,
+    prefix: String,
+): Boolean {
+    val afterPrefix = if (leadLower.startsWith(prefix)) lead.substring(prefix.length) else null
+    if (afterPrefix == null || afterPrefix.isEmpty() || afterPrefix[0].isLetter()) return false
+    val trimmed = afterPrefix.dropWhile { it == '.' || it == ' ' }
+    val digits = trimmed.takeWhile { it.isDigit() }
+    val terminator = trimmed.getOrNull(digits.length)
+    return digits.isNotEmpty() && (terminator == null || terminator in NUMBER_MARKERS)
+}
 
 /** Индекс колонки для левого края [left]: самая правая граница `columns`, не превышающая `left` (+ допуск). */
 private fun columnOf(

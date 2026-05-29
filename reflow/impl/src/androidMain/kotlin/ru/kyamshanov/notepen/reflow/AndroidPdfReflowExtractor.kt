@@ -14,10 +14,12 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
+import ru.kyamshanov.notepen.reflow.lattice.LatticeTableRefiner
 import java.io.File
 
 /**
@@ -51,6 +53,25 @@ class AndroidPdfReflowExtractor(
         withContext(ioDispatcher) {
             openDocument(path).use { document ->
                 ReflowAssembler.assemble((0 until document.numberOfPages).map { extractPage(document, it) })
+            }
+        }
+
+    override suspend fun extractWithLattice(
+        path: String,
+        pageBitmaps: PageBitmapProvider,
+    ): ReflowDocument =
+        withContext(ioDispatcher) {
+            openDocument(path).use { document ->
+                // RawPage'и держим до конца, чтобы Lattice мог их переиспользовать
+                // (мап глифов в ячейки по их координатам). Второй проход extract
+                // дороже, чем разовое удержание ~10–100 КБ RawPage в памяти.
+                val rawPages = (0 until document.numberOfPages).map { extractPage(document, it) }
+                val assembled = ReflowAssembler.assemble(rawPages)
+                LatticeTableRefiner.refine(
+                    document = assembled,
+                    rawPages = rawPages,
+                    renderPage = pageBitmaps,
+                )
             }
         }
 

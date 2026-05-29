@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen.book
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
@@ -60,6 +61,23 @@ class EbookAwarePdfReflowExtractor(
             }
             doc
         }
+    }
+
+    /**
+     * Lattice-уточнение book-режима: для book-источника с уже-собранным sidecar
+     * структура заголовков/абзацев известна точно (без эвристик), и Lattice здесь
+     * не нужен — sidecar возвращается как есть. Для остальных случаев (raw PDF,
+     * book без sidecar) прокидываем pageBitmaps делегату.
+     */
+    override suspend fun extractWithLattice(
+        path: String,
+        pageBitmaps: PageBitmapProvider,
+    ): ReflowDocument {
+        val isBook = converter.canConvert(path)
+        val sidecar = if (isBook) reflow.reflowFor(path) else null
+        if (sidecar != null) return sidecar
+        val targetPath = if (isBook) converter.ensurePdf(path) else path
+        return delegate.extractWithLattice(targetPath, pageBitmaps)
     }
 
     private suspend fun resolve(path: String): String = if (converter.canConvert(path)) converter.ensurePdf(path) else path

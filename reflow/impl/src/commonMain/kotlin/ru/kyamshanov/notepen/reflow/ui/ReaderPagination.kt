@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import ru.kyamshanov.notepen.reflow.api.TextAnchor
 import kotlin.math.roundToInt
 
 /**
@@ -169,4 +170,63 @@ internal object ReaderPagination {
         val endY: Float,
         val nextStartY: Float,
     )
+
+    /**
+     * Индекс страницы, на которую попадает [anchor]. «Валюта» позиции — TextAnchor;
+     * номер страницы выводим из него после раскладки, а не наоборот. Сохраняет место
+     * чтения при ре-пагинации (смена шрифта/полей/ориентации).
+     *
+     * Правила:
+     * - если какой-то [PageWindow.firstBlock] совпадает с `anchor.blockIndex` —
+     *   возвращаем **первую** такую страницу (для блока, растянутого на несколько
+     *   страниц, это начало блока, а не его конец);
+     * - иначе блок лежит внутри окна — возвращаем последнюю страницу с `firstBlock`
+     *   строго меньшим `anchor.blockIndex`: именно она содержит блок (следующая уже
+     *   начинается за ним).
+     *
+     * Пустой [windows] → `0` (соглашение: вызывающий рендерит пустую страницу).
+     * Якорь до первой страницы → `0`.
+     *
+     * Phase A: используется только `blockIndex`. Phase B добавит точное позиционирование
+     * по строке через `charStart`.
+     */
+    fun pageForAnchor(
+        windows: List<PageWindow>,
+        anchor: TextAnchor,
+    ): Int {
+        if (windows.isEmpty()) return 0
+        val anchorBlock = anchor.blockIndex
+        val exact = windows.indexOfFirst { it.firstBlock == anchorBlock }
+        val raw = if (exact >= 0) exact else windows.indexOfLast { it.firstBlock < anchorBlock }
+        return raw.coerceAtLeast(0).coerceAtMost(windows.lastIndex)
+    }
+
+    /**
+     * Phase B precision: уточняет страницу внутри блока, растянутого на несколько окон.
+     * Идёт вперёд от [basePage] (которую дал [pageForAnchor]) и выбирает последнее окно,
+     * чей `firstBlock == blockIndex` и `firstBlockOffsetPx ≤ targetY`. Чтение
+     * прекращается, как только встретилось окно из другого блока: следующий блок —
+     * другой контент, в нём targetY не определён.
+     *
+     * Если ни одно окно в блоке не подходит (например, `targetY < windows[basePage]
+     * .firstBlockOffsetPx`) — возвращается [basePage] (откат к началу блока).
+     */
+    fun pageWithinBlockForY(
+        windows: List<PageWindow>,
+        basePage: Int,
+        blockIndex: Int,
+        targetY: Float,
+    ): Int {
+        if (windows.isEmpty()) return 0
+        val safeBase = basePage.coerceIn(0, windows.lastIndex)
+        var best = safeBase
+        var i = safeBase
+        while (i < windows.size) {
+            val w = windows[i]
+            if (w.firstBlock != blockIndex || w.firstBlockOffsetPx > targetY) break
+            best = i
+            i++
+        }
+        return best
+    }
 }

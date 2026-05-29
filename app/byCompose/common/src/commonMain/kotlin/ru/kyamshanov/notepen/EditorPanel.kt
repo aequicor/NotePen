@@ -91,6 +91,8 @@ import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
 import ru.kyamshanov.notepen.reflow.ReflowPageLocator
 import ru.kyamshanov.notepen.reflow.ReflowReading
 import ru.kyamshanov.notepen.reflow.StrokeTextMapper
+import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
+import ru.kyamshanov.notepen.reflow.api.PageRaster
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
@@ -316,6 +318,17 @@ fun EditorPanel(
     // фоном при наличии текстового слоя и липком маркере; переиспользуется режимом чтения.
     val reflowDocCacheState = remember(pdfState) { mutableStateOf<ReflowDocument?>(null) }
     var reflowReading by remember(pdfState) { mutableStateOf<ReflowReading?>(null) }
+    // Якорь чтения уровня документа: «валюта» позиции в reflow-режиме (см. TextAnchor).
+    // Живёт здесь, а не в ReflowReader: переживает закрытие/открытие reader-mode в сессии
+    // и пишется в .view-сайдкар (autosave ниже), чтобы при следующем открытии документа
+    // вернуть пользователя на ту же страницу даже после смены шрифта/ориентации.
+    var currentReadingAnchor by remember(pdfState) { mutableStateOf(TextAnchor.START) }
+    // Флаг «первый вход в reader-mode восстанавливает сохранённый якорь». Включается,
+    // когда loadViewState восстановил позицию reflow с диска, и гасится при первом
+    // срабатывании reading-mode-enter эффекта. Нужен, чтобы НЕ перебить сохранённую
+    // позицию маппингом «PDF-страница → блок» (этот маппинг применяем только при
+    // mid-session toggle PDF→reading, когда пользователь действительно в PDF-навигации).
+    var useRestoredAnchorOnFirstEnter by remember(pdfState) { mutableStateOf(false) }
     LaunchedEffect(pdfState.readingMode, pdfState) {
         if (!pdfState.readingMode) {
             reflowReading = null
@@ -326,18 +339,51 @@ fun EditorPanel(
         val targetPage = pdfViewerState.firstVisiblePageIndex
         val strokesByPage = drawingStates.mapValues { (_, state) -> state.currentPaths.toList() }
         val highlightsByPage = pdfState.highlights.toMap()
+        // Lattice-провайдер пиксельных снимков страницы: дёргается только из
+        // [LatticeTableRefiner] (использует кадры лениво — лишь для страниц с
+        // low-conf Stream-table кандидатами). Если PDF ещё не загружен, передаём
+        // null — use case откатывается на plain extract без Lattice.
+        val pageBitmapsForLattice: PageBitmapProvider? =
+            pdfState.pdfDocument?.let { _ ->
+                { pageIndex, targetWidthPx ->
+                    val doc = pdfState.pdfDocument
+                    val info = doc?.info?.pages?.getOrNull(pageIndex)
+                    if (doc == null || info == null) {
+                        null
+                    } else {
+                        val ratio = info.aspectRatio.takeIf { it > 0f } ?: 1f
+                        val heightPx = (targetWidthPx / ratio).toInt().coerceAtLeast(1)
+                        runCatching { renderer.renderPage(doc, pageIndex, targetWidthPx, heightPx) }
+                            .getOrNull()
+                            ?.let { PageRaster(pixels = it.pixels, widthPx = it.widthPx, heightPx = it.heightPx) }
+                    }
+                }
+            }
         val reading =
             runCatching {
-                reflowReadingUseCase(filePath, strokesByPage, highlightsByPage, reflowDocCacheState.value)
+                reflowReadingUseCase(
+                    path = filePath,
+                    strokesByPage = strokesByPage,
+                    highlightsByPage = highlightsByPage,
+                    document = reflowDocCacheState.value,
+                    pageBitmaps = pageBitmapsForLattice,
+                )
             }
                 .onFailure { e -> panelLogger.warn { "Reflow reading build failed: ${e::class.simpleName}" } }
                 .getOrNull()
         reflowReading = reading
         if (reading != null) {
             if (reflowDocCacheState.value == null) reflowDocCacheState.value = reading.document
-            ReflowPageLocator
-                .blockIndexForPage(reading.document, targetPage)
-                ?.let { reflowNavigateToBlock.value = it }
+            // На самом первом входе с восстановленной позицией пропускаем маппинг
+            // PDF-страница→блок — иначе перекрыл бы saved reflowAnchor PDF-страницей.
+            // Для mid-session toggle (после рисования в PDF) маппинг как раз нужен.
+            val consumeRestored = useRestoredAnchorOnFirstEnter
+            useRestoredAnchorOnFirstEnter = false
+            if (!consumeRestored) {
+                ReflowPageLocator
+                    .blockIndexForPage(reading.document, targetPage)
+                    ?.let { reflowNavigateToBlock.value = it }
+            }
         }
     }
 
@@ -640,6 +686,14 @@ fun EditorPanel(
                 // Вторичный таб того же файла открываем в обычном (не reading) режиме —
                 // как и позицию, режим чтения для него не восстанавливаем.
                 pdfState.readingMode = if (pdfState.skipPageRestore) false else view.readingMode
+                // Восстанавливаем reflow-якорь (если был сохранён) — даже если режим
+                // чтения сейчас не активен: при последующем переключении в reader-mode
+                // initialAnchor вернёт пользователя на ту же страницу. На вторичном табе
+                // (skipPageRestore) намеренно стартуем с начала, как и с позицией PDF.
+                if (!pdfState.skipPageRestore) {
+                    currentReadingAnchor = TextAnchor.ofBlock(view.reflowAnchorBlockIndex)
+                    useRestoredAnchorOnFirstEnter = true
+                }
             }
         val projectionStrokes =
             hostAnnotationSnapshotFor
@@ -751,6 +805,8 @@ fun EditorPanel(
                 currentPage = pdfViewerState.firstVisiblePageIndex,
                 currentPageOffset = pdfViewerState.firstVisiblePageOffsetPx,
                 readingMode = pdfState.readingMode,
+                reflowAnchorBlockIndex = currentReadingAnchor.blockIndex,
+                reflowAnchorCharStart = currentReadingAnchor.charStart,
             )
         }.drop(1)
             .distinctUntilChanged()
@@ -1532,6 +1588,8 @@ fun EditorPanel(
                                         ?.let { page -> pdfViewerState.scrollToPage(page, 0) }
                                 }
                             },
+                            initialAnchor = currentReadingAnchor,
+                            onReadingAnchorChange = { currentReadingAnchor = it },
                         )
                     }
                 } else {

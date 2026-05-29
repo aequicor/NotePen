@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.reflow
 import io.github.oshai.kotlinlogging.KotlinLogging
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
@@ -40,6 +41,10 @@ public class BuildReflowReadingUseCase(
      *   согласованы с текущей экстракцией
      * @param document уже извлечённый документ для переиспользования (например, из
      *   кэша редактора); если `null` — извлекается заново
+     * @param pageBitmaps опциональный колбэк растеризации страницы под Lattice-
+     *   уточнение таблиц. `null` — Lattice пропускается, в документе остаются
+     *   Figure-крoпы для low-confidence Stream-таблиц. При наличии колбэка
+     *   рендер дёргается лениво — только для страниц с low-conf кандидатами.
      * @return документ + выделения для [ru.kyamshanov.notepen.reflow.ui.ReflowReader]
      */
     public suspend operator fun invoke(
@@ -47,10 +52,13 @@ public class BuildReflowReadingUseCase(
         strokesByPage: Map<Int, List<DrawingPath>>,
         highlightsByPage: Map<Int, List<StickyHighlight>> = emptyMap(),
         document: ReflowDocument? = null,
+        pageBitmaps: PageBitmapProvider? = null,
     ): ReflowReading {
         val totalMark = TimeSource.Monotonic.markNow()
         val extractMark = TimeSource.Monotonic.markNow()
-        val doc = document ?: extractor.extract(path)
+        val doc =
+            document
+                ?: if (pageBitmaps != null) extractor.extractWithLattice(path, pageBitmaps) else extractor.extract(path)
         val extractMs = extractMark.elapsedNow().inWholeMilliseconds
         val anchorMark = TimeSource.Monotonic.markNow()
         val strokeAnchors =

@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
@@ -33,7 +34,27 @@ public class InFlightDedupPdfReflowExtractor(
 
     override suspend fun probe(path: String): PdfContentKind = delegate.probe(path)
 
-    override suspend fun extract(path: String): ReflowDocument {
+    override suspend fun extract(path: String): ReflowDocument = dedupedExtract(path) { delegate.extract(path) }
+
+    override suspend fun extractWithLattice(
+        path: String,
+        pageBitmaps: PageBitmapProvider,
+    ): ReflowDocument = dedupedExtract(path) { delegate.extractWithLattice(path, pageBitmaps) }
+
+    /**
+     * Общая дедупликация по `path`: первый вызывающий (leader) выполняет [actualExtract],
+     * остальные (followers) ждут его результата. Использует одну и ту же `inflight`-карту
+     * для `extract` и `extractWithLattice`, потому что для редактора (один таб → один
+     * pageBitmaps) разница между этими вариантами на одном пути не возникает в практике.
+     *
+     * Catch Throwable намеренно: leader должен прокинуть followers ЛЮБУЮ ошибку (включая
+     * CancellationException и Error'ы), иначе followers повиснут на `deferred.await()`.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun dedupedExtract(
+        path: String,
+        actualExtract: suspend () -> ReflowDocument,
+    ): ReflowDocument {
         val (deferred, isLeader) =
             mutex.withLock {
                 val existing = inflight[path]
@@ -48,7 +69,7 @@ public class InFlightDedupPdfReflowExtractor(
             }
         if (isLeader) {
             try {
-                val doc = delegate.extract(path)
+                val doc = actualExtract()
                 deferred.complete(doc)
             } catch (t: Throwable) {
                 deferred.completeExceptionally(t)

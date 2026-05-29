@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import ru.kyamshanov.notepen.reflow.api.TextAnchor
 import ru.kyamshanov.notepen.reflow.ui.ReaderPagination.BlockLayout
 import kotlin.math.abs
 import kotlin.test.Test
@@ -109,5 +110,79 @@ class ReaderPaginationTest {
     @Test
     fun emptyDocumentHasNoPages() {
         assertTrue(ReaderPagination.pageWindows(emptyList(), 100f, 0f).isEmpty())
+    }
+
+    @Test
+    fun pageForAnchorPicksLastWindowAtOrBeforeBlock() {
+        // 10 строк × 10px по странице 30px → 4 окна с firstBlock = 0 (один блок, рвётся).
+        // Якорь на блок 0 → страница 0.
+        val singleBlock =
+            ReaderPagination.pageWindows(
+                blocks = listOf(splittable(lines = 10, lineHeight = 10f)),
+                pageHeightPx = 30f,
+                spacingPx = 0f,
+            )
+        assertEquals(0, ReaderPagination.pageForAnchor(singleBlock, TextAnchor.ofBlock(0)))
+
+        // Несколько блоков: каждое окно открывается своим блоком.
+        val multi =
+            ReaderPagination.pageWindows(
+                blocks =
+                    listOf(
+                        atomic(height = 25f),
+                        atomic(height = 25f),
+                        atomic(height = 25f),
+                    ),
+                pageHeightPx = 30f,
+                spacingPx = 0f,
+            )
+        assertEquals(0, ReaderPagination.pageForAnchor(multi, TextAnchor.ofBlock(0)))
+        assertEquals(1, ReaderPagination.pageForAnchor(multi, TextAnchor.ofBlock(1)))
+        assertEquals(2, ReaderPagination.pageForAnchor(multi, TextAnchor.ofBlock(2)))
+    }
+
+    @Test
+    fun pageWithinBlockForYWalksWindowsOfSameBlock() {
+        // 10 строк × 10px → 4 окна одного блока с firstBlockOffsetPx 0,30,60,90.
+        val windows =
+            ReaderPagination.pageWindows(
+                blocks = listOf(splittable(lines = 10, lineHeight = 10f)),
+                pageHeightPx = 30f,
+                spacingPx = 0f,
+            )
+        // targetY=25 попадает в первую страницу (диапазон 0..30 окна 0).
+        assertEquals(0, ReaderPagination.pageWithinBlockForY(windows, basePage = 0, blockIndex = 0, targetY = 25f))
+        // targetY=35 попадает на вторую страницу (offset=30 ≤ 35 < 60).
+        assertEquals(1, ReaderPagination.pageWithinBlockForY(windows, basePage = 0, blockIndex = 0, targetY = 35f))
+        // targetY=85 → третья страница.
+        assertEquals(2, ReaderPagination.pageWithinBlockForY(windows, basePage = 0, blockIndex = 0, targetY = 85f))
+    }
+
+    @Test
+    fun pageWithinBlockForYStopsAtBlockBoundary() {
+        // Два атомарных блока: окно 0 — block 0, окно 1 — block 1.
+        val windows =
+            ReaderPagination.pageWindows(
+                blocks = listOf(atomic(height = 20f), atomic(height = 20f)),
+                pageHeightPx = 25f,
+                spacingPx = 0f,
+            )
+        // Любой targetY в block 0: лимит обхода — этот же блок, остаёмся на 0.
+        assertEquals(0, ReaderPagination.pageWithinBlockForY(windows, basePage = 0, blockIndex = 0, targetY = 999f))
+    }
+
+    @Test
+    fun pageForAnchorClampsOutOfRangeAndEmpty() {
+        assertEquals(0, ReaderPagination.pageForAnchor(emptyList(), TextAnchor.ofBlock(42)))
+
+        val windows =
+            ReaderPagination.pageWindows(
+                blocks = listOf(atomic(height = 20f), atomic(height = 20f)),
+                pageHeightPx = 25f,
+                spacingPx = 0f,
+            )
+        // Block за пределами документа клампится на последнее окно — иначе после ре-пагинации
+        // pagerState.scrollToPage улетал бы в out-of-bounds и крашился.
+        assertEquals(windows.lastIndex, ReaderPagination.pageForAnchor(windows, TextAnchor.ofBlock(999)))
     }
 }

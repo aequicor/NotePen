@@ -75,7 +75,10 @@ internal object BlockHeightCalculator {
                 )
             is ReflowBlock.Paragraph -> measureSplittable(block.text, block.source, settings.paragraphStyle(), 0, w, settings, textMeasurer)
             is ReflowBlock.ListItem -> {
-                val indent = with(density) { settings.contentPadding.roundToPx() }
+                // Согласовано с UI: ListItemView рендерит padding-start = contentPadding × (level + 1),
+                // обмер должен использовать ту же ширину, иначе lineBottoms/heights разъедутся и
+                // даст drift на границе страниц (defect (b) — см. P0-P5).
+                val indent = with(density) { (settings.contentPadding * (block.level + 1)).roundToPx() }
                 measureSplittable(block.text, block.source, settings.paragraphStyle(), indent, w, settings, textMeasurer)
             }
             is ReflowBlock.Blockquote -> {
@@ -123,6 +126,107 @@ internal object BlockHeightCalculator {
         val result = textMeasurer.measure(annotated, style, constraints = Constraints(maxWidth = width))
         val lineBottoms = List(result.lineCount) { result.getLineBottom(it) }
         return MeasuredBlock(result.size.height, lineBottoms)
+    }
+
+    /**
+     * Phase B precision: charStart, соответствующий вершине окна, попадающей внутрь
+     * делимого блока на y-координате [offsetPx] относительно верха блока. Возвращает
+     * 0 для не-делимых блоков и `offsetPx ≤ 0` (страница начинается с верха блока).
+     *
+     * Не использует кэш [lineBottoms]: считаем линии заново через [TextMeasurer]
+     * (один measure на вызов), потому что нужен ещё и `getLineStart(line)` — а это
+     * уже не покрывается lineBottoms. Стоимость — один measure одного блока на
+     * каждое перелистывание, что незначительно (firstBlock обычно небольшой).
+     */
+    fun charStartAtOffsetPx(
+        block: ReflowBlock,
+        contentWidthPx: Int,
+        settings: ReflowReaderSettings,
+        textMeasurer: TextMeasurer,
+        density: Density,
+        offsetPx: Float,
+    ): Int {
+        val spec = textSpecFor(block, contentWidthPx, settings, density)
+        if (offsetPx <= 0f || spec == null) return 0
+        val result =
+            textMeasurer.measure(
+                text = styledText(spec.text, spec.source, emptyList(), settings),
+                style = spec.style,
+                constraints = Constraints(maxWidth = spec.widthPx),
+            )
+        // Первая строка, чей низ строго больше offsetPx — она «содержит» offsetPx
+        // (низ предыдущей ≤ offsetPx < низ этой).
+        var line = 0
+        while (line < result.lineCount && result.getLineBottom(line) <= offsetPx) line++
+        val safeLine = line.coerceAtMost((result.lineCount - 1).coerceAtLeast(0))
+        return if (result.lineCount == 0) 0 else result.getLineStart(safeLine)
+    }
+
+    /**
+     * Phase B precision (read-side): индекс строки в [block], содержащей символ
+     * [charStart]. Возвращает 0 для не-делимых блоков (там charStart всегда 0) или
+     * `charStart <= 0`. Отрицательное значение никогда не возвращает — клампится.
+     */
+    fun lineForCharStart(
+        block: ReflowBlock,
+        contentWidthPx: Int,
+        settings: ReflowReaderSettings,
+        textMeasurer: TextMeasurer,
+        density: Density,
+        charStart: Int,
+    ): Int {
+        val spec = textSpecFor(block, contentWidthPx, settings, density)
+        if (charStart <= 0 || spec == null) return 0
+        val result =
+            textMeasurer.measure(
+                text = styledText(spec.text, spec.source, emptyList(), settings),
+                style = spec.style,
+                constraints = Constraints(maxWidth = spec.widthPx),
+            )
+        val lc = result.lineCount
+        val safeChar = charStart.coerceAtMost(spec.text.length)
+        return if (lc == 0) 0 else result.getLineForOffset(safeChar).coerceIn(0, lc - 1)
+    }
+
+    /**
+     * Спецификация текста для measure-операций над одним блоком: текст, провенанс,
+     * стиль и эффективная ширина с учётом indent'а блока. `null` для блоков без
+     * текстового содержимого (Figure/Table/Divider) и не-делимых (Heading): к ним
+     * Phase B мапинг charStart↔line не применяется.
+     */
+    private data class TextSpec(
+        val text: String,
+        val source: List<SourceSpan>,
+        val style: TextStyle,
+        val widthPx: Int,
+    )
+
+    private fun textSpecFor(
+        block: ReflowBlock,
+        contentWidthPx: Int,
+        settings: ReflowReaderSettings,
+        density: Density,
+    ): TextSpec? {
+        val w = contentWidthPx.coerceAtLeast(1)
+        return when (block) {
+            is ReflowBlock.Paragraph ->
+                TextSpec(block.text, block.source, settings.paragraphStyle(), w)
+            is ReflowBlock.ListItem -> {
+                // Согласованно с [measure]: учитываем уровень вложенности в indent'е.
+                val indent = with(density) { (settings.contentPadding * (block.level + 1)).roundToPx() }
+                TextSpec(block.text, block.source, settings.paragraphStyle(), (w - indent).coerceAtLeast(1))
+            }
+            is ReflowBlock.Blockquote -> {
+                val indent = with(density) { (BLOCKQUOTE_BAR_WIDTH + settings.contentPadding).roundToPx() }
+                val style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic)
+                TextSpec(block.text, block.source, style, (w - indent).coerceAtLeast(1))
+            }
+            is ReflowBlock.Heading,
+            is ReflowBlock.Figure,
+            is ReflowBlock.Table,
+            ReflowBlock.Divider,
+            -> null
+        }
     }
 
     private fun measureTable(
