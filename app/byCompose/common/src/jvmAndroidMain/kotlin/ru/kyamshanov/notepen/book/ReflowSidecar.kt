@@ -121,6 +121,21 @@ private sealed interface ReflowBlockDto {
     @Serializable
     @SerialName("divider")
     data object Divider : ReflowBlockDto
+
+    @Serializable
+    @SerialName("code")
+    data class Code(
+        val text: String,
+        val source: List<SourceSpanDto> = emptyList(),
+    ) : ReflowBlockDto
+
+    @Serializable
+    @SerialName("footnote")
+    data class Footnote(
+        val text: String,
+        val marker: String? = null,
+        val source: List<SourceSpanDto> = emptyList(),
+    ) : ReflowBlockDto
 }
 
 @Serializable
@@ -164,6 +179,8 @@ private fun ReflowBlock.toDto(): ReflowBlockDto =
         is ReflowBlock.Table ->
             ReflowBlockDto.Table(rows.map { row -> row.cells.map { CellDto(it.text, it.source.map { s -> s.toDto() }) } })
         is ReflowBlock.Figure -> ReflowBlockDto.Figure(pageIndex, bounds.toDto(), aspectRatio)
+        is ReflowBlock.Code -> ReflowBlockDto.Code(text, source.map { it.toDto() })
+        is ReflowBlock.Footnote -> ReflowBlockDto.Footnote(text, marker, source.map { it.toDto() })
         ReflowBlock.Divider -> ReflowBlockDto.Divider
     }
 
@@ -188,6 +205,8 @@ private fun ReflowBlockDto.toModel(): ReflowBlock =
             ReflowBlock.Figure(pageIndex, rect, ratio)
         }
         ReflowBlockDto.Divider -> ReflowBlock.Divider
+        is ReflowBlockDto.Code -> ReflowBlock.Code(text, source.map { it.toModel() })
+        is ReflowBlockDto.Footnote -> ReflowBlock.Footnote(text, marker, source.map { it.toModel() })
     }
 
 private fun SourceSpan.toDto(): SourceSpanDto = SourceSpanDto(pageIndex, charStart, charEnd, bounds.toDto(), bold, monospace)

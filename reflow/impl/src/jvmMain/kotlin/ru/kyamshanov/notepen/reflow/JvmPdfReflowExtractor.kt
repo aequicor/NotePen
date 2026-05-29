@@ -46,7 +46,17 @@ class JvmPdfReflowExtractor(
     override suspend fun extract(path: String): ReflowDocument =
         withContext(ioDispatcher) {
             openDocument(path).use { document ->
-                ReflowAssembler.assemble((0 until document.numberOfPages).map { extractPage(document, it) })
+                val rawPages = (0 until document.numberOfPages).map { extractPage(document, it) }
+                val assembled = ReflowAssembler.assemble(rawPages)
+                // Vector-path Lattice работает без растеризации: если PDF
+                // нарисовал рамки таблиц векторно (большинство нативных PDF),
+                // refiner подменит low-conf Figure'ы на Tables прямо здесь.
+                // На сканированных PDF (нет vectorLines) — no-op.
+                val afterLattice = LatticeTableRefiner.refineFromVectorLines(assembled, rawPages)
+                // Tagged PDF: автор разметил структуру → промоутим совпадающие
+                // Paragraph'ы в Heading'и с правильным уровнем. На untagged PDF —
+                // no-op.
+                applyTaggedHeadings(document, afterLattice)
             }
         }
 
@@ -61,13 +71,35 @@ class JvmPdfReflowExtractor(
                 // дороже, чем разовое удержание ~10–100 КБ RawPage в памяти.
                 val rawPages = (0 until document.numberOfPages).map { extractPage(document, it) }
                 val assembled = ReflowAssembler.assemble(rawPages)
-                LatticeTableRefiner.refine(
-                    document = assembled,
-                    rawPages = rawPages,
-                    renderPage = pageBitmaps,
-                )
+                // 1) Дешёвый vector-path сначала: если PDF имеет нарисованные
+                //    рамки таблиц векторно — recover'им их без растеризации.
+                val afterVector = LatticeTableRefiner.refineFromVectorLines(assembled, rawPages)
+                // 2) Для оставшихся fallback Figures (без vector lines / vector
+                //    refinement не сработал) пробуем растровый путь через
+                //    PageBitmapProvider. Растеризация значительно дороже.
+                val afterRaster =
+                    LatticeTableRefiner.refine(
+                        document = afterVector,
+                        rawPages = rawPages,
+                        renderPage = pageBitmaps,
+                    )
+                applyTaggedHeadings(document, afterRaster)
             }
         }
+
+    /**
+     * Промоутит совпадающие Paragraph'ы в Heading'и из struct tree, если PDF
+     * tagged. Wrap в `runCatching` — кривой StructTree не должен ломать extract.
+     */
+    private fun applyTaggedHeadings(
+        document: PDDocument,
+        reflow: ReflowDocument,
+    ): ReflowDocument =
+        runCatching {
+            if (!TaggedPdfHeadings.isTagged(document)) return@runCatching reflow
+            val headings = TaggedPdfHeadings.collectHeadings(document)
+            TaggedPdfHeadings.promoteMatchingParagraphs(reflow, headings)
+        }.getOrDefault(reflow)
 
     private fun openDocument(path: String): PDDocument {
         val file = File(path)
@@ -105,19 +137,32 @@ class JvmPdfReflowExtractor(
         stripper.startPage = pageIndex + 1
         stripper.endPage = pageIndex + 1
         stripper.getText(document)
+        val (images, vectorLines) = collectGraphics(page, box.height)
         return RawPage(
             pageIndex = pageIndex,
             widthPt = box.width,
             heightPt = box.height,
             glyphs = glyphs,
-            images = collectImageRegions(page),
+            images = images,
+            vectorLines = vectorLines,
         )
     }
 
-    /** Прямоугольники встроенных растровых изображений страницы (в пунктах, top-left). */
-    private fun collectImageRegions(page: PDPage): List<ReflowRect> =
-        runCatching { ImageRegionCollector(page).also { it.processPage(page) }.regions }
-            .getOrDefault(emptyList())
+    /**
+     * Один проход stream-engine по странице: собираем и встроенные изображения,
+     * и векторные линии (кандидаты в грид сетки таблиц). Раньше делали два
+     * прохода ради одного collector'а изображений; теперь второй пайплайн —
+     * Lattice via vector — присоединяется бесплатно.
+     */
+    private fun collectGraphics(
+        page: PDPage,
+        pageHeightPt: Float,
+    ): Pair<List<ReflowRect>, List<VectorLine>> =
+        runCatching {
+            val collector = GraphicsCollector(page, pageHeightPt)
+            collector.processPage(page)
+            collector.images to collector.vectorLines
+        }.getOrDefault(emptyList<ReflowRect>() to emptyList())
 
     private fun TextPosition.toGlyph(): RawGlyph? {
         val text = unicode?.takeIf { it.isNotEmpty() } ?: return null
@@ -140,18 +185,34 @@ class JvmPdfReflowExtractor(
     }
 
     /**
-     * Stream-engine, собирающий размещение встроенных растровых изображений
-     * (через CTM в [drawImage]); прочие операции рисования игнорируются.
+     * Stream-engine, собирающий за один проход:
+     *  - встроенные растровые изображения (через CTM в [drawImage]) — как раньше;
+     *  - векторные «грид-линии» из path-operator'ов (`moveTo`/`lineTo` →
+     *    `strokePath`/`closePath`/`appendRectangle`+stroke), отфильтрованные до
+     *    близких к горизонтальным или вертикальным.
+     *
+     * Сегменты, формирующие прямоугольники таблиц, эмитятся отдельными отрезками
+     * — постпроцессинг (LatticeTableDetector) кластеризует их в грид. Сегменты,
+     * близкие к диагональным (например, тени или подписи) — отбрасываются.
+     *
+     * Координаты конвертируются из PDF user-space (origin bottom-left) в
+     * top-left того же масштаба, как у [RawGlyph.rect].
      */
-    private class ImageRegionCollector(
+    private class GraphicsCollector(
         page: PDPage,
+        private val pageHeightPt: Float,
     ) : PDFGraphicsStreamEngine(page) {
-        val regions = mutableListOf<ReflowRect>()
-        private val pageHeight = page.mediaBox.height
+        val images = mutableListOf<ReflowRect>()
+        val vectorLines = mutableListOf<VectorLine>()
+
+        /** Накопленные сегменты текущего path'а; коммитятся в [vectorLines] на stroke. */
+        private val pendingSegments = mutableListOf<PendingSegment>()
+        private var currentX = 0f
+        private var currentY = 0f
 
         override fun drawImage(pdImage: PDImage) {
             val m = graphicsState.currentTransformationMatrix
-            regions +=
+            images +=
                 FigureGeometry.imageRectFromCtm(
                     scaleX = m.scaleX,
                     shearY = m.shearY,
@@ -159,7 +220,7 @@ class JvmPdfReflowExtractor(
                     scaleY = m.scaleY,
                     translateX = m.translateX,
                     translateY = m.translateY,
-                    pageHeightPt = pageHeight,
+                    pageHeightPt = pageHeightPt,
                 )
         }
 
@@ -168,19 +229,42 @@ class JvmPdfReflowExtractor(
             p1: Point2D,
             p2: Point2D,
             p3: Point2D,
-        ) {}
+        ) {
+            // Прямоугольник = 4 ребра. Эмитим их как 4 сегмента, чтобы strokePath
+            // их подхватил.
+            addSegment(p0.x.toFloat(), p0.y.toFloat(), p1.x.toFloat(), p1.y.toFloat())
+            addSegment(p1.x.toFloat(), p1.y.toFloat(), p2.x.toFloat(), p2.y.toFloat())
+            addSegment(p2.x.toFloat(), p2.y.toFloat(), p3.x.toFloat(), p3.y.toFloat())
+            addSegment(p3.x.toFloat(), p3.y.toFloat(), p0.x.toFloat(), p0.y.toFloat())
+        }
 
         override fun clip(windingRule: Int) {}
 
         override fun moveTo(
             x: Float,
             y: Float,
-        ) {}
+        ) {
+            currentX = x
+            currentY = y
+        }
 
         override fun lineTo(
             x: Float,
             y: Float,
-        ) {}
+        ) {
+            addSegment(currentX, currentY, x, y)
+            currentX = x
+            currentY = y
+        }
+
+        private fun addSegment(
+            x1: Float,
+            y1: Float,
+            x2: Float,
+            y2: Float,
+        ) {
+            pendingSegments += PendingSegment(x1, y1, x2, y2)
+        }
 
         override fun curveTo(
             x1: Float,
@@ -189,21 +273,87 @@ class JvmPdfReflowExtractor(
             y2: Float,
             x3: Float,
             y3: Float,
-        ) {}
+        ) {
+            // Кривые — не грид-линии; не запоминаем как сегмент, но обновляем позицию.
+            currentX = x3
+            currentY = y3
+        }
 
-        override fun getCurrentPoint(): Point2D = Point2D.Float(0f, 0f)
+        override fun getCurrentPoint(): Point2D = Point2D.Float(currentX, currentY)
 
-        override fun closePath() {}
+        override fun closePath() {
+            pendingSegments.clear()
+        }
 
-        override fun endPath() {}
+        override fun endPath() {
+            pendingSegments.clear()
+        }
 
-        override fun strokePath() {}
+        override fun strokePath() {
+            commitPending()
+        }
 
-        override fun fillPath(windingRule: Int) {}
+        override fun fillPath(windingRule: Int) {
+            // Заливка без обводки — не грид-линия, dropping.
+            pendingSegments.clear()
+        }
 
-        override fun fillAndStrokePath(windingRule: Int) {}
+        override fun fillAndStrokePath(windingRule: Int) {
+            commitPending()
+        }
 
         override fun shadingFill(shadingName: COSName) {}
+
+        private fun commitPending() {
+            for (s in pendingSegments) {
+                classify(s)?.let { vectorLines += it }
+            }
+            pendingSegments.clear()
+        }
+
+        /**
+         * Классифицирует сегмент как [VectorLine.isHorizontal] / vertical или
+         * отбрасывает. Допуск 1°: |dy| / max(|dx|, ε) ≤ tan(1°) ≈ 0.018 → horizontal.
+         * `perpPos`-координата конвертируется в top-left origin.
+         */
+        private fun classify(s: PendingSegment): VectorLine? {
+            val dx = kotlin.math.abs(s.x2 - s.x1)
+            val dy = kotlin.math.abs(s.y2 - s.y1)
+            val length = kotlin.math.max(dx, dy)
+            if (length < MIN_SEGMENT_LENGTH_PT) return null
+            return when {
+                dy <= AXIS_ALIGN_TANGENT * dx ->
+                    VectorLine(
+                        isHorizontal = true,
+                        start = kotlin.math.min(s.x1, s.x2),
+                        end = kotlin.math.max(s.x1, s.x2),
+                        perpPos = pageHeightPt - (s.y1 + s.y2) / 2f,
+                    )
+                dx <= AXIS_ALIGN_TANGENT * dy ->
+                    VectorLine(
+                        isHorizontal = false,
+                        start = pageHeightPt - kotlin.math.max(s.y1, s.y2),
+                        end = pageHeightPt - kotlin.math.min(s.y1, s.y2),
+                        perpPos = (s.x1 + s.x2) / 2f,
+                    )
+                else -> null
+            }
+        }
+
+        private data class PendingSegment(
+            val x1: Float,
+            val y1: Float,
+            val x2: Float,
+            val y2: Float,
+        )
+
+        private companion object {
+            /** tg(1°) ≈ 0.0175. Допуск отклонения от оси для классификации линии. */
+            const val AXIS_ALIGN_TANGENT = 0.018f
+
+            /** Минимальная длина сегмента в pt: 3 pt отсекает «точки» от декоров. */
+            const val MIN_SEGMENT_LENGTH_PT = 3f
+        }
     }
 
     private companion object {

@@ -127,6 +127,8 @@ public fun fingerprintDocument(document: ReflowDocument): Long {
                 h = mixInt(h, block.pageIndex)
                 h = mixInt(h, block.aspectRatio.toRawBits())
             }
+            is ReflowBlock.Code -> h = mixString(h, block.text)
+            is ReflowBlock.Footnote -> h = mixString(h, block.text)
             ReflowBlock.Divider -> Unit
         }
     }
@@ -167,5 +169,7 @@ private fun blockTag(b: ReflowBlock): Char =
         is ReflowBlock.Blockquote -> 'Q'
         is ReflowBlock.Table -> 'T'
         is ReflowBlock.Figure -> 'F'
+        is ReflowBlock.Code -> 'C'
+        is ReflowBlock.Footnote -> 'N'
         ReflowBlock.Divider -> 'D'
     }

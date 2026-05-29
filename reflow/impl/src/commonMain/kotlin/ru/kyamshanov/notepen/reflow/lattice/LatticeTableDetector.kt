@@ -73,6 +73,42 @@ internal object LatticeTableDetector {
      *
      * @param luminanceThreshold порог «тёмного» пикселя (см. [Morphology.argbToBinary])
      */
+
+    /**
+     * Альтернатива [detect]: строит [TableGrid] из заранее-известных грид-линий
+     * (например, из векторных PDF-операторов `lineTo`/`strokePath` — см.
+     * `JvmPdfReflowExtractor.GraphicsCollector`). Без растеризации.
+     *
+     * Координаты во входных линиях должны быть в той же системе, что и итоговый
+     * `TableGrid.cells` (обычно «пиксельной» — например, при масштабировании
+     * страницы в `targetWidthPx`). Caller отвечает за консистентность шкалы.
+     *
+     * `null`, если линий недостаточно (≥[MIN_GRID_LINES_PER_AXIS] на ось).
+     */
+    fun detectFromGridLines(
+        horizontal: List<GridLine>,
+        vertical: List<GridLine>,
+    ): TableGrid? {
+        val cells = buildCells(horizontal, vertical)
+        val isValid =
+            horizontal.size >= MIN_GRID_LINES_PER_AXIS &&
+                vertical.size >= MIN_GRID_LINES_PER_AXIS &&
+                cells.isNotEmpty()
+        if (!isValid) return null
+        return TableGrid(
+            horizontalLines = horizontal,
+            verticalLines = vertical,
+            cells = cells,
+            bounds =
+                PixelRect(
+                    left = vertical.first().position,
+                    top = horizontal.first().position,
+                    right = vertical.last().position + 1,
+                    bottom = horizontal.last().position + 1,
+                ),
+        )
+    }
+
     fun detect(
         pixels: IntArray,
         width: Int,

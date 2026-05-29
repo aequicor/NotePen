@@ -82,6 +82,78 @@ class LatticeTableRefinerTest {
         }
 
     @Test
+    fun `refineFromVectorLines reconstructs Table from vector grid lines`() =
+        runTest {
+            // Та же раскладка, что и в bitmap-варианте, но грид задан
+            // VectorLine'ами прямо в PDF-points — без растеризации.
+            val widthPt = 600f
+            val heightPt = 400f
+            val glyphs =
+                cellWord("Name", startX = 80f, top = 80f) +
+                    cellWord("Type", startX = 320f, top = 80f) +
+                    cellWord("Age", startX = 80f, top = 240f) +
+                    cellWord("Int", startX = 320f, top = 240f)
+            // 3 H-линии (Y=50, 200, 350) + 3 V-линии (X=50, 300, 550) → 2×2 ячейки.
+            val vectorLines =
+                listOf(
+                    ru.kyamshanov.notepen.reflow.VectorLine(true, start = 50f, end = 550f, perpPos = 50f),
+                    ru.kyamshanov.notepen.reflow.VectorLine(true, start = 50f, end = 550f, perpPos = 200f),
+                    ru.kyamshanov.notepen.reflow.VectorLine(true, start = 50f, end = 550f, perpPos = 350f),
+                    ru.kyamshanov.notepen.reflow.VectorLine(false, start = 50f, end = 350f, perpPos = 50f),
+                    ru.kyamshanov.notepen.reflow.VectorLine(false, start = 50f, end = 350f, perpPos = 300f),
+                    ru.kyamshanov.notepen.reflow.VectorLine(false, start = 50f, end = 350f, perpPos = 550f),
+                )
+            val rawPage =
+                RawPage(
+                    pageIndex = 0,
+                    widthPt = widthPt,
+                    heightPt = heightPt,
+                    glyphs = glyphs,
+                    images = emptyList(),
+                    vectorLines = vectorLines,
+                )
+            val figure =
+                ReflowBlock.Figure(
+                    pageIndex = 0,
+                    bounds = ReflowRect(0.05f, 0.05f, 0.95f, 0.95f),
+                    aspectRatio = widthPt / heightPt,
+                    wasTableFallback = true,
+                )
+            val document = ReflowDocument(kind = PdfContentKind.TEXT_BASED, blocks = listOf(figure))
+            val refined = LatticeTableRefiner.refineFromVectorLines(document, listOf(rawPage))
+            val table = assertIs<ReflowBlock.Table>(refined.blocks.single())
+            assertEquals(2, table.rows.size, "2 рядов из 3 H-линий")
+            assertEquals(2, table.rows[0].cells.size, "2 колонки из 3 V-линий")
+            assertEquals("Name", table.rows[0].cells[0].text)
+            assertEquals("Int", table.rows[1].cells[1].text)
+            assertEquals(1f, table.confidence)
+        }
+
+    @Test
+    fun `refineFromVectorLines is no-op when no vector lines on the page`() =
+        runTest {
+            val figure =
+                ReflowBlock.Figure(
+                    pageIndex = 0,
+                    bounds = ReflowRect(0f, 0f, 1f, 1f),
+                    aspectRatio = 1f,
+                    wasTableFallback = true,
+                )
+            val document = ReflowDocument(kind = PdfContentKind.TEXT_BASED, blocks = listOf(figure))
+            val rawPage =
+                RawPage(
+                    pageIndex = 0,
+                    widthPt = 600f,
+                    heightPt = 400f,
+                    glyphs = emptyList(),
+                    images = emptyList(),
+                    vectorLines = emptyList(),
+                )
+            val refined = LatticeTableRefiner.refineFromVectorLines(document, listOf(rawPage))
+            assertEquals(document, refined)
+        }
+
+    @Test
     fun `refine skips Figures without wasTableFallback flag`() =
         runTest {
             val figure =

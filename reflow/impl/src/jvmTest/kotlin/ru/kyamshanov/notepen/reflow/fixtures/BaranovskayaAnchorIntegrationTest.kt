@@ -197,6 +197,8 @@ class BaranovskayaAnchorIntegrationTest {
                 is ReflowBlock.Paragraph -> splittableLayout(block.text, charsPerLine, baseLineHeightPx)
                 is ReflowBlock.ListItem -> splittableLayout(block.text, charsPerLine, baseLineHeightPx)
                 is ReflowBlock.Blockquote -> splittableLayout(block.text, charsPerLine, baseLineHeightPx)
+                is ReflowBlock.Code -> splittableLayout(block.text, charsPerLine, baseLineHeightPx)
+                is ReflowBlock.Footnote -> splittableLayout(block.text, charsPerLine, baseLineHeightPx)
                 is ReflowBlock.Table -> {
                     val rows = max(1, block.rows.size)
                     BlockLayout(heightPx = rows * baseLineHeightPx * TABLE_ROW_MULTIPLIER, lineBottomsPx = emptyList())

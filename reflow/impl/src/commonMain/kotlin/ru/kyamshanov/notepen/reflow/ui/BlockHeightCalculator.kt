@@ -87,6 +87,8 @@ internal object BlockHeightCalculator {
                 measureSplittable(block.text, block.source, style, indent, w, settings, textMeasurer)
             }
             is ReflowBlock.Table -> measureTable(block, w, settings, textMeasurer, density)
+            is ReflowBlock.Code -> measureSplittable(block.text, block.source, settings.codeStyle(), 0, w, settings, textMeasurer)
+            is ReflowBlock.Footnote -> measureSplittable(block.text, block.source, settings.footnoteStyle(), 0, w, settings, textMeasurer)
         }
     }
 
@@ -221,6 +223,8 @@ internal object BlockHeightCalculator {
                 val style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic)
                 TextSpec(block.text, block.source, style, (w - indent).coerceAtLeast(1))
             }
+            is ReflowBlock.Code -> TextSpec(block.text, block.source, settings.codeStyle(), w)
+            is ReflowBlock.Footnote -> TextSpec(block.text, block.source, settings.footnoteStyle(), w)
             is ReflowBlock.Heading,
             is ReflowBlock.Figure,
             is ReflowBlock.Table,

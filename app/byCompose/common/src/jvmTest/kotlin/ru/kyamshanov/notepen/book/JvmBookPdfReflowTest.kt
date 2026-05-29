@@ -110,6 +110,8 @@ class JvmBookPdfReflowTest {
             is ReflowBlock.Paragraph -> block.text to block.source
             is ReflowBlock.ListItem -> block.text to block.source
             is ReflowBlock.Blockquote -> block.text to block.source
+            is ReflowBlock.Code -> block.text to block.source
+            is ReflowBlock.Footnote -> block.text to block.source
             is ReflowBlock.Table, is ReflowBlock.Figure, ReflowBlock.Divider -> null
         }
 

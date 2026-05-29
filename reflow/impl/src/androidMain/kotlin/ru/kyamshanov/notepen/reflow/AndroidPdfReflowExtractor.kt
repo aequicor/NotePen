@@ -52,7 +52,9 @@ class AndroidPdfReflowExtractor(
     override suspend fun extract(path: String): ReflowDocument =
         withContext(ioDispatcher) {
             openDocument(path).use { document ->
-                ReflowAssembler.assemble((0 until document.numberOfPages).map { extractPage(document, it) })
+                val rawPages = (0 until document.numberOfPages).map { extractPage(document, it) }
+                val assembled = ReflowAssembler.assemble(rawPages)
+                LatticeTableRefiner.refineFromVectorLines(assembled, rawPages)
             }
         }
 
@@ -67,8 +69,9 @@ class AndroidPdfReflowExtractor(
                 // дороже, чем разовое удержание ~10–100 КБ RawPage в памяти.
                 val rawPages = (0 until document.numberOfPages).map { extractPage(document, it) }
                 val assembled = ReflowAssembler.assemble(rawPages)
+                val afterVector = LatticeTableRefiner.refineFromVectorLines(assembled, rawPages)
                 LatticeTableRefiner.refine(
-                    document = assembled,
+                    document = afterVector,
                     rawPages = rawPages,
                     renderPage = pageBitmaps,
                 )
@@ -123,19 +126,30 @@ class AndroidPdfReflowExtractor(
         stripper.startPage = pageIndex + 1
         stripper.endPage = pageIndex + 1
         stripper.getText(document)
+        val (images, vectorLines) = collectGraphics(page, box.height)
         return RawPage(
             pageIndex = pageIndex,
             widthPt = box.width,
             heightPt = box.height,
             glyphs = glyphs,
-            images = collectImageRegions(page),
+            images = images,
+            vectorLines = vectorLines,
         )
     }
 
-    /** Прямоугольники встроенных растровых изображений страницы (в пунктах, top-left). */
-    private fun collectImageRegions(page: PDPage): List<ReflowRect> =
-        runCatching { ImageRegionCollector(page).also { it.processPage(page) }.regions }
-            .getOrDefault(emptyList())
+    /**
+     * Один проход stream-engine: изображения + векторные грид-линии (см.
+     * [LatticeTableRefiner.refineFromVectorLines]).
+     */
+    private fun collectGraphics(
+        page: PDPage,
+        pageHeightPt: Float,
+    ): Pair<List<ReflowRect>, List<VectorLine>> =
+        runCatching {
+            val collector = GraphicsCollector(page, pageHeightPt)
+            collector.processPage(page)
+            collector.images to collector.vectorLines
+        }.getOrDefault(emptyList<ReflowRect>() to emptyList())
 
     private fun TextPosition.toGlyph(): RawGlyph? {
         val text = unicode?.takeIf { it.isNotEmpty() } ?: return null
@@ -158,18 +172,23 @@ class AndroidPdfReflowExtractor(
     }
 
     /**
-     * Stream-engine PdfBox-Android, собирающий размещение встроенных растровых
-     * изображений (через CTM в [drawImage]); прочие операции игнорируются.
+     * Stream-engine PdfBox-Android: за один проход собирает встроенные
+     * изображения + векторные грид-линии (см. JVM-аналог в JvmPdfReflowExtractor).
      */
-    private class ImageRegionCollector(
+    private class GraphicsCollector(
         page: PDPage,
+        private val pageHeightPt: Float,
     ) : PDFGraphicsStreamEngine(page) {
-        val regions = mutableListOf<ReflowRect>()
-        private val pageHeight = page.mediaBox.height
+        val images = mutableListOf<ReflowRect>()
+        val vectorLines = mutableListOf<VectorLine>()
+
+        private val pendingSegments = mutableListOf<PendingSegment>()
+        private var currentX = 0f
+        private var currentY = 0f
 
         override fun drawImage(pdImage: PDImage) {
             val m = graphicsState.currentTransformationMatrix
-            regions +=
+            images +=
                 FigureGeometry.imageRectFromCtm(
                     scaleX = m.scaleX,
                     shearY = m.shearY,
@@ -177,7 +196,7 @@ class AndroidPdfReflowExtractor(
                     scaleY = m.scaleY,
                     translateX = m.translateX,
                     translateY = m.translateY,
-                    pageHeightPt = pageHeight,
+                    pageHeightPt = pageHeightPt,
                 )
         }
 
@@ -186,19 +205,40 @@ class AndroidPdfReflowExtractor(
             p1: PointF,
             p2: PointF,
             p3: PointF,
-        ) {}
+        ) {
+            addSegment(p0.x, p0.y, p1.x, p1.y)
+            addSegment(p1.x, p1.y, p2.x, p2.y)
+            addSegment(p2.x, p2.y, p3.x, p3.y)
+            addSegment(p3.x, p3.y, p0.x, p0.y)
+        }
 
         override fun clip(windingRule: Path.FillType) {}
 
         override fun moveTo(
             x: Float,
             y: Float,
-        ) {}
+        ) {
+            currentX = x
+            currentY = y
+        }
 
         override fun lineTo(
             x: Float,
             y: Float,
-        ) {}
+        ) {
+            addSegment(currentX, currentY, x, y)
+            currentX = x
+            currentY = y
+        }
+
+        private fun addSegment(
+            x1: Float,
+            y1: Float,
+            x2: Float,
+            y2: Float,
+        ) {
+            pendingSegments += PendingSegment(x1, y1, x2, y2)
+        }
 
         override fun curveTo(
             x1: Float,
@@ -207,21 +247,77 @@ class AndroidPdfReflowExtractor(
             y2: Float,
             x3: Float,
             y3: Float,
-        ) {}
+        ) {
+            currentX = x3
+            currentY = y3
+        }
 
-        override fun getCurrentPoint(): PointF = PointF(0f, 0f)
+        override fun getCurrentPoint(): PointF = PointF(currentX, currentY)
 
-        override fun closePath() {}
+        override fun closePath() {
+            pendingSegments.clear()
+        }
 
-        override fun endPath() {}
+        override fun endPath() {
+            pendingSegments.clear()
+        }
 
-        override fun strokePath() {}
+        override fun strokePath() {
+            commitPending()
+        }
 
-        override fun fillPath(windingRule: Path.FillType) {}
+        override fun fillPath(windingRule: Path.FillType) {
+            pendingSegments.clear()
+        }
 
-        override fun fillAndStrokePath(windingRule: Path.FillType) {}
+        override fun fillAndStrokePath(windingRule: Path.FillType) {
+            commitPending()
+        }
 
         override fun shadingFill(shadingName: COSName) {}
+
+        private fun commitPending() {
+            for (s in pendingSegments) {
+                classify(s)?.let { vectorLines += it }
+            }
+            pendingSegments.clear()
+        }
+
+        private fun classify(s: PendingSegment): VectorLine? {
+            val dx = kotlin.math.abs(s.x2 - s.x1)
+            val dy = kotlin.math.abs(s.y2 - s.y1)
+            val length = kotlin.math.max(dx, dy)
+            if (length < MIN_SEGMENT_LENGTH_PT) return null
+            return when {
+                dy <= AXIS_ALIGN_TANGENT * dx ->
+                    VectorLine(
+                        isHorizontal = true,
+                        start = kotlin.math.min(s.x1, s.x2),
+                        end = kotlin.math.max(s.x1, s.x2),
+                        perpPos = pageHeightPt - (s.y1 + s.y2) / 2f,
+                    )
+                dx <= AXIS_ALIGN_TANGENT * dy ->
+                    VectorLine(
+                        isHorizontal = false,
+                        start = pageHeightPt - kotlin.math.max(s.y1, s.y2),
+                        end = pageHeightPt - kotlin.math.min(s.y1, s.y2),
+                        perpPos = (s.x1 + s.x2) / 2f,
+                    )
+                else -> null
+            }
+        }
+
+        private data class PendingSegment(
+            val x1: Float,
+            val y1: Float,
+            val x2: Float,
+            val y2: Float,
+        )
+
+        private companion object {
+            const val AXIS_ALIGN_TANGENT = 0.018f
+            const val MIN_SEGMENT_LENGTH_PT = 3f
+        }
     }
 
     private companion object {

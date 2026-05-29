@@ -67,6 +67,8 @@ public object ReflowPageLocator {
                     .flatMap { it.source }
                     .minOfOrNull { it.pageIndex }
             is ReflowBlock.Figure -> pageIndex
+            is ReflowBlock.Code -> source.minOfOrNull { it.pageIndex }
+            is ReflowBlock.Footnote -> source.minOfOrNull { it.pageIndex }
             ReflowBlock.Divider -> null
         }
 }

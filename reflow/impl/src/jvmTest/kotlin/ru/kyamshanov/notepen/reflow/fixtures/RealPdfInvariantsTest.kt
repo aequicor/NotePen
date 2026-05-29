@@ -181,6 +181,7 @@ class RealPdfInvariantsTest {
             is ReflowBlock.ListItem -> b.text.length
             is ReflowBlock.Blockquote -> b.text.length
             is ReflowBlock.Table -> b.rows.sumOf { r -> r.cells.sumOf { c -> c.text.length } }
+            is ReflowBlock.Code -> b.text.length
             else -> 0
         }
 

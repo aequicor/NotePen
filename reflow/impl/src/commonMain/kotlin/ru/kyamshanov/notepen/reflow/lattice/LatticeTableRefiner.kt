@@ -46,6 +46,26 @@ internal object LatticeTableRefiner {
      */
     private const val ROW_GROUP_TOLERANCE_FRACTION = 0.05f
 
+    /**
+     * Масштаб конверсии PDF-points → integer для vector-path Lattice. 10 = 0.1 pt
+     * на единицу. PDF-страница A4 (~595×842 pt) → ~5950×8420 int — достаточно
+     * точно для кластеризации линий, и compact: int helps cluster-merge perform.
+     */
+    private const val VECTOR_INT_SCALE = 10f
+
+    /**
+     * Минимальная длина vector-линии (доля стороны страницы) — соответствует
+     * `LatticeTableDetector.MIN_LINE_LENGTH_FRACTION = 0.05`, чтобы две стратегии
+     * фильтровали одинаковые «обрывки» линий.
+     */
+    private const val VECTOR_MIN_LINE_FRACTION = 0.05f
+
+    /**
+     * Допуск кластеризации параллельных линий — те же 0.5% стороны, что и в
+     * растровом пути [LatticeTableDetector.LINE_CLUSTER_TOLERANCE_FRACTION].
+     */
+    private const val VECTOR_CLUSTER_TOLERANCE_FRACTION = 0.005f
+
     suspend fun refine(
         document: ReflowDocument,
         rawPages: List<RawPage>,
@@ -67,12 +87,95 @@ internal object LatticeTableRefiner {
             if (context != null) {
                 indexedFigures.forEach { (idx, block) ->
                     val figure = block as ReflowBlock.Figure
-                    val table = reconstructTableForFigure(figure, context.grid, context.page, context.bitmap)
+                    val table =
+                        reconstructTableForFigure(
+                            figure = figure,
+                            grid = context.grid,
+                            page = context.page,
+                            intSpaceWidth = context.bitmap.widthPx,
+                            intSpaceHeight = context.bitmap.heightPx,
+                        )
                     if (table != null) newBlocks[idx] = table
                 }
             }
         }
         return ReflowDocument(kind = document.kind, blocks = newBlocks)
+    }
+
+    /**
+     * Альтернативный путь Lattice через **векторные грид-линии** страницы:
+     * вместо растеризации и морфологии берёт `RawPage.vectorLines` напрямую,
+     * кластеризует их в `LatticeTableDetector.GridLine` и пытается восстановить
+     * таблицы. Работает без `PageBitmapProvider` — для PDF с нарисованными
+     * рамками таблиц это быстрее (нет PDFRenderer) и точнее (нет потерь от
+     * раундинга при бинаризации anti-aliased линий).
+     *
+     * Применять до/вместо [refine]: вызывается из `extract()` JVM-экстрактора
+     * после assemble, до возвращения документа. Если для всех страниц с
+     * fallback Figure нет vector lines — no-op.
+     */
+    fun refineFromVectorLines(
+        document: ReflowDocument,
+        rawPages: List<RawPage>,
+    ): ReflowDocument {
+        val candidates =
+            document.blocks
+                .withIndex()
+                .filter { (_, b) -> b is ReflowBlock.Figure && b.wasTableFallback }
+        if (candidates.isEmpty()) return document
+
+        val byPage = candidates.groupBy { (_, b) -> (b as ReflowBlock.Figure).pageIndex }
+        val newBlocks = document.blocks.toMutableList()
+        for ((pageIndex, indexedFigures) in byPage) {
+            val rawPage = rawPages.getOrNull(pageIndex) ?: continue
+            if (rawPage.vectorLines.isEmpty()) continue
+            val grid = buildGridFromVectors(rawPage) ?: continue
+            val intWidth = (rawPage.widthPt * VECTOR_INT_SCALE).toInt().coerceAtLeast(1)
+            val intHeight = (rawPage.heightPt * VECTOR_INT_SCALE).toInt().coerceAtLeast(1)
+            indexedFigures.forEach { (idx, block) ->
+                val figure = block as ReflowBlock.Figure
+                val table =
+                    reconstructTableForFigure(
+                        figure = figure,
+                        grid = grid,
+                        page = rawPage,
+                        intSpaceWidth = intWidth,
+                        intSpaceHeight = intHeight,
+                    )
+                if (table != null) newBlocks[idx] = table
+            }
+        }
+        return ReflowDocument(kind = document.kind, blocks = newBlocks)
+    }
+
+    /**
+     * Строит [LatticeTableDetector.TableGrid] из векторных линий страницы:
+     * масштабирует pt → int (через [VECTOR_INT_SCALE]), кластеризует параллельные
+     * близкие линии — точная аналогия растрового [Morphology.clusterToGridLines].
+     */
+    private fun buildGridFromVectors(rawPage: RawPage): LatticeTableDetector.TableGrid? {
+        val intWidth = (rawPage.widthPt * VECTOR_INT_SCALE).toInt().coerceAtLeast(1)
+        val intHeight = (rawPage.heightPt * VECTOR_INT_SCALE).toInt().coerceAtLeast(1)
+        val tolY = (intHeight * VECTOR_CLUSTER_TOLERANCE_FRACTION).toInt().coerceAtLeast(1)
+        val tolX = (intWidth * VECTOR_CLUSTER_TOLERANCE_FRACTION).toInt().coerceAtLeast(1)
+        val minHRun = (intWidth * VECTOR_MIN_LINE_FRACTION).toInt().coerceAtLeast(1)
+        val minVRun = (intHeight * VECTOR_MIN_LINE_FRACTION).toInt().coerceAtLeast(1)
+        val hSegments = mutableListOf<Morphology.LineSegment>()
+        val vSegments = mutableListOf<Morphology.LineSegment>()
+        for (line in rawPage.vectorLines) {
+            val start = (line.start * VECTOR_INT_SCALE).toInt()
+            val end = (line.end * VECTOR_INT_SCALE).toInt()
+            val perp = (line.perpPos * VECTOR_INT_SCALE).toInt()
+            val length = end - start
+            if (line.isHorizontal) {
+                if (length >= minHRun) hSegments += Morphology.LineSegment(start, end, perp)
+            } else {
+                if (length >= minVRun) vSegments += Morphology.LineSegment(start, end, perp)
+            }
+        }
+        val h = Morphology.clusterToGridLines(hSegments, tolY)
+        val v = Morphology.clusterToGridLines(vSegments, tolX)
+        return LatticeTableDetector.detectFromGridLines(h, v)
     }
 
     /**
@@ -118,9 +221,10 @@ internal object LatticeTableRefiner {
         figure: ReflowBlock.Figure,
         grid: LatticeTableDetector.TableGrid,
         page: RawPage,
-        bitmap: PageRaster,
+        intSpaceWidth: Int,
+        intSpaceHeight: Int,
     ): ReflowBlock.Table? {
-        val figPx = figureToPixelRect(figure.bounds, bitmap)
+        val figPx = figureToPixelRect(figure.bounds, intSpaceWidth, intSpaceHeight)
         val cellsInFig = grid.cells.filter { it.centerInside(figPx) }
         // Ячеек мало — скорее шум; ≥2 рядов нужны как и Stream. Объединяем гарды
         // ниже в одну ветку, чтобы число return'ов не росло.
@@ -128,7 +232,7 @@ internal object LatticeTableRefiner {
             if (cellsInFig.size < MIN_CELLS_FOR_TABLE) {
                 emptyList()
             } else {
-                groupCellsByRow(cellsInFig.map { pixelCellToPdfPoint(it, bitmap, page) })
+                groupCellsByRow(cellsInFig.map { pixelCellToPdfPoint(it, intSpaceWidth, intSpaceHeight, page) })
             }
         return if (rows.size < 2) {
             null
@@ -148,16 +252,17 @@ internal object LatticeTableRefiner {
         }
     }
 
-    /** Конверсия normalized [0..1] → pixel `IntRect` через размер растрового буфера. */
+    /** Конверсия normalized [0..1] → int `PixelRect` через размер целевого int-space. */
     private fun figureToPixelRect(
         bounds: ReflowRect,
-        bitmap: PageRaster,
+        intSpaceWidth: Int,
+        intSpaceHeight: Int,
     ): LatticeTableDetector.PixelRect =
         LatticeTableDetector.PixelRect(
-            left = (bounds.left * bitmap.widthPx).toInt(),
-            top = (bounds.top * bitmap.heightPx).toInt(),
-            right = (bounds.right * bitmap.widthPx).toInt(),
-            bottom = (bounds.bottom * bitmap.heightPx).toInt(),
+            left = (bounds.left * intSpaceWidth).toInt(),
+            top = (bounds.top * intSpaceHeight).toInt(),
+            right = (bounds.right * intSpaceWidth).toInt(),
+            bottom = (bounds.bottom * intSpaceHeight).toInt(),
         )
 
     private fun LatticeTableDetector.PixelRect.centerInside(outer: LatticeTableDetector.PixelRect): Boolean {
@@ -166,14 +271,15 @@ internal object LatticeTableRefiner {
         return cx in outer.left..outer.right && cy in outer.top..outer.bottom
     }
 
-    /** Пиксельная ячейка → прямоугольник в PDF-пунктах (как у глифов). */
+    /** Int-space ячейка → прямоугольник в PDF-пунктах (как у глифов). */
     private fun pixelCellToPdfPoint(
         cell: LatticeTableDetector.PixelRect,
-        bitmap: PageRaster,
+        intSpaceWidth: Int,
+        intSpaceHeight: Int,
         page: RawPage,
     ): PointRect {
-        val pxToWPt = page.widthPt / bitmap.widthPx.toFloat()
-        val pxToHPt = page.heightPt / bitmap.heightPx.toFloat()
+        val pxToWPt = page.widthPt / intSpaceWidth.toFloat()
+        val pxToHPt = page.heightPt / intSpaceHeight.toFloat()
         return PointRect(
             left = cell.left * pxToWPt,
             top = cell.top * pxToHPt,

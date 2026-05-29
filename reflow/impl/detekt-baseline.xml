@@ -3,28 +3,45 @@
   <ManuallySuppressedIssues/>
   <CurrentIssues>
     <ID>ComplexCondition:ReflowReader.kt:source.isEmpty() &amp;&amp; anchors.isEmpty() &amp;&amp; !settings.bionic &amp;&amp; !needsWordSpacing</ID>
+    <ID>CyclomaticComplexMethod:ReflowAssembler.kt:ReflowAssembler$private fun buildLine: Line</ID>
     <ID>CyclomaticComplexMethod:ReflowReader.kt:@Composable private fun PagedReflowContent</ID>
     <ID>CyclomaticComplexMethod:ReflowReader.kt:@Composable public fun ReflowReader</ID>
     <ID>CyclomaticComplexMethod:ReflowReader.kt:internal fun styledText: AnnotatedString</ID>
-    <ID>EmptyFunctionBlock:AndroidPdfReflowExtractor.kt:AndroidPdfReflowExtractor.ImageRegionCollector${}</ID>
-    <ID>EmptyFunctionBlock:JvmPdfReflowExtractor.kt:JvmPdfReflowExtractor.ImageRegionCollector${}</ID>
+    <ID>EmptyFunctionBlock:AndroidPdfReflowExtractor.kt:AndroidPdfReflowExtractor.GraphicsCollector${}</ID>
+    <ID>EmptyFunctionBlock:JvmPdfReflowExtractor.kt:JvmPdfReflowExtractor.GraphicsCollector${}</ID>
+    <ID>LargeClass:ReflowAssembler.kt:ReflowAssembler</ID>
     <ID>LongMethod:ReaderAirbar.kt:@Composable internal fun ReaderAirbar</ID>
     <ID>LongMethod:ReaderAirbar.kt:@Composable private fun CollapsedPill</ID>
     <ID>LongMethod:ReaderAirbar.kt:@Composable private fun TuneSheet</ID>
     <ID>LongMethod:ReflowReader.kt:@Composable private fun PagedReflowContent</ID>
     <ID>LongMethod:ReflowReader.kt:@Composable public fun ReflowReader</ID>
+    <ID>LoopWithTooManyJumpStatements:LatticeTableRefiner.kt:LatticeTableRefiner$for</ID>
+    <ID>LoopWithTooManyJumpStatements:ReflowAssembler.kt:ReflowAssembler$while</ID>
+    <ID>LoopWithTooManyJumpStatements:TaggedPdfHeadings.kt:TaggedPdfHeadings$for</ID>
+    <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$is ReflowBlock.Code -&gt; measureSplittable(block.text, block.source, settings.codeStyle(), 0, w, settings, textMeasurer)</ID>
+    <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$is ReflowBlock.Footnote -&gt; measureSplittable(block.text, block.source, settings.footnoteStyle(), 0, w, settings, textMeasurer)</ID>
     <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$is ReflowBlock.Paragraph -&gt; measureSplittable(block.text, block.source, settings.paragraphStyle(), 0, w, settings, textMeasurer)</ID>
     <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$measureSplittable(block.text, block.source, settings.paragraphStyle(), indent, w, settings, textMeasurer)</ID>
     <ID>MaxLineLength:FontStyles.kt:FontStyles$private fun String?.matchesAny: Boolean</ID>
     <ID>MaxLineLength:ReflowAssembler.kt:ReflowAssembler$/** Горизонтальный зазор (доля кегля строки), трактуемый как пробел между словами (когда ширина пробела неизвестна). */</ID>
     <ID>MaxLineLength:ReflowAssembler.kt:ReflowAssembler.BlockBuilder$private fun isSoftHyphen: Boolean</ID>
     <ID>MaxLineLength:ReflowReader.kt:if (rowIndex == 0) settings.textColor.copy(alpha = TABLE_HEADER_ALPHA) else Color.Transparent</ID>
+    <ID>ReturnCount:FootnoteExtractor.kt:FootnoteExtractor$fun extractFootnote: FootnoteSplit</ID>
     <ID>ReturnCount:ReadingErgonomics.kt:ReadingErgonomics$fun dimAlpha: Float</ID>
     <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler$private fun buildTable: ReflowBlock.Table?</ID>
+    <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler$private fun shouldDehyphenateAcross: Boolean</ID>
+    <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler.BlockBuilder$fun addLine</ID>
+    <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler.BlockBuilder$private fun looksLikeDropCap: Boolean</ID>
     <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler.Line$fun startsListItem: Boolean</ID>
     <ID>ReturnCount:ReflowPageLocator.kt:ReflowPageLocator$public fun pageForBlock: Int?</ID>
-    <ID>TooManyFunctions:AndroidPdfReflowExtractor.kt:AndroidPdfReflowExtractor$ImageRegionCollector : PDFGraphicsStreamEngine</ID>
-    <ID>TooManyFunctions:JvmPdfReflowExtractor.kt:JvmPdfReflowExtractor$ImageRegionCollector : PDFGraphicsStreamEngine</ID>
+    <ID>ReturnCount:RunningHeaderStripper.kt:RunningHeaderStripper$fun strip: List&lt;RawPage&gt;</ID>
+    <ID>ReturnCount:RunningHeaderStripper.kt:RunningHeaderStripper$private fun collectCandidates: List&lt;Candidate&gt;</ID>
+    <ID>ReturnCount:TaggedPdfHeadings.kt:TaggedPdfHeadings$fun collectHeadings: List&lt;TaggedHeading&gt;</ID>
+    <ID>ReturnCount:TaggedPdfHeadings.kt:TaggedPdfHeadings$private fun collectActualText: String</ID>
+    <ID>ReturnCount:TaggedPdfHeadings.kt:TaggedPdfHeadings$private fun parseHeadingLevel: Int</ID>
+    <ID>TooManyFunctions:AndroidPdfReflowExtractor.kt:AndroidPdfReflowExtractor$GraphicsCollector : PDFGraphicsStreamEngine</ID>
+    <ID>TooManyFunctions:JvmPdfReflowExtractor.kt:JvmPdfReflowExtractor$GraphicsCollector : PDFGraphicsStreamEngine</ID>
+    <ID>TooManyFunctions:LatticeTableRefiner.kt:LatticeTableRefiner</ID>
     <ID>TooManyFunctions:ReaderAirbar.kt:ru.kyamshanov.notepen.reflow.ui.ReaderAirbar.kt</ID>
     <ID>TooManyFunctions:ReflowAssembler.kt:ReflowAssembler</ID>
     <ID>TooManyFunctions:ReflowAssembler.kt:ReflowAssembler$BlockBuilder</ID>

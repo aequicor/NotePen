@@ -18,6 +18,9 @@ package ru.kyamshanov.notepen.reflow.api
  * @property bold фрагмент набран полужирным начертанием (определено по имени шрифта)
  * @property italic фрагмент набран курсивным начертанием (определено по имени шрифта)
  * @property monospace фрагмент набран моноширинным шрифтом (обычно inline-код)
+ * @property superscript фрагмент — надстрочный (smaller font + baseline-offset вверх),
+ *   как в `x²` или маркер сноски `¹`. UI рендерит уменьшенным шрифтом и сдвигом вверх
+ * @property subscript фрагмент — подстрочный (`H₂O`, индексы)
  */
 public data class SourceSpan(
     public val pageIndex: Int,
@@ -27,4 +30,6 @@ public data class SourceSpan(
     public val bold: Boolean = false,
     public val monospace: Boolean = false,
     public val italic: Boolean = false,
+    public val superscript: Boolean = false,
+    public val subscript: Boolean = false,
 )

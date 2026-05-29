@@ -139,6 +139,20 @@ internal object ReflowAssembler {
     private const val HEADING_MIN_LENGTH = 2
 
     /**
+     * Доля моноширинных глифов в строке, начиная с которой строка считается
+     * «строкой кода» (а не «текстом с inline-code-fragment'ом»). 0.8 — высокий
+     * порог, отсекает обычные абзацы с одним inline `code` (Markdown-style).
+     */
+    private const val CODE_LINE_MONOSPACE_FRACTION = 0.8f
+
+    /**
+     * Минимум моноширинных строк подряд для эмиссии Code-блока. Меньшее
+     * количество — обычно подсказки в скобках или одиночные кодовые строки в
+     * абзаце; они остаются inline через `SourceSpan(monospace=true)`.
+     */
+    private const val CODE_MIN_CONSECUTIVE_LINES = 2
+
+    /**
      * Минимальная доля letter-or-digit в строке Heading. Ниже — текст состоит
      * преимущественно из пунктуации/спецсимволов («/», «.», «—»), это не реальный
      * заголовок, а строка-разделитель.
@@ -165,6 +179,46 @@ internal object ReflowAssembler {
      * упражнений учебника.
      */
     private const val MIN_TABLE_ROWS_WIDE = 3
+
+    /** Доля bold-ячеек в первой строке, начиная с которой таблица имеет header. */
+    private const val TABLE_HEADER_BOLD_RATIO = 0.5f
+
+    /**
+     * Множитель кегля для drop cap: глифы ≥ этого множителя × body-font, в строке
+     * только один символ — декоративная буквица, не Heading.
+     */
+    private const val DROP_CAP_RATIO = 3f
+
+    /** Дефолтный XY-cut порог зазора (0.02 = 2% стороны страницы) — для HYBRID/OCR. */
+    private const val XY_CUT_DEFAULT_MIN_GAP_FRACTION = 0.02f
+
+    /**
+     * Более строгий порог для TEXT_BASED: 10% ширины страницы. Столбцы таблиц
+     * имеют gap ~ font-size = 1–2% страницы; пограничные wide-cell prose
+     * false-positive — до ~7%. Multi-column journals обычно имеют gutter
+     * ≥10%, поэтому порог 0.10 ловит реальные 2-колоночные layouts и не
+     * разрезает таблицы / wide-cell prose в один столбец.
+     */
+    private const val XY_CUT_TEXT_BASED_MIN_GAP_FRACTION = 0.10f
+
+    /** Минимум непустых ячеек в строке, чтобы статус header имел смысл. */
+    private const val TABLE_HEADER_MIN_NON_EMPTY = 2
+
+    /**
+     * Доля кегля строки, при которой глиф считается super/subscript-кандидатом:
+     * `glyph.fontSizePt < line.fontSize × этот множитель`. 0.7 = сильно меньше —
+     * отсекает шрифт-вариации primary text (book/heading) и ловит only真ные
+     * sup/sub'ы.
+     */
+    private const val SUBSCRIPT_FONT_RATIO = 0.7f
+
+    /**
+     * Сдвиг baseline (доля кегля строки): superscript глиф имеет
+     * `bottom < median - delta`, subscript — `bottom > median + delta`. 0.25 —
+     * мягкий порог; меньшее значение даёт ложноположительные на anti-aliased
+     * выравнивании в OCR.
+     */
+    private const val SUBSCRIPT_BASELINE_DELTA = 0.25f
 
     /** Порог по числу колонок, выше которого начинается «широкая» политика (см. [MIN_TABLE_ROWS_WIDE]). */
     private const val WIDE_TABLE_COLS_THRESHOLD = 8
@@ -251,7 +305,12 @@ internal object ReflowAssembler {
      */
     fun assemble(pages: List<RawPage>): ReflowDocument {
         val kind = classify(pages)
-        val bodyFont = medianFontSize(pages.flatMap { it.glyphs })
+        // Колонтитулы (running headers/footers) убираем ДО всего остального: они
+        // не должны попадать ни в порядок чтения (XY-cut), ни в детект таблиц,
+        // ни в abzac-сборку. Stripper консервативный — на коротких документах
+        // ничего не делает.
+        val cleanedPages = RunningHeaderStripper.strip(pages)
+        val bodyFont = medianFontSize(cleanedPages.flatMap { it.glyphs })
         // XY-cut сегментация ДО groupLines — только для OCR/HYBRID PDF, где
         // text-layer noisy и groupLines склеивает глифы разных колонок одной Y
         // в одну Line (с перепутанным порядком «leftcol1 rightcol1»). Для
@@ -259,15 +318,173 @@ internal object ReflowAssembler {
         // последовательность, плюс table-extraction (detectTableRanges) видит
         // table-column gaps теми же сигналами, что XY-cut, и сегментация
         // разрезала бы таблицы по колонкам, ломая их.
+        // TEXT_BASED: XY-cut пока выключен — на чистом native PDF column gaps
+        // таблиц/выровненных абзацев trigger'ят сегментацию, и таблицы режутся
+        // по колонкам. Нужен detect-таблицы-сначала + exclude-zone в XY-cut'е
+        // (не landed). Пока возвращаем как было: TEXT_BASED идёт без сегментации,
+        // OCR/HYBRID — через XY-cut.
         val flatPages =
-            if (kind == PdfContentKind.TEXT_BASED) pages else pages.flatMap { segmentPage(it) }
-        val pageLines = flatPages.map { it to groupLines(it.glyphs, bodyFont, it) }
+            if (kind == PdfContentKind.TEXT_BASED) cleanedPages else cleanedPages.flatMap { segmentPage(it) }
+        // Footnotes: вынимаем small-font блоки из нижней зоны страниц. Возвращаем
+        // (pageWithoutFootnotes, footnoteBlockOrNull). Извлечение before groupLines:
+        // footnote-глифы не должны участвовать в подсчёте typicalPitch / bodyFont.
+        val pagesWithFootnotes =
+            flatPages.map { p ->
+                val split = FootnoteExtractor.extractFootnote(p, bodyFont)
+                split.page to split.footnote
+            }
+        val pageLines = pagesWithFootnotes.map { (p, _) -> p to groupLines(p.glyphs, bodyFont, p) }
         // Шаг строк (baseline-to-baseline) стабилен к вариации высоты глиф-бокса
         // между шрифтами/версиями PDFBox, в отличие от зазора по нижнему краю
         // бокса, — поэтому разрыв абзаца считаем по нему.
         val typicalPitch = typicalLinePitch(pageLines.map { it.second })
-        val blocks = pageLines.flatMap { (page, lines) -> buildPageBlocks(page, lines, bodyFont, typicalPitch) }
-        return ReflowDocument(kind = kind, blocks = blocks)
+        val blocks =
+            pageLines.flatMapIndexed { i, pair ->
+                val (page, lines) = pair
+                val pageBlocks = buildPageBlocks(page, lines, bodyFont, typicalPitch)
+                // Footnote страницы приклеиваем в конец её блоков, перед переходом к
+                // следующей странице. Так блок «принадлежит» правильной странице в
+                // потоке чтения.
+                val footnote = pagesWithFootnotes[i].second
+                if (footnote != null && footnote.text.isNotEmpty()) pageBlocks + footnote else pageBlocks
+            }
+        // Cross-page table continuation: подряд идущие Tables с одинаковым числом
+        // колонок склеиваются в одну. Срабатывает на multi-page tables (длинные
+        // спецификации, библиографии в табличной форме).
+        val joinedBlocks = joinContinuedTables(blocks)
+        // Dehyphenation across page boundaries: если последний Paragraph
+        // страницы заканчивается на дефис + буква, а следующий Paragraph
+        // начинается со строчной буквы — это перенос слова через page break.
+        // Склеиваем тексты, убирая дефис.
+        val dehyphenated = dehyphenateAdjacentParagraphs(joinedBlocks)
+        return ReflowDocument(kind = kind, blocks = dehyphenated)
+    }
+
+    /**
+     * Пост-пасс: для каждой пары подряд идущих [ReflowBlock.Paragraph] / [ListItem],
+     * где первый кончается на дефис (соединяющий буквы), а второй начинается
+     * со строчной буквы, — склеиваем их в один блок с удалением дефиса.
+     *
+     * Узкая эвристика: только Paragraph→Paragraph и ListItem→ListItem (последний —
+     * редко, обычно перенос предложения в списке). Heading→Paragraph и прочие
+     * комбинации не трогаем.
+     *
+     * Spans второго блока сдвигаются на длину первого после слияния (с поправкой
+     * на удалённый дефис).
+     */
+    private fun dehyphenateAdjacentParagraphs(blocks: List<ReflowBlock>): List<ReflowBlock> {
+        if (blocks.size < 2) return blocks
+        val out = mutableListOf<ReflowBlock>()
+        var i = 0
+        while (i < blocks.size) {
+            val curr = blocks[i]
+            val next = blocks.getOrNull(i + 1)
+            if (next != null && shouldDehyphenateAcross(curr, next)) {
+                out += mergeAcrossHyphen(curr as ReflowBlock.Paragraph, next as ReflowBlock.Paragraph)
+                i += 2
+            } else {
+                out += curr
+                i++
+            }
+        }
+        return out
+    }
+
+    /**
+     * `true`, если оба блока — Paragraph, первый кончается на дефис+буква (т.е.
+     * перенос слова в смысле [isSoftHyphenSeparator]), а второй начинается со
+     * строчной буквы.
+     */
+    private fun shouldDehyphenateAcross(
+        a: ReflowBlock,
+        b: ReflowBlock,
+    ): Boolean {
+        if (a !is ReflowBlock.Paragraph || b !is ReflowBlock.Paragraph) return false
+        val aText = a.text.trimEnd()
+        if (aText.length < 2) return false
+        val last = aText.last()
+        val prev = aText[aText.length - 2]
+        if (last !in HYPHEN_CHARS || !prev.isLetter()) return false
+        val bFirst = b.text.firstOrNull { !it.isWhitespace() } ?: return false
+        return bFirst.isLowerCase()
+    }
+
+    private fun mergeAcrossHyphen(
+        a: ReflowBlock.Paragraph,
+        b: ReflowBlock.Paragraph,
+    ): ReflowBlock.Paragraph {
+        // Убираем последний символ (дефис) у первого, объединяем тексты, сдвигаем
+        // спаны второго.
+        val trimmedA = a.text.trimEnd()
+        val noHyphenA = trimmedA.dropLast(1)
+        val merged = noHyphenA + b.text.trimStart()
+        val shift = noHyphenA.length - (b.text.length - b.text.trimStart().length)
+        val newSpans =
+            a.source +
+                b.source.map { span ->
+                    span.copy(charStart = span.charStart + shift, charEnd = span.charEnd + shift)
+                }
+        return ReflowBlock.Paragraph(text = merged, source = newSpans)
+    }
+
+    /**
+     * Сливает подряд идущие [ReflowBlock.Table] с одинаковым числом колонок: чаще
+     * всего это таблица, разбитая страничным разрывом исходного PDF на два Table-
+     * блока. Сливаем агрессивно по равенству cols — column-lefts проверки
+     * пропускаем, потому что разные страницы могут иметь чуть смещённую раскладку
+     * (page margins), но столбцов столько же.
+     *
+     * Confidence результата — `min(parts)` (консервативно: одна слабая половина
+     * понижает общую). Если в первой части был header — у объединения header
+     * сохраняется на первой строке, остальные `isHeader=false` (даже если в
+     * новой части тоже определилась header — на cross-page таблице вторая
+     * шапка повторяет первую, её опускаем).
+     */
+    private fun joinContinuedTables(blocks: List<ReflowBlock>): List<ReflowBlock> {
+        if (blocks.size < 2) return blocks
+        val out = mutableListOf<ReflowBlock>()
+        var i = 0
+        while (i < blocks.size) {
+            val curr = blocks[i]
+            if (curr !is ReflowBlock.Table) {
+                out += curr
+                i++
+                continue
+            }
+            val cols = curr.rows.firstOrNull()?.cells?.size ?: 0
+            var j = i + 1
+            val parts = mutableListOf(curr)
+            // Жадно гребём следующие Tables с тем же числом колонок. Прерываемся,
+            // как только встретили НЕ-Table.
+            while (j < blocks.size) {
+                val next = blocks[j] as? ReflowBlock.Table ?: break
+                val nextCols = next.rows.firstOrNull()?.cells?.size ?: 0
+                if (nextCols != cols || cols == 0) break
+                parts += next
+                j++
+            }
+            if (parts.size == 1) {
+                out += curr
+            } else {
+                out += mergeTableParts(parts)
+            }
+            i = j
+        }
+        return out
+    }
+
+    private fun mergeTableParts(parts: List<ReflowBlock.Table>): ReflowBlock.Table {
+        val allRows = mutableListOf<ReflowBlock.TableRow>()
+        val firstHeaderIdx = parts.first().rows.indexOfFirst { it.isHeader }
+        for ((partIdx, part) in parts.withIndex()) {
+            for ((rowIdx, row) in part.rows.withIndex()) {
+                // Header сохраняем только из первой части (на первой её позиции).
+                val keepHeader = partIdx == 0 && rowIdx == firstHeaderIdx && firstHeaderIdx >= 0
+                allRows += if (keepHeader) row else row.copy(isHeader = false)
+            }
+        }
+        val conf = parts.minOf { it.confidence }
+        return ReflowBlock.Table(rows = allRows, confidence = conf)
     }
 
     /**
@@ -279,13 +496,17 @@ internal object ReflowAssembler {
      * страниц: figure в правой колонке должна попасть в правую sub-RawPage,
      * иначе при flow-reading она «выпрыгнет» в неправильное место текста.
      */
-    private fun segmentPage(page: RawPage): List<RawPage> {
+    private fun segmentPage(
+        page: RawPage,
+        minGapFraction: Float = XY_CUT_DEFAULT_MIN_GAP_FRACTION,
+    ): List<RawPage> {
         val regions =
             if (page.glyphs.size >= MIN_GLYPHS_FOR_XY_CUT) {
                 XyCutSegmenter.segment(
                     glyphRects = page.glyphs.map { it.rect },
                     pageWidthPt = page.widthPt,
                     pageHeightPt = page.heightPt,
+                    minGapFraction = minGapFraction,
                 )
             } else {
                 emptyList()
@@ -550,7 +771,34 @@ internal object ReflowAssembler {
         // Wide-tables (8+ cols) с <3 рядов почти всегда — pseudo-row из выровненных
         // упражнений / глоссариев; legitimate wide tables имеют header + data.
         if (columns.size >= WIDE_TABLE_COLS_THRESHOLD && rows.size < MIN_TABLE_ROWS_WIDE) return null
-        return ReflowBlock.Table(rows = rows, confidence = computeTableConfidence(rows))
+        // Header detection: первая строка с ≥TABLE_HEADER_BOLD_RATIO долей bold-ячеек
+        // — таблица заголовка. На остальных строках isHeader=false default.
+        val firstRow = rows.first()
+        val isFirstHeader = isHeaderRow(firstRow)
+        val finalRows =
+            if (!isFirstHeader || rows.isEmpty()) {
+                rows
+            } else {
+                listOf(firstRow.copy(isHeader = true)) + rows.drop(1)
+            }
+        return ReflowBlock.Table(rows = finalRows, confidence = computeTableConfidence(finalRows))
+    }
+
+    /**
+     * `true`, если первая строка таблицы выглядит как header: непустых ячеек
+     * минимум 2, и доля ячеек, в которых **большинство spans** полужирные,
+     * ≥ [TABLE_HEADER_BOLD_RATIO]. Reasoning: legitimate headers — это «Name»,
+     * «Type», «Value» bold-ом; обычные данные — нет.
+     */
+    private fun isHeaderRow(row: ReflowBlock.TableRow): Boolean {
+        val nonEmpty = row.cells.filter { it.text.isNotBlank() }
+        if (nonEmpty.size < TABLE_HEADER_MIN_NON_EMPTY) return false
+        val boldCells =
+            nonEmpty.count { cell ->
+                val spans = cell.source
+                spans.isNotEmpty() && spans.count { it.bold } * 2 >= spans.size
+            }
+        return boldCells.toFloat() / nonEmpty.size >= TABLE_HEADER_BOLD_RATIO
     }
 
     /**
@@ -634,6 +882,8 @@ internal object ReflowAssembler {
                         bold = piece.bold,
                         monospace = piece.monospace,
                         italic = piece.italic,
+                        superscript = piece.superscript,
+                        subscript = piece.subscript,
                     )
             }
         }
@@ -675,6 +925,11 @@ internal object ReflowAssembler {
     ): Line {
         val sorted = glyphs.sortedBy { it.rect.left }
         val fontSize = medianFontSize(sorted)
+        // Baseline для super/subscript-детекции: медиана `rect.bottom` среди
+        // глифов primary-кегля. Глифы заметно меньшего кегля и со сдвигом по Y
+        // — super/sub.
+        val primaryBottoms = sorted.filter { it.fontSizePt >= fontSize * 0.9f }.map { it.rect.bottom }
+        val medianBottom = if (primaryBottoms.isEmpty()) 0f else primaryBottoms.sorted()[primaryBottoms.size / 2]
         val pieces = ArrayList<SourcePiece>(sorted.size)
         val spaceBefore = ArrayList<Boolean>(sorted.size)
         var prevRight: Float? = null
@@ -705,6 +960,10 @@ internal object ReflowAssembler {
                     !attachesToPrev &&
                     (pendingSpace || (gap != null && gap > spaceThreshold))
             spaceBefore += needsSpace
+            val isSmallFont = fontSize > 0f && glyph.fontSizePt < fontSize * SUBSCRIPT_FONT_RATIO
+            val bottomDelta = glyph.rect.bottom - medianBottom
+            val isSuperscript = isSmallFont && bottomDelta < -fontSize * SUBSCRIPT_BASELINE_DELTA
+            val isSubscript = isSmallFont && bottomDelta > fontSize * SUBSCRIPT_BASELINE_DELTA
             pieces +=
                 SourcePiece(
                     text = glyph.text,
@@ -713,6 +972,8 @@ internal object ReflowAssembler {
                     bold = glyph.bold,
                     italic = glyph.italic,
                     monospace = glyph.monospace,
+                    superscript = isSuperscript,
+                    subscript = isSubscript,
                 )
             pendingSpace = false
             prevRight = glyph.rect.right
@@ -801,6 +1062,12 @@ internal object ReflowAssembler {
         private var pendingListLevel = 0
 
         /**
+         * true — накапливается code-блок (подряд идущие моноширинные строки).
+         * Имеет приоритет над heading/list/paragraph в [addLine].
+         */
+        private var pendingCode = false
+
+        /**
          * Нормализованный отступ маркера последнего эмитированного list-элемента
          * (для сравнения с новым). `null` — list-flow прерван (после non-list
          * блока / перед первым list-элементом страницы), уровень начинается с 0.
@@ -845,6 +1112,18 @@ internal object ReflowAssembler {
             // lastLineBottom обновляем ДО раннего return: следующая строка должна
             // видеть актуальный нижний край этой как «предыдущей».
             lastLineBottom = line.bottom
+            // Code-block detection: моноширинная строка добавляется в накапливаемый
+            // pendingCode-run; не-моноширинная сбрасывает run и переходит к обычной
+            // обработке. Проверяем ДО list/heading: код имеет приоритет над list-
+            // паттернами вроде «1: foo» (часто встречается в коде).
+            if (isMonospaceDominant(line)) {
+                if (!pendingCode) flush()
+                pendingCode = true
+                pending += line
+                return
+            } else if (pendingCode) {
+                flush()
+            }
             // List-маркер выигрывает над heading: типографски «Упр. 47.» или «1)
             // Item» могут пройти heading-ensemble (font + bold + no period), но
             // семантически это enumerated items, а не section headings. Проверяем
@@ -890,6 +1169,11 @@ internal object ReflowAssembler {
             line: Line,
             previousLineBottom: Float?,
         ): Int {
+            // Drop cap эвристика: одиночный гигантский глиф (≥DROP_CAP_RATIO × body)
+            // НЕ heading — это декоративная капитель начала абзаца. Возвращаем 0;
+            // addLine положит эту «строку» в обычный pending pool, и она склеится
+            // с продолжением абзаца как часть его текста.
+            if (looksLikeDropCap(line)) return 0
             val fontRatioMet = bodyFont > 0f && line.fontSize >= bodyFont * HEADING_RATIO
             val secondary = if (fontRatioMet) countSecondaryHeadingSignals(line, previousLineBottom) else 0
             return if (fontRatioMet && secondary >= HEADING_SECONDARY_SIGNALS_MIN) {
@@ -897,6 +1181,19 @@ internal object ReflowAssembler {
             } else {
                 0
             }
+        }
+
+        /**
+         * Drop cap (буквица): одиночный глиф минимум в [DROP_CAP_RATIO] раз
+         * крупнее body-font'а, без хвоста (длина текста строки = 1). Книги-беллетристика
+         * часто открывают абзац декоративной заглавной буквой высотой в 3–4 строки;
+         * heading-detector ошибочно классифицирует её как L1.
+         */
+        private fun looksLikeDropCap(line: Line): Boolean {
+            if (bodyFont <= 0f) return false
+            if (line.fontSize < bodyFont * DROP_CAP_RATIO) return false
+            val text = line.pieces.joinToString("") { it.text }
+            return text.length == 1 && text.first().isLetter()
         }
 
         /**
@@ -957,6 +1254,13 @@ internal object ReflowAssembler {
         private fun flush() {
             if (pending.isEmpty()) {
                 pendingList = false
+                pendingCode = false
+                return
+            }
+            // Code-блок собирается отдельно: переносы строк сохраняются как '\n',
+            // моноширинный стиль рендера и без heading/list демоушн'ов.
+            if (pendingCode) {
+                emitCode()
                 return
             }
             // Элемент списка склеивается как абзац (перенос строк/дефис), но
@@ -1061,6 +1365,53 @@ internal object ReflowAssembler {
                 alphaRatio >= HEADING_MIN_ALPHA_RATIO
         }
 
+        /**
+         * Эмитит накопленный Code-блок: переносы строк сохраняются как '\n',
+         * пробелы внутри строки — по spaceBefore. Эмиссия требует
+         * ≥[CODE_MIN_CONSECUTIVE_LINES] строк, иначе откат к Paragraph (одиночная
+         * моноширинная строка чаще — встроенный путь к файлу / variable name,
+         * рендерится через monospace SourceSpan и не нуждается в Code-блоке).
+         */
+        private fun emitCode() {
+            if (pending.size < CODE_MIN_CONSECUTIVE_LINES) {
+                val built = buildParagraph(pending)
+                if (built.text.isNotEmpty()) {
+                    blocks += ReflowBlock.Paragraph(built.text, built.source)
+                }
+            } else {
+                val built = buildCode(pending)
+                if (built.text.isNotEmpty()) {
+                    blocks += ReflowBlock.Code(built.text, built.source)
+                }
+            }
+            pending.clear()
+            pendingHeadingLevel = 0
+            pendingList = false
+            pendingListLevel = 0
+            pendingCode = false
+            lastListIndent = null
+            lastListLevel = 0
+        }
+
+        /** Доля моноширинных глифов в строке (по числу pieces). */
+        private fun isMonospaceDominant(line: Line): Boolean {
+            if (line.pieces.isEmpty()) return false
+            val mono = line.pieces.count { it.monospace }
+            return mono.toFloat() / line.pieces.size >= CODE_LINE_MONOSPACE_FRACTION
+        }
+
+        /** Code-блок: между строками — '\n', spans сохраняют монотонные offsets. */
+        private fun buildCode(lines: List<Line>): BuiltText {
+            val sb = StringBuilder()
+            val spans = mutableListOf<SourceSpan>()
+            for (line in lines) {
+                if (line.pieces.isEmpty()) continue
+                if (sb.isNotEmpty()) sb.append('\n')
+                appendPieces(line, sb, spans)
+            }
+            return BuiltText(sb.toString(), spans.filter { it.charStart < it.charEnd })
+        }
+
         /** Заголовок: всегда межстрочный пробел, без логики переноса. */
         private fun buildHeading(lines: List<Line>): BuiltText {
             val sb = StringBuilder()
@@ -1096,6 +1447,8 @@ internal object ReflowAssembler {
                         bold = piece.bold,
                         monospace = piece.monospace,
                         italic = piece.italic,
+                        superscript = piece.superscript,
+                        subscript = piece.subscript,
                     )
             }
         }
@@ -1117,6 +1470,8 @@ internal object ReflowAssembler {
         val bold: Boolean = false,
         val italic: Boolean = false,
         val monospace: Boolean = false,
+        val superscript: Boolean = false,
+        val subscript: Boolean = false,
     )
 
     private data class BuiltText(

@@ -32,8 +32,10 @@ internal object ReflowBinaryFormat {
      * v3: `Table.confidence` (f32) и `Figure.wasTableFallback` (bool) сериализуются;
      *   в `SourceSpan.flags` добавлен FLAG_ITALIC (бит 0x04). Старые кэши (v1/v2)
      *   бракуются по `version` и удаляются вызывающим — однократный re-extract.
+     * v4: `TableRow.isHeader` (bool) round-trip + новый `TAG_CODE` для
+     *   `ReflowBlock.Code`. Старые кэши (v1–v3) бракуются.
      */
-    private const val VERSION: Int = 3
+    private const val VERSION: Int = 4
     private const val BUFFER_SIZE = 64 * 1024
 
     private const val TAG_HEADING: Byte = 0
@@ -43,10 +45,14 @@ internal object ReflowBinaryFormat {
     private const val TAG_TABLE: Byte = 4
     private const val TAG_FIGURE: Byte = 5
     private const val TAG_DIVIDER: Byte = 6
+    private const val TAG_CODE: Byte = 7
+    private const val TAG_FOOTNOTE: Byte = 8
 
     private const val FLAG_BOLD: Int = 0x01
     private const val FLAG_MONOSPACE: Int = 0x02
     private const val FLAG_ITALIC: Int = 0x04
+    private const val FLAG_SUPERSCRIPT: Int = 0x08
+    private const val FLAG_SUBSCRIPT: Int = 0x10
 
     data class CachedDocument(
         val document: ReflowDocument,
@@ -129,6 +135,8 @@ internal object ReflowBinaryFormat {
                         writeString(out, cell.text)
                         writeSpans(out, cell.source)
                     }
+                    // v4: isHeader per row.
+                    out.writeBoolean(row.isHeader)
                 }
                 // v3: confidence — нужен для Lattice-рефайнера и tightening:
                 // знание исходного Stream-сигнала помогает решать, нужно ли пробовать
@@ -145,6 +153,17 @@ internal object ReflowBinaryFormat {
                 out.writeBoolean(block.wasTableFallback)
             }
             ReflowBlock.Divider -> out.writeByte(TAG_DIVIDER.toInt())
+            is ReflowBlock.Code -> {
+                out.writeByte(TAG_CODE.toInt())
+                writeString(out, block.text)
+                writeSpans(out, block.source)
+            }
+            is ReflowBlock.Footnote -> {
+                out.writeByte(TAG_FOOTNOTE.toInt())
+                writeString(out, block.text)
+                writeString(out, block.marker ?: "")
+                writeSpans(out, block.source)
+            }
         }
     }
 
@@ -172,7 +191,8 @@ internal object ReflowBinaryFormat {
                         val cellSpans = readSpans(input)
                         cells.add(ReflowBlock.TableCell(cellText, cellSpans))
                     }
-                    rows.add(ReflowBlock.TableRow(cells))
+                    val isHeader = input.readBoolean()
+                    rows.add(ReflowBlock.TableRow(cells = cells, isHeader = isHeader))
                 }
                 val confidence = input.readFloat()
                 ReflowBlock.Table(rows = rows, confidence = confidence)
@@ -190,6 +210,13 @@ internal object ReflowBinaryFormat {
                 )
             }
             TAG_DIVIDER -> ReflowBlock.Divider
+            TAG_CODE -> ReflowBlock.Code(readString(input), readSpans(input))
+            TAG_FOOTNOTE -> {
+                val text = readString(input)
+                val marker = readString(input).takeIf { it.isNotEmpty() }
+                val spans = readSpans(input)
+                ReflowBlock.Footnote(text = text, marker = marker, source = spans)
+            }
             else -> throw IllegalArgumentException("ReflowBinary: unknown tag $tag")
         }
 
@@ -252,6 +279,8 @@ internal object ReflowBinaryFormat {
         if (span.bold) flags = flags or FLAG_BOLD
         if (span.monospace) flags = flags or FLAG_MONOSPACE
         if (span.italic) flags = flags or FLAG_ITALIC
+        if (span.superscript) flags = flags or FLAG_SUPERSCRIPT
+        if (span.subscript) flags = flags or FLAG_SUBSCRIPT
         out.writeByte(flags)
     }
 
@@ -269,6 +298,8 @@ internal object ReflowBinaryFormat {
             bold = (flags and FLAG_BOLD) != 0,
             monospace = (flags and FLAG_MONOSPACE) != 0,
             italic = (flags and FLAG_ITALIC) != 0,
+            superscript = (flags and FLAG_SUPERSCRIPT) != 0,
+            subscript = (flags and FLAG_SUBSCRIPT) != 0,
         )
     }
 }

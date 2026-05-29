@@ -1228,6 +1228,31 @@ private fun ReflowBlockView(
         is ReflowBlock.Figure -> FigureView(block, settings, renderPage)
 
         ReflowBlock.Divider -> DividerView(settings)
+
+        is ReflowBlock.Code ->
+            // Code-блок: моноширинный шрифт, переносы строк сохранены.
+            // Используем стандартный SelectableReflowText со специальным
+            // monospace-стилем; selection/anchors работают как у Paragraph.
+            SelectableReflowText(
+                content = BlockContent(block.text, block.source),
+                anchors = anchors,
+                style = settings.codeStyle(),
+                settings = settings,
+                blockIndex = blockIndex,
+                onLines = onLines,
+            )
+
+        is ReflowBlock.Footnote ->
+            // Footnote: меньший шрифт + dim alpha. Marker (¹/*) пока не рендерится
+            // отдельно — он встроен в text если PDF содержал его inline.
+            SelectableReflowText(
+                content = BlockContent(block.text, block.source),
+                anchors = anchors,
+                style = settings.footnoteStyle(),
+                settings = settings,
+                blockIndex = blockIndex,
+                onLines = onLines,
+            )
     }
 }
 
@@ -1588,6 +1613,43 @@ internal fun ReflowReaderSettings.paragraphStyle(): TextStyle =
         platformStyle = readerPlatformTextStyle(),
     )
 
+/**
+ * Стиль рендера блока кода [ReflowBlock.Code]: моноширинный шрифт, тот же кегль и
+ * line-height, что и у paragraph (чтобы соседство code → text не прыгало),
+ * выравнивание по левому краю (justify ломал бы код), без переноса слов.
+ */
+
+/**
+ * Стиль footnote: меньший кегль (0.85×) и приглушённый цвет (75% alpha).
+ */
+internal fun ReflowReaderSettings.footnoteStyle(): TextStyle {
+    val size = fontSize.value * FOOTNOTE_FONT_SCALE
+    return TextStyle(
+        color = textColor.copy(alpha = FOOTNOTE_TEXT_ALPHA),
+        fontFamily = resolveReaderFontFamily(fontFamily),
+        fontSize = size.sp,
+        lineHeight = (size * lineHeightMultiplier).sp,
+        letterSpacing = letterSpacing,
+        textAlign = if (align == ReaderAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start,
+        hyphens = if (hyphenation) Hyphens.Auto else Hyphens.None,
+        lineHeightStyle = DeterministicLineHeight,
+        platformStyle = readerPlatformTextStyle(),
+    )
+}
+
+internal fun ReflowReaderSettings.codeStyle(): TextStyle =
+    TextStyle(
+        color = textColor,
+        fontFamily = FontFamily.Monospace,
+        fontSize = fontSize,
+        lineHeight = (fontSize.value * lineHeightMultiplier).sp,
+        letterSpacing = letterSpacing,
+        textAlign = TextAlign.Start,
+        hyphens = Hyphens.None,
+        lineHeightStyle = DeterministicLineHeight,
+        platformStyle = readerPlatformTextStyle(),
+    )
+
 internal fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
     val scale =
         when (level) {
@@ -1691,6 +1753,8 @@ private fun blockTextLength(block: ReflowBlock): Int =
         is ReflowBlock.Paragraph -> block.text.length
         is ReflowBlock.ListItem -> block.text.length
         is ReflowBlock.Blockquote -> block.text.length
+        is ReflowBlock.Code -> block.text.length
+        is ReflowBlock.Footnote -> block.text.length
         is ReflowBlock.Table -> block.rows.sumOf { row -> row.cells.sumOf { it.text.length } }
         is ReflowBlock.Figure -> 0
         ReflowBlock.Divider -> 0
@@ -1739,6 +1803,12 @@ private const val HEADING_SCALE_3 = 1.15f
 private const val HEADING_LINE_HEIGHT_MULTIPLIER = 1.25f
 private const val FIGURE_PLACEHOLDER_ALPHA = 0.06f
 private const val FIGURE_LABEL_ALPHA = 0.5f
+
+/** Размер шрифта footnote относительно body-кегля. */
+private const val FOOTNOTE_FONT_SCALE = 0.85f
+
+/** Прозрачность текста сноски — обычно ниже, чем у body, для визуального отделения. */
+private const val FOOTNOTE_TEXT_ALPHA = 0.75f
 
 private const val ERGO_TICK_MS = 30_000L
 private const val BREAK_INTERVAL_MS = 25 * 60 * 1000L

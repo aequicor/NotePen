@@ -158,6 +158,8 @@ public object StrokeTextMapper {
             // ре-анкоринг штрихов в таблицы пока не поддержан.
             is ReflowBlock.Table -> emptyList()
             is ReflowBlock.Figure -> emptyList()
+            is ReflowBlock.Code -> source
+            is ReflowBlock.Footnote -> source
             ReflowBlock.Divider -> emptyList()
         }
 

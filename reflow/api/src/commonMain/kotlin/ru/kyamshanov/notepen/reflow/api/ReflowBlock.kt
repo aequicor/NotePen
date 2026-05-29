@@ -106,6 +106,13 @@ public sealed interface ReflowBlock {
      */
     public data class TableRow(
         public val cells: List<TableCell>,
+        /**
+         * `true` для шапки таблицы. Детектируется
+         * [ru.kyamshanov.notepen.reflow.ReflowAssembler] по типографским признакам
+         * (доля полужирных ячеек ≥ TABLE_HEADER_BOLD_RATIO в первой строке).
+         * UI рендерит такие строки с фоновой подложкой и/или bold-стилем.
+         */
+        public val isHeader: Boolean = false,
     )
 
     /**
@@ -155,4 +162,39 @@ public sealed interface ReflowBlock {
      * Не несёт текста и привязки к странице; рендерится тонкой линией.
      */
     public data object Divider : ReflowBlock
+
+    /**
+     * Блок кода: контактные строки одного шрифта, преимущественно моноширинного.
+     * Отличие от [Paragraph]: переносы строк значимы (`\n` в [text]), пробелы
+     * не сворачиваются, рендер использует моноширинный шрифт и/или фон.
+     *
+     * Детектируется в [ru.kyamshanov.notepen.reflow.ReflowAssembler]: подряд
+     * идущие строки, где ≥CODE_MONOSPACE_FRAC глифов помечены `monospace=true`,
+     * группируются в один Code-блок. Inline-monospace внутри обычного абзаца
+     * остаётся `SourceSpan(monospace = true)` — UI рендерит инлайном.
+     *
+     * @property text текст кода с сохранёнными переводами строк
+     * @property source провенанс по строкам/символам — как у [Paragraph]
+     */
+    public data class Code(
+        public val text: String,
+        public val source: List<SourceSpan> = emptyList(),
+    ) : ReflowBlock
+
+    /**
+     * Сноска: small-font блок, обычно в нижней части страницы PDF (под
+     * горизонтальной линией-разделителем). В reflow рендерится отдельно от
+     * основного потока — обычно более мелким шрифтом или со специальным
+     * indent'ом. Если в основном тексте присутствует marker сноски (`¹`, `*`,
+     * etc.), в идеале сноска привязана к нему — пока [marker] noop.
+     *
+     * @property text текст сноски, переносы строк свёрнуты в пробелы как в Paragraph
+     * @property marker маркер ссылки в основном тексте (`null` если не распознан)
+     * @property source провенанс
+     */
+    public data class Footnote(
+        public val text: String,
+        public val marker: String? = null,
+        public val source: List<SourceSpan> = emptyList(),
+    ) : ReflowBlock
 }
