@@ -1380,7 +1380,11 @@ private fun TableView(
                                 .fillMaxHeight()
                                 .border(TABLE_BORDER_WIDTH, borderColor)
                                 .background(
-                                    if (row.isHeader) settings.textColor.copy(alpha = TABLE_HEADER_ALPHA) else Color.Transparent,
+                                    if (row.isHeader) {
+                                        settings.textColor.copy(alpha = TABLE_HEADER_ALPHA)
+                                    } else {
+                                        Color.Transparent
+                                    },
                                 ).padding(TABLE_CELL_PADDING),
                     ) {
                         BasicText(

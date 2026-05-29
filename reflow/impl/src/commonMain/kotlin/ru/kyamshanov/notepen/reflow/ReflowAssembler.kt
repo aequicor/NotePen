@@ -1413,15 +1413,16 @@ internal object ReflowAssembler {
             val trimmed = text.trim()
             val letterDigits = trimmed.count { it.isLetterOrDigit() }
             val alphaRatio = if (trimmed.isEmpty()) 0f else letterDigits.toFloat() / trimmed.length
-            if (trimmed.length < HEADING_MIN_LENGTH || letterDigits == 0 || alphaRatio < HEADING_MIN_ALPHA_RATIO) {
-                return false
-            }
+            val baselineOk =
+                trimmed.length >= HEADING_MIN_LENGTH &&
+                    letterDigits > 0 &&
+                    alphaRatio >= HEADING_MIN_ALPHA_RATIO
+            if (!baselineOk) return false
             val words = trimmed.split(WHITESPACE_REGEX).filter { it.isNotEmpty() }
-            if (words.size >= HEADING_SPACED_OUT_MIN_WORDS) {
-                val singleLetterWords = words.count { it.length == 1 && it[0].isLetter() }
-                if (singleLetterWords * 2 > words.size) return false
-            }
-            return true
+            val spacedOut =
+                words.size >= HEADING_SPACED_OUT_MIN_WORDS &&
+                    words.count { it.length == 1 && it[0].isLetter() } * 2 > words.size
+            return !spacedOut
         }
 
         /**
