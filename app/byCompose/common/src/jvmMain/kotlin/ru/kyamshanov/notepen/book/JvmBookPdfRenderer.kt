@@ -71,6 +71,14 @@ object JvmBookPdfRenderer {
     private const val PARAGRAPH_GAP = 18
     private const val HEADING_GAP_BEFORE = 30
     private const val HEADING_GAP_AFTER = 12
+
+    /**
+     * Заголовки-плейсхолдеры, которые иногда встречаются в FB2 (`<section>` без
+     * `<title>`, FB2-обёртки с многоточием или звёздочками). Сам блок рисуется,
+     * но в TOC не пишется — иначе боковая панель оглавления забивается
+     * безымянными `…`-entries.
+     */
+    private val TOC_PLACEHOLDER_TITLES = setOf("...", "…", "* * *", "***", "*")
     private const val RULE_GAP = 26
     private const val IMAGE_GAP = 22
 
@@ -333,7 +341,13 @@ object JvmBookPdfRenderer {
             val size = HEADING_SIZES[(level - 1).coerceIn(0, HEADING_SIZES.lastIndex)]
             val lineHeight = (size * LINE_FACTOR).toInt()
             if (cursorY + lineHeight > contentBottom) newPage()
-            tocEntries.add(TocEntry(level = level, title = text, pageIndex = pageIndex))
+            val tocTitle = text.trim()
+            // F-4 oborona: пропускаем заголовки-плейсхолдеры из TOC (пустые,
+            // «...» / «…» / «* * *»). Сам блок при этом всё ещё рисуется как
+            // Heading в потоке чтения — TOC просто без шумных безымянных entries.
+            if (tocTitle.isNotEmpty() && tocTitle !in TOC_PLACEHOLDER_TITLES) {
+                tocEntries.add(TocEntry(level = level, title = tocTitle, pageIndex = pageIndex))
+            }
             val chunks = chunksFor(listOf(InlineSpan(text, bold = true)), size, Color.BLACK, italicBase = false)
             drawChunks(chunks, indent = 0, firstLineIndent = 0)
             cursorY += HEADING_GAP_AFTER

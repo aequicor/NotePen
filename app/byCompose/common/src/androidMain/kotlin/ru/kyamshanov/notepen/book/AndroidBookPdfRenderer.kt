@@ -59,6 +59,14 @@ object AndroidBookPdfRenderer {
     private const val PARAGRAPH_GAP = 8
     private const val HEADING_GAP_BEFORE = 14
     private const val HEADING_GAP_AFTER = 6
+
+    /**
+     * Заголовки-плейсхолдеры, которые иногда встречаются в FB2 (`<section>` без
+     * `<title>`, FB2-обёртки с многоточием или звёздочками). Сам блок рисуется,
+     * но в TOC не пишется — иначе боковая панель оглавления забивается
+     * безымянными `…`-entries.
+     */
+    private val TOC_PLACEHOLDER_TITLES = setOf("...", "…", "* * *", "***", "*")
     private const val RULE_GAP = 14
     private const val IMAGE_GAP = 10
     private const val QUOTE_COLOR = 0xFF444444.toInt()
@@ -184,7 +192,13 @@ object AndroidBookPdfRenderer {
             cursorY += HEADING_GAP_BEFORE
             val size = HEADING_SIZES[(level - 1).coerceIn(0, HEADING_SIZES.lastIndex)]
             if (cursorY + size * LINE_SPACING_MULT > contentBottom) newPage()
-            tocEntries.add(TocEntry(level = level, title = text, pageIndex = pageNumber - 1))
+            val tocTitle = text.trim()
+            // F-4 oborona: пропускаем заголовки-плейсхолдеры из TOC (пустые,
+            // «...» / «…» / «* * *»). Сам блок при этом всё ещё рисуется как
+            // Heading в потоке чтения — TOC просто без шумных безымянных entries.
+            if (tocTitle.isNotEmpty() && tocTitle !in TOC_PLACEHOLDER_TITLES) {
+                tocEntries.add(TocEntry(level = level, title = tocTitle, pageIndex = pageNumber - 1))
+            }
             val paint = textPaint(size, Typeface.create(Typeface.SERIF, Typeface.BOLD), Color.BLACK)
             val spans = drawLayout(text, paint, indent = 0, defaultBold = true)
             cursorY += HEADING_GAP_AFTER

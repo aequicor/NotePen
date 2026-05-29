@@ -505,6 +505,13 @@ fun DetailsContent(
     val showToc = controls?.showToc ?: false
     val hasToc = controls?.hasToc ?: false
     val readingModeEnabled = controls?.readingModeEnabled ?: false
+    // F-6: при включении режима чтения возвращаем фокус на корневой Box, чтобы
+    // стрелки и Space начинали листать сразу. До этого фокуса требовался первый
+    // тап по полотну (см. Initial-pass focusRequester ниже) — а в чистом mouse-only
+    // сценарии после переключения в режим чтения первый Right часто не доходил.
+    LaunchedEffect(readingModeEnabled) {
+        if (readingModeEnabled) focusRequester.requestFocus()
+    }
     val readingModeAvailable = controls?.readingModeAvailable ?: true
     // В режиме чтения тап по тексту прячет инструменты и быстрые действия вместе с
     // airbar ридера; повторный тап — возвращает. Берём состояние НАПРЯМУЮ из
