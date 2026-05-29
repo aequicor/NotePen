@@ -41,8 +41,22 @@ class FileTransferReceiver(
     /**
      * Suspends until a full transfer is received. Returns the absolute path of the
      * written file. Throws if the underlying flow terminates before completion.
+     *
+     * The destination file name is derived from the transfer's `documentId`
+     * (or `fileName` for legacy empty ids) under [destDir] — the
+     * cache-by-documentId scheme used by the host→client document download path.
      */
-    suspend fun awaitFile(): ReceivedFile {
+    suspend fun awaitFile(): ReceivedFile = receive { header -> joinPath(destDir, cacheNameFor(header)) }
+
+    /**
+     * Like [awaitFile] but writes the assembled bytes to the explicit [destPath]
+     * instead of deriving a cache name. Used by the **client→host** upload path
+     * (Librarian-over-LAN), where the host reassembles into a temp file before
+     * verifying and handing it to the local library.
+     */
+    suspend fun awaitFileTo(destPath: String): ReceivedFile = receive { destPath }
+
+    private suspend fun receive(destPathFor: (NetworkMessage.FileTransferStart) -> String): ReceivedFile {
         var header: NetworkMessage.FileTransferStart? = null
         val buffers = HashMap<Int, ByteArray>()
 
@@ -67,26 +81,8 @@ class FileTransferReceiver(
                         val received = buffers.values.sumOf { it.size }.toLong()
                         onProgress(TransferProgress(transferred = received, total = h.totalSize))
                         if (buffers.size == h.totalChunks) {
-                            val assembled =
-                                ByteArray(h.totalSize.toInt()).also { out ->
-                                    var offset = 0
-                                    for (i in 0 until h.totalChunks) {
-                                        val chunk = buffers.getValue(i)
-                                        chunk.copyInto(out, offset)
-                                        offset += chunk.size
-                                    }
-                                }
-                            // Имя кеш-файла включает hash(documentId) — два файла
-                            // с одинаковым `fileName`, но разными documentId
-                            // (`book.pdf#a` и `book.pdf#b`) больше не затирают друг друга.
-                            // Для legacy-вызовов (пустой documentId) поведение не меняется.
-                            val cacheName =
-                                if (h.documentId.isNotEmpty()) {
-                                    documentIdToCacheFileName(h.documentId, h.fileName)
-                                } else {
-                                    h.fileName
-                                }
-                            val dest = joinPath(destDir, cacheName)
+                            val assembled = assemble(h, buffers)
+                            val dest = destPathFor(h)
                             okio_writeBytes(dest, assembled)
                             logger.info { "FileTransferReceiver: completed → $dest" }
                             emit(
@@ -103,6 +99,29 @@ class FileTransferReceiver(
                 }
             }.first()
     }
+
+    private fun assemble(
+        header: NetworkMessage.FileTransferStart,
+        buffers: Map<Int, ByteArray>,
+    ): ByteArray =
+        ByteArray(header.totalSize.toInt()).also { out ->
+            var offset = 0
+            for (i in 0 until header.totalChunks) {
+                val chunk = buffers.getValue(i)
+                chunk.copyInto(out, offset)
+                offset += chunk.size
+            }
+        }
+
+    // Имя кеш-файла включает hash(documentId) — два файла с одинаковым `fileName`,
+    // но разными documentId (`book.pdf#a` и `book.pdf#b`) больше не затирают друг
+    // друга. Для legacy-вызовов (пустой documentId) поведение не меняется.
+    private fun cacheNameFor(header: NetworkMessage.FileTransferStart): String =
+        if (header.documentId.isNotEmpty()) {
+            documentIdToCacheFileName(header.documentId, header.fileName)
+        } else {
+            header.fileName
+        }
 }
 
 private fun joinPath(

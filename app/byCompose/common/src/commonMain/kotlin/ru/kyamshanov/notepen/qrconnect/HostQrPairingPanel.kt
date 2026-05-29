@@ -81,7 +81,9 @@ fun HostQrPairingPanel(
             is HostQrPairingCoordinator.State.ShowingQr ->
                 ShowingQrContent(
                     state = s,
+                    canGrantLibrarian = viewModel.canGrantLibrarian,
                     onApprove = { peerId -> viewModel.approve(peerId) },
+                    onApproveAsLibrarian = { peerId -> viewModel.approveAsLibrarian(peerId) },
                     onReject = { peerId -> viewModel.reject(peerId) },
                     onDisconnect = { peerId -> viewModel.disconnect(peerId) },
                     onDisconnectAll = viewModel::disconnectAll,
@@ -110,7 +112,9 @@ fun HostQrPairingPanel(
 @Composable
 private fun ShowingQrContent(
     state: HostQrPairingCoordinator.State.ShowingQr,
+    canGrantLibrarian: Boolean,
     onApprove: (String) -> Unit,
+    onApproveAsLibrarian: (String) -> Unit,
     onReject: (String) -> Unit,
     onDisconnect: (String) -> Unit,
     onDisconnectAll: () -> Unit,
@@ -155,7 +159,9 @@ private fun ShowingQrContent(
     state.pendingApproval?.let { peer ->
         ClientApprovalDialog(
             client = peer,
-            onAccept = { onApprove(peer.id) },
+            canGrantLibrarian = canGrantLibrarian,
+            onAcceptAsReader = { onApprove(peer.id) },
+            onAcceptAsLibrarian = { onApproveAsLibrarian(peer.id) },
             onReject = { onReject(peer.id) },
         )
     }
@@ -238,14 +244,16 @@ private fun ConnectedPeersList(
 @Composable
 private fun ClientApprovalDialog(
     client: DeviceInfo,
-    onAccept: () -> Unit,
+    canGrantLibrarian: Boolean,
+    onAcceptAsReader: () -> Unit,
+    onAcceptAsLibrarian: () -> Unit,
     onReject: () -> Unit,
 ) {
     LiquidGlassAlertDialog(
         onDismissRequest = onReject,
         title = { Text("Разрешить подключение?") },
         text = {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(client.name, style = MaterialTheme.typography.titleMedium)
                 if (client.host.isNotEmpty() && client.port != 0) {
                     Text(
@@ -253,9 +261,27 @@ private fun ClientApprovalDialog(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                if (canGrantLibrarian) {
+                    Text(
+                        text =
+                            "«Читатель» — только просмотр библиотеки. " +
+                                "«Библиотекарь» — также добавление и замена книг.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         },
-        confirmButton = { TextButton(onClick = onAccept) { Text("Принять") } },
-        dismissButton = { TextButton(onClick = onReject) { Text("Отклонить") } },
+        // Reader is the safe default (first / confirm button). Librarian is the
+        // explicit elevated choice, offered only when this host can grant it.
+        confirmButton = { TextButton(onClick = onAcceptAsReader) { Text("Как читателя") } },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (canGrantLibrarian) {
+                    TextButton(onClick = onAcceptAsLibrarian) { Text("Как библиотекаря") }
+                }
+                TextButton(onClick = onReject) { Text("Отклонить") }
+            }
+        },
     )
 }

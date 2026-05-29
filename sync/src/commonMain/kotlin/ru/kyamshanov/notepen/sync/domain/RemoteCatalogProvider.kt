@@ -13,7 +13,9 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
 import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolder
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolderLink
+import ru.kyamshanov.notepen.sync.domain.model.RemoteLibraryRole
 import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
+import ru.kyamshanov.notepen.sync.domain.port.LibrarianGrantStore
 import ru.kyamshanov.notepen.sync.domain.port.LibraryManifestProvider
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
@@ -41,15 +43,29 @@ private const val CATALOG_BROADCAST_DEBOUNCE_MS = 500L
  * @param manifestProvider Source of the published library — the books a peer
  *   may see and the id→path resolution used when streaming a document.
  * @param folderRepository Source of user folders and folder/file links.
+ * @param grantStore Optional durable store of the librarian write allow-set
+ *   (M5b). When non-null, grants are persisted on [grantLibrarian]/[revokeLibrarian]
+ *   and restored via [restoreLibrarianGrants]; when null the allow-set is
+ *   in-memory only (M5a behaviour, e.g. Android which never hosts over LAN).
  */
 class RemoteCatalogProvider(
     private val hostName: String,
     private val manifestProvider: LibraryManifestProvider,
     private val folderRepository: FolderRepository,
+    private val grantStore: LibrarianGrantStore? = null,
 ) {
     private val mutex = Mutex()
     private val allowedByPeer = mutableMapOf<String, Set<String>>()
     private val uriByPeer = mutableMapOf<String, Map<String, String>>()
+
+    // Per-peer WRITE allow-set: the ids of peers granted the Librarian role and
+    // therefore permitted to mutate this host's library (add/remove/replace).
+    // This is the mirror, for writes, of `allowedByPeer` (the read allow-list):
+    // it is **default-deny** — a peer absent from this set may read whatever the
+    // served catalog exposes but may NOT mutate anything. M5b sets this role from
+    // the pairing approval UX and persists it via [grantStore]; the safe default
+    // is unchanged (no peer is a librarian until explicitly granted).
+    private val librarianPeerIds = mutableSetOf<String>()
 
     /** Resolves [documentId] for [peerId] back to the local URI, or `null` if not allowed. */
     suspend fun resolveUri(
@@ -74,6 +90,91 @@ class RemoteCatalogProvider(
         peerId: String,
         documentId: String,
     ): Boolean = mutex.withLock { allowedByPeer[peerId]?.contains(documentId) == true }
+
+    /**
+     * Grants [peerId] the Librarian role on this host — i.e. adds it to the
+     * per-peer write allow-set so its library-mutation requests are honoured,
+     * and (when a [grantStore] is wired) persists the grant durably so it
+     * survives a host restart.
+     *
+     * Idempotent. Called by the pairing layer (M5b) when the operator approves a
+     * peer as a librarian rather than a reader.
+     */
+    suspend fun grantLibrarian(peerId: String) {
+        // Persist FIRST, then flip the in-memory set — so a failed durable write never
+        // leaves a grant that is honoured now but silently lost on the next host
+        // restart. A store failure is logged and the in-memory grant is NOT applied
+        // (the operator can retry); without a store the in-memory set is the only
+        // source of truth and is updated unconditionally (M5a behaviour).
+        val durable =
+            grantStore?.let { store ->
+                runCatching { store.grant(peerId) }
+                    .onFailure {
+                        logger.warn { "Persisting librarian grant for $peerId failed: ${it::class.simpleName}" }
+                    }.isSuccess
+            } ?: true
+        if (durable) mutex.withLock { librarianPeerIds.add(peerId) }
+    }
+
+    /**
+     * Revokes [peerId]'s Librarian role: future mutation requests from it are
+     * rejected, and the persisted grant (if any) is dropped. Idempotent. Reading
+     * (the catalog allow-list) is unaffected.
+     */
+    suspend fun revokeLibrarian(peerId: String) {
+        mutex.withLock { librarianPeerIds.remove(peerId) }
+        grantStore?.let { store ->
+            runCatching { store.revoke(peerId) }
+                .onFailure { logger.warn { "Persisting librarian revoke for $peerId failed: ${it::class.simpleName}" } }
+        }
+    }
+
+    /**
+     * Re-grants every peer id persisted in [grantStore] into the in-memory write
+     * allow-set. Called once on startup so durable librarian grants survive a
+     * host restart. No-op when no [grantStore] is wired. Does **not** write back.
+     */
+    suspend fun restoreLibrarianGrants() {
+        val store = grantStore ?: return
+        val persisted =
+            runCatching { store.load() }
+                .onFailure { logger.warn { "Loading persisted librarian grants failed: ${it::class.simpleName}" } }
+                .getOrDefault(emptySet())
+        if (persisted.isEmpty()) return
+        mutex.withLock { librarianPeerIds.addAll(persisted) }
+        logger.info { "Restored ${persisted.size} persisted librarian grant(s)" }
+    }
+
+    /** Snapshot of the peer ids currently granted the Librarian role (for the connected-clients UI). */
+    suspend fun librarianPeerIdsSnapshot(): Set<String> = mutex.withLock { librarianPeerIds.toSet() }
+
+    /**
+     * True if [peerId] is in the write allow-set (a granted librarian). The
+     * authorisation gate for every [NetworkMessage.LibraryAddRequest] /
+     * [NetworkMessage.LibraryRemoveRequest] / [NetworkMessage.LibraryReplaceRequest].
+     *
+     * **Default-deny**: a peer that was never explicitly granted returns `false`.
+     */
+    suspend fun isLibrarian(peerId: String): Boolean = mutex.withLock { peerId in librarianPeerIds }
+
+    /**
+     * Rebuilds the catalog for [peerId] (stamping its now-current
+     * [RemoteCatalog.grantedRole]) and pushes it to that peer over [server].
+     * Called right after a role change ([grantLibrarian]/[revokeLibrarian]) so
+     * the affected client learns its new role immediately rather than only on the
+     * next content change or reconnect.
+     */
+    suspend fun pushCatalogTo(
+        server: PeerServer,
+        peerId: String,
+    ) {
+        val catalog =
+            runCatching { buildSnapshotFor(peerId) }
+                .onFailure { logger.warn { "Failed to rebuild catalog for role push: ${it::class.simpleName}" } }
+                .getOrNull() ?: return
+        runCatching { server.send(peerId, NetworkMessage.RemoteCatalogResponse(catalog)) }
+            .onFailure { logger.warn { "Role-change catalog push to $peerId failed: ${it::class.simpleName}" } }
+    }
 
     /**
      * Subscribes [server] to incoming [NetworkMessage.RemoteCatalogRequest]s
@@ -222,15 +323,21 @@ class RemoteCatalogProvider(
             }
         val allowed = recent.map { it.documentId }.toSet()
         val docToUri = booksWithUri.associate { (book, uri) -> book.id.value to uri }
-        mutex.withLock {
-            allowedByPeer[peerId] = allowed
-            uriByPeer[peerId] = docToUri
-        }
+        val grantedRole =
+            mutex.withLock {
+                allowedByPeer[peerId] = allowed
+                uriByPeer[peerId] = docToUri
+                // Advertise the peer's role from the SAME authoritative write
+                // allow-set the mutation handler gates on — so the client can light
+                // up librarian UI/capabilities. Still re-verified on every mutation.
+                if (peerId in librarianPeerIds) RemoteLibraryRole.Librarian else RemoteLibraryRole.Reader
+            }
         return RemoteCatalog(
             hostName = hostName,
             recent = recent,
             folders = folders,
             folderLinks = folderLinks,
+            grantedRole = grantedRole,
         )
     }
 }

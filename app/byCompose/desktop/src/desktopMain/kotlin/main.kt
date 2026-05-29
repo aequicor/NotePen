@@ -38,6 +38,7 @@ import ru.kyamshanov.notepen.document.infrastructure.SidecarIdentityCache
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
 import ru.kyamshanov.notepen.library.impl.GitHubLibraryBackend
+import ru.kyamshanov.notepen.library.impl.LibraryRegistryMutationTarget
 import ru.kyamshanov.notepen.library.impl.LocalFolderLibraryBackend
 import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
 import ru.kyamshanov.notepen.library.infrastructure.JvmLibraryConnectionStore
@@ -67,6 +68,7 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
 import ru.kyamshanov.notepen.setupJbrTitleBar
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
+import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
@@ -76,6 +78,7 @@ import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.JvmLibrarianGrantStore
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
 import ru.kyamshanov.notepen.tablet.CocoaTabletInputController
@@ -296,6 +299,13 @@ fun main(args: Array<String>) {
             ioDispatcher = Dispatchers.IO,
         )
 
+    // Librarian-over-LAN (M5a): the host's mutation target resolves a remote
+    // librarian's add/remove/replace against the library registry built below.
+    // The registry is constructed after SyncRuntime (it needs onlinePeerIds), so
+    // the target reads it lazily through this holder rather than capturing it.
+    val libraryRegistryHolder = java.util.concurrent.atomic.AtomicReference<DefaultLibraryRegistry?>(null)
+    val libraryMutationTarget = LibraryRegistryMutationTarget(registryProvider = { libraryRegistryHolder.get() })
+
     // Lazy owner of the heavy sync/network stack: Ktor server/client, CIO engine,
     // jmDNS registrar, SQLite pending-delta queue, projection, coordinators —
     // all build inside SyncRuntime.enable(), and are torn down on disable().
@@ -316,6 +326,10 @@ fun main(args: Array<String>) {
             remoteDocumentStatusRegistry = remoteDocumentStatusRegistry,
             openDocumentRegistry = openDocumentRegistry,
             localDocumentIdRegistry = localDocumentIdRegistry,
+            libraryMutationTarget = libraryMutationTarget,
+            // M5b: persist the host's per-peer Librarian grants so an approved
+            // librarian survives a desktop restart (re-granted on the next enable()).
+            librarianGrantStore = JvmLibrarianGrantStore(ioDispatcher = Dispatchers.IO),
         )
 
     // The QR pairing VM stays light: it only holds state flows for the panel
@@ -329,6 +343,14 @@ fun main(args: Array<String>) {
             hostDeviceName = selfName,
             scope = appScope,
             onStop = { syncRuntime.disable() },
+            // M5b: approving a peer "as librarian" grants it the host's write
+            // allow-set (persisted) and immediately re-serves the catalog so its
+            // client lights up the librarian role without waiting for a reconnect.
+            grantLibrarian = { peerId ->
+                val session = syncRuntime.enable()
+                session.remoteCatalogProvider.grantLibrarian(peerId)
+                session.remoteCatalogProvider.pushCatalogTo(session.peerServer, peerId)
+            },
         )
 
     // Single instance of the combined online-peers flow. Empty when the runtime
@@ -370,6 +392,17 @@ fun main(args: Array<String>) {
                     PeerLanLibraryBackend(
                         catalogs = remoteCatalogCache.catalogs,
                         documentOpenerProvider = { syncRuntime.session.value?.remoteDocumentOpener },
+                        // M5b: when the host grants this device the Librarian role, mutations stream
+                        // the book to the paired host over the live sync client. Null until sync is up.
+                        mutationClientProvider = { peerId ->
+                            syncRuntime.session.value?.syncClient?.let { syncClient ->
+                                LibraryMutationClient(
+                                    client = syncClient,
+                                    hostId = peerId,
+                                    newRequestId = { UUID.randomUUID().toString() },
+                                )
+                            }
+                        },
                         onlinePeerIds = onlinePeerIdsFlow,
                     ),
                     GitHubLibraryBackend(
@@ -390,6 +423,9 @@ fun main(args: Array<String>) {
             ioDispatcher = Dispatchers.IO,
             connectionStore = libraryConnectionStore,
         )
+    // Publish the registry so the Librarian-over-LAN mutation target can resolve
+    // a remote librarian's request against the host's connected libraries.
+    libraryRegistryHolder.set(libraryRegistry)
     appScope.launch {
         // The always-connected local library (M1) stays wired explicitly every launch.
         libraryRegistry.connect(LibraryConnection.Local(libraryRoot.canonicalPath))

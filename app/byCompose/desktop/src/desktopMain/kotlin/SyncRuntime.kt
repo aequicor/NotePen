@@ -29,6 +29,7 @@ import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
 import ru.kyamshanov.notepen.sync.domain.DocumentTransferRequestHandler
 import ru.kyamshanov.notepen.sync.domain.HostAnnotationProjection
 import ru.kyamshanov.notepen.sync.domain.HostHeadlessAnnotationHandler
+import ru.kyamshanov.notepen.sync.domain.HostLibraryMutationHandler
 import ru.kyamshanov.notepen.sync.domain.LocalCachedDocumentCleaner
 import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
@@ -40,7 +41,9 @@ import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
+import ru.kyamshanov.notepen.sync.domain.port.LibrarianGrantStore
 import ru.kyamshanov.notepen.sync.domain.port.LibraryManifestProvider
+import ru.kyamshanov.notepen.sync.domain.port.LibraryMutationTarget
 import ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
@@ -64,6 +67,10 @@ class SyncSession internal constructor(
     val pendingDeltaQueue: SqlDelightPendingDeltaQueue,
     val remoteDocumentOpener: RemoteDocumentOpener,
     val hostAnnotationProjection: HostAnnotationProjection,
+    // Host-side catalog provider — also the per-peer Librarian write allow-set.
+    // Exposed so the pairing UI can grant the Librarian role to an approved peer
+    // (M5b) and push the updated catalog back to it immediately.
+    val remoteCatalogProvider: RemoteCatalogProvider,
     val serviceRegistrar: JmDnsServiceRegistrar,
     internal val httpClient: HttpClient,
     internal val sessionJob: Job,
@@ -95,6 +102,14 @@ class SyncRuntime(
     private val remoteDocumentStatusRegistry: InMemoryRemoteDocumentStatusRegistry,
     private val openDocumentRegistry: OpenDocumentRegistry,
     private val localDocumentIdRegistry: LocalDocumentIdRegistry,
+    // Optional Librarian-over-LAN target. When non-null, the host accepts
+    // library-mutation requests from peers granted the librarian role (M5). Null
+    // (e.g. Android, which never serves a local library over LAN) disables it.
+    private val libraryMutationTarget: LibraryMutationTarget? = null,
+    // Durable store of the host's per-peer Librarian write allow-set (M5b). When
+    // non-null, librarian grants persist across host restarts and are re-granted
+    // on enable(). Null keeps the M5a in-memory-only behaviour.
+    private val librarianGrantStore: LibrarianGrantStore? = null,
 ) {
     private val _session = MutableStateFlow<SyncSession?>(null)
     val session: StateFlow<SyncSession?> = _session.asStateFlow()
@@ -168,8 +183,22 @@ class SyncRuntime(
             startReplayCoordinators(sessionScope, syncEngineRegistry, peerServer, syncClient)
 
             val remoteCatalogProvider = buildCatalogProvider(sessionScope, peerServer, syncClient)
+            // M5b: re-grant durable librarian peers before any peer connects, so a
+            // reconnecting librarian's mutations are honoured straight away.
+            remoteCatalogProvider.restoreLibrarianGrants()
             DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider)
                 .start(scope = sessionScope)
+
+            // Librarian-over-LAN (M5a): accept add/remove/replace from peers in the
+            // write allow-set, reassemble + verify uploaded bytes, apply to the host
+            // library. Wired only when a mutation target is provided (desktop host).
+            libraryMutationTarget?.let { target ->
+                HostLibraryMutationHandler(
+                    server = peerServer,
+                    provider = remoteCatalogProvider,
+                    target = target,
+                ).start(scope = sessionScope)
+            }
 
             val hostAnnotationProjection =
                 buildProjection(sessionScope, peerServer, remoteCatalogProvider, syncEngineRegistry)
@@ -199,6 +228,7 @@ class SyncRuntime(
                 pendingDeltaQueue = pendingDeltaQueue,
                 remoteDocumentOpener = remoteDocumentOpener,
                 hostAnnotationProjection = hostAnnotationProjection,
+                remoteCatalogProvider = remoteCatalogProvider,
                 serviceRegistrar = serviceRegistrar,
                 httpClient = httpClient,
                 sessionJob = sessionJob,
@@ -241,6 +271,7 @@ class SyncRuntime(
                 hostName = selfName,
                 manifestProvider = libraryManifestProvider,
                 folderRepository = folderRepository,
+                grantStore = librarianGrantStore,
             )
         provider.serve(server = peerServer, scope = scope)
         provider.serve(client = syncClient, scope = scope)

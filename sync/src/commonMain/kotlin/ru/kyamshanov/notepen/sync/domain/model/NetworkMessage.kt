@@ -240,4 +240,102 @@ sealed class NetworkMessage {
     @Serializable
     @SerialName("remote_catalog_changed")
     data object RemoteCatalogChanged : NetworkMessage()
+
+    /**
+     * Librarian → host: add a new book to the host's local library identified by
+     * [targetLibraryId]. The book bytes follow this message as a [FileChunk]
+     * stream (optionally preceded by a [FileTransferStart]) whose `transferId`
+     * equals [requestId] — that is how the inbound upload is correlated back to
+     * this request on the host. The host verifies the reassembled file against
+     * [fileSize] and [contentSha256] before applying the mutation.
+     *
+     * Only peers in the host's per-peer **write allow-set** (librarian peers) may
+     * mutate; any other peer is rejected with [LibraryMutationResult] `ok=false`.
+     * Additive: pre-M5 hosts simply never emit/handle this variant.
+     *
+     * @property targetLibraryId opaque id of the host library to mutate (resolved
+     *   by the host's library registry); empty selects the host's default local library.
+     * @property displayName human-readable name to give the added book.
+     * @property fileSize expected total byte length of the uploaded file.
+     * @property contentSha256 lowercase hex SHA-256 of the full uploaded file.
+     * @property requestId unique id correlating the reply ([LibraryMutationResult])
+     *   and the inbound [FileChunk] stream (`transferId == requestId`).
+     */
+    @Serializable
+    @SerialName("library_add_request")
+    data class LibraryAddRequest(
+        val targetLibraryId: String,
+        val displayName: String,
+        val fileSize: Long,
+        val contentSha256: String,
+        val requestId: String,
+    ) : NetworkMessage()
+
+    /**
+     * Librarian → host: remove the book identified by [libraryBookId] from the
+     * host library [targetLibraryId]. No file transfer accompanies this request.
+     *
+     * Subject to the same per-peer write allow-set as [LibraryAddRequest].
+     * Removal may be unsupported by the host's backend; in that case the host
+     * replies [LibraryMutationResult] `ok=false` with an explanatory error.
+     *
+     * @property targetLibraryId opaque id of the host library to mutate.
+     * @property libraryBookId per-library locator of the book to remove.
+     * @property requestId unique id correlating the [LibraryMutationResult] reply.
+     */
+    @Serializable
+    @SerialName("library_remove_request")
+    data class LibraryRemoveRequest(
+        val targetLibraryId: String,
+        val libraryBookId: String,
+        val requestId: String,
+    ) : NetworkMessage()
+
+    /**
+     * Librarian → host: replace the content of the book identified by
+     * [libraryBookId] in the host library [targetLibraryId] with newly uploaded
+     * bytes. Like [LibraryAddRequest], the replacement bytes follow as a
+     * [FileChunk] stream whose `transferId` equals [requestId], verified against
+     * [fileSize] and [contentSha256].
+     *
+     * Subject to the same per-peer write allow-set as [LibraryAddRequest].
+     *
+     * @property targetLibraryId opaque id of the host library to mutate.
+     * @property libraryBookId per-library locator of the book to replace.
+     * @property displayName human-readable name to give the replacement book.
+     * @property fileSize expected total byte length of the uploaded file.
+     * @property contentSha256 lowercase hex SHA-256 of the full uploaded file.
+     * @property requestId unique id correlating the reply and inbound chunk stream.
+     */
+    @Serializable
+    @SerialName("library_replace_request")
+    data class LibraryReplaceRequest(
+        val targetLibraryId: String,
+        val libraryBookId: String,
+        val displayName: String,
+        val fileSize: Long,
+        val contentSha256: String,
+        val requestId: String,
+    ) : NetworkMessage()
+
+    /**
+     * Host → librarian: outcome of a
+     * [LibraryAddRequest] / [LibraryRemoveRequest] / [LibraryReplaceRequest],
+     * correlated by [requestId].
+     *
+     * @property requestId echoes the originating request's id.
+     * @property ok `true` if the mutation was applied; `false` if rejected (not a
+     *   librarian, verification mismatch, unsupported operation, or I/O error).
+     * @property error human-readable failure reason when [ok] is `false`.
+     * @property newLibraryBookId the per-library id of the added/replaced book on
+     *   success, when the backend reports one.
+     */
+    @Serializable
+    @SerialName("library_mutation_result")
+    data class LibraryMutationResult(
+        val requestId: String,
+        val ok: Boolean,
+        val error: String? = null,
+        val newLibraryBookId: String? = null,
+    ) : NetworkMessage()
 }

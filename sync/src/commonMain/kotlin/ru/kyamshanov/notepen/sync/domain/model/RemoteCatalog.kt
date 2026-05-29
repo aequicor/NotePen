@@ -3,6 +3,30 @@ package ru.kyamshanov.notepen.sync.domain.model
 import kotlinx.serialization.Serializable
 
 /**
+ * The access level the **host** has granted the receiving peer over the host's
+ * library, advertised inside [RemoteCatalog].
+ *
+ * This is the host→client half of the Librarian-over-LAN role handshake (M5b):
+ * the host's per-peer write allow-set (see
+ * [ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider.isLibrarian]) is the
+ * authoritative gate, but the client needs to *know* its granted role to surface
+ * librarian UI/capabilities and avoid sending mutations that will be rejected.
+ *
+ * Default-deny and wire-compatible: an older host that never sets this field
+ * deserialises as [Reader], so a pre-M5b client/host pair behaves exactly as
+ * before (read-only). The host always re-verifies every mutation against its own
+ * allow-set; this field is advisory for the client only.
+ */
+@Serializable
+enum class RemoteLibraryRole {
+    /** Read-only: the peer may browse and open, but not mutate the host's library. */
+    Reader,
+
+    /** Librarian: the peer may add/replace (and, where supported, remove) books. */
+    Librarian,
+}
+
+/**
  * Snapshot of one host's library shared with a paired peer.
  *
  * Sent as part of [NetworkMessage.RemoteCatalogResponse]. The tablet caches
@@ -16,6 +40,9 @@ import kotlinx.serialization.Serializable
  * @property recent Files in the host's "recent" list, newest first.
  * @property folders User-defined folders on the host.
  * @property folderLinks Many-to-many `(folderId, documentId)` membership.
+ * @property grantedRole the access level the host has granted the receiving peer
+ *   (M5b). Defaults to [RemoteLibraryRole.Reader] so older hosts (which never
+ *   populate it) keep wire compatibility — the peer is treated as a reader.
  */
 @Serializable
 data class RemoteCatalog(
@@ -23,6 +50,7 @@ data class RemoteCatalog(
     val recent: List<RemoteEntry>,
     val folders: List<RemoteFolder>,
     val folderLinks: List<RemoteFolderLink>,
+    val grantedRole: RemoteLibraryRole = RemoteLibraryRole.Reader,
 )
 
 /**

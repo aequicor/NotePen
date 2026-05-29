@@ -7,21 +7,17 @@
     <ID>FunctionNaming:FileTransferActuals.kt:actual fun okio_delete: Boolean</ID>
     <ID>FunctionNaming:FileTransferActuals.kt:actual fun okio_exists: Boolean</ID>
     <ID>FunctionNaming:FileTransferActuals.kt:actual fun okio_readBytes: ByteArray</ID>
+    <ID>FunctionNaming:FileTransferActuals.kt:actual fun okio_tempFilePath: String</ID>
     <ID>FunctionNaming:FileTransferActuals.kt:actual fun okio_writeBytes</ID>
     <ID>FunctionNaming:WebSocketFileTransfer.kt:expect fun okio_delete: Boolean</ID>
     <ID>FunctionNaming:WebSocketFileTransfer.kt:expect fun okio_exists: Boolean</ID>
     <ID>FunctionNaming:WebSocketFileTransfer.kt:expect fun okio_readBytes: ByteArray</ID>
+    <ID>FunctionNaming:WebSocketFileTransfer.kt:expect fun okio_tempFilePath: String</ID>
     <ID>FunctionNaming:WebSocketFileTransfer.kt:expect fun okio_writeBytes</ID>
     <ID>LongMethod:KtorSyncClient.kt:HostSession$private suspend fun runSession: SessionOutcome</ID>
     <ID>LongMethod:RemoteDocumentOpener.kt:RemoteDocumentOpener$@OptIn(ExperimentalCoroutinesApi::class) suspend fun open: RemoteDocumentResult</ID>
     <ID>LoopWithTooManyJumpStatements:KtorPeerServer.kt:KtorPeerServer$for</ID>
     <ID>LoopWithTooManyJumpStatements:LocalCachedDocumentCleaner.kt:LocalCachedDocumentCleaner$for</ID>
-    <ID>MaxLineLength:CatalogDiffOrphanDetector.kt:CatalogDiffOrphanDetector$"No connected host still has $documentId — marking OrphanedOnHost (pending=${counts[documentId]})"</ID>
-    <ID>MaxLineLength:DocumentStatusCoordinator.kt:DocumentStatusCoordinator$"Marking ${msg.documentId} as OrphanedOnHost (host=${hostMessage.host.name}, reason=${msg.reason})"</ID>
-    <ID>MaxLineLength:InMemoryPendingDeltaQueue.kt:InMemoryPendingDeltaQueue$override suspend fun peek: List&lt;StrokeDelta&gt;</ID>
-    <ID>MaxLineLength:RemoteCatalogClientCoordinator.kt:RemoteCatalogClientCoordinator$.</ID>
-    <ID>MaxLineLength:RemoteCatalogClientCoordinator.kt:RemoteCatalogHostCoordinator$.</ID>
-    <ID>MaxLineLength:RemoteDocumentOpener.kt:RemoteDocumentOpener$.</ID>
     <ID>ReturnCount:HostAnnotationProjection.kt:HostAnnotationProjection$private suspend fun ensureLoaded: Unit?</ID>
     <ID>ReturnCount:KtorSyncClient.kt:HostSession$private suspend fun attemptReconnect: Boolean</ID>
     <ID>ReturnCount:RemoteDocumentOpener.kt:RemoteDocumentOpener$@OptIn(ExperimentalCoroutinesApi::class) suspend fun open: RemoteDocumentResult</ID>
@@ -30,5 +26,6 @@
     <ID>TooGenericExceptionCaught:KtorPeerServer.kt:KtorPeerServer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:KtorSyncClient.kt:HostSession$e: Exception</ID>
     <ID>TooManyFunctions:KtorPeerServer.kt:KtorPeerServer : PeerServer</ID>
+    <ID>TooManyFunctions:RemoteCatalogProvider.kt:RemoteCatalogProvider</ID>
   </CurrentIssues>
 </SmellBaseline>

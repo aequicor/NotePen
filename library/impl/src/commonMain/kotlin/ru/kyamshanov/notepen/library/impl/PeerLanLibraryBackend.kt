@@ -8,6 +8,8 @@ import ru.kyamshanov.notepen.library.api.LibraryBackend
 import ru.kyamshanov.notepen.library.api.LibraryBackendKind
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.api.LibraryDescriptor
+import ru.kyamshanov.notepen.library.api.LibraryRole
+import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
@@ -30,12 +32,17 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  * @param catalogs client-side per-peer catalog cache shared with the rest of the sync stack.
  * @param documentOpenerProvider provider of the live [RemoteDocumentOpener]; may return `null`
  *   while the heavy sync stack is still wiring (the opener is built lazily once sync is enabled).
+ * @param mutationClientProvider factory for a [LibraryMutationClient] addressed to a given peer,
+ *   used when the host has granted this device the Librarian role (M5b). Returns `null` while the
+ *   sync client is unavailable, or always for a read-only build (the default). Mutations then fail
+ *   with a clear error / [ru.kyamshanov.notepen.library.api.NotLibrarianException].
  * @param onlinePeerIds optional reactive set of currently-online peer ids, used to derive each
  *   library's connection state.
  */
 public class PeerLanLibraryBackend(
     private val catalogs: StateFlow<Map<DeviceInfo, RemoteCatalog>>,
     private val documentOpenerProvider: () -> RemoteDocumentOpener?,
+    private val mutationClientProvider: (peerId: String) -> LibraryMutationClient? = { null },
     private val onlinePeerIds: Flow<Set<String>>? = null,
 ) : LibraryBackend {
     override val kind: LibraryBackendKind = LibraryBackendKind.PeerLan
@@ -47,10 +54,11 @@ public class PeerLanLibraryBackend(
         runCatching {
             val peer = spec.requirePeerLan()
             PeerLanLibrary(
-                descriptor = peerLanDescriptor(peer.peerId, displayNameFor(peer.peerId)),
+                descriptor = peerLanDescriptor(peer.peerId, displayNameFor(peer.peerId), roleFor(peer.peerId)),
                 peerId = peer.peerId,
                 catalogs = catalogs,
                 documentOpener = documentOpenerProvider,
+                mutationClientProvider = mutationClientProvider,
                 onlinePeerIds = onlinePeerIds,
                 scope = scope,
             )
@@ -59,8 +67,17 @@ public class PeerLanLibraryBackend(
     override suspend fun probe(spec: LibraryConnection): Result<LibraryDescriptor> =
         runCatching {
             val peer = spec.requirePeerLan()
-            peerLanDescriptor(peer.peerId, displayNameFor(peer.peerId))
+            peerLanDescriptor(peer.peerId, displayNameFor(peer.peerId), roleFor(peer.peerId))
         }
+
+    /** The host-advertised role for [peerId] from the cached catalog (Reader if absent). */
+    private fun roleFor(peerId: String): LibraryRole =
+        catalogs.value.entries
+            .firstOrNull { it.key.id == peerId }
+            ?.value
+            ?.grantedRole
+            ?.toLibraryRole()
+            ?: LibraryRole.Reader
 
     /**
      * The peer's host display name if its catalog is already cached, else the peer id itself.

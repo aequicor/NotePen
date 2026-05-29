@@ -64,8 +64,10 @@ import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
+import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
+import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
 import ru.kyamshanov.notepen.sync.domain.LocalCachedDocumentCleaner
 import ru.kyamshanov.notepen.sync.domain.PendingDeltaReplayCoordinator
@@ -76,7 +78,6 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
-import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
@@ -251,6 +252,17 @@ class MainActivity : ComponentActivity() {
                         PeerLanLibraryBackend(
                             catalogs = remoteCatalogCache.catalogs,
                             documentOpenerProvider = { heavyDepsFlow.value?.remoteDocumentOpener },
+                            // M5b: Android is client-only but CAN be a Librarian client of a peer.
+                            // When the host grants it that role, mutations stream over the sync client.
+                            mutationClientProvider = { peerId ->
+                                heavyDepsFlow.value?.syncClient?.let { syncClient ->
+                                    LibraryMutationClient(
+                                        client = syncClient,
+                                        hostId = peerId,
+                                        newRequestId = { UUID.randomUUID().toString() },
+                                    )
+                                }
+                            },
                             onlinePeerIds = onlinePeerIdsFlow,
                         ),
                         GitHubLibraryBackend(
@@ -432,7 +444,14 @@ class MainActivity : ComponentActivity() {
                 componentContext = defaultComponentContext(),
                 historyRepository = historyRepo,
                 mainComponentFactory = {
-                    componentContext, onOpenEditor, onOpenPeerCatalog, onOpenFolder, _, onOpenSettings, onOpenLibrarySources ->
+                    componentContext,
+                    onOpenEditor,
+                    onOpenPeerCatalog,
+                    onOpenFolder,
+                    _,
+                    onOpenSettings,
+                    onOpenLibrarySources,
+                    ->
                     // libraryFolder=null на Android → onOpenLibraryFolder тоже не нужен;
                     // компонент не показывает карточку «Библиотека», навигация туда
                     // никогда не инициируется.

@@ -123,6 +123,14 @@ expect fun okio_exists(path: String): Boolean
 /** Best-effort: deletes the file at [path]. Returns true on success. No-op if it doesn't exist. */
 expect fun okio_delete(path: String): Boolean
 
+/**
+ * Returns an absolute path to a fresh, not-yet-existing file in the system temp
+ * directory. Used by the host to reassemble an inbound Librarian upload before
+ * verifying it and handing it to the local library. The caller writes the bytes
+ * (via [okio_writeBytes]) and is responsible for deleting the temp file.
+ */
+expect fun okio_tempFilePath(suffix: String): String
+
 /** Base64-encodes [bytes]. Platform-provided via expect/actual. */
 expect fun encodeBase64(bytes: ByteArray): String
 

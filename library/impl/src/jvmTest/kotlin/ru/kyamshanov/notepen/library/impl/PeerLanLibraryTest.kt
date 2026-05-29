@@ -4,11 +4,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import ru.kyamshanov.notepen.library.api.LibraryBackendKind
@@ -16,8 +18,10 @@ import ru.kyamshanov.notepen.library.api.LibraryBookId
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.api.LibraryConnectionState
 import ru.kyamshanov.notepen.library.api.LibraryRole
+import ru.kyamshanov.notepen.library.api.NotLibrarianException
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolderItem
+import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.documentIdToCacheFileName
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
@@ -26,12 +30,14 @@ import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
 import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
+import ru.kyamshanov.notepen.sync.domain.model.RemoteLibraryRole
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -69,12 +75,76 @@ class PeerLanLibraryTest {
         override suspend fun disconnectAll() = Unit
     }
 
-    private fun catalog(vararg entries: RemoteEntry): RemoteCatalog =
+    /**
+     * Captures sent messages and auto-replies a successful [NetworkMessage.LibraryMutationResult]
+     * the moment a library request is sent — closing the loop the real host would close over the
+     * network so [LibraryMutationClient] can resolve.
+     */
+    private class RecordingSyncClient(
+        scope: CoroutineScope,
+    ) : SyncClient {
+        val sent = mutableListOf<NetworkMessage>()
+        private val host = DeviceInfo(id = "peer-1", name = "Studio Mac", host = "10.0.0.5", port = 8080)
+        private val outbound = MutableSharedFlow<NetworkMessage>(replay = 64, extraBufferCapacity = 64)
+        private val _incoming = MutableSharedFlow<HostMessage>(replay = 64, extraBufferCapacity = 64)
+
+        override val pairingStates: Flow<Map<String, PairingState>> = emptyFlow()
+        override val connectedHosts: Flow<Set<DeviceInfo>> = flowOf(setOf(host))
+        override val incomingMessages: Flow<HostMessage> = _incoming
+
+        init {
+            scope.launch {
+                outbound.collect { msg ->
+                    val requestId =
+                        when (msg) {
+                            is NetworkMessage.LibraryAddRequest -> msg.requestId
+                            is NetworkMessage.LibraryReplaceRequest -> msg.requestId
+                            is NetworkMessage.LibraryRemoveRequest -> msg.requestId
+                            else -> null
+                        }
+                    if (requestId != null) {
+                        _incoming.emit(
+                            HostMessage(
+                                host,
+                                NetworkMessage.LibraryMutationResult(requestId, ok = true, newLibraryBookId = "server-id"),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+
+        override suspend fun connect(
+            server: DeviceInfo,
+            pairingCode: String,
+            selfInfo: DeviceInfo,
+        ): Result<DeviceInfo> = Result.failure(UnsupportedOperationException("stub"))
+
+        override suspend fun send(
+            hostId: String,
+            message: NetworkMessage,
+        ) {
+            sent += message
+            outbound.emit(message)
+        }
+
+        override suspend fun broadcast(message: NetworkMessage) = Unit
+
+        override suspend fun disconnect(hostId: String) = Unit
+
+        override suspend fun disconnectAll() = Unit
+    }
+
+    private fun catalog(
+        vararg entries: RemoteEntry,
+        grantedRole: RemoteLibraryRole = RemoteLibraryRole.Reader,
+    ): RemoteCatalog =
         RemoteCatalog(
             hostName = "Studio Mac",
             recent = entries.toList(),
             folders = emptyList(),
             folderLinks = emptyList(),
+            grantedRole = grantedRole,
         )
 
     private fun entry(
@@ -180,6 +250,75 @@ class PeerLanLibraryTest {
             online.value = emptySet()
 
             assertEquals(LibraryConnectionState.Disconnected, library.connectionState.value)
+            scope.cancel()
+        }
+
+    @Test
+    fun librarianRole_advertised_reportsLibrarianCapabilities_andAddBookSendsRequest() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val catalogs =
+                MutableStateFlow(
+                    mapOf(peer to catalog(entry("doc-a#aa", "a.pdf"), grantedRole = RemoteLibraryRole.Librarian)),
+                )
+            val src = File(tempDir, "new.pdf").apply { writeBytes("%PDF book".encodeToByteArray()) }
+            val syncClient = RecordingSyncClient(scope)
+            val backend =
+                PeerLanLibraryBackend(
+                    catalogs = catalogs,
+                    documentOpenerProvider = { null },
+                    mutationClientProvider = { peerId ->
+                        LibraryMutationClient(
+                            client = syncClient,
+                            hostId = peerId,
+                            newRequestId = { "req-1" },
+                            timeoutMs = 10_000L,
+                        )
+                    },
+                )
+            val library = backend.connect(LibraryConnection.PeerLan(peerId), scope).getOrThrow()
+
+            assertEquals(LibraryRole.Librarian, library.descriptor.role, "host advertised Librarian")
+            assertTrue(library.capabilities.canAdd && library.capabilities.canReplace, "librarian can add/replace")
+
+            val result = library.addBook(src.absolutePath).getOrThrow()
+
+            assertEquals("server-id", result.libraryBookId.value, "the host-reported book id is surfaced")
+            val req = syncClient.sent.filterIsInstance<NetworkMessage.LibraryAddRequest>().single()
+            assertEquals("new.pdf", req.displayName)
+            assertEquals(src.length(), req.fileSize)
+            val chunks = syncClient.sent.filterIsInstance<NetworkMessage.FileChunk>()
+            assertTrue(chunks.isNotEmpty() && chunks.all { it.transferId == req.requestId }, "chunks correlate to request")
+            scope.cancel()
+        }
+
+    @Test
+    fun readerRole_addBook_throwsNotLibrarianException() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val catalogs =
+                MutableStateFlow(
+                    mapOf(peer to catalog(entry("doc-a#aa", "a.pdf"), grantedRole = RemoteLibraryRole.Reader)),
+                )
+            val syncClient = RecordingSyncClient(scope)
+            val backend =
+                PeerLanLibraryBackend(
+                    catalogs = catalogs,
+                    documentOpenerProvider = { null },
+                    mutationClientProvider = { peerId ->
+                        LibraryMutationClient(client = syncClient, hostId = peerId, newRequestId = { "req-1" })
+                    },
+                )
+            val library = backend.connect(LibraryConnection.PeerLan(peerId), scope).getOrThrow()
+
+            assertEquals(LibraryRole.Reader, library.descriptor.role)
+            assertFalse(library.capabilities.canAdd, "a reader cannot add")
+
+            val result = library.addBook(File(tempDir, "x.pdf").apply { writeText("x") }.absolutePath)
+
+            assertTrue(result.isFailure)
+            assertTrue(result.exceptionOrNull() is NotLibrarianException, "reader add fails with NotLibrarianException")
+            assertTrue(syncClient.sent.isEmpty(), "no request sent for a reader")
             scope.cancel()
         }
 
