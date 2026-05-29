@@ -6,8 +6,6 @@
     <ID>CyclomaticComplexMethod:ReflowReader.kt:@Composable private fun PagedReflowContent</ID>
     <ID>CyclomaticComplexMethod:ReflowReader.kt:@Composable public fun ReflowReader</ID>
     <ID>CyclomaticComplexMethod:ReflowReader.kt:internal fun styledText: AnnotatedString</ID>
-    <ID>EmptyFunctionBlock:AndroidPdfReflowExtractor.kt:AndroidPdfReflowExtractor.ImageRegionCollector${}</ID>
-    <ID>EmptyFunctionBlock:JvmPdfReflowExtractor.kt:JvmPdfReflowExtractor.ImageRegionCollector${}</ID>
     <ID>LongMethod:ReaderAirbar.kt:@Composable internal fun ReaderAirbar</ID>
     <ID>LongMethod:ReaderAirbar.kt:@Composable private fun CollapsedPill</ID>
     <ID>LongMethod:ReaderAirbar.kt:@Composable private fun TuneSheet</ID>
@@ -23,8 +21,6 @@
     <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler$private fun buildTable: ReflowBlock.Table?</ID>
     <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler.Line$fun startsListItem: Boolean</ID>
     <ID>ReturnCount:ReflowPageLocator.kt:ReflowPageLocator$public fun pageForBlock: Int?</ID>
-    <ID>TooManyFunctions:AndroidPdfReflowExtractor.kt:AndroidPdfReflowExtractor$ImageRegionCollector : PDFGraphicsStreamEngine</ID>
-    <ID>TooManyFunctions:JvmPdfReflowExtractor.kt:JvmPdfReflowExtractor$ImageRegionCollector : PDFGraphicsStreamEngine</ID>
     <ID>TooManyFunctions:ReaderAirbar.kt:ru.kyamshanov.notepen.reflow.ui.ReaderAirbar.kt</ID>
     <ID>TooManyFunctions:ReflowAssembler.kt:ReflowAssembler</ID>
     <ID>TooManyFunctions:ReflowAssembler.kt:ReflowAssembler$BlockBuilder</ID>

@@ -239,6 +239,7 @@ internal object LatticeTableRefiner {
                     bounds = normalised(glyph.rect, page.widthPt, page.heightPt),
                     bold = glyph.bold,
                     monospace = glyph.monospace,
+                    italic = glyph.italic,
                 )
             prevRight = glyph.rect.right
             prevTop = glyph.rect.top

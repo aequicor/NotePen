@@ -152,6 +152,7 @@ class AndroidPdfReflowExtractor(
             fontSizePt = fontSizeInPt,
             spaceWidthPt = widthOfSpace,
             bold = FontStyles.isBold(fontName),
+            italic = FontStyles.isItalic(fontName),
             monospace = FontStyles.isMonospace(fontName),
         )
     }

@@ -106,11 +106,12 @@ class RealPdfInvariantsTest {
             val headings = counts["Heading"] ?: 0
             val figures = counts["Figure"] ?: 0
 
-            // Post-tuning (2026-05-29): paragraphs=2076, tables=471, headings=126,
-            // figures=547 (520 fallback из low-conf Stream tables — wide false positives
-            // c 30+ колонками отсекаются TABLE_COLS_HARD_LIMIT). Russian list markers
-            // подняли listitems с 33 до 113. Ranges ±30% от наблюдаемых после-тюнинговых
-            // значений.
+            // Post-tightening (2026-05-29 wave 2): paragraphs=2093, tables=337,
+            // headings=127, figures=652. После tightening Stream detector
+            // (COLUMN_ALIGN_FACTOR 1.0→0.5, wide-table MIN_ROWS=3 @ 8+ cols,
+            // fillRatio hard-min 0.5) tables упали 471→337 — wide pseudo-tables
+            // из упражнений переехали в Figure-fallback / paragraphs. Ranges
+            // оставлены широкими (±30%), чтобы тюнинг не ломал каждый раз.
             assertInRange(paragraphs, 1500..2700, "paragraphs")
             assertInRange(tables, 320..650, "tables")
             assertInRange(headings, 90..170, "headings")

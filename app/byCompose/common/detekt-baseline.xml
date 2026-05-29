@@ -11,7 +11,6 @@
     <ID>CyclomaticComplexMethod:MainScreenViewModel.kt:MainScreenViewModel$private suspend fun handleIntent</ID>
     <ID>CyclomaticComplexMethod:PageThumbnailsSidebar.kt:@Composable fun PageThumbnailsSidebar</ID>
     <ID>CyclomaticComplexMethod:PageThumbnailsSidebar.kt:@Composable private fun ThumbnailItem</ID>
-    <ID>CyclomaticComplexMethod:PeerCatalogContent.kt:@Composable fun PeerCatalogContent</ID>
     <ID>CyclomaticComplexMethod:RootContent.kt:@Composable fun RootContent</ID>
     <ID>CyclomaticComplexMethod:ShortcutsSettingsDialog.kt:@Composable private fun BindingField</ID>
     <ID>CyclomaticComplexMethod:TabBar.kt:@Composable fun TabBar</ID>
@@ -50,6 +49,7 @@
     <ID>MatchingDeclarationName:ClientPairingPanel.kt:ClientPairingScreen</ID>
     <ID>MatchingDeclarationName:PageThumbnailsSidebar.kt:PageFilterMode</ID>
     <ID>MatchingDeclarationName:PeerCatalogComponent.kt:PeerCatalogComponentImpl : PeerCatalogComponentComponentContext</ID>
+    <ID>MatchingDeclarationName:ReflowSourceStat.kt:SourceStat</ID>
     <ID>MaxLineLength:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer.PageComposer$canvas.drawLine(MARGIN.toFloat(), cursorY.toFloat(), (PAGE_WIDTH - MARGIN).toFloat(), cursorY.toFloat(), paint)</ID>
     <ID>MaxLineLength:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer.PageComposer$paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)</ID>
     <ID>MaxLineLength:AndroidDocumentLoader.kt:AndroidDocumentLoader$override suspend fun load: PdfDocument</ID>
@@ -83,6 +83,7 @@
     <ID>ReturnCount:MainScreenViewModel.kt:MainScreenViewModel$private suspend fun openRecentFileById</ID>
     <ID>ReturnCount:OpenDocuments.kt:OpenDocuments$fun closeTab: OpenDocuments?</ID>
     <ID>ReturnCount:PeerCatalogViewModel.kt:PeerCatalogViewModel$private fun hasCachedCopy: Boolean</ID>
+    <ID>ReturnCount:ReflowSourceStat.android.kt:private fun statUri: SourceStat?</ID>
     <ID>ReturnCount:TabSession.kt:TabSession$fun moveTabToNewPanel</ID>
     <ID>ReturnCount:WorkspaceLayout.kt:WorkspaceLayout$fun withPanelTabs: WorkspaceLayout?</ID>
     <ID>SwallowedException:MainScreenViewModel.kt:MainScreenViewModel$e: FileDuplicateInFolderException</ID>

@@ -132,14 +132,51 @@ internal object ReflowAssembler {
      */
     private const val SENTENCE_TERMINATORS = ".!?…:;"
 
+    /**
+     * Минимальная длина строки (после trim) для эмиссии Heading. Огрызки в 1 символ
+     * («Ф», «\», «'») почти всегда — OCR-мусор, на TOC бесполезен.
+     */
+    private const val HEADING_MIN_LENGTH = 2
+
+    /**
+     * Минимальная доля letter-or-digit в строке Heading. Ниже — текст состоит
+     * преимущественно из пунктуации/спецсимволов («/», «.», «—»), это не реальный
+     * заголовок, а строка-разделитель.
+     */
+    private const val HEADING_MIN_ALPHA_RATIO = 0.6f
+
     /** Горизонтальный зазор (доля кегля), начиная с которого это граница колонок таблицы. */
     private const val COLUMN_GAP_FACTOR = 1.5f
 
-    /** Допуск выравнивания левых краёв ячеек в одну колонку (доля кегля). */
-    private const val COLUMN_ALIGN_FACTOR = 1.0f
+    /**
+     * Допуск выравнивания левых краёв ячеек в одну колонку (доля кегля). 0.5 — половина
+     * кегля; tighter, чем «целая буква» (1.0): отсекает sloppy alignments, при которых
+     * соседние абзацы случайно вырастают в «таблицу».
+     */
+    private const val COLUMN_ALIGN_FACTOR = 0.5f
 
     /** Минимум «колоночных» строк (≥2 сегмента), чтобы счесть блок таблицей. */
     private const val MIN_TABLE_ROWS = 2
+
+    /**
+     * Минимум рядов для «широкой» таблицы (8+ колонок). Reasoning: legitimate wide
+     * tables практически всегда имеют 3+ ряда (header + data); 2-рядные wide
+     * candidates обычно — pseudo-row из выровненных по индентам глоссариев /
+     * упражнений учебника.
+     */
+    private const val MIN_TABLE_ROWS_WIDE = 3
+
+    /** Порог по числу колонок, выше которого начинается «широкая» политика (см. [MIN_TABLE_ROWS_WIDE]). */
+    private const val WIDE_TABLE_COLS_THRESHOLD = 8
+
+    /**
+     * Минимальная допустимая доля непустых ячеек. Ниже — сетка считается разрежённой
+     * (случайно выровненные сегменты, а не реальная таблица), confidence
+     * принудительно зануляется. 0.5 — компромисс: реальные грамматические таблицы
+     * с optional ячейками держатся выше; pseudo-tables из упражнений (где почти
+     * каждая ячейка пустая, кроме первой) обнуляются.
+     */
+    private const val FILL_RATIO_HARD_MIN = 0.5f
 
     /** Сколько подряд не-колоночных строк (переносы ячеек) допускается между строками таблицы. */
     private const val MAX_TABLE_GAP_LINES = 2
@@ -236,9 +273,11 @@ internal object ReflowAssembler {
     /**
      * Делит [page] на регионы XY-cut'ом. Однорегионная страница возвращается как
      * есть (нет лишних аллокаций); многорегионная — как список sub-RawPage'ей в
-     * порядке чтения. Images навешиваются на ПЕРВУЮ sub-страницу: правильное
-     * распределение по регионам — отдельная задача (multi-column docs c figures
-     * имеют known-limitation на этом этапе).
+     * порядке чтения. Images распределяются по регионам по midpoint картинки:
+     * ищем регион, чей bbox содержит центр изображения (или ближайший по
+     * Manhattan-расстоянию, если ни один не содержит). Это нужно для multi-column
+     * страниц: figure в правой колонке должна попасть в правую sub-RawPage,
+     * иначе при flow-reading она «выпрыгнет» в неправильное место текста.
      */
     private fun segmentPage(page: RawPage): List<RawPage> {
         val regions =
@@ -251,16 +290,81 @@ internal object ReflowAssembler {
             } else {
                 emptyList()
             }
-        return if (regions.size <= 1) {
-            listOf(page)
-        } else {
-            regions.mapIndexed { regionIndex, glyphIndices ->
-                page.copy(
-                    glyphs = glyphIndices.map { page.glyphs[it] },
-                    images = if (regionIndex == 0) page.images else emptyList(),
-                )
-            }
+        if (regions.size <= 1) return listOf(page)
+        val regionBounds = regions.map { glyphIndices -> regionBounds(glyphIndices, page.glyphs) }
+        val imagesPerRegion = assignImagesToRegions(page.images, regionBounds)
+        return regions.mapIndexed { regionIndex, glyphIndices ->
+            page.copy(
+                glyphs = glyphIndices.map { page.glyphs[it] },
+                images = imagesPerRegion[regionIndex],
+            )
         }
+    }
+
+    /**
+     * Bbox региона = объединение прямоугольников его глифов. Региону без глифов
+     * (теоретически невозможно — XyCutSegmenter не эмитит пустые) даём пустой
+     * вырожденный rect, который assignImagesToRegions исключит из «contains».
+     */
+    private fun regionBounds(
+        glyphIndices: List<Int>,
+        glyphs: List<RawGlyph>,
+    ): ReflowRect {
+        if (glyphIndices.isEmpty()) {
+            return ReflowRect(0f, 0f, 0f, 0f)
+        }
+        var left = Float.POSITIVE_INFINITY
+        var top = Float.POSITIVE_INFINITY
+        var right = Float.NEGATIVE_INFINITY
+        var bottom = Float.NEGATIVE_INFINITY
+        for (i in glyphIndices) {
+            val r = glyphs[i].rect
+            if (r.left < left) left = r.left
+            if (r.top < top) top = r.top
+            if (r.right > right) right = r.right
+            if (r.bottom > bottom) bottom = r.bottom
+        }
+        return ReflowRect(left, top, right, bottom)
+    }
+
+    /**
+     * Распределяет [images] по регионам по midpoint: для каждой картинки находим
+     * регион, чей bbox содержит её центр; если ни один не содержит — берём с
+     * минимальным расстоянием от центра картинки до bbox региона (по Manhattan).
+     * Возвращает [List<List<ReflowRect>>] длины `regions.size`.
+     */
+    private fun assignImagesToRegions(
+        images: List<ReflowRect>,
+        regions: List<ReflowRect>,
+    ): List<List<ReflowRect>> {
+        val buckets = List(regions.size) { mutableListOf<ReflowRect>() }
+        for (img in images) {
+            val midX = (img.left + img.right) / 2f
+            val midY = (img.top + img.bottom) / 2f
+            val containerIdx =
+                regions.indexOfFirst { r ->
+                    midX in r.left..r.right && midY in r.top..r.bottom && (r.right > r.left) && (r.bottom > r.top)
+                }
+            val targetIdx =
+                if (containerIdx >= 0) {
+                    containerIdx
+                } else {
+                    var bestIdx = 0
+                    var bestDist = Float.POSITIVE_INFINITY
+                    regions.forEachIndexed { idx, r ->
+                        val dx = maxOf(r.left - midX, 0f, midX - r.right)
+                        val dy = maxOf(r.top - midY, 0f, midY - r.bottom)
+                        val dist = dx + dy
+                        if (dist < bestDist) {
+                            bestDist = dist
+                            bestIdx = idx
+                        }
+                    }
+                    bestIdx
+                }
+            buckets[targetIdx].add(img)
+        }
+        return buckets
     }
 
     private fun buildPageBlocks(
@@ -443,6 +547,9 @@ internal object ReflowAssembler {
                 )
             }
         if (rows.size < MIN_TABLE_ROWS) return null
+        // Wide-tables (8+ cols) с <3 рядов почти всегда — pseudo-row из выровненных
+        // упражнений / глоссариев; legitimate wide tables имеют header + data.
+        if (columns.size >= WIDE_TABLE_COLS_THRESHOLD && rows.size < MIN_TABLE_ROWS_WIDE) return null
         return ReflowBlock.Table(rows = rows, confidence = computeTableConfidence(rows))
     }
 
@@ -471,7 +578,11 @@ internal object ReflowAssembler {
         val cols = rows.first().cells.size
         // Бинарная отсечка по числу колонок: только явные аномалии (30+) обнуляются.
         val colsPenalty = if (cols >= TABLE_COLS_HARD_LIMIT) 0f else 1f
-        return rowFactor * fillRatio * lengthPenalty * colsPenalty
+        // Бинарная отсечка по fillRatio: разрежённая сетка (50% и менее non-empty)
+        // — почти всегда случайно выровненные сегменты. Soft factor (fillRatio
+        // multiply) уже даёт градиент сверху, hard cutoff отсекает совсем разреженные.
+        val fillPenalty = if (fillRatio < FILL_RATIO_HARD_MIN) 0f else 1f
+        return rowFactor * fillRatio * lengthPenalty * colsPenalty * fillPenalty
     }
 
     /** Левые края колонок: кластеризует левые края сегментов с допуском [tolNorm]. */
@@ -514,7 +625,16 @@ internal object ReflowAssembler {
                 if (index > 0 && segment.spaceBefore[index]) sb.append(' ')
                 val start = sb.length
                 sb.append(piece.text)
-                spans += SourceSpan(piece.pageIndex, start, sb.length, piece.bounds, piece.bold, piece.monospace)
+                spans +=
+                    SourceSpan(
+                        pageIndex = piece.pageIndex,
+                        charStart = start,
+                        charEnd = sb.length,
+                        bounds = piece.bounds,
+                        bold = piece.bold,
+                        monospace = piece.monospace,
+                        italic = piece.italic,
+                    )
             }
         }
         return BuiltText(sb.toString(), spans)
@@ -591,6 +711,7 @@ internal object ReflowAssembler {
                     pageIndex = page.pageIndex,
                     bounds = glyph.rect.normalised(page.widthPt, page.heightPt),
                     bold = glyph.bold,
+                    italic = glyph.italic,
                     monospace = glyph.monospace,
                 )
             pendingSpace = false
@@ -792,7 +913,8 @@ internal object ReflowAssembler {
         ): Int {
             var signals = 0
             if (line.pieces.isNotEmpty() && line.pieces.count { it.bold } * 2 >= line.pieces.size) signals++
-            if (previousLineBottom != null && typicalPitch > 0f &&
+            if (previousLineBottom != null &&
+                typicalPitch > 0f &&
                 line.top - previousLineBottom >= typicalPitch * HEADING_GAP_FACTOR
             ) {
                 signals++
@@ -839,12 +961,20 @@ internal object ReflowAssembler {
             }
             // Элемент списка склеивается как абзац (перенос строк/дефис), но
             // эмитится отдельным типом блока для отступа в ридере.
-            val built = if (pendingHeadingLevel > 0) buildHeading(pending) else buildParagraph(pending)
+            val emitAsHeading = pendingHeadingLevel > 0
+            val built = if (emitAsHeading) buildHeading(pending) else buildParagraph(pending)
+            // Демоушн «мусорных» heading'ов в Paragraph: на OCR-шумных PDF (Барановская)
+            // ensemble иногда срабатывает на одно-символьных огрызках («Ф», «\», «V»)
+            // или OCR-искажённых строках («Лр тиклъ»). Эти строки technically «крупный
+            // кегль + gap», но не несут навигационной ценности; UX страдает от мусорных
+            // entries в TOC. Sanity check: ≥2 letter-or-digit char, ≥60% алфавитных.
+            val headingPassesSanity = emitAsHeading && isAcceptableHeading(built.text)
+            val effectiveHeading = emitAsHeading && headingPassesSanity
             val emittedListItem = pendingList && built.text.isNotEmpty()
             if (built.text.isNotEmpty()) {
                 blocks +=
                     when {
-                        pendingHeadingLevel > 0 -> ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
+                        effectiveHeading -> ReflowBlock.Heading(built.text, pendingHeadingLevel, built.source)
                         pendingList -> ReflowBlock.ListItem(built.text, built.source, level = pendingListLevel)
                         else -> ReflowBlock.Paragraph(built.text, built.source)
                     }
@@ -911,6 +1041,26 @@ internal object ReflowAssembler {
             return BuiltText(sb.toString(), spans.filter { it.charStart < it.charEnd })
         }
 
+        /**
+         * Sanity-фильтр для эмиссии Heading: отсев одно-символьных огрызков и
+         * OCR-мусора (символы вроде «\», «'», «V», одинокий слог). Heading'и идут в
+         * TOC ридера, мусор там создаёт шум. Критерии:
+         *  - длина после `trim()` ≥ [HEADING_MIN_LENGTH] (2);
+         *  - доля букв/цифр ≥ [HEADING_MIN_ALPHA_RATIO] (0.6);
+         *  - содержит хотя бы один letter-or-digit.
+         *
+         * Если строка не проходит — flush demote'ит её в Paragraph (текст всё ещё
+         * виден в потоке чтения, просто без heading-стиля и без TOC-entry).
+         */
+        private fun isAcceptableHeading(text: String): Boolean {
+            val trimmed = text.trim()
+            val letterDigits = trimmed.count { it.isLetterOrDigit() }
+            val alphaRatio = if (trimmed.isEmpty()) 0f else letterDigits.toFloat() / trimmed.length
+            return trimmed.length >= HEADING_MIN_LENGTH &&
+                letterDigits > 0 &&
+                alphaRatio >= HEADING_MIN_ALPHA_RATIO
+        }
+
         /** Заголовок: всегда межстрочный пробел, без логики переноса. */
         private fun buildHeading(lines: List<Line>): BuiltText {
             val sb = StringBuilder()
@@ -937,7 +1087,16 @@ internal object ReflowAssembler {
                 if (index > 0 && line.spaceBefore[index]) sb.append(' ')
                 val start = sb.length
                 sb.append(piece.text)
-                spans += SourceSpan(piece.pageIndex, start, sb.length, piece.bounds, piece.bold, piece.monospace)
+                spans +=
+                    SourceSpan(
+                        pageIndex = piece.pageIndex,
+                        charStart = start,
+                        charEnd = sb.length,
+                        bounds = piece.bounds,
+                        bold = piece.bold,
+                        monospace = piece.monospace,
+                        italic = piece.italic,
+                    )
             }
         }
 
@@ -956,6 +1115,7 @@ internal object ReflowAssembler {
         val pageIndex: Int,
         val bounds: ReflowRect,
         val bold: Boolean = false,
+        val italic: Boolean = false,
         val monospace: Boolean = false,
     )
 

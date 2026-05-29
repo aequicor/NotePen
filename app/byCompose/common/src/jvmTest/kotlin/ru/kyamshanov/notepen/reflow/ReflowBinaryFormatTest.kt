@@ -121,6 +121,52 @@ class ReflowBinaryFormatTest {
     }
 
     @Test
+    fun tableConfidenceRoundtrips() {
+        // v3: Table.confidence сохраняется в кэше; без round-trip cache-hit
+        // приходил бы с дефолтным 1f, теряя Stream-сигнал для Lattice refiner'а.
+        val table =
+            ReflowBlock.Table(
+                rows = listOf(ReflowBlock.TableRow(cells = listOf(ReflowBlock.TableCell("x"), ReflowBlock.TableCell("y")))),
+                confidence = 0.42f,
+            )
+        val doc = ReflowDocument(kind = PdfContentKind.HYBRID, blocks = listOf(table))
+        val restored = roundtrip(doc).document.blocks.single() as ReflowBlock.Table
+        assertEquals(0.42f, restored.confidence)
+        assertEquals(table, restored)
+    }
+
+    @Test
+    fun figureWasTableFallbackRoundtrips() {
+        val figure =
+            ReflowBlock.Figure(
+                pageIndex = 5,
+                bounds = ReflowRect(0.1f, 0.2f, 0.8f, 0.6f),
+                aspectRatio = 1.5f,
+                wasTableFallback = true,
+            )
+        val doc = ReflowDocument(kind = PdfContentKind.HYBRID, blocks = listOf(figure))
+        val restored = doc.let { roundtrip(it).document.blocks.single() as ReflowBlock.Figure }
+        assertEquals(true, restored.wasTableFallback)
+        assertEquals(figure, restored)
+    }
+
+    @Test
+    fun spanItalicFlagRoundtrips() {
+        // v3 flag bit 0x04: italic.
+        val rect = ReflowRect(0f, 0f, 1f, 1f)
+        val spans =
+            listOf(
+                SourceSpan(0, 0, 1, rect, italic = true),
+                SourceSpan(0, 1, 2, rect, bold = true, italic = true),
+                SourceSpan(0, 2, 3, rect, monospace = true, italic = false),
+                SourceSpan(0, 3, 4, rect, bold = true, monospace = true, italic = true),
+            )
+        val doc = ReflowDocument(kind = PdfContentKind.TEXT_BASED, blocks = listOf(ReflowBlock.Paragraph("abcd", spans)))
+        val restoredSpans = (roundtrip(doc).document.blocks.single() as ReflowBlock.Paragraph).source
+        assertEquals(spans, restoredSpans)
+    }
+
+    @Test
     fun badMagicFails() {
         val bytes = ByteArray(40) { 0 }
         assertFailsWith<IllegalArgumentException> {

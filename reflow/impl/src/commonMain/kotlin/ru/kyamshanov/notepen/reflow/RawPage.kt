@@ -14,6 +14,7 @@ import ru.kyamshanov.notepen.reflow.api.ReflowRect
  * @property spaceWidthPt ширина пробела текущего шрифта в пунктах; 0 — неизвестна.
  *   Используется, чтобы отличить межсловный зазор от широкого трекинга букв.
  * @property bold глиф набран полужирным начертанием (по имени шрифта)
+ * @property italic глиф набран курсивом (по имени шрифта)
  * @property monospace глиф набран моноширинным шрифтом (по имени шрифта)
  */
 internal data class RawGlyph(
@@ -22,6 +23,7 @@ internal data class RawGlyph(
     val fontSizePt: Float,
     val spaceWidthPt: Float = 0f,
     val bold: Boolean = false,
+    val italic: Boolean = false,
     val monospace: Boolean = false,
 )
 

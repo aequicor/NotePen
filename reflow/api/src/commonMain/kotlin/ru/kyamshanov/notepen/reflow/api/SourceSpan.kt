@@ -16,6 +16,7 @@ package ru.kyamshanov.notepen.reflow.api
  * @property charEnd индекс конца фрагмента в `.text` блока (исключительно)
  * @property bounds область фрагмента на странице, нормализованная к `[0..1]`
  * @property bold фрагмент набран полужирным начертанием (определено по имени шрифта)
+ * @property italic фрагмент набран курсивным начертанием (определено по имени шрифта)
  * @property monospace фрагмент набран моноширинным шрифтом (обычно inline-код)
  */
 public data class SourceSpan(
@@ -25,4 +26,5 @@ public data class SourceSpan(
     public val bounds: ReflowRect,
     public val bold: Boolean = false,
     public val monospace: Boolean = false,
+    public val italic: Boolean = false,
 )

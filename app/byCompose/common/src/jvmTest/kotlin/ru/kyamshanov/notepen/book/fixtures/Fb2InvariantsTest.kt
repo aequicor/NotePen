@@ -111,8 +111,9 @@ class Fb2InvariantsTest {
         // Heading text — это metadata, NOT смысловой заголовок. Locked.
         // Real fix: либо renderer не делает metadata так чтобы оно ловилось ensemble'м,
         // либо post-pass фильтрует Heading с очень короткой alphanumeric не-кириллицей.
+        val isMd5Hash = heading.text.matches(Regex("[a-f0-9]{32}"))
         val isGarbage =
-            heading.text.matches(Regex("[a-f0-9]{32}")) || // md5 hash
+            isMd5Hash ||
                 heading.text == "Unknown" ||
                 heading.text.length < 4
         assertTrue(isGarbage, "expected metadata garbage in FB2 heading, got: '${heading.text}'")

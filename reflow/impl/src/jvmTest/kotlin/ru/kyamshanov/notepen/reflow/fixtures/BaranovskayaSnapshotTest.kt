@@ -57,6 +57,105 @@ class BaranovskayaSnapshotTest {
         )
     }
 
+    /**
+     * Окно вокруг первой «крупной» таблицы (≥3 ряда и ≥3 колонки): включает
+     * предшествующий heading + table. Защищает рендер таблиц от регрессий в
+     * Stream/Lattice detector'е и UI [ReflowReader]'е.
+     */
+    @Test
+    fun grammarTable() {
+        val doc = loadDoc() ?: return
+        val tableIdx =
+            doc.blocks.indexOfFirst { block ->
+                block is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Table &&
+                    block.rows.size >= MIN_SNAPSHOT_TABLE_ROWS &&
+                    (block.rows.firstOrNull()?.cells?.size ?: 0) >= MIN_SNAPSHOT_TABLE_COLS
+            }
+        if (tableIdx < 0) {
+            println("[snapshot] no suitable table found — skipping grammarTable")
+            return
+        }
+        val start = (tableIdx - SLICE_PRELUDE).coerceAtLeast(0)
+        val end = (tableIdx + SLICE_AFTER).coerceAtMost(doc.blocks.size - 1)
+        snapshot(name = "baranovskaya_table", slice = doc.subDocument(start..end))
+    }
+
+    /**
+     * Окно с кластером из 4+ ListItem подряд (выровненный пер-уровень indent
+     * в UI должен быть виден): покрывает Russian list-marker detection
+     * («Упр./Задание/Пример N.») + visual hierarchy.
+     */
+    @Test
+    fun listExercises() {
+        val doc = loadDoc() ?: return
+        val clusterStart = findListCluster(doc, minClusterSize = MIN_SNAPSHOT_LIST_CLUSTER)
+        if (clusterStart < 0) {
+            println("[snapshot] no list cluster found — skipping listExercises")
+            return
+        }
+        val start = (clusterStart - SLICE_PRELUDE).coerceAtLeast(0)
+        val end = (clusterStart + SLICE_AFTER).coerceAtMost(doc.blocks.size - 1)
+        snapshot(name = "baranovskaya_list", slice = doc.subDocument(start..end))
+    }
+
+    /**
+     * Окно с heading-иерархией L1→L2→L3 в пределах [SLICE_HEADING_WINDOW] блоков.
+     * Защищает heading-ensemble + heading-render styling (font scale per level).
+     */
+    @Test
+    fun headingHierarchy() {
+        val doc = loadDoc() ?: return
+        val start = findHeadingHierarchyStart(doc)
+        if (start < 0) {
+            println("[snapshot] no L1+L2+L3 hierarchy window found — skipping headingHierarchy")
+            return
+        }
+        val end = (start + SLICE_HEADING_WINDOW).coerceAtMost(doc.blocks.size - 1)
+        snapshot(name = "baranovskaya_heading_hierarchy", slice = doc.subDocument(start..end))
+    }
+
+    /** Индекс начала первой группы из [minClusterSize] подряд идущих ListItem'ов. */
+    private fun findListCluster(
+        doc: ReflowDocument,
+        minClusterSize: Int,
+    ): Int {
+        var run = 0
+        var runStart = -1
+        for ((i, block) in doc.blocks.withIndex()) {
+            if (block is ru.kyamshanov.notepen.reflow.api.ReflowBlock.ListItem) {
+                if (run == 0) runStart = i
+                run++
+                if (run >= minClusterSize) return runStart
+            } else if (block !is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Paragraph &&
+                block !is ru.kyamshanov.notepen.reflow.api.ReflowBlock.Figure
+            ) {
+                // Допускаем абзацы (объяснения) и Figure (иллюстрации к упражнениям)
+                // между list-item'ами; heading / table / divider сбрасывают run.
+                run = 0
+                runStart = -1
+            }
+        }
+        return -1
+    }
+
+    /**
+     * Ищет первое окно длиной [SLICE_HEADING_WINDOW], содержащее заголовки уровней
+     * 1, 2 и 3 одновременно. Возвращает индекс окна или -1.
+     */
+    private fun findHeadingHierarchyStart(doc: ReflowDocument): Int {
+        val blocks = doc.blocks
+        for (start in 0 until blocks.size - SLICE_HEADING_WINDOW) {
+            val window = blocks.subList(start, start + SLICE_HEADING_WINDOW)
+            val levels =
+                window
+                    .filterIsInstance<ru.kyamshanov.notepen.reflow.api.ReflowBlock.Heading>()
+                    .map { it.level }
+                    .toSet()
+            if (1 in levels && 2 in levels && 3 in levels) return start
+        }
+        return -1
+    }
+
     private fun snapshot(
         name: String,
         slice: ReflowDocument,
@@ -108,6 +207,24 @@ class BaranovskayaSnapshotTest {
     companion object {
         private const val BARANOVSKAYA_PATH =
             "/Users/kruz18/Documents/english/Барановская_Грамматика_англ_языка_202509160919_58958.pdf"
+
+        /** Минимум рядов таблицы для snapshot — отсекает маленькие 2×3 grids. */
+        private const val MIN_SNAPSHOT_TABLE_ROWS = 3
+
+        /** Минимум колонок таблицы для snapshot — отсекает 2-колоночные key-value таблицы. */
+        private const val MIN_SNAPSHOT_TABLE_COLS = 3
+
+        /** Минимум подряд идущих ListItem'ов для «кластера». */
+        private const val MIN_SNAPSHOT_LIST_CLUSTER = 4
+
+        /** Сколько блоков ДО найденной точки интереса включить в slice (контекст). */
+        private const val SLICE_PRELUDE = 2
+
+        /** Сколько блоков ПОСЛЕ точки интереса включить в slice. */
+        private const val SLICE_AFTER = 25
+
+        /** Окно поиска L1+L2+L3 hierarchy в одной visual chunk'е. */
+        private const val SLICE_HEADING_WINDOW = 40
 
         /**
          * Кеш извлечённого документа на время прогона класса: extract'a ~2s, делать его

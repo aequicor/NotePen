@@ -28,11 +28,12 @@ internal object ReflowBinaryFormat {
 
     /**
      * v1: исходный плоский формат.
-     * v2: `ReflowBlock.Figure` сериализует `aspectRatio` отдельным `f32`. v1-кэши
-     *   при чтении бракуются по `version` и удаляются вызывающим — на устройстве
-     *   проходит однократный re-extract.
+     * v2: `ReflowBlock.Figure` сериализует `aspectRatio` отдельным `f32`.
+     * v3: `Table.confidence` (f32) и `Figure.wasTableFallback` (bool) сериализуются;
+     *   в `SourceSpan.flags` добавлен FLAG_ITALIC (бит 0x04). Старые кэши (v1/v2)
+     *   бракуются по `version` и удаляются вызывающим — однократный re-extract.
      */
-    private const val VERSION: Int = 2
+    private const val VERSION: Int = 3
     private const val BUFFER_SIZE = 64 * 1024
 
     private const val TAG_HEADING: Byte = 0
@@ -45,6 +46,7 @@ internal object ReflowBinaryFormat {
 
     private const val FLAG_BOLD: Int = 0x01
     private const val FLAG_MONOSPACE: Int = 0x02
+    private const val FLAG_ITALIC: Int = 0x04
 
     data class CachedDocument(
         val document: ReflowDocument,
@@ -128,12 +130,19 @@ internal object ReflowBinaryFormat {
                         writeSpans(out, cell.source)
                     }
                 }
+                // v3: confidence — нужен для Lattice-рефайнера и tightening:
+                // знание исходного Stream-сигнала помогает решать, нужно ли пробовать
+                // Lattice (или иные post-passes) при следующем чтении из кэша.
+                out.writeFloat(block.confidence)
             }
             is ReflowBlock.Figure -> {
                 out.writeByte(TAG_FIGURE.toInt())
                 out.writeInt(block.pageIndex)
                 writeRect(out, block.bounds)
                 out.writeFloat(block.aspectRatio)
+                // v3: wasTableFallback — отметка для Lattice-рефайнера. Без round-trip
+                // refiner на cache-hit пути не пробовал бы восстановить таблицу.
+                out.writeBoolean(block.wasTableFallback)
             }
             ReflowBlock.Divider -> out.writeByte(TAG_DIVIDER.toInt())
         }
@@ -165,9 +174,21 @@ internal object ReflowBinaryFormat {
                     }
                     rows.add(ReflowBlock.TableRow(cells))
                 }
-                ReflowBlock.Table(rows)
+                val confidence = input.readFloat()
+                ReflowBlock.Table(rows = rows, confidence = confidence)
             }
-            TAG_FIGURE -> ReflowBlock.Figure(input.readInt(), readRect(input), input.readFloat())
+            TAG_FIGURE -> {
+                val pageIndex = input.readInt()
+                val bounds = readRect(input)
+                val aspect = input.readFloat()
+                val wasTableFallback = input.readBoolean()
+                ReflowBlock.Figure(
+                    pageIndex = pageIndex,
+                    bounds = bounds,
+                    aspectRatio = aspect,
+                    wasTableFallback = wasTableFallback,
+                )
+            }
             TAG_DIVIDER -> ReflowBlock.Divider
             else -> throw IllegalArgumentException("ReflowBinary: unknown tag $tag")
         }
@@ -230,6 +251,7 @@ internal object ReflowBinaryFormat {
         var flags = 0
         if (span.bold) flags = flags or FLAG_BOLD
         if (span.monospace) flags = flags or FLAG_MONOSPACE
+        if (span.italic) flags = flags or FLAG_ITALIC
         out.writeByte(flags)
     }
 
@@ -246,6 +268,7 @@ internal object ReflowBinaryFormat {
             bounds = bounds,
             bold = (flags and FLAG_BOLD) != 0,
             monospace = (flags and FLAG_MONOSPACE) != 0,
+            italic = (flags and FLAG_ITALIC) != 0,
         )
     }
 }

@@ -32,4 +32,19 @@ class FontStylesTest {
         assertFalse(FontStyles.isMonospace("HelveticaNeue"))
         assertFalse(FontStyles.isMonospace(null))
     }
+
+    @Test
+    fun `italic is detected from subset-prefixed font name`() {
+        assertTrue(FontStyles.isItalic("BAAAAA+HelveticaNeue-Italic"))
+        assertTrue(FontStyles.isItalic("TimesNewRomanPS-ItalicMT"))
+        assertTrue(FontStyles.isItalic("Arial-BoldItalicMT"))
+        assertTrue(FontStyles.isItalic("Helvetica-Oblique"))
+    }
+
+    @Test
+    fun `regular and null fonts are not italic`() {
+        assertFalse(FontStyles.isItalic("BAAAAA+HelveticaNeue"))
+        assertFalse(FontStyles.isItalic("Times-Roman"))
+        assertFalse(FontStyles.isItalic(null))
+    }
 }
