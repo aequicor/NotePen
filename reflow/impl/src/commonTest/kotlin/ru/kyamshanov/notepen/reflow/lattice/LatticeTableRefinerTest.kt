@@ -193,6 +193,65 @@ class LatticeTableRefinerTest {
             assertIs<ReflowBlock.Figure>(refined.blocks.single())
         }
 
+    /**
+     * F-7 regression: на OCR-сканах PDFBox ловит фантомные вертикальные rulings между
+     * колонками глифов, и Lattice строит грид из множества узких колонок по 1 символу.
+     * Раньше [LatticeTableRefiner.reconstructTableForFigure] возвращал
+     * `Table(confidence = 1f)` в обход OCR-noise guard'а (он был только в Stream-пути).
+     * Теперь общий [ru.kyamshanov.notepen.reflow.TableNoiseGuard] срабатывает и здесь —
+     * рефайнер возвращает null, исходный Figure-кроп сохраняется.
+     *
+     * Раскладка: 600×200 pt, 3 H-линии (Y=20,60,100 → 2 ряда) × 8 V-линий
+     * (X=10,90,…,570 → 7 узких колонок) = 14 ячеек по 1 символу. avg cell chars = 1.0,
+     * fragment-ratio = 1.0 — гарантированный OCR-шум.
+     */
+    @Test
+    fun `refineFromVectorLines keeps Figure for phantom-ruling single-char grid (F-7)`() =
+        runTest {
+            val widthPt = 600f
+            val heightPt = 200f
+            // Row 1 (top≈35) и Row 2 (top≈75): по одному символу на колонку.
+            val colLefts = listOf(10f, 90f, 170f, 250f, 330f, 410f, 490f)
+            val row1 = listOf("А", "р", "т", "и", "к", "л", "ь")
+            val row2 = listOf("о", "с", "н", "о", "в", "а", "н")
+            val glyphs =
+                colLefts.zip(row1).flatMap { (x, ch) -> cellWord(ch, startX = x + 30f, top = 35f) } +
+                    colLefts.zip(row2).flatMap { (x, ch) -> cellWord(ch, startX = x + 30f, top = 75f) }
+            // 3 H-линии + 8 V-линий — фантомные rulings между глифами.
+            val vLineXs = listOf(10f, 90f, 170f, 250f, 330f, 410f, 490f, 570f)
+            val vectorLines =
+                listOf(
+                    ru.kyamshanov.notepen.reflow.VectorLine(true, start = 10f, end = 570f, perpPos = 20f),
+                    ru.kyamshanov.notepen.reflow.VectorLine(true, start = 10f, end = 570f, perpPos = 60f),
+                    ru.kyamshanov.notepen.reflow.VectorLine(true, start = 10f, end = 570f, perpPos = 100f),
+                ) +
+                    vLineXs.map { x ->
+                        ru.kyamshanov.notepen.reflow.VectorLine(false, start = 20f, end = 100f, perpPos = x)
+                    }
+            val rawPage =
+                RawPage(
+                    pageIndex = 0,
+                    widthPt = widthPt,
+                    heightPt = heightPt,
+                    glyphs = glyphs,
+                    images = emptyList(),
+                    vectorLines = vectorLines,
+                )
+            val figure =
+                ReflowBlock.Figure(
+                    pageIndex = 0,
+                    bounds = ReflowRect(0f, 0f, 1f, 1f),
+                    aspectRatio = widthPt / heightPt,
+                    wasTableFallback = true,
+                )
+            val document = ReflowDocument(kind = PdfContentKind.TEXT_BASED, blocks = listOf(figure))
+            val refined = LatticeTableRefiner.refineFromVectorLines(document, listOf(rawPage))
+            assertIs<ReflowBlock.Figure>(
+                refined.blocks.single(),
+                "phantom-ruling single-char grid must stay a Figure, not become a Table",
+            )
+        }
+
     @Test
     fun `refine keeps Figure when bitmap callback returns null`() =
         runTest {

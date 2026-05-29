@@ -106,14 +106,14 @@ class RealPdfInvariantsTest {
             val headings = counts["Heading"] ?: 0
             val figures = counts["Figure"] ?: 0
 
-            // Post-F1 (2026-05-29 wave 3 qa): paragraphs ~3080, tables ~250.
-            // F-1 guard (TABLE_MIN_AVG_CELL_CHARS = 2.0) выбрасывает OCR-каши,
-            // у которых среднее непустой ячейки < 2 символов (учебник Барановской:
-            // pile of single-char/digram "ячеек" из обычной прозы и колофона).
-            // Эти ranges → теперь параграфы (поток текста), tables соответственно
-            // снижаются. Ranges оставлены широкими (±30%), чтобы тюнинг не ломал каждый раз.
-            assertInRange(paragraphs, 2500..3800, "paragraphs")
-            assertInRange(tables, 150..450, "tables")
+            // Post-F8 (2026-05-29 auto-fix wave): paragraphs ~3590, tables ~141.
+            // TableNoiseGuard теперь ловит не только чисто-побуквенный шум (F-1, avg<2),
+            // но и широкие shredded-сетки (≥12 колонок коротких фрагментов) и spaced-letter
+            // прозу ("(О с|нова|на|в|1997|году)"). На учебнике Барановской это перевело
+            // ещё ~110 фантомных «таблиц» в поток параграфов (tables 250→141, para 3080→3590).
+            // Ranges широкие (±30%), чтобы тюнинг не ломал тест каждый раз.
+            assertInRange(paragraphs, 2800..4200, "paragraphs")
+            assertInRange(tables, 80..300, "tables")
             assertInRange(headings, 90..200, "headings")
             // F-1 убрал wide pseudo-table → Figure fallback на учебнике: те ранее
             // составляли ~85% Figures (520 из 652). Сейчас остаются настоящие

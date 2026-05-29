@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.reflow.lattice
 
 import ru.kyamshanov.notepen.reflow.RawGlyph
 import ru.kyamshanov.notepen.reflow.RawPage
+import ru.kyamshanov.notepen.reflow.TableNoiseGuard
 import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PageRaster
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
@@ -234,21 +235,23 @@ internal object LatticeTableRefiner {
             } else {
                 groupCellsByRow(cellsInFig.map { pixelCellToPdfPoint(it, intSpaceWidth, intSpaceHeight, page) })
             }
-        return if (rows.size < 2) {
+        if (rows.size < 2) return null
+        val tableRows =
+            rows.map { rowCells ->
+                ReflowBlock.TableRow(
+                    cells = rowCells.sortedBy { it.left }.map { rect -> buildLatticeCell(rect, page) },
+                )
+            }
+        // OCR-noise guard (F-7): PDFBox ловит фантомные rulings между колонками глифов
+        // на сканах → грид 25+ колонок по 1 символу. Тот же helper, что у Stream-пути
+        // ([ru.kyamshanov.notepen.reflow.TableNoiseGuard]). Без этой проверки Lattice
+        // возвращал Table(confidence = 1f) в обход F-1. При срабатывании — null, и caller
+        // сохраняет исходный Figure-кроп страницы (строго лучше сломанной таблицы).
+        // Иначе Lattice — детерминированный сигнал от нарисованной сетки, confidence=1.
+        return if (TableNoiseGuard.isOcrNoiseTable(tableRows)) {
             null
         } else {
-            // Lattice — детерминированный сигнал от нарисованной сетки, confidence=1.
-            // Slice 1's Stream confidence-фильтр уже отработал; рефайнер целенаправленно
-            // подменяет именно те Figure'ы, что родились из low-conf Stream-fallback.
-            ReflowBlock.Table(
-                rows =
-                    rows.map { rowCells ->
-                        ReflowBlock.TableRow(
-                            cells = rowCells.sortedBy { it.left }.map { rect -> buildLatticeCell(rect, page) },
-                        )
-                    },
-                confidence = 1f,
-            )
+            ReflowBlock.Table(rows = tableRows, confidence = 1f)
         }
     }
 

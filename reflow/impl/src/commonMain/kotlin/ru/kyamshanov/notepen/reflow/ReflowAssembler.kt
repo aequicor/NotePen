@@ -275,28 +275,6 @@ internal object ReflowAssembler {
     private const val TABLE_MAX_TYPICAL_CELL_CHARS = 100f
 
     /**
-     * Нижняя граница средней длины **непустой** ячейки (символов): OCR / column-gap
-     * noise нарезает прозу пословно/побуквенно ("Лр", "т", "икл", "ъ"), и средняя
-     * содержательная ячейка получается < 2 символов. Реальные таблицы имеют хотя бы
-     * двухбуквенные ячейки ("Yes"/"No"/"5%"/"FB2"), и среднее у них ≥ 2.0. Таблица с
-     * меньшим средним отбрасывается (`buildTable` возвращает null), и диапазон строк
-     * деградирует в обычные параграфы — текст хотя бы читается потоком, а не пляшет
-     * по сетке. См. F-1 (OCR-каша на учебнике Барановской).
-     */
-    private const val TABLE_MIN_AVG_CELL_CHARS = 2.0f
-
-    /**
-     * Максимальная доля «фрагментных» (≤ [TABLE_FRAGMENT_CELL_CHARS] символов) ячеек
-     * среди непустых: OCR/column-gap noise часто даёт `"(О|с|нова|на|в|1997"` —
-     * среднее 2.3, но 4 из 6 ячеек ≤ 2 chars. Real grammar/glossary table с
-     * single-char header (например, кириллический алфавит «А|Б|В | Аист|Барс|Волк»)
-     * даёт ≤ 50% фрагментов; пограничный порог 0.6 фильтрует noise, оставляя
-     * подобные легитимные tables.
-     */
-    private const val TABLE_FRAGMENT_RATIO_LIMIT = 0.6f
-    private const val TABLE_FRAGMENT_CELL_CHARS = 2
-
-    /**
      * Граница confidence, ниже которой таблица заменяется на [ReflowBlock.Figure]-кроп
      * исходной страницы (см. пост-пасс в [buildPageBlocks]). 0.4 — компромисс между
      * сохранением 2-строчных key-value таблиц с короткими ячейками (conf ~0.7) и
@@ -803,22 +781,11 @@ internal object ReflowAssembler {
         // Wide-tables (8+ cols) с <3 рядов почти всегда — pseudo-row из выровненных
         // упражнений / глоссариев; legitimate wide tables имеют header + data.
         if (columns.size >= WIDE_TABLE_COLS_THRESHOLD && rows.size < MIN_TABLE_ROWS_WIDE) return null
-        // OCR-noise guard (F-1): средняя длина непустой ячейки ниже [TABLE_MIN_AVG_CELL_CHARS]
-        // ИЛИ доля «фрагментных» (≤[TABLE_FRAGMENT_CELL_CHARS]) ячеек выше
-        // [TABLE_FRAGMENT_RATIO_LIMIT] — column-gap detector почти всегда разрезал
-        // обычную прозу по глифам (учебник Барановской: "(О", "с", "нова", "на", "в",
-        // "1997"...). Считаем по non-empty cells, чтобы редкие легитимные таблицы с
-        // optional пустыми ячейками не наказывались. Возврат null отдаёт диапазон
-        // обратно в абзацный сборщик — пусть пляшущий OCR хотя бы читается строкой.
-        run {
-            val nonEmptyLengths = rows.flatMap { row -> row.cells.map { it.text.length }.filter { it > 0 } }
-            if (nonEmptyLengths.isNotEmpty()) {
-                val avg = nonEmptyLengths.sum().toFloat() / nonEmptyLengths.size
-                if (avg < TABLE_MIN_AVG_CELL_CHARS) return null
-                val fragments = nonEmptyLengths.count { it <= TABLE_FRAGMENT_CELL_CHARS }
-                if (fragments.toFloat() / nonEmptyLengths.size > TABLE_FRAGMENT_RATIO_LIMIT) return null
-            }
-        }
+        // OCR-noise guard (F-1, общий с Lattice-путём через [TableNoiseGuard]):
+        // column-gap detector почти всегда разрезал обычную прозу по глифам (учебник
+        // Барановской: "(О", "с", "нова", "на", "в", "1997"...). Возврат null отдаёт
+        // диапазон обратно в абзацный сборщик — пусть пляшущий OCR хотя бы читается строкой.
+        if (TableNoiseGuard.isOcrNoiseTable(rows)) return null
         // Header detection: первая строка с ≥TABLE_HEADER_BOLD_RATIO долей bold-ячеек
         // — таблица заголовка. На остальных строках isHeader=false default.
         val firstRow = rows.first()
