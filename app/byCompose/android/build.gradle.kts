@@ -39,6 +39,15 @@ android {
         }
     }
     buildTypes {
+        getByName("debug") {
+            // Debug-сборка живёт под отдельным applicationId — рядом с боевой
+            // ru.kyamshanov.notepen, без INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+            // Удобно для QA-итераций (см. .claude/ux-reports/*) и hot-iterate'а
+            // на физическом устройстве, где пользователь хранит свои разметки в
+            // основной сборке.
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
