@@ -1020,17 +1020,26 @@ private fun PagedReflowContent(
                 )
             }
         val pagerState = rememberPagerState(initialPage = initialPage) { windows.size }
+        // Свежие значения для трекера якоря ниже: он НЕ перезапускается на ре-пагинации
+        // (иначе перечитал бы устаревший индекс страницы в новой раскладке и затёр якорь —
+        // F-10: место чтения терялось при смене ориентации). См. LaunchedEffect(pagerState).
+        val latestWindows = rememberUpdatedState(windows)
+        val latestContentWidthPx = rememberUpdatedState(contentWidthPx)
+        val latestSettings = rememberUpdatedState(settings)
         // Ре-пагинация: встаём на страницу, открывающуюся якорным блоком (не на тот же
-        // номер) — место чтения сохраняется при смене кегля/полей. Тяжёлый measure
+        // номер) — место чтения сохраняется при смене кегля/полей/ориентации. Тяжёлый measure
         // (до ~50 ms для блока-главы EPUB) уносим на Default, чтобы не блокировать main.
+        // Якорь захватываем в локальную val ДО suspend: трекер ниже сдвинет `anchor` уже
+        // после скролла на восстановленную страницу, и читать «живой» `anchor` тут нельзя.
         LaunchedEffect(windows) {
-            val base = ReaderPagination.pageForAnchor(windows, anchor)
+            val restoreAnchor = anchor
+            val base = ReaderPagination.pageForAnchor(windows, restoreAnchor)
             val newPage =
                 withContext(Dispatchers.Default) {
                     refinePageForCharStart(
                         windows = windows,
                         basePage = base,
-                        anchor = anchor,
+                        anchor = restoreAnchor,
                         blocks = document.blocks,
                         lineBottoms = lineBottoms,
                         contentWidthPx = contentWidthPx,
@@ -1052,9 +1061,13 @@ private fun PagedReflowContent(
         // Первый блок текущей страницы = якорь; публикуем наружу (прогресс + смена режима).
         // Phase B: вычисляем charStart по firstBlockOffsetPx → строка → начало строки в
         // тексте блока (один measure firstBlock на смену страницы; Default для патологии).
-        LaunchedEffect(pagerState, windows) {
+        // Ключ — только pagerState (+document), НЕ windows: трекер живёт сквозь ре-пагинацию
+        // и реагирует лишь на реальные смены страницы (свайп/тап/клавиша/восстановление
+        // выше), а не на рестарт из-за смены раскладки. windows/ширину/настройки читаем
+        // «вживую» через rememberUpdatedState, чтобы маппинг был по актуальной раскладке.
+        LaunchedEffect(pagerState, document) {
             snapshotFlow { pagerState.currentPage }.collect { pageIndex ->
-                val window = windows.getOrNull(pageIndex)
+                val window = latestWindows.value.getOrNull(pageIndex)
                 val first = window?.firstBlock ?: 0
                 val charStart =
                     if (window != null && window.firstBlockOffsetPx > 0) {
@@ -1063,8 +1076,8 @@ private fun PagedReflowContent(
                             withContext(Dispatchers.Default) {
                                 BlockHeightCalculator.charStartAtOffsetPx(
                                     block = block,
-                                    contentWidthPx = contentWidthPx,
-                                    settings = settings,
+                                    contentWidthPx = latestContentWidthPx.value,
+                                    settings = latestSettings.value,
                                     textMeasurer = textMeasurer,
                                     density = density,
                                     offsetPx = window.firstBlockOffsetPx.toFloat(),
