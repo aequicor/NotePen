@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# notepen-android — adb/emulator/gradle helper for automated NotePen UX testing.
+#
+# Drives a connected Android device or the Medium_Phone_API_36.1 emulator with
+# no permission prompts. Pick the target with NOTEPEN_SERIAL=<serial> or pass
+# nothing to auto-select the only connected device.
+#
+#   Real device (Huawei) : 44RUN24B09G03494
+#   Emulator AVD         : Medium_Phone_API_36.1  (boots as emulator-5554)
+#   Debug package        : ru.kyamshanov.notepen.debug  (.debug suffix)
+set -euo pipefail
+
+REPO="/Users/kruz18/IdeaProjects/NotePen"
+SDK="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+ADB="$SDK/platform-tools/adb"
+EMULATOR="$SDK/emulator/emulator"
+PKG="${NOTEPEN_PKG:-ru.kyamshanov.notepen.debug}"
+AVD="${NOTEPEN_AVD:-Medium_Phone_API_36.1}"
+
+die() { echo "error: $*" >&2; exit 1; }
+[ -x "$ADB" ] || die "adb not found at $ADB (set ANDROID_HOME)"
+
+# Resolve target serial: explicit env wins, else the single connected device.
+resolve_serial() {
+  if [ -n "${NOTEPEN_SERIAL:-}" ]; then echo "$NOTEPEN_SERIAL"; return; fi
+  local ds
+  ds=$("$ADB" devices | awk 'NR>1 && $2=="device" {print $1}')
+  local n; n=$(echo "$ds" | grep -c . || true)
+  [ "$n" -eq 1 ] || die "want exactly one device, found $n. Set NOTEPEN_SERIAL.\n$ds"
+  echo "$ds"
+}
+adbs() { local s; s=$(resolve_serial); "$ADB" -s "$s" "$@"; }
+
+usage() {
+  cat <<EOF
+notepen-android <command> [args]   (target: NOTEPEN_SERIAL or sole device)
+
+  devices                 List attached devices/emulators
+  boot-emulator           Start AVD '$AVD' headless-ish and wait for boot
+  kill-emulator           adb emu kill the running emulator
+  install                 ./gradlew :app:byCompose:android:installDebug on target
+  launch                  Launch $PKG main activity
+  stop                    Force-stop $PKG
+  shot <file.png> [max]   Screencap to file; optional sips downscale to <max> px
+  tap <x> <y>             Tap
+  swipe <x1> <y1> <x2> <y2> [ms]   Swipe / drag (default 300ms)
+  text "<string>"         Input text into focused field
+  key <KEYCODE|name>      Key event (e.g. 22=DPAD_RIGHT, BACK, HOME, ENTER)
+  rotate <portrait|landscape>      Lock rotation
+  push <local> [remoteDir]         Push a fixture (default /sdcard/Download/)
+  backup <dir>            run-as tar of files/databases/shared_prefs -> <dir>/notepen-data.tar
+  logcat [filterspec]     Stream logcat (default: NotePen:* AndroidRuntime:E *:S)
+  raw -- <adb args...>    Pass through to adb -s <serial>
+EOF
+}
+
+cmd="${1:-}"; shift || true
+case "$cmd" in
+  devices) "$ADB" devices -l ;;
+
+  boot-emulator)
+    if "$ADB" devices | awk 'NR>1 && $1 ~ /^emulator-/ && $2=="device"' | grep -q .; then
+      echo "emulator already running"; exit 0
+    fi
+    "$EMULATOR" -list-avds | grep -qx "$AVD" || die "AVD '$AVD' not found"
+    echo "booting $AVD ..."
+    nohup "$EMULATOR" -avd "$AVD" -no-snapshot-save -netdelay none -netspeed full \
+      >/tmp/notepen-emu.log 2>&1 &
+    "$ADB" -s emulator-5554 wait-for-device
+    echo -n "waiting for boot"
+    for _ in $(seq 1 120); do
+      if [ "$("$ADB" -s emulator-5554 shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = "1" ]; then
+        echo " — done"; "$ADB" -s emulator-5554 shell input keyevent 82 >/dev/null 2>&1 || true; exit 0
+      fi
+      echo -n "."; sleep 2
+    done
+    die "emulator did not finish booting in 240s (see /tmp/notepen-emu.log)"
+    ;;
+
+  kill-emulator) "$ADB" -s emulator-5554 emu kill 2>/dev/null || echo "no emulator-5554 running" ;;
+
+  install)
+    s=$(resolve_serial)
+    echo "installing on $s ..."
+    ( cd "$REPO" && ANDROID_SERIAL="$s" ./gradlew :app:byCompose:android:installDebug )
+    ;;
+
+  launch)  adbs shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1 >/dev/null && echo "launched $PKG" ;;
+  stop)    adbs shell am force-stop "$PKG" && echo "stopped $PKG" ;;
+
+  shot)
+    out="${1:?usage: shot <file.png> [maxpx]}"; max="${2:-}"
+    mkdir -p "$(dirname "$out")"
+    adbs exec-out screencap -p > "$out"
+    if [ -n "$max" ]; then sips -Z "$max" "$out" --out "$out" >/dev/null; fi
+    echo "saved $out"
+    ;;
+
+  tap)   adbs shell input tap "${1:?x}" "${2:?y}" ;;
+  swipe) adbs shell input swipe "${1:?x1}" "${2:?y1}" "${3:?x2}" "${4:?y2}" "${5:-300}" ;;
+  text)  adbs shell input text "${1// /%s}" ;;
+  key)   adbs shell input keyevent "${1:?keycode}" ;;
+
+  rotate)
+    adbs shell settings put system accelerometer_rotation 0 >/dev/null
+    case "${1:?portrait|landscape}" in
+      portrait)  adbs shell settings put system user_rotation 0 ;;
+      landscape) adbs shell settings put system user_rotation 1 ;;
+      *) die "rotate portrait|landscape" ;;
+    esac
+    echo "rotation locked: $1"
+    ;;
+
+  push)
+    local_f="${1:?local path}"; rdir="${2:-/sdcard/Download/}"
+    adbs push "$local_f" "$rdir" && echo "pushed -> $rdir"
+    ;;
+
+  backup)
+    dir="${1:?backup dir}"; mkdir -p "$dir"
+    adbs exec-out run-as "${PKG%.debug}" tar -cf - files databases shared_prefs > "$dir/notepen-data.tar"
+    echo "backed up -> $dir/notepen-data.tar"
+    ;;
+
+  logcat) adbs logcat "${@:-NotePen:* AndroidRuntime:E *:S}" ;;
+
+  raw)
+    [ "${1:-}" = "--" ] && shift
+    adbs "$@"
+    ;;
+
+  ""|-h|--help|help) usage ;;
+  *) die "unknown command '$cmd' (try: notepen-android help)" ;;
+esac

@@ -1,0 +1,17 @@
+{
+  "$comment": "Automated desktop/Android UX-testing tooling allowlist. Lets an auto-mode session drive the apps without permission prompts. See .claude/tools/README.md.",
+  "permissions": {
+    "allow": [
+      "mcp__notepen-desktop",
+      "Bash(.claude/tools/bin/notepen-android:*)",
+      "Bash(adb:*)",
+      "Bash(/Users/kruz18/Library/Android/sdk/platform-tools/adb:*)",
+      "Bash(/Users/kruz18/Library/Android/sdk/emulator/emulator:*)",
+      "Bash(./gradlew:*)",
+      "Bash(screencapture:*)",
+      "Bash(sips:*)",
+      "Bash(osascript:*)",
+      "Bash(open:*)"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "notepen-desktop-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-contained macOS desktop GUI automation MCP for NotePen UX testing (screencapture + JXA/CoreGraphics + osascript). No third-party native deps.",
+  "bin": {
+    "notepen-desktop-mcp": "server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  }
+}

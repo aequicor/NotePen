@@ -63,6 +63,12 @@ bin/
 /.claude/settings.local.json
 .aikit/bin/
 /.claude/worktrees/
+# UX-testing tooling: commit the tools, drop local deps + screenshot artifacts
+/.claude/tools/desktop-mcp/node_modules/
+/.claude/ux-reports/
+# the generic `bin/` rule above would otherwise hide our helper script
+!/.claude/tools/bin/
+!/.claude/tools/bin/notepen-android
 /org/
 /META-INF/
 
