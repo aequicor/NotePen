@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.reflow.api.REFLOW_PARSER_VERSION
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import java.io.File
 import java.io.IOException
@@ -47,11 +48,14 @@ internal class FileSystemReflowDocumentDiskCache(
             }.fold(
                 onSuccess = { cached ->
                     val decodeMs = mark.elapsedNow().inWholeMilliseconds
-                    if (cached.sourceSize != stat.size || cached.sourceMtime != stat.mtime) {
+                    val staleSource = cached.sourceSize != stat.size || cached.sourceMtime != stat.mtime
+                    val staleParser = cached.parserVersion != REFLOW_PARSER_VERSION
+                    if (staleSource || staleParser) {
                         cacheLogger.info {
                             "PdfReflow: cache stale path=${maskPath(path)} " +
                                 "cachedSize=${cached.sourceSize} actualSize=${stat.size} " +
-                                "cachedMtime=${cached.sourceMtime} actualMtime=${stat.mtime}"
+                                "cachedMtime=${cached.sourceMtime} actualMtime=${stat.mtime} " +
+                                "cachedParser=${cached.parserVersion} actualParser=$REFLOW_PARSER_VERSION"
                         }
                         file.delete()
                         null

@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen.reflow
 
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
+import ru.kyamshanov.notepen.reflow.api.REFLOW_PARSER_VERSION
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
@@ -34,8 +35,12 @@ internal object ReflowBinaryFormat {
      *   бракуются по `version` и удаляются вызывающим — однократный re-extract.
      * v4: `TableRow.isHeader` (bool) round-trip + новый `TAG_CODE` для
      *   `ReflowBlock.Code`. Старые кэши (v1–v3) бракуются.
+     * v5: в заголовок (бывший reserved-слот) пишется `parserVersion`
+     *   ([REFLOW_PARSER_VERSION]). Структура блоков не менялась, но bump версии
+     *   формата одноразово бракует все v1–v4 кэши; дальше инвалидация по версии
+     *   парсера идёт без bump'а формата — просто инкрементом константы (F-9).
      */
-    private const val VERSION: Int = 4
+    private const val VERSION: Int = 5
     private const val BUFFER_SIZE = 64 * 1024
 
     private const val TAG_HEADING: Byte = 0
@@ -58,13 +63,20 @@ internal object ReflowBinaryFormat {
         val document: ReflowDocument,
         val sourceSize: Long,
         val sourceMtime: Long,
+        val parserVersion: Int,
     )
 
+    /**
+     * @param parserVersion версия парсера, под которую разобран документ. По
+     *   умолчанию — текущая [REFLOW_PARSER_VERSION]; параметр оставлен для тестов,
+     *   которым нужно сэмулировать кэш от другой версии парсера.
+     */
     fun write(
         document: ReflowDocument,
         sourceSize: Long,
         sourceMtime: Long,
         out: OutputStream,
+        parserVersion: Int = REFLOW_PARSER_VERSION,
     ) {
         val dos = DataOutputStream(BufferedOutputStream(out, BUFFER_SIZE))
         dos.writeInt(MAGIC)
@@ -74,7 +86,8 @@ internal object ReflowBinaryFormat {
         dos.writeInt(document.kind.ordinal)
         dos.writeLong(sourceSize)
         dos.writeLong(sourceMtime)
-        dos.writeLong(0L) // reserved
+        dos.writeInt(parserVersion) // v5: parser version (бывший reserved-слот)
+        dos.writeInt(0) // reserved
         document.blocks.forEach { writeBlock(dos, it) }
         dos.flush()
     }
@@ -91,13 +104,14 @@ internal object ReflowBinaryFormat {
         val kindOrdinal = dis.readInt()
         val sourceSize = dis.readLong()
         val sourceMtime = dis.readLong()
-        dis.readLong() // reserved
+        val parserVersion = dis.readInt() // v5
+        dis.readInt() // reserved
         val kind =
             PdfContentKind.entries.getOrNull(kindOrdinal)
                 ?: throw IllegalArgumentException("ReflowBinary: bad kind ordinal $kindOrdinal")
         val blocks = ArrayList<ReflowBlock>(blockCount)
         repeat(blockCount) { blocks.add(readBlock(dis)) }
-        return CachedDocument(ReflowDocument(kind, blocks), sourceSize, sourceMtime)
+        return CachedDocument(ReflowDocument(kind, blocks), sourceSize, sourceMtime, parserVersion)
     }
 
     private fun writeBlock(

@@ -167,6 +167,23 @@ class ReflowBinaryFormatTest {
     }
 
     @Test
+    fun parserVersionRoundtrips() {
+        // v5: parserVersion пишется в заголовок и читается обратно.
+        val doc = ReflowDocument(kind = PdfContentKind.TEXT_BASED, blocks = emptyList())
+        // По умолчанию — текущая версия парсера.
+        assertEquals(
+            ru.kyamshanov.notepen.reflow.api.REFLOW_PARSER_VERSION,
+            roundtrip(doc).parserVersion,
+        )
+        // Явно заданная версия round-trip'ится без искажений.
+        val bytes =
+            ByteArrayOutputStream().apply {
+                ReflowBinaryFormat.write(doc, 1L, 2L, this, parserVersion = 99)
+            }.toByteArray()
+        assertEquals(99, ReflowBinaryFormat.read(ByteArrayInputStream(bytes)).parserVersion)
+    }
+
+    @Test
     fun badMagicFails() {
         val bytes = ByteArray(40) { 0 }
         assertFailsWith<IllegalArgumentException> {

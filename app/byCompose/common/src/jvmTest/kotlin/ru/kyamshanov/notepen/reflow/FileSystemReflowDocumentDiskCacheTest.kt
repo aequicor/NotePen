@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.reflow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
+import ru.kyamshanov.notepen.reflow.api.REFLOW_PARSER_VERSION
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
@@ -117,6 +118,29 @@ class FileSystemReflowDocumentDiskCacheTest {
                     statByPath = mapOf("/x.pdf" to SourceStat(10L, 21L)),
                 )
             assertNull(readingCache.read("/x.pdf"))
+        }
+
+    @Test
+    fun parserVersionChangeInvalidatesEntry() =
+        // F-9: кэш, разобранный старой версией парсера, должен браковаться даже
+        // при неизменных size/mtime исходника — иначе фикс эвристик (напр. F-8
+        // TableNoiseGuard) был бы невидим для уже открытой ранее книги.
+        runTest {
+            val dir = Files.createTempDirectory("reflow-cache").toFile()
+            val cache =
+                newCache(
+                    dir = dir,
+                    statByPath = mapOf("/x.pdf" to SourceStat(10L, 20L)),
+                )
+            cache.write("/x.pdf", docA)
+            // Перезаписываем кэш так, будто его создал парсер ПРЕДЫДУЩЕЙ версии.
+            val file = dir.listFiles().orEmpty().single { it.name.endsWith(".reflow.bin") }
+            file.outputStream().use {
+                ReflowBinaryFormat.write(docA, 10L, 20L, it, parserVersion = REFLOW_PARSER_VERSION - 1)
+            }
+            assertNull(cache.read("/x.pdf"))
+            // Устаревший по версии парсера файл удалён.
+            assertTrue(!file.exists())
         }
 
     @Test

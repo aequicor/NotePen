@@ -25,7 +25,6 @@ public data class TextAnchor(
          * Якорь на начало блока [blockIndex] без точечного диапазона.
          * Для позиции чтения, когда charOffset ещё не считается (Phase A).
          */
-        public fun ofBlock(blockIndex: Int): TextAnchor =
-            TextAnchor(blockIndex = blockIndex, charStart = 0, charEnd = 0)
+        public fun ofBlock(blockIndex: Int): TextAnchor = TextAnchor(blockIndex, charStart = 0, charEnd = 0)
     }
 }
