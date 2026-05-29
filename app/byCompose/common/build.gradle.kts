@@ -39,6 +39,8 @@ kotlin {
         commonMain.dependencies {
             // module with logic
             implementation(projects.shared)
+            implementation(projects.library.api)
+            implementation(projects.library.impl)
             implementation(projects.drawing.api)
             implementation(projects.drawing.impl)
             implementation(projects.tools.marker)

@@ -3,9 +3,9 @@ package ru.kyamshanov.notepen.mainscreen.ui.screen
 import com.arkivanov.decompose.ComponentContext
 import kotlinx.coroutines.flow.Flow
 import ru.kyamshanov.notepen.MainComponent
+import ru.kyamshanov.notepen.library.api.LibraryRegistry
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
-import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
 import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
 import ru.kyamshanov.notepen.mainscreen.domain.port.ThumbnailRepository
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
@@ -59,10 +59,10 @@ class MainScreenComponent(
     /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
     /**
-     * Общая папка «Библиотека» для расшаривания книг подключённым устройствам.
-     * `null` — фича не поддерживается на платформе и секция в UI скрывается.
+     * Реестр библиотек, питающий секцию «Библиотека» (`mergedBooks`).
+     * `null` — на платформе нет локальной библиотеки (Android), секция скрыта.
      */
-    private val libraryFolder: LibraryFolder? = null,
+    private val libraryRegistry: LibraryRegistry? = null,
 ) : MainComponent,
     ComponentContext by componentContext {
     /** ViewModel главного экрана, привязанная к жизненному циклу компонента. */
@@ -78,6 +78,6 @@ class MainScreenComponent(
             thumbnailGenerator = thumbnailGenerator,
             remoteCatalogsFlow = remoteCatalogsFlow,
             onlinePeerIdsFlow = onlinePeerIdsFlow,
-            libraryFolder = libraryFolder,
+            libraryRegistry = libraryRegistry,
         )
 }

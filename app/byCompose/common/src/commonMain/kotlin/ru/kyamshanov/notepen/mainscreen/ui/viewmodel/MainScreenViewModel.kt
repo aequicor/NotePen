@@ -17,6 +17,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
+import ru.kyamshanov.notepen.library.api.LibraryBookId
+import ru.kyamshanov.notepen.library.api.LibraryRegistry
+import ru.kyamshanov.notepen.library.api.MergedLibraryEntry
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileDuplicateInFolderException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileNotInHistoryException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderLimitExceededException
@@ -27,8 +30,6 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
 import ru.kyamshanov.notepen.mainscreen.domain.model.RecentFile
 import ru.kyamshanov.notepen.mainscreen.domain.port.FileHistoryRepository
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
-import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
-import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolderItem
 import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
 import ru.kyamshanov.notepen.mainscreen.domain.port.ThumbnailRepository
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
@@ -94,10 +95,13 @@ class MainScreenViewModel(
      */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
     /**
-     * Общая папка «Библиотека», расшариваемая пирам. На платформах, где она
-     * не поддерживается (Android), передаётся `null` и секция в UI скрывается.
+     * Реестр подключённых библиотек. Секция «Библиотека» на главном экране
+     * показывает книги из [LibraryRegistry.mergedBooks]. На платформах без
+     * локальной библиотеки (Android) передаётся `null` — секция скрывается,
+     * как и раньше. Поведение и вид полки идентичны прежней реализации поверх
+     * `LibraryFolder`: одна локальная библиотека на desktop, тот же список книг.
      */
-    private val libraryFolder: LibraryFolder? = null,
+    private val libraryRegistry: LibraryRegistry? = null,
     private val nowMillis: () -> Long = { currentTimeMillis() },
 ) {
     private val logger = KotlinLogging.logger {}
@@ -110,10 +114,10 @@ class MainScreenViewModel(
     val state: StateFlow<MainScreenUiState> = _state.asStateFlow()
 
     init {
-        libraryFolder?.let { folder ->
+        libraryRegistry?.let { registry ->
             scope.launch {
-                folder.items.collect { items ->
-                    _state.update { it.copy(library = items.map(LibraryFolderItem::toUiModel)) }
+                registry.mergedBooks.collect { merged ->
+                    _state.update { it.copy(library = merged.map(MergedLibraryEntry::toUiModel)) }
                 }
             }
         }
@@ -201,7 +205,7 @@ class MainScreenViewModel(
 
     private fun openLibraryFolder() {
         if (isNavigating) return
-        if (libraryFolder == null) return
+        if (libraryRegistry == null) return
         isNavigating = true
         _state.update { it.copy(navigationTarget = NavigationTarget.LibraryFolder) }
     }
@@ -221,12 +225,19 @@ class MainScreenViewModel(
         }
     }
 
+    /**
+     * Локальная библиотека-получатель добавляемых книг — первая, чья роль
+     * позволяет добавлять (`capabilities.canAdd`). В M1 это единственная
+     * локальная папка пользователя на desktop; на Android реестр пуст.
+     */
+    private fun librarianLibrary() = libraryRegistry?.libraries?.value?.firstOrNull { it.capabilities.canAdd }
+
     private suspend fun addToLibrary(sourceUri: String) {
-        val folder = libraryFolder ?: return
+        val library = librarianLibrary() ?: return
         if (_state.value.isLoading) return
         // Если drag-операция была активна — сбросим её, как делает [handleDropOnFolder].
         _state.update { it.copy(dragState = DragState.None) }
-        folder.addCopy(sourceUri).fold(
+        library.addBook(sourceUri).fold(
             onSuccess = {
                 _state.update { it.copy(successEvent = SuccessEvent.FileAddedToLibrary) }
             },
@@ -237,11 +248,33 @@ class MainScreenViewModel(
         )
     }
 
-    private fun openLibraryItem(itemId: String) {
-        if (isNavigating) return
-        val item = _state.value.library?.firstOrNull { it.id == itemId } ?: return
+    /**
+     * Открывает книгу полки в редакторе. Абсолютный путь к файлу не хранится в
+     * UI-модели (там только per-library locator), поэтому резолвится через
+     * [ru.kyamshanov.notepen.library.api.Library.open]. Вызывается только при
+     * явном открытии элемента полки — на главном экране карточка библиотеки
+     * ведёт на sub-экран (`OpenLibraryFolder`), а не открывает элемент напрямую.
+     */
+    private suspend fun openLibraryItem(itemId: String) {
+        // Найти библиотеку, в которой есть книга с этим locator'ом.
+        val library =
+            libraryRegistry
+                ?.takeUnless { isNavigating }
+                ?.libraries
+                ?.value
+                ?.firstOrNull { lib -> lib.books.value.any { it.libraryBookId.value == itemId } }
+                ?: return
         isNavigating = true
-        _state.update { it.copy(navigationTarget = NavigationTarget.Editor(item.uri, 0)) }
+        library.open(LibraryBookId(itemId)).fold(
+            onSuccess = { doc ->
+                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(doc.localPath, 0)) }
+            },
+            onFailure = { e ->
+                logger.warn(e) { "openLibraryItem failed: ${e::class.simpleName}" }
+                isNavigating = false
+                _state.update { it.copy(errorEvent = ErrorEvent.FileError) }
+            },
+        )
     }
 
     /**
@@ -837,13 +870,23 @@ private fun Folder.toUiModel(fileCount: Int) =
         lastFileOpenedAt = null,
     )
 
-private fun LibraryFolderItem.toUiModel() =
+/**
+ * Maps a merged library entry to the shelf UI model.
+ *
+ * The main-screen library card only renders the item *count* (and the section's visibility),
+ * so this mapping is intentionally a one-to-one carry-over of the prior `LibraryFolderItem`
+ * fields. `uri` is the per-library locator (relative path for a local folder); the absolute path
+ * for opening is resolved on demand via `Library.open`, so it is not carried here — the shelf card
+ * never reads it. `modifiedAt` defaults to 0 only if the backend omits it (local folders always
+ * report it), preserving the previous ordering.
+ */
+private fun MergedLibraryEntry.toUiModel() =
     LibraryShelfUiModel(
-        id = id,
-        uri = uri,
-        displayName = displayName,
-        sizeBytes = sizeBytes,
-        modifiedAt = modifiedAt,
+        id = entry.libraryBookId.value,
+        uri = entry.libraryBookId.value,
+        displayName = entry.displayName,
+        sizeBytes = entry.sizeBytes,
+        modifiedAt = entry.modifiedAt ?: 0L,
     )
 
 /** Platform-provided current time in milliseconds since Unix epoch. */

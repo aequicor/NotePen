@@ -18,9 +18,11 @@ import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.sun.jna.Native
 import com.sun.jna.Platform
 import com.sun.jna.platform.win32.WinDef.HWND
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import notepen.app.bycompose.desktop.generated.resources.Res
 import notepen.app.bycompose.desktop.generated.resources.app_icon
 import org.jetbrains.compose.resources.painterResource
@@ -31,6 +33,9 @@ import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
 import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
 import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
+import ru.kyamshanov.notepen.library.api.LibraryConnection
+import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
+import ru.kyamshanov.notepen.library.impl.LocalFolderLibraryBackend
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -122,6 +127,8 @@ private object OpenFileRouter {
 
 /** Расширения, которые NotePen умеет открыть из аргументов запуска (Windows/Linux). */
 private val OPENABLE_EXTENSIONS = listOf("pdf", "png", "jpg", "jpeg", "epub", "fb2.zip", "fb2", "cbz", "cbr")
+
+private val mainLogger = KotlinLogging.logger {}
 
 fun main(args: Array<String>) {
     // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
@@ -231,6 +238,37 @@ fun main(args: Array<String>) {
             ioDispatcher = Dispatchers.IO,
         )
 
+    // The library shelf is now sourced through the :library abstraction. In M1 there is exactly one
+    // local-folder library — the user's `~/NotePen Library`. The backend factory reuses the existing
+    // [libraryFolder] instance for that root so the registry and the "Library" drill-down share a
+    // single scan/state (the drill-down still talks to [libraryFolder] directly). Behaviour and the
+    // rendered shelf are unchanged versus reading LibraryFolder.items directly.
+    val libraryRegistry =
+        DefaultLibraryRegistry(
+            backends =
+                listOf(
+                    LocalFolderLibraryBackend { rootPath, _ ->
+                        if (File(rootPath).canonicalPath == libraryRoot.canonicalPath) {
+                            libraryFolder
+                        } else {
+                            FileSystemLibraryFolder(
+                                root = File(rootPath),
+                                isBook = isBook,
+                                notifier = catalogChangeNotifier,
+                                scope = appScope,
+                                ioDispatcher = Dispatchers.IO,
+                            )
+                        }
+                    },
+                ),
+            scope = appScope,
+            ioDispatcher = Dispatchers.IO,
+        )
+    appScope.launch {
+        libraryRegistry.connect(LibraryConnection.Local(libraryRoot.canonicalPath))
+            .onFailure { e -> mainLogger.warn(e) { "Failed to connect local library at startup" } }
+    }
+
     // In-memory state holders are cheap; we expose them to the UI from the
     // light path so that the main screen can subscribe before the sync stack
     // finishes wiring. SyncRuntime fills these as peers connect once the user
@@ -322,7 +360,7 @@ fun main(args: Array<String>) {
                         onOpenLibraryFolder = onLib,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
-                        libraryFolder = libraryFolder,
+                        libraryRegistry = libraryRegistry,
                     )
                 },
                 peerCatalogComponentFactory = { ctx, peerId, displayName, onBack, onOpenEditor ->
