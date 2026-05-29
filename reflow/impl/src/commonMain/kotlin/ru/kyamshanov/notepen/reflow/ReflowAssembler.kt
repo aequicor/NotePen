@@ -139,6 +139,16 @@ internal object ReflowAssembler {
     private const val HEADING_MIN_LENGTH = 2
 
     /**
+     * Минимальное число «слов» в строке-кандидате, начиная с которого считаем
+     * долю одиночных букв (F-3): «В х о д н а я» = 7 слов, >50% одиночные →
+     * это OCR с расставленными буквами, не Heading.
+     */
+    private const val HEADING_SPACED_OUT_MIN_WORDS = 3
+
+    /** Общий разделитель пробелов/таб'ов для разбиения на слова. */
+    private val WHITESPACE_REGEX = Regex("\\s+")
+
+    /**
      * Доля моноширинных глифов в строке, начиная с которой строка считается
      * «строкой кода» (а не «текстом с inline-code-fragment'ом»). 0.8 — высокий
      * порог, отсекает обычные абзацы с одним inline `code` (Markdown-style).
@@ -263,6 +273,28 @@ internal object ReflowAssembler {
      * абзац из соседней колонки на wide-cell/OCR случае.
      */
     private const val TABLE_MAX_TYPICAL_CELL_CHARS = 100f
+
+    /**
+     * Нижняя граница средней длины **непустой** ячейки (символов): OCR / column-gap
+     * noise нарезает прозу пословно/побуквенно ("Лр", "т", "икл", "ъ"), и средняя
+     * содержательная ячейка получается < 2 символов. Реальные таблицы имеют хотя бы
+     * двухбуквенные ячейки ("Yes"/"No"/"5%"/"FB2"), и среднее у них ≥ 2.0. Таблица с
+     * меньшим средним отбрасывается (`buildTable` возвращает null), и диапазон строк
+     * деградирует в обычные параграфы — текст хотя бы читается потоком, а не пляшет
+     * по сетке. См. F-1 (OCR-каша на учебнике Барановской).
+     */
+    private const val TABLE_MIN_AVG_CELL_CHARS = 2.0f
+
+    /**
+     * Максимальная доля «фрагментных» (≤ [TABLE_FRAGMENT_CELL_CHARS] символов) ячеек
+     * среди непустых: OCR/column-gap noise часто даёт `"(О|с|нова|на|в|1997"` —
+     * среднее 2.3, но 4 из 6 ячеек ≤ 2 chars. Real grammar/glossary table с
+     * single-char header (например, кириллический алфавит «А|Б|В | Аист|Барс|Волк»)
+     * даёт ≤ 50% фрагментов; пограничный порог 0.6 фильтрует noise, оставляя
+     * подобные легитимные tables.
+     */
+    private const val TABLE_FRAGMENT_RATIO_LIMIT = 0.6f
+    private const val TABLE_FRAGMENT_CELL_CHARS = 2
 
     /**
      * Граница confidence, ниже которой таблица заменяется на [ReflowBlock.Figure]-кроп
@@ -771,6 +803,22 @@ internal object ReflowAssembler {
         // Wide-tables (8+ cols) с <3 рядов почти всегда — pseudo-row из выровненных
         // упражнений / глоссариев; legitimate wide tables имеют header + data.
         if (columns.size >= WIDE_TABLE_COLS_THRESHOLD && rows.size < MIN_TABLE_ROWS_WIDE) return null
+        // OCR-noise guard (F-1): средняя длина непустой ячейки ниже [TABLE_MIN_AVG_CELL_CHARS]
+        // ИЛИ доля «фрагментных» (≤[TABLE_FRAGMENT_CELL_CHARS]) ячеек выше
+        // [TABLE_FRAGMENT_RATIO_LIMIT] — column-gap detector почти всегда разрезал
+        // обычную прозу по глифам (учебник Барановской: "(О", "с", "нова", "на", "в",
+        // "1997"...). Считаем по non-empty cells, чтобы редкие легитимные таблицы с
+        // optional пустыми ячейками не наказывались. Возврат null отдаёт диапазон
+        // обратно в абзацный сборщик — пусть пляшущий OCR хотя бы читается строкой.
+        run {
+            val nonEmptyLengths = rows.flatMap { row -> row.cells.map { it.text.length }.filter { it > 0 } }
+            if (nonEmptyLengths.isNotEmpty()) {
+                val avg = nonEmptyLengths.sum().toFloat() / nonEmptyLengths.size
+                if (avg < TABLE_MIN_AVG_CELL_CHARS) return null
+                val fragments = nonEmptyLengths.count { it <= TABLE_FRAGMENT_CELL_CHARS }
+                if (fragments.toFloat() / nonEmptyLengths.size > TABLE_FRAGMENT_RATIO_LIMIT) return null
+            }
+        }
         // Header detection: первая строка с ≥TABLE_HEADER_BOLD_RATIO долей bold-ячеек
         // — таблица заголовка. На остальных строках isHeader=false default.
         val firstRow = rows.first()
@@ -1351,7 +1399,12 @@ internal object ReflowAssembler {
          * TOC ридера, мусор там создаёт шум. Критерии:
          *  - длина после `trim()` ≥ [HEADING_MIN_LENGTH] (2);
          *  - доля букв/цифр ≥ [HEADING_MIN_ALPHA_RATIO] (0.6);
-         *  - содержит хотя бы один letter-or-digit.
+         *  - содержит хотя бы один letter-or-digit;
+         *  - не «расставленные пробелами буквы» (F-3): ≥3 «слов», >50% — одиночные
+         *    буквы. Это сигнатура OCR'д заголовков в условно-широком кегле
+         *    («В х о д н а я» вместо «Входная»), где каждая буква оказалась
+         *    собственным глифом с большим зазором. Heading в TOC из такого
+         *    становится нечитаемым шумом — лучше показать как Paragraph.
          *
          * Если строка не проходит — flush demote'ит её в Paragraph (текст всё ещё
          * виден в потоке чтения, просто без heading-стиля и без TOC-entry).
@@ -1360,9 +1413,15 @@ internal object ReflowAssembler {
             val trimmed = text.trim()
             val letterDigits = trimmed.count { it.isLetterOrDigit() }
             val alphaRatio = if (trimmed.isEmpty()) 0f else letterDigits.toFloat() / trimmed.length
-            return trimmed.length >= HEADING_MIN_LENGTH &&
-                letterDigits > 0 &&
-                alphaRatio >= HEADING_MIN_ALPHA_RATIO
+            if (trimmed.length < HEADING_MIN_LENGTH || letterDigits == 0 || alphaRatio < HEADING_MIN_ALPHA_RATIO) {
+                return false
+            }
+            val words = trimmed.split(WHITESPACE_REGEX).filter { it.isNotEmpty() }
+            if (words.size >= HEADING_SPACED_OUT_MIN_WORDS) {
+                val singleLetterWords = words.count { it.length == 1 && it[0].isLetter() }
+                if (singleLetterWords * 2 > words.size) return false
+            }
+            return true
         }
 
         /**

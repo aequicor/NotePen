@@ -81,18 +81,21 @@ class CrossPageTableJoinTest {
 
     @Test
     fun tables_with_different_column_count_stay_separate() {
-        // Первая таблица 2×3, вторая 3×3 — не должны сливаться.
+        // Первая таблица 2×3, вторая 3×3 — не должны сливаться. Реалистичные
+        // ячейки (3+ символов): однобуквенные header'ы триггерят F-1 noise-guard
+        // (avg cell chars < TABLE_MIN_AVG_CELL_CHARS) и таблица деградирует в
+        // параграфы, ломая assertion'ы про cols.
         val page0 = tablePage(0)
         val glyphs2 =
-            cell("A", topY = 50f, startX = 50f) +
-                cell("B", topY = 50f, startX = 200f) +
-                cell("C", topY = 50f, startX = 350f) +
-                cell("a1", topY = 80f, startX = 50f) +
-                cell("b1", topY = 80f, startX = 200f) +
-                cell("c1", topY = 80f, startX = 350f) +
-                cell("a2", topY = 110f, startX = 50f) +
-                cell("b2", topY = 110f, startX = 200f) +
-                cell("c2", topY = 110f, startX = 350f)
+            cell("Col1", topY = 50f, startX = 50f) +
+                cell("Col2", topY = 50f, startX = 200f) +
+                cell("Col3", topY = 50f, startX = 350f) +
+                cell("val1", topY = 80f, startX = 50f) +
+                cell("val2", topY = 80f, startX = 200f) +
+                cell("val3", topY = 80f, startX = 350f) +
+                cell("val4", topY = 110f, startX = 50f) +
+                cell("val5", topY = 110f, startX = 200f) +
+                cell("val6", topY = 110f, startX = 350f)
         val page1 =
             RawPage(
                 pageIndex = 1,

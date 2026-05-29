@@ -106,16 +106,19 @@ class RealPdfInvariantsTest {
             val headings = counts["Heading"] ?: 0
             val figures = counts["Figure"] ?: 0
 
-            // Post-tightening (2026-05-29 wave 2): paragraphs=2093, tables=337,
-            // headings=127, figures=652. После tightening Stream detector
-            // (COLUMN_ALIGN_FACTOR 1.0→0.5, wide-table MIN_ROWS=3 @ 8+ cols,
-            // fillRatio hard-min 0.5) tables упали 471→337 — wide pseudo-tables
-            // из упражнений переехали в Figure-fallback / paragraphs. Ranges
-            // оставлены широкими (±30%), чтобы тюнинг не ломал каждый раз.
-            assertInRange(paragraphs, 1500..2700, "paragraphs")
-            assertInRange(tables, 320..650, "tables")
-            assertInRange(headings, 90..170, "headings")
-            assertInRange(figures, 350..750, "figures (mostly low-conf Stream fallback)")
+            // Post-F1 (2026-05-29 wave 3 qa): paragraphs ~3080, tables ~250.
+            // F-1 guard (TABLE_MIN_AVG_CELL_CHARS = 2.0) выбрасывает OCR-каши,
+            // у которых среднее непустой ячейки < 2 символов (учебник Барановской:
+            // pile of single-char/digram "ячеек" из обычной прозы и колофона).
+            // Эти ranges → теперь параграфы (поток текста), tables соответственно
+            // снижаются. Ranges оставлены широкими (±30%), чтобы тюнинг не ломал каждый раз.
+            assertInRange(paragraphs, 2500..3800, "paragraphs")
+            assertInRange(tables, 150..450, "tables")
+            assertInRange(headings, 90..200, "headings")
+            // F-1 убрал wide pseudo-table → Figure fallback на учебнике: те ранее
+            // составляли ~85% Figures (520 из 652). Сейчас остаются настоящие
+            // фигуры + редкие Lattice-восстановленные. Реально измерено ~64.
+            assertInRange(figures, 30..200, "figures (mostly low-conf Stream fallback)")
         }
     }
 
