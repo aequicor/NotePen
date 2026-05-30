@@ -859,10 +859,12 @@ fun LandscapeToolRail(
 }
 
 /**
- * The landscape rail's glass island: the scrollable vertical [WheelStrip] of
- * [entries] with the pinned undo / redo [PinnedHistoryButtons] fixed below it, so
- * undo is always visible regardless of how far the wheel is scrolled. Recolours
- * to the reader palette in reading mode via [railSelectionColorScheme].
+ * The landscape rail's glass island: the pinned undo / redo [PinnedHistoryButtons]
+ * fixed at the TOP with the scrollable vertical [WheelStrip] of [entries] below
+ * them. The wheel is capped to the leftover height (`weight(fill = false)`) so the
+ * pinned buttons never get pushed off-screen when the tool list overflows, and
+ * undo stays visible regardless of how far the wheel is scrolled. Recolours to the
+ * reader palette in reading mode via [railSelectionColorScheme].
  */
 @Composable
 private fun LandscapeToolRailIsland(
@@ -880,19 +882,27 @@ private fun LandscapeToolRailIsland(
             colorScheme =
                 railSelectionColorScheme(MaterialTheme.colorScheme, readerTheme.contentColor, readerTheme.background),
         ) {
-            // Колесо прокручивается, а отмена/повтор — ЗАКРЕПЛЁННЫЕ кнопки снизу
-            // острова: всегда видны независимо от прокрутки и активного инструмента.
+            // Отмена/повтор — ЗАКРЕПЛЁННЫЕ кнопки СВЕРХУ острова: всегда видны
+            // независимо от прокрутки и активного инструмента. Колесо ниже ограничено
+            // остатком высоты (weight, fill = false) и прокручивается внутри него,
+            // поэтому при переполнении списка инструментов кнопки не выдавливаются
+            // за экран.
             Column(
                 modifier = Modifier.padding(ISLAND_PADDING),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                WheelStrip(entries = entries, orientation = RailOrientation.VERTICAL, selectedKey = selectedKey)
                 PinnedHistoryButtons(
                     orientation = RailOrientation.VERTICAL,
                     undoEnabled = system.undoEnabled,
                     onUndo = system.onUndo,
                     redoEnabled = system.redoEnabled,
                     onRedo = system.onRedo,
+                )
+                WheelStrip(
+                    entries = entries,
+                    orientation = RailOrientation.VERTICAL,
+                    selectedKey = selectedKey,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
             }
         }
