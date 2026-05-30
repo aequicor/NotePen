@@ -62,7 +62,6 @@ import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -75,6 +74,7 @@ import ru.kyamshanov.notepen.WheelScrollButtons
 import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.LocalBlurEnabled
 import ru.kyamshanov.notepen.blur.glassSource
+import ru.kyamshanov.notepen.currentWindowSizePx
 import ru.kyamshanov.notepen.fadingEdges
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
@@ -137,7 +137,7 @@ fun MainContent(
     peerClient: SyncClient? = null,
     modifier: Modifier = Modifier,
 ) {
-    val windowWidth = LocalWindowInfo.current.containerSize.width
+    val windowWidth = currentWindowSizePx().width
     val isWide = with(LocalDensity.current) { windowWidth.toDp() >= WIDE_SCREEN_THRESHOLD }
     val snackbarHostState = remember { SnackbarHostState() }
 

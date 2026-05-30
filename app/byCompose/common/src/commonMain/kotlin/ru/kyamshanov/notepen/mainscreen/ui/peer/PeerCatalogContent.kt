@@ -30,13 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.LIQUID_GLASS_TOP_BAR_HEIGHT
 import ru.kyamshanov.notepen.LiquidGlassTopBar
 import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.glassSource
+import ru.kyamshanov.notepen.currentWindowSizePx
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.ui.component.RemoteEntryCard
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
@@ -58,7 +58,7 @@ fun PeerCatalogContent(
         component.viewModel.onErrorShown()
     }
 
-    val windowWidth = LocalWindowInfo.current.containerSize.width
+    val windowWidth = currentWindowSizePx().width
     val isWide = with(LocalDensity.current) { windowWidth.toDp() >= WIDE_SCREEN_THRESHOLD }
     val titleBarInteraction = LocalTitleBarInteraction.current
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()

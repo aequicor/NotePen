@@ -96,7 +96,6 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
@@ -215,8 +214,13 @@ fun DetailsContent(
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     modifier: Modifier = Modifier,
 ) {
-    val localWindowInfo = LocalWindowInfo.current
-    val windowSizeInPx = localWindowInfo.containerSize
+    // Размер окна редактора берём из достоверного для платформы источника
+    // ([currentWindowSizePx]): на Android — из активной Configuration, которая
+    // обновляется при каждом повороте даже когда Activity сама обрабатывает смену
+    // конфигурации (configChanges) и не пересоздаётся. Раньше использовался
+    // LocalWindowInfo.containerSize, но на части OEM-прошивок (Huawei/EMUI) он
+    // «отставал» на один поворот: рельса/верхний бар показывали прошлую ориентацию.
+    val windowSizeInPx = currentWindowSizePx()
     val isLandscape = windowSizeInPx.width > windowSizeInPx.height
     // Широкий экран для авто-включения книжного разворота (FEATURE #5, «Две
     // страницы»): альбомная ориентация И соотношение сторон ≥ ~1.5. На таких
