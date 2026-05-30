@@ -3,6 +3,8 @@ package ru.kyamshanov.notepen.magnifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import ru.kyamshanov.notepen.pdfviewer.PdfPagesLayout
+import ru.kyamshanov.notepen.pdfviewer.SpreadMode
 
 /**
  * Чистые функции преобразования координат между двумя пространствами лупы:
@@ -109,4 +111,31 @@ fun resolvePageForDocY(
         if (pageTopsPx[mid] <= docY) lo = mid else hi = mid - 1
     }
     return lo
+}
+
+/**
+ * Индекс страницы, содержащей точку `(docX, docY)` в document-space, с учётом
+ * раскладки разворота ([SpreadMode.SPREAD]).
+ *
+ * В [SpreadMode.SINGLE] эквивалентно [resolvePageForDocY] — колонка одна. В
+ * развороте левая и правая страницы пары делят один Y-ряд (`pageTopsPx`
+ * совпадает), поэтому одного `docY` недостаточно: ряд определяется по Y, а
+ * левая/правая страница пары — по `docX` относительно границы колонок
+ * (середина «корешка» [PdfPagesLayout.SPREAD_GUTTER_PX]). Без этого выбора
+ * рамка лупы на правой половине листа маппится в document-X левой половины.
+ */
+fun resolvePageForDocSpace(
+    layout: PdfPagesLayout,
+    docX: Float,
+    docY: Float,
+): Int {
+    val idx = resolvePageForDocY(layout.pageTopsPx, docY)
+    if (layout.spreadMode != SpreadMode.SPREAD) return idx
+    val leftPage = if (idx % 2 == 1) idx - 1 else idx
+    val rightPage = leftPage + 1
+    val hasRight =
+        rightPage < layout.pageTopsPx.size &&
+            layout.pageTopsPx[rightPage] == layout.pageTopsPx[leftPage]
+    val columnSplit = layout.basePageWidthPx + PdfPagesLayout.SPREAD_GUTTER_PX / 2f
+    return if (hasRight && docX >= columnSplit) rightPage else leftPage
 }

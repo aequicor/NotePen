@@ -3,6 +3,9 @@ package ru.kyamshanov.notepen.magnifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
+import ru.kyamshanov.notepen.pdfviewer.PdfPagesLayout
+import ru.kyamshanov.notepen.pdfviewer.SpreadMode
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -75,6 +78,53 @@ class MagnifierGeometryTest {
         val out = panelLocalToPageNormalized(Offset(10f, 10f), Size.Zero, target)
         assertEquals(Offset.Zero, out)
     }
+
+    @Test
+    fun `resolvePageForDocSpace in SINGLE ignores docX`() {
+        val layout =
+            PdfPagesLayout.build(
+                listOf(page(0), page(1)),
+                basePageWidthPx = 100f,
+            ) // SINGLE, tops 0 / 100
+        // X не влияет — колонка одна.
+        assertEquals(0, resolvePageForDocSpace(layout, docX = 9999f, docY = 50f))
+        assertEquals(1, resolvePageForDocSpace(layout, docX = -9999f, docY = 150f))
+    }
+
+    @Test
+    fun `resolvePageForDocSpace picks left or right page of spread pair by docX`() {
+        // Пара (0,1) в одном Y-ряду: левая на X=0, правая на X=116 (100 + gutter 16).
+        val layout =
+            PdfPagesLayout.build(
+                listOf(page(0), page(1)),
+                basePageWidthPx = 100f,
+                spreadMode = SpreadMode.SPREAD,
+            )
+        // Левая половина листа → страница 0.
+        assertEquals(0, resolvePageForDocSpace(layout, docX = 50f, docY = 50f))
+        // Правая половина (за корешком) → страница 1, хотя docY тот же ряд.
+        assertEquals(1, resolvePageForDocSpace(layout, docX = 150f, docY = 50f))
+        // Граница колонок — середина корешка (108): левее → 0, правее → 1.
+        assertEquals(0, resolvePageForDocSpace(layout, docX = 100f, docY = 50f))
+        assertEquals(1, resolvePageForDocSpace(layout, docX = 110f, docY = 50f))
+    }
+
+    @Test
+    fun `resolvePageForDocSpace hanging last left page has no right column`() {
+        // 3 страницы в spread: пара (0,1) + висячая левая 2. Для ряда страницы 2
+        // правой колонки нет → docX справа всё равно даёт страницу 2.
+        val layout =
+            PdfPagesLayout.build(
+                listOf(page(0), page(1), page(2)),
+                basePageWidthPx = 100f,
+                spreadMode = SpreadMode.SPREAD,
+            )
+        val row2Top = layout.pageTopsPx[2]
+        assertEquals(2, resolvePageForDocSpace(layout, docX = 50f, docY = row2Top + 10f))
+        assertEquals(2, resolvePageForDocSpace(layout, docX = 150f, docY = row2Top + 10f))
+    }
+
+    private fun page(index: Int): PdfPageInfo = PdfPageInfo(pageIndex = index, widthPt = 100f, heightPt = 100f)
 
     private fun assertNear(
         expected: Float,

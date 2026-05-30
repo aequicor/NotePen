@@ -184,10 +184,15 @@ class MagnifierTargetGestureController(
         val basePageW = layout.basePageWidthPx
         val pdfH = layout.pdfHeightsPx[pi]
         val pageTop = layout.pageTopsPx[pi]
+        // В развороте правая страница пары смещена по X на pageLeftsPx[pi]
+        // (в SINGLE — всегда 0f). Без него viewport-rect рамки правой
+        // половины считался бы на месте левой → жест письма по левой странице
+        // ловил бы hit-test рамки, которая на другой стороне листа.
+        val pageLeft = layout.pageLeftsPx[pi]
         val pan = viewerState.pan
         val t = seg.targetOnPage
-        val left = pan.x + t.left * basePageW * zoom
-        val right = pan.x + t.right * basePageW * zoom
+        val left = pan.x + (pageLeft + t.left * basePageW) * zoom
+        val right = pan.x + (pageLeft + t.right * basePageW) * zoom
         val top = pan.y + (pageTop + t.top * pdfH) * zoom
         val bottom = pan.y + (pageTop + t.bottom * pdfH) * zoom
         return Rect(left, top, right, bottom)

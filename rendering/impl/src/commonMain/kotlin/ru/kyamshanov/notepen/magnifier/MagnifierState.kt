@@ -363,14 +363,19 @@ class MagnifierState {
         val docTop = (viewportRect.top - pan.y) / zoom
         val docRight = (viewportRect.right - pan.x) / zoom
         val docBottom = (viewportRect.bottom - pan.y) / zoom
+        // В развороте Y-ряд делят обе страницы пары — колонку выбираем по
+        // центру рамки в document-X, иначе правая половина пере-привязалась бы
+        // к левой странице.
+        val docCenterX = (docLeft + docRight) / 2f
         val pageIdx =
-            resolvePageForDocY(layout.pageTopsPx, docTop)
+            resolvePageForDocSpace(layout, docCenterX, docTop)
                 .coerceIn(0, layout.pdfHeightsPx.size - 1)
         val pageTop = layout.pageTopsPx[pageIdx]
+        val pageLeft = layout.pageLeftsPx[pageIdx]
         val pdfH = layout.pdfHeightsPx[pageIdx]
         if (pdfH <= 0f) return
-        val leftN = docLeft / basePageW
-        val rightN = docRight / basePageW
+        val leftN = (docLeft - pageLeft) / basePageW
+        val rightN = (docRight - pageLeft) / basePageW
         val topN = (docTop - pageTop) / pdfH
         val bottomN = (docBottom - pageTop) / pdfH
         val clamped = clampTargetToPage(Rect(leftN, topN, rightN, bottomN))
@@ -393,12 +398,14 @@ class MagnifierState {
         val basePageW = layout.basePageWidthPx
         val pdfH = layout.pdfHeightsPx[pi]
         val pageTop = layout.pageTopsPx[pi]
+        // X-смещение колонки страницы (0f в SINGLE, правый столбец в SPREAD).
+        val pageLeft = layout.pageLeftsPx[pi]
         val pan = viewerState.pan
         val t = seg.targetOnPage
         return Rect(
-            left = pan.x + t.left * basePageW * zoom,
+            left = pan.x + (pageLeft + t.left * basePageW) * zoom,
             top = pan.y + (pageTop + t.top * pdfH) * zoom,
-            right = pan.x + t.right * basePageW * zoom,
+            right = pan.x + (pageLeft + t.right * basePageW) * zoom,
             bottom = pan.y + (pageTop + t.bottom * pdfH) * zoom,
         )
     }
