@@ -14,6 +14,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
@@ -313,6 +314,15 @@ actual fun PdfPagesViewer(
     // приложения, адаптивно к светлой/тёмной теме.
     val overscrollColor = MaterialTheme.colorScheme.primary
 
+    // Резолвер «логический индекс → исходная страница + вырезка» меняется при
+    // переключении разделения разворотов (#4): новое замыкание захватывает новый
+    // spreadSplit. Рендер-эффект ниже ключится на (pdfDocument, state, renderer) и
+    // НЕ пересоздаётся при смене pageSource, поэтому читаем его через
+    // rememberUpdatedState — иначе запущенная корутина держала бы старое замыкание
+    // (spreadSplit=false) при уже удвоённом state.pages и слала бы рендереру
+    // логические индексы как исходные → IndexOutOfBounds (краш окна).
+    val currentPageSource by rememberUpdatedState(pageSource)
+
     // macOS trackpad pinch: NSEventMaskMagnify via libnotepen_gesture.dylib.
     // Skiko intercepts NSView.magnifyWithEvent: natively and never forwards it
     // to Compose's PointerInputScope, so we bypass Skiko entirely with an
@@ -399,7 +409,7 @@ actual fun PdfPagesViewer(
                 // дёргает ре-рендер так же, как поворот.
                 cropSignature =
                     if (last >= first) {
-                        (first..last).sumOf { cropSignatureOf(pageSource(it)) * 131 + it }
+                        (first..last).sumOf { cropSignatureOf(currentPageSource(it)) * 131 + it }
                     } else {
                         0
                     },
@@ -421,7 +431,12 @@ actual fun PdfPagesViewer(
                 )
                 for (i in snap.first..snap.last) {
                     val rotation = userRotationQuarters(i)
-                    val src = pageSource(i)
+                    val src = currentPageSource(i)
+                    // Защита от транзиентного рассинхрона при переключении #4:
+                    // если резолвер вернул исходный индекс вне диапазона документа
+                    // — пропускаем кадр для этой страницы вместо падения рендера
+                    // (исключение на корутине рендера убило бы окно редактора).
+                    if (src.sourceIndex !in 0 until doc.info.pageCount) continue
                     val cropSig = cropSignatureOf(src)
                     val cached = cache.get(i)
                     if (cached != null && cache.isFresh(cached, snap.scalePercent, rotation, cropSig)) {

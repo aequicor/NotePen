@@ -156,11 +156,14 @@ class PdfDocumentState internal constructor(
      * счётчик. При выключенном [spreadSplit] совпадают с исходными страницами
      * [pdfDocument]. При включённом — каждая исходная страница `S` даёт две
      * половины (`2S` — левая, `2S+1` — правая) с тем же [PdfPageInfo.pageIndex],
-     * что и логический индекс, и aspect, скорректированным под половинную ширину
-     * ([SpreadSplit.halfAspect]). [PdfPageInfo.rotation] оставляем собственным
-     * (рендерер крутит половину отдельно); [PdfPageInfo.widthPt]/`heightPt`
-     * оставляем исходными — они используются только для подбора DPI, который
-     * рендерер пересчитывает с учётом вырезки.
+     * что и логический индекс, и aspect'ом половинной ВИЗУАЛЬНОЙ ширины.
+     * [PdfPageInfo.rotation] оставляем собственным (рендерер крутит половину
+     * отдельно). Делим именно ту сторону mediabox, что даёт ВИЗУАЛЬНУЮ ширину:
+     * у `/Rotate 90/270` страница повёрнута, поэтому визуальная ширина = `heightPt`
+     * (иначе [PdfPageInfo.aspectRatio] = `heightPt/widthPt` у повёрнутых **удвоится**
+     * вместо деления → половина выйдет широкой короткой полосой). Сами `widthPt`/
+     * `heightPt` влияют лишь на aspect раскладки и подбор DPI; рендерер берёт
+     * исходную страницу по `sourceIndex` и применяет вырезку отдельно.
      */
     val pages by derivedStateOf {
         val source = pdfDocument?.info?.pages.orEmpty()
@@ -171,8 +174,15 @@ class PdfDocumentState internal constructor(
                 source.forEach { info ->
                     val left = SpreadSplit.leftLogical(info.pageIndex)
                     val right = SpreadSplit.rightLogical(info.pageIndex)
-                    add(info.copy(pageIndex = left, widthPt = info.widthPt * SpreadSplit.GUTTER_X))
-                    add(info.copy(pageIndex = right, widthPt = info.widthPt * SpreadSplit.GUTTER_X))
+                    val rotated = info.rotation == ROTATE_90 || info.rotation == ROTATE_270
+                    val half =
+                        if (rotated) {
+                            info.copy(heightPt = info.heightPt * SpreadSplit.GUTTER_X)
+                        } else {
+                            info.copy(widthPt = info.widthPt * SpreadSplit.GUTTER_X)
+                        }
+                    add(half.copy(pageIndex = left))
+                    add(half.copy(pageIndex = right))
                 }
             }
         }
@@ -552,6 +562,10 @@ class PdfDocumentState internal constructor(
     }
 
     companion object {
+        /** Углы собственного `/Rotate` PDF, при которых mediabox повёрнут на бок. */
+        private const val ROTATE_90 = 90
+        private const val ROTATE_270 = 270
+
         /**
          * Creates a [PdfDocumentState] with fresh annotation state. Used by
          * [TabSession] when opening the first tab for a file.

@@ -394,7 +394,10 @@ actual class PdfViewerState internal constructor(
                 x = if (delta.x == 0f) dragRawPan.x else dragRawPan.x + delta.x,
                 y = if (delta.y == 0f) dragRawPan.y else dragRawPan.y + delta.y,
             )
-        val c = clamped(dragRawPan)
+        // Свободный кламп: помещающийся во вьюпорт лист можно таскать почти за
+        // край (без возврата к центру). В пределах свободного хода dragRawPan == c,
+        // поэтому overscrollOffset остаётся нулевым — пружина не срабатывает.
+        val c = clampedFree(dragRawPan)
         pan =
             Offset(
                 x = if (delta.x == 0f) pan.x else c.x,
@@ -527,7 +530,12 @@ actual class PdfViewerState internal constructor(
                 zoom = zoom,
                 currentPanX = pan.x,
             )
-        pan = clamped(newPan)
+        // Центрируем лист по X (если он у́же вьюпорта), прижимая лишь по
+        // переполняющей оси Y к целевой странице. Раньше тут был slot-based
+        // `clamped`, который держал на экране весь слот с [PageExtent] — у скан-
+        // страниц с правым «вылетом» extent'а это стягивало центрированный лист
+        // к левому краю (см. centeredAndClamped — центрирует по самому листу).
+        pan = centeredAndClamped(newPan)
     }
 
     actual fun requestRecenter(
@@ -640,6 +648,19 @@ actual class PdfViewerState internal constructor(
 
     private fun clamped(p: Offset): Offset =
         PdfViewerMath.clampPan(
+            pan = p,
+            layout = layout,
+            zoom = zoom,
+            viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
+        )
+
+    /**
+     * Кламп для свободного drag-перетаскивания: лист, помещающийся во вьюпорт,
+     * можно увести почти за край (см. [PdfViewerMath.clampPanFree]). Переполняющая
+     * ось ведёт себя как в [clamped]. Используется в [panGestureBy].
+     */
+    private fun clampedFree(p: Offset): Offset =
+        PdfViewerMath.clampPanFree(
             pan = p,
             layout = layout,
             zoom = zoom,

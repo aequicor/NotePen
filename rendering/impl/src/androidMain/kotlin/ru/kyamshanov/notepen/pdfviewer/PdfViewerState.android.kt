@@ -300,7 +300,11 @@ actual class PdfViewerState internal constructor(
      */
     fun panBy(delta: Offset) {
         val candidate = pan + delta
-        val c = clamped(candidate)
+        // Свободный кламп: лист, помещающийся во вьюпорт, можно увести почти за
+        // край (без возврата к центру) — это и есть «свободное перемещение». По
+        // переполняющей оси (скролл/зум) — прежнее поведение с полэкранным
+        // overscroll-буфером (см. [clampedFree]).
+        val c = clampedFree(candidate)
         pan =
             Offset(
                 x = if (delta.x == 0f) pan.x else c.x,
@@ -326,7 +330,10 @@ actual class PdfViewerState internal constructor(
                 zoom = zoom,
                 currentPanX = pan.x,
             )
-        pan = clamped(newPan)
+        // Центрируем лист по X (если он у́же вьюпорта) — slot-based `clamped`
+        // стягивал бы центрированный лист к краю у скан-страниц с правым «вылетом»
+        // extent'а. По Y прижимаем к целевой странице (паритет с desktop).
+        pan = centeredAndClamped(newPan)
     }
 
     actual fun doubleTapZoom(focus: Offset) {
@@ -379,6 +386,23 @@ actual class PdfViewerState internal constructor(
             viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
             // Touch: оверскролл-буфер — половина экрана по каждой оси, чтобы
             // страницу можно было увести к центру вьюпорта для рисования у краёв.
+            horizontalBuffer = viewportSize.width / 2f,
+            verticalBuffer = viewportSize.height / 2f,
+        )
+
+    /**
+     * Кламп для свободного drag-перетаскивания (см. [PdfViewerMath.clampPanFree]):
+     * лист, помещающийся во вьюпорт, можно увести почти за край — на экране
+     * остаётся лишь доля листа, без возврата к центру. Переполняющая ось ведёт
+     * себя как в [clamped] (тот же полэкранный overscroll-буфер). Используется в
+     * [panBy].
+     */
+    private fun clampedFree(p: Offset): Offset =
+        PdfViewerMath.clampPanFree(
+            pan = p,
+            layout = layout,
+            zoom = zoom,
+            viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
             horizontalBuffer = viewportSize.width / 2f,
             verticalBuffer = viewportSize.height / 2f,
         )
