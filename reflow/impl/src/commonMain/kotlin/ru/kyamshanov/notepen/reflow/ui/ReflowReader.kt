@@ -532,6 +532,19 @@ public fun ReflowReader(
             }
         }
 
+        // Ручки-курсоры показываем уже во время самого жеста (живое превью концов
+        // выделения), а не только после отпускания. На этой фазе они неинтерактивны
+        // (фокус ведёт палец) и без собственного pointerInput — поэтому не конкурируют
+        // с идущим drag. После отпускания их сменяет интерактивный SelectionConfirmOverlay
+        // в тех же координатах (matchParentSize контейнера → endRect ложится один в один).
+        if (selectionState.isActive && !confirming) {
+            LiveSelectionHandles(
+                state = selectionState,
+                settings = settings,
+                modifier = Modifier.matchParentSize(),
+            )
+        }
+
         // Оверлей подтверждения выделения: ручки-курсоры на концах + плавающая панель
         // «Копировать/Выделить». Тот же размер/координаты, что и контейнер контента
         // (matchParentSize), поэтому endRect() в системе контейнера ложится один в один.
@@ -1540,6 +1553,48 @@ private fun BoxScope.SelectionHandle(
                         },
                     )
                 }.drawBehind {
+                    drawCircle(
+                        color = settings.highlightColor.copy(alpha = SELECTION_HANDLE_ALPHA),
+                        radius = radiusPx,
+                        center = Offset(radiusPx, radiusPx),
+                    )
+                },
+    )
+}
+
+/**
+ * Неинтерактивные ручки-курсоры на концах выделения во время самого жеста — живое
+ * превью ещё до фиксации. В отличие от [SelectionHandle], без собственного pointerInput
+ * (фокус ведёт палец), поэтому не перехватывают идущий drag. Координаты концов берём из
+ * [ReflowSelectionState.endRect] — в системе контейнера, как и у [SelectionConfirmOverlay].
+ */
+@Composable
+private fun BoxScope.LiveSelectionHandles(
+    state: ReflowSelectionState,
+    settings: ReflowReaderSettings,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val radiusPx = with(density) { SELECTION_HANDLE_RADIUS.toPx() }
+    Box(modifier) {
+        state.endRect(SelectionEnd.ANCHOR)?.let { LiveSelectionHandle(it, radiusPx, settings) }
+        state.endRect(SelectionEnd.FOCUS)?.let { LiveSelectionHandle(it, radiusPx, settings) }
+    }
+}
+
+/** Один неинтерактивный кружок-ручка под нижней границей курсора [rect] (см. [LiveSelectionHandles]). */
+@Composable
+private fun BoxScope.LiveSelectionHandle(
+    rect: Rect,
+    radiusPx: Float,
+    settings: ReflowReaderSettings,
+) {
+    Box(
+        modifier =
+            Modifier
+                .offset { IntOffset((rect.left - radiusPx).roundToInt(), rect.bottom.roundToInt()) }
+                .size(SELECTION_HANDLE_RADIUS * 2)
+                .drawBehind {
                     drawCircle(
                         color = settings.highlightColor.copy(alpha = SELECTION_HANDLE_ALPHA),
                         radius = radiusPx,

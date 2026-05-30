@@ -14,6 +14,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PageRotation
 import ru.kyamshanov.notepen.annotation.domain.model.SpreadSplit
+import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.model.mergeRotations
 import ru.kyamshanov.notepen.annotation.domain.model.mergeStrokesByPage
@@ -497,24 +498,46 @@ class PdfDocumentState internal constructor(
         val result = HashMap<Int, MutableList<StickyHighlight>>()
         source.forEach { (srcPage, hs) ->
             hs.forEach { h ->
-                val firstRectLeft = h.rects.firstOrNull()?.left ?: 0f
-                val right = firstRectLeft >= SpreadSplit.GUTTER_X
-                val remapped =
-                    h.rects.map { r ->
-                        if (right) {
-                            r.copy(
-                                left = (r.left - SpreadSplit.GUTTER_X) / SpreadSplit.GUTTER_X,
-                                right = (r.right - SpreadSplit.GUTTER_X) / SpreadSplit.GUTTER_X,
-                            )
-                        } else {
-                            r.copy(left = r.left / SpreadSplit.GUTTER_X, right = r.right / SpreadSplit.GUTTER_X)
-                        }
-                    }
-                val target = if (right) SpreadSplit.rightLogical(srcPage) else SpreadSplit.leftLogical(srcPage)
-                result.getOrPut(target) { mutableListOf() }.add(h.copy(rects = remapped))
+                // Прямоугольник подсветки тянется на всю ширину строки и часто пересекает
+                // корешок (x=0.5). В отличие от штриха (целиком уходит в половину по первой
+                // точке), подсветку РЕЖЕМ по корешку: каждый прямоугольник обрезается к левой
+                // и правой половине отдельно и попадает в свою логическую страницу. Иначе
+                // широкая подсветка, целиком отнесённая к одной половине и отмасштабированная
+                // (right/0.5 → до 2×), вылезала бы за край половины в гаттер.
+                val leftRects = h.rects.mapNotNull { clipRectToHalf(it, right = false) }
+                val rightRects = h.rects.mapNotNull { clipRectToHalf(it, right = true) }
+                if (leftRects.isNotEmpty()) {
+                    result.getOrPut(SpreadSplit.leftLogical(srcPage)) { mutableListOf() }
+                        .add(h.copy(rects = leftRects))
+                }
+                if (rightRects.isNotEmpty()) {
+                    result.getOrPut(SpreadSplit.rightLogical(srcPage)) { mutableListOf() }
+                        .add(h.copy(rects = rightRects))
+                }
             }
         }
         return result
+    }
+
+    /**
+     * Обрезает прямоугольник [r] (координаты исходной страницы) к одной половине
+     * разворота и пересчитывает X в систему координат этой половины `[0, 1]`. Режется
+     * только по корешку (`x=0.5`); внешний край сохраняет лёгкий выход за `[0..1]`,
+     * как и у обычной (неразделённой) подсветки. `null` — прямоугольник не пересекает
+     * выбранную половину. Y не меняется.
+     */
+    private fun clipRectToHalf(
+        r: NormalizedRect,
+        right: Boolean,
+    ): NormalizedRect? {
+        val left = if (right) maxOf(r.left, SpreadSplit.GUTTER_X) else r.left
+        val rightEdge = if (right) r.right else minOf(r.right, SpreadSplit.GUTTER_X)
+        if (rightEdge <= left) return null
+        val base = if (right) SpreadSplit.GUTTER_X else 0f
+        return r.copy(
+            left = (left - base) / SpreadSplit.GUTTER_X,
+            right = (rightEdge - base) / SpreadSplit.GUTTER_X,
+        )
     }
 
     private fun mergeHighlightsByPage(logical: Map<Int, List<StickyHighlight>>): Map<Int, List<StickyHighlight>> {
