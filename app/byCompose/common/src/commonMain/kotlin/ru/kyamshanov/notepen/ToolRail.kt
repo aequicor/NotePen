@@ -368,17 +368,19 @@ internal fun PinnedHistoryButtons(
     val button:
         @Composable (icon: ImageVector, description: String, enabled: Boolean, onClick: () -> Unit) -> Unit =
         { icon, description, enabled, onClick ->
-            IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = description,
-                    tint =
-                        if (enabled) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SYSTEM_DISABLED_ALPHA)
-                        },
-                )
+            Tooltip(description) {
+                IconButton(onClick = onClick, enabled = enabled, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = description,
+                        tint =
+                            if (enabled) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SYSTEM_DISABLED_ALPHA)
+                            },
+                    )
+                }
             }
         }
     val undoButton: @Composable () -> Unit = {
@@ -487,12 +489,14 @@ internal fun systemControlEntries(
         )
     }
     val syncButton: @Composable () -> Unit = {
-        IconButton(onClick = onOpenSync, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
-            Icon(
-                imageVector = Icons.Default.Sync,
-                contentDescription = "Синхронизация",
-                tint = syncTint,
-            )
+        Tooltip("Синхронизация") {
+            IconButton(onClick = onOpenSync, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                Icon(
+                    imageVector = Icons.Default.Sync,
+                    contentDescription = "Синхронизация",
+                    tint = syncTint,
+                )
+            }
         }
     }
     // M4: «Синхронизация документа» — per-document live-sync toggle. DISTINCT from
@@ -508,37 +512,41 @@ internal fun systemControlEntries(
         )
     }
     val shortcutsButton: @Composable () -> Unit = {
-        IconButton(onClick = onOpenShortcutsSettings, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Шорткаты",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Tooltip("Шорткаты") {
+            IconButton(onClick = onOpenShortcutsSettings, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Шорткаты",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
     val exportButton: @Composable () -> Unit = {
-        IconButton(
-            onClick = onExport,
-            enabled = hasAnnotations && !isExporting,
-            modifier = Modifier.size(RAIL_BUTTON_SIZE),
-        ) {
-            if (isExporting) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(EXPORT_PROGRESS_SIZE),
-                    strokeWidth = EXPORT_PROGRESS_STROKE,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Default.PictureAsPdf,
-                    contentDescription = "Экспортировать в PDF",
-                    tint =
-                        if (hasAnnotations) {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SYSTEM_DISABLED_ALPHA)
-                        },
-                )
+        Tooltip("Экспортировать в PDF") {
+            IconButton(
+                onClick = onExport,
+                enabled = hasAnnotations && !isExporting,
+                modifier = Modifier.size(RAIL_BUTTON_SIZE),
+            ) {
+                if (isExporting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(EXPORT_PROGRESS_SIZE),
+                        strokeWidth = EXPORT_PROGRESS_STROKE,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.PictureAsPdf,
+                        contentDescription = "Экспортировать в PDF",
+                        tint =
+                            if (hasAnnotations) {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = SYSTEM_DISABLED_ALPHA)
+                            },
+                    )
+                }
             }
         }
     }
@@ -551,12 +559,14 @@ internal fun systemControlEntries(
         )
     }
     val rotatePageButton: @Composable () -> Unit = {
-        IconButton(onClick = onRotatePage, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.RotateRight,
-                contentDescription = "Повернуть страницу",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Tooltip("Повернуть страницу") {
+            IconButton(onClick = onRotatePage, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.RotateRight,
+                    contentDescription = "Повернуть страницу",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
     val spreadSplitButton: @Composable () -> Unit = {
@@ -583,12 +593,14 @@ internal fun systemControlEntries(
     // вертикальной рельсе широкий горизонтальный кластер обрезался по ширине
     // полосы — «−» пропадал, а проценты съезжали.
     val zoomInButton: @Composable () -> Unit = {
-        IconButton(onClick = onZoomIn, enabled = scale < MAX_SCALE, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
-            Icon(
-                imageVector = Icons.Default.ZoomIn,
-                contentDescription = "Увеличить",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Tooltip("Увеличить") {
+            IconButton(onClick = onZoomIn, enabled = scale < MAX_SCALE, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                Icon(
+                    imageVector = Icons.Default.ZoomIn,
+                    contentDescription = "Увеличить",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
     val zoomLabel: @Composable () -> Unit = {
@@ -603,12 +615,14 @@ internal fun systemControlEntries(
         )
     }
     val zoomOutButton: @Composable () -> Unit = {
-        IconButton(onClick = onZoomOut, enabled = scale > MIN_SCALE, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
-            Icon(
-                imageVector = Icons.Default.ZoomOut,
-                contentDescription = "Уменьшить",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Tooltip("Уменьшить") {
+            IconButton(onClick = onZoomOut, enabled = scale > MIN_SCALE, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                Icon(
+                    imageVector = Icons.Default.ZoomOut,
+                    contentDescription = "Уменьшить",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
     return buildList {
