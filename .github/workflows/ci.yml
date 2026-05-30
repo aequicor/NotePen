@@ -1,0 +1,81 @@
+# Tier 1 — Automated / deterministic CI gate (see /TESTING.md).
+#
+# This is the hard merge gate for NotePen: on every push to master and every PR
+# it runs `./gradlew check` = build + all JVM unit/logic tests + the Roborazzi
+# golden screenshots (:reflow:impl) + ktlintCheck + detekt (auto-applied to every
+# module, per-module detekt-baseline.xml honored). All tests are commonTest/jvmTest
+# on the JVM; there is no instrumented androidTest source set, so a single Linux job
+# covers the whole deterministic tier.
+#
+# Out of CI scope on purpose:
+#   - Tier 2 (AI-vision): non-deterministic, token-costly live-app checks on real
+#     renderers/gestures. Advisory only; triggered by an `ai-vision` prompt, not CI.
+#   - Tier 3 (manual): real stylus/palm-rejection, overlay latency, two-device
+#     LAN sync, installers, JBR title bar. Release sign-off on hardware.
+#
+# Separate from release.yml (tag-triggered, build-only packaging).
+
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Cancel superseded runs on the same ref (latest push/PR update wins).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Tier 1 verify (check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # `check` configures :app:byCompose:desktop, which pins a vendor=JETBRAINS
+      # toolchain and resolves it EAGERLY at configuration time (javaHome = ...get()).
+      # foojay can't provision the JetBrains vendor, so configuration fails unless a
+      # jbrsdk is registered via org.gradle.java.installations.paths — same trick as
+      # release.yml, here on linux-x64. We need jbrsdk (not jbr) for jpackage/jmods.
+      #
+      # The desktop module pins languageVersion 25 (vendor=JETBRAINS), so the toolchain
+      # must be jbrsdk 25. Keep this URL in lockstep with release.yml and with the local
+      # JBR (currently JBR-25.0.3). When the desktop pin moves, bump the build here too.
+      - name: Provision JetBrains Runtime SDK 25 (desktop toolchain)
+        run: |
+          set -euo pipefail
+          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-25.0.3-linux-x64-b480.61.tar.gz"
+          echo "Downloading $url"
+          curl -fSL --retry 3 "$url" -o "$RUNNER_TEMP/jbrsdk.tar.gz"
+          mkdir -p "$RUNNER_TEMP/jbrsdk"
+          tar -xzf "$RUNNER_TEMP/jbrsdk.tar.gz" -C "$RUNNER_TEMP/jbrsdk" --strip-components=1
+          home=$(dirname "$(dirname "$(find "$RUNNER_TEMP/jbrsdk" -type f -path '*/bin/jpackage' | head -n1)")")
+          test -x "$home/bin/javac"
+          printf '\norg.gradle.java.installations.paths=%s\n' "$home" >> gradle.properties
+          echo "JBR toolchain home: $home"
+          "$home/bin/java" -version
+
+      # Full deterministic gate per CLAUDE.md (= build + tests + ktlintCheck + detekt,
+      # incl. Roborazzi goldens). The Android SDK is preinstalled on ubuntu-latest.
+      - name: Verify (Tier 1)
+        run: ./gradlew check
+
+      # Surface JVM test + Roborazzi reports when the gate fails.
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: '**/build/reports'
+          if-no-files-found: ignore
