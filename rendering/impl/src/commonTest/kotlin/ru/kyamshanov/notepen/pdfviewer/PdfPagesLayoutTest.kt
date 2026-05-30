@@ -187,6 +187,92 @@ class PdfPagesLayoutTest {
     }
 
     @Test
+    fun `clampPanFree lets a fitting page move almost off-screen without snapping back`() {
+        val layout = PdfPagesLayout.build(pages(1f), basePageWidthPx = 100f)
+        // Лист 100×100 в 400×400 помещается по обеим осям. keep = 100*0.25 = 25,
+        // свободный диапазон по каждой оси = [25-100, 400-25] = [-75, 375] —
+        // намного шире, чем у clampPan ([0, 300]): лист можно увести почти за край.
+        val vp = FloatSize(400f, 400f)
+        val far = PdfViewerMath.clampPanFree(Offset(999f, 999f), layout, zoom = 1f, viewportSize = vp)
+        assertEquals(375f, far.x)
+        assertEquals(375f, far.y)
+        val near = PdfViewerMath.clampPanFree(Offset(-999f, -999f), layout, zoom = 1f, viewportSize = vp)
+        assertEquals(-75f, near.x)
+        assertEquals(-75f, near.y)
+        // Значение внутри свободного хода не трогается (нет возврата к центру).
+        val within = PdfViewerMath.clampPanFree(Offset(200f, -40f), layout, zoom = 1f, viewportSize = vp)
+        assertEquals(200f, within.x)
+        assertEquals(-40f, within.y)
+    }
+
+    @Test
+    fun `clampPanFree keeps clampPan overscroll behavior on an overflowing axis`() {
+        // Лист 100×300 в 400×200: X помещается → свободный ход; Y переполняет →
+        // прежнее поведение clampPan (края [-100, 0] + буфер 25 → [-125, 25]).
+        val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f)
+        val vp = FloatSize(400f, 200f)
+        val free = PdfViewerMath.clampPanFree(Offset(999f, 999f), layout, zoom = 1f, viewportSize = vp)
+        assertEquals(375f, free.x) // X — свободный: 400 - 25
+        assertEquals(25f, free.y) // Y — как в clampPan: hi + буфер
+    }
+
+    @Test
+    fun `clampPanFree forwards a custom overscroll buffer to the overflowing axis`() {
+        // Android передаёт полэкранный буфер. Лист 100×300 в 400×200: Y переполняет,
+        // края [-100, 0]; буфер 100 (вместо дефолтных 25) → диапазон [-200, 100].
+        val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f)
+        val vp = FloatSize(400f, 200f)
+        val clamped =
+            PdfViewerMath.clampPanFree(
+                pan = Offset(0f, 999f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = vp,
+                horizontalBuffer = 100f,
+                verticalBuffer = 100f,
+            )
+        assertEquals(100f, clamped.y) // hi + кастомный буфер
+    }
+
+    @Test
+    fun `clampPanFree ignores a right ink overflow when bounding horizontal travel`() {
+        // У страницы ink выходит вправо за лист (right = 1.4): слот шире листа,
+        // но свободный ход считается по КОЛОНКЕ листа (100), а не по слоту (140) —
+        // иначе «вылет» extent'а перекосил бы перемещение.
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f),
+                basePageWidthPx = 100f,
+                extents = listOf(PageExtent(right = 1.4f)),
+            )
+        val vp = FloatSize(400f, 400f)
+        val far = PdfViewerMath.clampPanFree(Offset(999f, 0f), layout, zoom = 1f, viewportSize = vp)
+        assertEquals(375f, far.x) // 400 - 100*0.25 — по листу, не по слоту
+    }
+
+    @Test
+    fun `centeringClamp centres the page sheet despite a right ink overflow`() {
+        // Регрессия: скан-страница с правым «вылетом» extent (right = 1.4) должна
+        // центрироваться по САМОМУ листу (colонка 100), а не по слоту (140).
+        // Слот шире → slot-based clampPan стянул бы лист влево; centeringClamp —
+        // нет. На этом инварианте держится центрирование при открытии (scrollToPage).
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f),
+                basePageWidthPx = 100f,
+                extents = listOf(PageExtent(right = 1.4f)),
+            )
+        val centered =
+            PdfViewerMath.centeringClamp(
+                pan = Offset(0f, 0f),
+                layout = layout,
+                zoom = 1f,
+                viewportSize = FloatSize(400f, 400f),
+            )
+        assertEquals(150f, centered.x) // (400 - 100) / 2 — по листу
+    }
+
+    @Test
     fun `fitToWidth zoom equals viewportWidth divided by basePageWidth`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f), basePageWidthPx = 100f)
         assertEquals(3f, PdfViewerMath.fitToWidthZoom(layout, viewportWidth = 300f))

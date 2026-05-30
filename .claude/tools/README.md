@@ -7,63 +7,16 @@ committed.
 
 | Surface | How Claude drives it | Setup |
 |---|---|---|
-| Desktop GUI (exploratory) | `notepen-desktop` MCP server — screenshot + click/type | one-time macOS permission grant ↓ |
 | Desktop (deterministic) | Roborazzi compose-desktop tests in `:reflow:impl` | none |
 | Android (real device + emulator) | `notepen-android` helper (adb/emulator/gradle) | none |
 
-The allowlist in [`.claude/settings.json`](../settings.json) pre-approves the MCP
-server and the `adb` / `emulator` / `gradlew` / `screencapture` / `sips` /
-`osascript` / `open` commands so an auto-mode session never stalls on a prompt.
+The allowlist in [`.claude/settings.json`](../settings.json) pre-approves the
+`adb` / `emulator` / `gradlew` / `open` commands so an auto-mode session never
+stalls on a prompt.
 
 ---
 
-## 1. Desktop GUI MCP — `notepen-desktop`
-
-A self-contained Node MCP server ([desktop-mcp/server.js](desktop-mcp/server.js))
-that uses **only built-in macOS tools** (`screencapture`, `sips`, `osascript`
-JXA/CoreGraphics + System Events). No Homebrew, no Swift, no AI key, no
-third-party native binaries — fully auditable.
-
-Registered at **local scope** (`claude mcp list` → `notepen-desktop`). Tools:
-
-| Tool | What it does |
-|---|---|
-| `screenshot` | Capture the screen. The preview is downsized to the display's **logical** size, so a pixel you read off it equals the `x,y` you pass to `click`. Optional `path` saves full-res PNG; optional `region {x,y,w,h}`. |
-| `click` / `double_click` / `move` / `drag` | Mouse, in logical points (top-left origin). `drag` is good for strokes / page swipes. |
-| `type_text` | Type a string (newlines → Return). |
-| `press_key` | One key + modifiers — `return tab escape left right up down pageup pagedown home end space delete f1-f12` or a single char; modifiers `command control option shift`. |
-| `activate_app` | Foreground an app by name — `"NotePen"` (release bundle) or `"java"` (gradle `runDesktop`). |
-| `list_windows` | Window titles + position + size for a process — find click targets. |
-
-### ⚠️ One-time permission grant (you must do this once — Claude cannot)
-
-macOS gates screen capture and synthetic input behind per-app privacy
-permissions. Grant them to **the app that runs Claude Code** (Terminal,
-iTerm2, Ghostty, VS Code, …):
-
-1. **System Settings ▸ Privacy & Security ▸ Screen Recording** → enable your
-   terminal app. (needed for `screenshot`)
-2. **System Settings ▸ Privacy & Security ▸ Accessibility** → enable your
-   terminal app. (needed for `click` / `type_text` / `list_windows`)
-3. **Quit and reopen the terminal** — macOS only applies the grant to newly
-   launched processes.
-
-If a tool returns a permission error it names which grant is missing.
-
-### Launching the desktop app for testing
-
-```
-./gradlew runDesktop          # quick; process shows up as "java"
-# or, closer to release (recommended by the autonomous-QA prompt):
-./gradlew :app:byCompose:desktop:createDistributable \
-  && open app/byCompose/desktop/build/compose/binaries/main/app/NotePen.app
-```
-
-Then: `screenshot` → read coordinates → `click` / `type_text` / `drag`.
-
----
-
-## 2. Deterministic desktop tests — Roborazzi
+## 1. Deterministic desktop tests — Roborazzi
 
 Headless Compose-Desktop screenshot tests, no GUI window or OS permission
 needed. The reliable regression net.
@@ -84,7 +37,7 @@ Any unexpected golden diff = a regression to investigate, not to re-record.
 
 ---
 
-## 3. Android helper — `notepen-android`
+## 2. Android helper — `notepen-android`
 
 [`bin/notepen-android`](bin/notepen-android) wraps adb/emulator/gradle. Targets
 the sole connected device by default; override with `NOTEPEN_SERIAL=<serial>`.
@@ -115,13 +68,13 @@ Known devices: Huawei `44RUN24B09G03494` (real stylus) and emulator
 ## Putting it together
 
 The existing playbooks in [`.claude/prompts/`](../prompts/) describe full UX
-passes; they assumed a `mcp__computer-use__*` server that didn't exist. The
-`notepen-desktop` MCP now fills that role — substitute `mcp__notepen-desktop__*`
-for the old `mcp__computer-use__*` tool names.
+passes. Interactive desktop GUI driving is no longer available locally; cover the
+desktop via the deterministic Roborazzi snapshots above, and exercise live
+input on Android via the `notepen-android` helper.
 
 ---
 
-## 4. `ai-vision` keyword hook
+## 3. `ai-vision` keyword hook
 
 A `UserPromptSubmit` hook so that whenever your prompt mentions **`ai-vision`**
 (case-insensitive), Claude is told to DO the visual work itself with this harness

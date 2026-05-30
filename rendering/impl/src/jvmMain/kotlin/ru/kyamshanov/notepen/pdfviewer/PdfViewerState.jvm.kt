@@ -141,8 +141,11 @@ actual class PdfViewerState internal constructor(
     private var pendingInitialScalePercent: Int? = null
     private var hasInitialCentered: Boolean = false
 
-    /** Отложенный «fit-to-width + центрирование» (см. [requestFitToWidth]). */
-    private var pendingFitPage: Int? = null
+    /** Отложенная перецентровка (см. [requestRecenter]). */
+    private var pendingRecenterPage: Int? = null
+
+    /** Множитель масштаба для отложенной перецентровки (`1f` — без изменения). */
+    private var pendingRecenterZoomFactor: Float = 1f
 
     internal fun applyPendingInitialScrollIfNeeded() {
         pendingInitialScalePercent?.let { sc ->
@@ -391,7 +394,10 @@ actual class PdfViewerState internal constructor(
                 x = if (delta.x == 0f) dragRawPan.x else dragRawPan.x + delta.x,
                 y = if (delta.y == 0f) dragRawPan.y else dragRawPan.y + delta.y,
             )
-        val c = clamped(dragRawPan)
+        // Свободный кламп: помещающийся во вьюпорт лист можно таскать почти за
+        // край (без возврата к центру). В пределах свободного хода dragRawPan == c,
+        // поэтому overscrollOffset остаётся нулевым — пружина не срабатывает.
+        val c = clampedFree(dragRawPan)
         pan =
             Offset(
                 x = if (delta.x == 0f) pan.x else c.x,
@@ -524,32 +530,46 @@ actual class PdfViewerState internal constructor(
                 zoom = zoom,
                 currentPanX = pan.x,
             )
-        pan = clamped(newPan)
+        // Центрируем лист по X (если он у́же вьюпорта), прижимая лишь по
+        // переполняющей оси Y к целевой странице. Раньше тут был slot-based
+        // `clamped`, который держал на экране весь слот с [PageExtent] — у скан-
+        // страниц с правым «вылетом» extent'а это стягивало центрированный лист
+        // к левому краю (см. centeredAndClamped — центрирует по самому листу).
+        pan = centeredAndClamped(newPan)
     }
 
-    actual fun requestFitToWidth(pageIndex: Int) {
-        pendingFitPage = pageIndex
+    actual fun requestRecenter(
+        pageIndex: Int,
+        zoomFactor: Float,
+    ) {
+        pendingRecenterPage = pageIndex
+        pendingRecenterZoomFactor = zoomFactor
         // Не применяем сразу: layout ещё старый (смена режима пере-строит его
-        // асинхронно). Применит [applyPendingFitIfNeeded] из вьюера после
+        // асинхронно). Применит [applyPendingRecenterIfNeeded] из вьюера после
         // пере-layout'а. Если же вьюпорт уже готов и пере-layout не придёт,
         // последующий resize/spreadMode-хук всё равно его подхватит.
     }
 
     /**
-     * Если есть отложенный [requestFitToWidth] — подбирает зум «по ширине ряда»
-     * и центрирует ряд, прижимая верх запрошенной страницы к верху вьюпорта,
-     * уже на АКТУАЛЬНОМ (пере-строенном) layout'е. Возвращает `true`, если фит
-     * применён. Вызывается вьюером после смены [pages] / [spreadMode].
+     * Если есть отложенный [requestRecenter] — на АКТУАЛЬНОМ (пере-строенном)
+     * layout'е домножает [zoom] на запрошенный множитель (для разворота — `1f`,
+     * масштаб не меняется; для разделения — `0.5f`/`2f`-компенсация), затем
+     * центрирует ряд раскладки по горизонтали и прижимает верх запрошенной
+     * страницы к верху вьюпорта. Возвращает `true`, если перецентровка применена.
+     * Вызывается вьюером после смены [pages] / [spreadMode].
      */
-    internal fun applyPendingFitIfNeeded(): Boolean {
-        val page = pendingFitPage
+    internal fun applyPendingRecenterIfNeeded(): Boolean {
+        val page = pendingRecenterPage
         if (page == null || viewportSize.width <= 0 || pages.isEmpty()) return false
-        pendingFitPage = null
+        pendingRecenterPage = null
+        val factor = pendingRecenterZoomFactor
+        pendingRecenterZoomFactor = 1f
+        if (factor != 1f) {
+            zoom = (zoom * factor).coerceIn(PdfViewerMath.MIN_ZOOM, PdfViewerMath.MAX_ZOOM)
+        }
         val idx = page.coerceIn(0, pages.lastIndex)
-        val newZoom = PdfViewerMath.fitToWidthZoom(layout, viewportSize.width.toFloat())
-        zoom = newZoom
         pan =
-            PdfViewerMath.panForPageTop(layout, idx, newZoom, viewportSize.width.toFloat())
+            PdfViewerMath.panForPageTop(layout, idx, zoom, viewportSize.width.toFloat())
                 .let(::clamped)
         return true
     }
@@ -628,6 +648,19 @@ actual class PdfViewerState internal constructor(
 
     private fun clamped(p: Offset): Offset =
         PdfViewerMath.clampPan(
+            pan = p,
+            layout = layout,
+            zoom = zoom,
+            viewportSize = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat()),
+        )
+
+    /**
+     * Кламп для свободного drag-перетаскивания: лист, помещающийся во вьюпорт,
+     * можно увести почти за край (см. [PdfViewerMath.clampPanFree]). Переполняющая
+     * ось ведёт себя как в [clamped]. Используется в [panGestureBy].
+     */
+    private fun clampedFree(p: Offset): Offset =
+        PdfViewerMath.clampPanFree(
             pan = p,
             layout = layout,
             zoom = zoom,

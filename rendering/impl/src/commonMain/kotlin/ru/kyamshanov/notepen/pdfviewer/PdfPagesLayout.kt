@@ -236,6 +236,14 @@ object PdfViewerMath {
     private const val OVERSCROLL_PAGE_FRACTION = 0.25f
 
     /**
+     * Доля размера листа, которая обязана остаться видимой при «свободном»
+     * перетаскивании (см. [clampPanFree]): когда лист помещается во вьюпорт, его
+     * можно увести почти за край, но не меньше этой доли на экране — чтобы лист
+     * нельзя было потерять полностью.
+     */
+    private const val FREE_PAN_MIN_VISIBLE_FRACTION = 0.25f
+
+    /**
      * Потолок размера слота страницы в пикселях для layout-фазы. Compose
      * `Constraints` не может упаковать сторону >~32767 при второй большой
      * стороне, поэтому страница НИКОГДА не раскладывается крупнее этого
@@ -500,6 +508,50 @@ object PdfViewerMath {
                 overflow = contentH > viewportSize.height,
                 buffer = verticalBuffer,
             )
+        return Offset(x, y)
+    }
+
+    /**
+     * Кламп [pan] для **свободного** drag-перетаскивания (см.
+     * [PdfViewerState.panGestureBy]).
+     *
+     * Отличие от [clampPan]: когда лист (PDF-колонка / ряд раскладки, а НЕ слот
+     * с [PageExtent]) **помещается** в вьюпорт по оси, его разрешено увести почти
+     * за край — на экране обязана остаться лишь доля [FREE_PAN_MIN_VISIBLE_FRACTION]
+     * листа. Это и есть «свободное перемещение»: лист можно поставить куда угодно,
+     * без возврата к центру/краю. По **переполняющей** оси (зумленный лист) —
+     * прежнее поведение [clampPan] (краевой clamp + оверскролл-буфер), чтобы не
+     * ломать настроенный overscroll на больших масштабах.
+     *
+     * Границы по листу берутся от колонки `[0, `[rowWidthPx]`]` (и
+     * `[0, totalHeightPx]`), а не от слота: правый «вылет» extent'а у скан-страниц
+     * не должен смещать свободный ход.
+     */
+    fun clampPanFree(
+        pan: Offset,
+        layout: PdfPagesLayout,
+        zoom: Float,
+        viewportSize: FloatSize,
+        horizontalBuffer: Float = layout.basePageWidthPx * zoom * OVERSCROLL_PAGE_FRACTION,
+        verticalBuffer: Float = layout.basePageWidthPx * zoom * OVERSCROLL_PAGE_FRACTION,
+    ): Offset {
+        val rowW = rowWidthPx(layout) * zoom
+        val totalH = layout.totalHeightPx * zoom
+        val slot = clampPan(pan, layout, zoom, viewportSize, horizontalBuffer, verticalBuffer)
+        val x =
+            if (rowW <= viewportSize.width) {
+                val keep = rowW * FREE_PAN_MIN_VISIBLE_FRACTION
+                pan.x.coerceIn(keep - rowW, viewportSize.width - keep)
+            } else {
+                slot.x
+            }
+        val y =
+            if (totalH <= viewportSize.height) {
+                val keep = totalH * FREE_PAN_MIN_VISIBLE_FRACTION
+                pan.y.coerceIn(keep - totalH, viewportSize.height - keep)
+            } else {
+                slot.y
+            }
         return Offset(x, y)
     }
 
