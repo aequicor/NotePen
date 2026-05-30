@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook (macOS / POSIX): when the user's prompt mentions "ai-vision"
 # (case-insensitive), inject context telling Claude to DO the visual work itself using the
-# macOS UX-testing harness under .claude/tools/ (notepen-desktop MCP + notepen-android helper).
+# macOS UX-testing harness under .claude/tools/ (notepen-android helper + Roborazzi).
 #
 # Wired from .claude/settings.local.json (gitignored, per-machine). Install with:
 #   node .claude/tools/install-ai-vision-hook.mjs
@@ -24,10 +24,6 @@ filmstrip -- not just a description. Read/display the captured PNG artifacts in 
 Use the macOS UX-testing harness under .claude/tools/ (read .claude/tools/README.md first). Pick the
 platform(s) relevant to the request:
 
-- Desktop: the `notepen-desktop` MCP (mcp__notepen-desktop__screenshot / click / type_text /
-  list_windows / activate_app). Launch the app with `./gradlew runDesktop` (process shows up as "java").
-  For an animation, capture a burst of ordered frames with mcp__notepen-desktop__screenshot using a
-  `path` (frame000.png, frame001.png, ...) while the transition plays.
 - Android (device or emulator): `.claude/tools/bin/notepen-android` (boot-emulator, install, launch,
   shot <file.png> [max], tap, swipe, text, key, rotate). For an animation, loop
   `.claude/tools/bin/notepen-android shot frameNNN.png` during the transition.
