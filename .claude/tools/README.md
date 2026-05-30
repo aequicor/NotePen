@@ -118,3 +118,24 @@ The existing playbooks in [`.claude/prompts/`](../prompts/) describe full UX
 passes; they assumed a `mcp__computer-use__*` server that didn't exist. The
 `notepen-desktop` MCP now fills that role — substitute `mcp__notepen-desktop__*`
 for the old `mcp__computer-use__*` tool names.
+
+---
+
+## 4. `ai-vision` keyword hook
+
+A `UserPromptSubmit` hook so that whenever your prompt mentions **`ai-vision`**
+(case-insensitive), Claude is told to DO the visual work itself with this harness
+— screenshot, record an animation, build a frame-by-frame filmstrip, and show the
+artifacts — instead of just describing it.
+
+- Hook script: [`ai-vision-hook.sh`](ai-vision-hook.sh) (POSIX/macOS). The Windows
+  twin lives at `tools/uitest/ai-vision-hook.ps1`.
+- Install once (wires it into the gitignored `.claude/settings.local.json`, so it
+  survives AI-Kit regeneration of `settings.json`):
+
+  ```
+  node .claude/tools/install-ai-vision-hook.mjs
+  ```
+
+  Then open `/hooks` once (or restart Claude Code) so the new hook is picked up.
+  Re-running the installer is a no-op.
