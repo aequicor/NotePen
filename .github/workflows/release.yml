@@ -72,7 +72,7 @@ jobs:
       # раннере его нет — поэтому качаем jbrsdk вручную и регистрируем как toolchain
       # через org.gradle.java.installations.paths. Нужен именно jbrsdk (не jbr): в нём
       # есть jpackage/jlink/jmods, которыми Compose собирает дистрибутив.
-      - name: Provision JetBrains Runtime SDK 21 (desktop toolchain)
+      - name: Provision JetBrains Runtime SDK 25 (desktop toolchain)
         run: |
           set -euo pipefail
           case "$(uname -m)" in
@@ -80,7 +80,7 @@ jobs:
             x86_64)        arch=osx-x64 ;;
             *) echo "::error::unexpected macOS arch $(uname -m)"; exit 1 ;;
           esac
-          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-21.0.11-${arch}-b1163.116.tar.gz"
+          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-25.0.3-${arch}-b480.61.tar.gz"
           echo "Downloading $url"
           curl -fSL --retry 3 "$url" -o "$RUNNER_TEMP/jbrsdk.tar.gz"
           mkdir -p "$RUNNER_TEMP/jbrsdk"
@@ -163,11 +163,11 @@ jobs:
 
       # См. комментарий в job build-macos: тот же jbrsdk-тулчейн нужен и здесь,
       # иначе резолв vendor=JETBRAINS упадёт (на раннере только Temurin).
-      - name: Provision JetBrains Runtime SDK 21 (desktop toolchain)
+      - name: Provision JetBrains Runtime SDK 25 (desktop toolchain)
         shell: bash
         run: |
           set -euo pipefail
-          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-21.0.11-windows-x64-b1163.116.tar.gz"
+          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-25.0.3-windows-x64-b480.61.tar.gz"
           echo "Downloading $url"
           curl -fSL --retry 3 "$url" -o jbrsdk.tar.gz
           mkdir -p .jbrsdk
