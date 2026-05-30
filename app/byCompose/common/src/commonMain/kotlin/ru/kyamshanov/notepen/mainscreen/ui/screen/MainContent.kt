@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -60,7 +59,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -76,6 +74,7 @@ import ru.kyamshanov.notepen.blur.LocalBlurEnabled
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.currentWindowSizePx
 import ru.kyamshanov.notepen.fadingEdges
+import ru.kyamshanov.notepen.wheelItem
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
@@ -106,6 +105,10 @@ import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 private val RECENT_CARD_WIDTH: Dp = 132.dp
+
+// Крайние карточки «Недавние» в барабане ужимаются мягче иконок тул-рейла: они
+// крупные, и сильное ужатие читалось бы как обрезка, а не как карусельный спад.
+private const val RECENT_CARD_MIN_SCALE: Float = 0.82f
 
 /**
  * Главный контент экрана: адаптивная вёрстка с TopAppBar, списком файлов и папок,
@@ -598,12 +601,10 @@ private fun RecentFilesRow(
     state: MainScreenUiState,
     onIntent: (MainScreenIntent) -> Unit,
 ) {
-    // Карусельный спад: плитки уменьшаются и тускнеют по мере приближения к
-    // краям viewport. Реализовано через [recentCardCarouselFalloff] — он
-    // меняет только graphicsLayer (layout footprint не трогаем, чтобы не
-    // дёргать видимый диапазон) и при выходе плитки из visibleItemsInfo
-    // фиксируется в КОНЕЧНОМ состоянии (minScale + alpha 0), а не возвращает
-    // scale=1: ровно отсюда росли "пропы" в стандартном wheelItem.
+    // Карусельный спад: плитки уменьшаются, тускнеют и подтягиваются к центру по
+    // мере приближения к краям viewport. Тот же «барабан», что у тул-рейла и
+    // ридера, — общий [wheelItem]: трансформа целиком в graphicsLayer (footprint
+    // не трогаем), поэтому видимый диапазон под скроллом не «осциллирует».
     val listState = rememberLazyListState()
     Box(modifier = Modifier.fillMaxWidth()) {
         // Внутри скроллящейся полосы отключаем live-сэмплинг backdrop у
@@ -663,7 +664,7 @@ private fun RecentFilesRow(
                         modifier =
                             Modifier
                                 .width(RECENT_CARD_WIDTH)
-                                .recentCardCarouselFalloff(listState = listState, index = index),
+                                .wheelItem(listState = listState, index = index, minScale = RECENT_CARD_MIN_SCALE),
                     )
                 }
             }
@@ -677,60 +678,6 @@ private fun RecentFilesRow(
         )
     }
 }
-
-/**
- * Плавный карусельный спад: масштаб 1→[minScale] и альфа 1→[minAlpha] по мере
- * того как viewport «отрезает» край плитки. Применяется ТОЛЬКО через
- * `graphicsLayer` — layout slot остаётся фиксированным, поэтому членство в
- * [LazyListLayoutInfo.visibleItemsInfo] не зависит от значения трансформы и не
- * "осциллирует" под скроллом (это была причина мерцания в общем `wheelItem`).
- *
- * **Модель: clipping-ratio.** Считаем долю плитки, реально обрезанную краем
- * viewport. Полностью видимые плитки → `t = 0` (никакой трансформы). Когда
- * плитка начинает резаться кромкой — `t` плавно набирает до `1` к моменту
- * полного выхода. Это даёт ровно тот эффект "карточка тускнеет/уменьшается по
- * мере исчезновения" — без посторонней деформации центральных плиток и без
- * скачка при отлипании от стопа: на стопе крайняя плитка ещё не обрезана →
- * `t = 0` сам собой, специальный anchor не нужен.
- *
- * **Кривая:** smootherstep `6t⁵−15t⁴+10t³` (C² на обоих концах) — медленный
- * старт у `clip ≈ 0` (только-только начинает резаться → trans-форма
- * практически нулевая), ускоренное падение в середине, ровный финиш у `clip = 1`.
- *
- * Когда плитка покидает `visibleItemsInfo` (один-два кадра перед утилизацией),
- * модификатор фиксирует её в конечном состоянии (`scale = minScale`,
- * `alpha = minAlpha`), без возврата в 1.
- */
-private fun Modifier.recentCardCarouselFalloff(
-    listState: LazyListState,
-    index: Int,
-    minScale: Float = 0.78f,
-    minAlpha: Float = 0f,
-): Modifier =
-    this.graphicsLayer {
-        val info = listState.layoutInfo
-        val item = info.visibleItemsInfo.firstOrNull { it.index == index }
-        val t =
-            if (item == null) {
-                1f
-            } else {
-                val itemStart = item.offset.toFloat()
-                val itemEnd = itemStart + item.size
-                val itemSize = item.size.toFloat().coerceAtLeast(1f)
-                // Сколько процентов плитки уже за левой/правой кромкой viewport.
-                // [0, 1]: 0 — целиком внутри, 1 — целиком снаружи.
-                val leftClip = ((info.viewportStartOffset - itemStart) / itemSize).coerceIn(0f, 1f)
-                val rightClip = ((itemEnd - info.viewportEndOffset) / itemSize).coerceIn(0f, 1f)
-                val clip = kotlin.math.max(leftClip, rightClip)
-                // smootherstep: при `clip ≈ 0` производная нулевая — лёгкий заход
-                // в обрезание почти не меняет трансформу. К `clip = 1` ускоряется.
-                clip * clip * clip * (clip * (clip * 6f - 15f) + 10f)
-            }
-        val scale = androidx.compose.ui.util.lerp(1f, minScale, t)
-        scaleX = scale
-        scaleY = scale
-        alpha = androidx.compose.ui.util.lerp(1f, minAlpha, t)
-    }
 
 @Composable
 private fun SectionHeader(text: String) {

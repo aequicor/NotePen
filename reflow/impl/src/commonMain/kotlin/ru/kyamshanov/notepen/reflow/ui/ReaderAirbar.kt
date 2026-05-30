@@ -277,10 +277,6 @@ private fun CollapsedPill(
 ) {
     val elements = readerWheelElements(stored)
     val listState = rememberLazyListState()
-    // Кэш натуральных размеров плашек: хвостовое затухание «барабана» считается от
-    // натуральной длины колеса, чтобы ужатие слотов не запускало петлю дрожания
-    // крайних плашек при движении мыши над текстом (см. wheelItem).
-    val naturalSizes = remember { mutableMapOf<Int, Int>() }
     Row(
         modifier =
             Modifier
@@ -361,7 +357,6 @@ private fun CollapsedPill(
                                     RailOrientation.HORIZONTAL,
                                     minAlpha = READER_WHEEL_MIN_ALPHA,
                                     edgeBand = WHEEL_EDGE_BAND_WIDE,
-                                    naturalSizes = naturalSizes,
                                 ),
                             ) {
                                 PresetWheelChip(
