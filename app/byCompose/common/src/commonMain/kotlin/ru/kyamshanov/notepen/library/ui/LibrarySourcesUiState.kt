@@ -14,6 +14,10 @@ import ru.kyamshanov.notepen.library.api.LibraryRole
  * @property serveOverLanSupported whether this platform can serve its library over LAN (desktop only;
  *   Android is client-only). Hides the "Открыть свою библиотеку" action when `false`.
  * @property serving whether serve-over-LAN has been switched on this session (drives the action label).
+ * @property googleDriveSupported whether a Google sign-in path is wired (an OAuth client is
+ *   configured); hides the "Google Drive" add option when `false`.
+ * @property googleDevicePrompt the active Google device-flow prompt (user code + URL) to display
+ *   while waiting for the user to authorize, or `null` when no sign-in is in progress.
  * @property errorMessage a transient error to surface in a snackbar, or `null`.
  */
 data class LibrarySourcesUiState(
@@ -22,7 +26,20 @@ data class LibrarySourcesUiState(
     val openLibraryAtStartup: Boolean = false,
     val serveOverLanSupported: Boolean = false,
     val serving: Boolean = false,
+    val googleDriveSupported: Boolean = false,
+    val googleDevicePrompt: GoogleDeviceCodeUiModel? = null,
     val errorMessage: String? = null,
+)
+
+/**
+ * The user-facing data of an in-progress Google device-flow sign-in.
+ *
+ * @property userCode the code the user types at [verificationUri].
+ * @property verificationUri the URL the user opens in any browser to authorize.
+ */
+data class GoogleDeviceCodeUiModel(
+    val userCode: String,
+    val verificationUri: String,
 )
 
 /**

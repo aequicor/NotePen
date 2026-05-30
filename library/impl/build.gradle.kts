@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidKmpLibrary)
+    alias(libs.plugins.kotlinSerialization)
 }
 
 kotlin {
@@ -28,6 +29,12 @@ kotlin {
 
             implementation(libs.kotlin.logging)
             implementation(libs.kotlinx.coroutines.core)
+
+            // Google Drive cloud backend: Ktor (engine injected by the DI layer) against the Drive
+            // v3 REST API + its OAuth device flow, with JSON response parsing.
+            implementation(libs.ktor.client.core)
+            implementation(libs.kotlinx.serialization.core)
+            implementation(libs.kotlinx.serialization.json)
         }
 
         commonTest.dependencies {

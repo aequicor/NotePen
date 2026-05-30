@@ -111,9 +111,17 @@ fun LibrarySourcesContent(
                 },
                 localFolderSupported = component.onPickLocalFolder != null,
                 onAddGitHub = component.viewModel::addGitHubLibrary,
+                googleDriveSupported = state.googleDriveSupported,
+                onAddGoogleDrive = component.viewModel::addGoogleDriveLibrary,
                 onToggleStartup = component.viewModel::setOpenLibraryAtStartup,
                 onOpenMyLibrary = component.viewModel::openMyLibrary,
             )
+            state.googleDevicePrompt?.let { prompt ->
+                GoogleDeviceCodeDialog(
+                    prompt = prompt,
+                    onCancel = component.viewModel::cancelGoogleSignIn,
+                )
+            }
             LibrarySourcesTopBar(
                 modifier = Modifier.align(Alignment.TopCenter),
                 onBack = component::onBack,
@@ -138,6 +146,8 @@ private fun LibrarySourcesList(
     onAddLocal: () -> Unit,
     localFolderSupported: Boolean,
     onAddGitHub: (repo: String, token: String) -> Unit,
+    googleDriveSupported: Boolean,
+    onAddGoogleDrive: (folderId: String) -> Unit,
     onToggleStartup: (Boolean) -> Unit,
     onOpenMyLibrary: () -> Unit,
 ) {
@@ -174,6 +184,8 @@ private fun LibrarySourcesList(
             onAddLan = onAddLan,
             onAddLocal = onAddLocal,
             onAddGitHub = onAddGitHub,
+            googleDriveSupported = googleDriveSupported,
+            onAddGoogleDrive = onAddGoogleDrive,
         )
 
         SectionHeader("Настройки")
@@ -261,15 +273,41 @@ private fun LibraryRow(
 }
 
 @Composable
+private fun AddLibraryLabel() {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
+    ) {
+        Icon(
+            imageVector = Icons.Default.Add,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Добавить библиотеку", style = MaterialTheme.typography.titleMedium)
+            Text(
+                text = "Локальная папка, LAN, GitHub или Google Drive",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
 private fun AddLibraryRow(
     availablePeers: List<AvailablePeerUiModel>,
     localFolderSupported: Boolean,
     onAddLan: (peerId: String, host: String?) -> Unit,
     onAddLocal: () -> Unit,
     onAddGitHub: (repo: String, token: String) -> Unit,
+    googleDriveSupported: Boolean,
+    onAddGoogleDrive: (folderId: String) -> Unit,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var gitHubDialogVisible by remember { mutableStateOf(false) }
+    var googleDriveDialogVisible by remember { mutableStateOf(false) }
     LibraryRowSurface(
         modifier =
             Modifier.pointerInput(Unit) {
@@ -277,30 +315,13 @@ private fun AddLibraryRow(
             },
     ) {
         Box {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(Modifier.width(16.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("Добавить библиотеку", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = "Локальная папка, устройство по LAN или GitHub",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
+            AddLibraryLabel()
             AddLibraryMenu(
                 expanded = menuExpanded,
                 onDismiss = { menuExpanded = false },
                 availablePeers = availablePeers,
                 localFolderSupported = localFolderSupported,
+                googleDriveSupported = googleDriveSupported,
                 onAddLan = { peerId, host ->
                     menuExpanded = false
                     onAddLan(peerId, host)
@@ -312,6 +333,10 @@ private fun AddLibraryRow(
                 onAddGitHub = {
                     menuExpanded = false
                     gitHubDialogVisible = true
+                },
+                onAddGoogleDrive = {
+                    menuExpanded = false
+                    googleDriveDialogVisible = true
                 },
             )
         }
@@ -325,6 +350,15 @@ private fun AddLibraryRow(
             },
         )
     }
+    if (googleDriveDialogVisible) {
+        GoogleDriveLibraryDialog(
+            onDismiss = { googleDriveDialogVisible = false },
+            onConfirm = { folderId ->
+                googleDriveDialogVisible = false
+                onAddGoogleDrive(folderId)
+            },
+        )
+    }
 }
 
 @Composable
@@ -333,9 +367,11 @@ private fun AddLibraryMenu(
     onDismiss: () -> Unit,
     availablePeers: List<AvailablePeerUiModel>,
     localFolderSupported: Boolean,
+    googleDriveSupported: Boolean,
     onAddLan: (peerId: String, host: String?) -> Unit,
     onAddLocal: () -> Unit,
     onAddGitHub: () -> Unit,
+    onAddGoogleDrive: () -> Unit,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (localFolderSupported) {
@@ -366,6 +402,13 @@ private fun AddLibraryMenu(
             leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null) },
             onClick = onAddGitHub,
         )
+        if (googleDriveSupported) {
+            DropdownMenuItem(
+                text = { Text("Google Drive…") },
+                leadingIcon = { Icon(Icons.Default.Cloud, contentDescription = null) },
+                onClick = onAddGoogleDrive,
+            )
+        }
     }
 }
 
@@ -424,6 +467,96 @@ private fun GitHubLibraryDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+/**
+ * Dialog to add a Google Drive library: the user pastes the shared folder's id. Confirming starts the
+ * Google OAuth device flow (read-only scope → Reader role); the device-code panel
+ * ([GoogleDeviceCodeDialog]) then appears while the user authorizes in a browser.
+ */
+@Composable
+private fun GoogleDriveLibraryDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (folderId: String) -> Unit,
+) {
+    var folderId by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Google Drive-библиотека") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Папка Google Drive читается как полка. Вставьте id папки (из ссылки drive.google.com/…/folders/<id>).",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = folderId,
+                    onValueChange = { folderId = it },
+                    singleLine = true,
+                    label = { Text("Id папки") },
+                    placeholder = { Text("1A2b3C…") },
+                    supportingText = {
+                        Text(
+                            "Откроется вход через Google. Доступ только для чтения — роль Читатель.",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    },
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(folderId) },
+                enabled = folderId.trim().isNotEmpty(),
+            ) {
+                Text("Войти и подключить")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Отмена") }
+        },
+    )
+}
+
+/**
+ * Shows the active Google device-flow prompt: the user code to type and the verification URL to
+ * open. Stays up (non-dismissable except via «Отмена») while the ViewModel polls for authorization.
+ */
+@Composable
+private fun GoogleDeviceCodeDialog(
+    prompt: GoogleDeviceCodeUiModel,
+    onCancel: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text("Вход через Google") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "Откройте в браузере:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(prompt.verificationUri, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    text = "и введите код:",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(prompt.userCode, style = MaterialTheme.typography.headlineSmall)
+                Text(
+                    text = "Ожидание подтверждения…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text("Отмена") }
         },
     )
 }

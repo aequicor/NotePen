@@ -41,7 +41,15 @@ import ru.kyamshanov.notepen.library.impl.GitHubLibraryBackend
 import ru.kyamshanov.notepen.library.impl.LibraryRegistryMutationTarget
 import ru.kyamshanov.notepen.library.impl.LocalFolderLibraryBackend
 import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
+import ru.kyamshanov.notepen.library.impl.google.GoogleDeviceAuthenticator
+import ru.kyamshanov.notepen.library.impl.google.GoogleDriveLibraryBackend
+import ru.kyamshanov.notepen.library.impl.google.GoogleDriveStore
+import ru.kyamshanov.notepen.library.impl.google.GoogleOAuthConfig
+import ru.kyamshanov.notepen.library.impl.google.RefreshingAccessTokenSource
+import ru.kyamshanov.notepen.library.impl.google.runGoogleDeviceFlow
 import ru.kyamshanov.notepen.library.infrastructure.JvmLibraryConnectionStore
+import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorization
+import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorizer
 import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
@@ -313,6 +321,7 @@ fun main(args: Array<String>) {
     // document is currently open (pinned in openDocumentRegistry) is never evicted. Runs once at
     // startup (below) and after each fresh LAN download (via SyncRuntime → RemoteDocumentOpener).
     val githubCacheDir = getAppDataDir().resolve("github-library").absolutePath
+    val driveCacheDir = getAppDataDir().resolve("google-drive-library").absolutePath
     val cacheEvictor =
         CacheEvictor(
             fileStore = JvmCacheFileStore(),
@@ -320,7 +329,7 @@ fun main(args: Array<String>) {
             documentIdRegistry = localDocumentIdRegistry,
             ioDispatcher = Dispatchers.IO,
         )
-    val downloadCacheDirs = listOf(receivedDir, githubCacheDir)
+    val downloadCacheDirs = listOf(receivedDir, githubCacheDir, driveCacheDir)
 
     // Lazy owner of the heavy sync/network stack: Ktor server/client, CIO engine,
     // jmDNS registrar, SQLite pending-delta queue, projection, coordinators —
@@ -391,7 +400,18 @@ fun main(args: Array<String>) {
     // Saved user-added libraries (PeerLan/GitHub) persist to library_connections.json under the app
     // data dir; the always-on local library below is wired explicitly and NOT persisted there.
     val libraryConnectionStore = JvmLibraryConnectionStore()
-    val githubHttpClient by lazy { io.ktor.client.HttpClient(io.ktor.client.engine.cio.CIO) }
+    // One lazily-built CIO engine shared by every cloud client (GitHub + Google Drive), so startup
+    // stays cheap until the first cloud library is connected.
+    val cloudHttpClient by lazy { io.ktor.client.HttpClient(io.ktor.client.engine.cio.CIO) }
+    // Google OAuth client credentials come from the environment (a Google Cloud Console
+    // "limited-input device" client). Empty when unset: the Drive backend is registered but sign-in
+    // cannot start until real credentials are provided.
+    val googleOAuthConfig =
+        GoogleOAuthConfig(
+            clientId = System.getenv("NOTEPEN_GOOGLE_CLIENT_ID").orEmpty(),
+            clientSecret = System.getenv("NOTEPEN_GOOGLE_CLIENT_SECRET").orEmpty(),
+        )
+    val googleDeviceAuthenticator = GoogleDeviceAuthenticator(httpClient = cloudHttpClient, config = googleOAuthConfig)
     val libraryRegistry =
         DefaultLibraryRegistry(
             backends =
@@ -432,7 +452,7 @@ fun main(args: Array<String>) {
                     GitHubLibraryBackend(
                         providerFactory = { coords ->
                             GitHubContentsCloudProvider(
-                                httpClient = githubHttpClient,
+                                httpClient = cloudHttpClient,
                                 owner = coords.owner,
                                 repo = coords.name,
                                 branch = coords.branch,
@@ -440,6 +460,23 @@ fun main(args: Array<String>) {
                             )
                         },
                         cacheDir = githubCacheDir,
+                        ioDispatcher = Dispatchers.IO,
+                    ),
+                    // Cloud (Google Drive): reads a shared Drive folder's files as a shelf via the
+                    // Drive v3 REST API. The token source refreshes the stored OAuth refresh token
+                    // per connection; the role follows the granted scope (readonly → Reader).
+                    GoogleDriveLibraryBackend(
+                        storeFactory = { coords ->
+                            GoogleDriveStore(
+                                httpClient = cloudHttpClient,
+                                tokenSource =
+                                    RefreshingAccessTokenSource(
+                                        refreshToken = coords.refreshToken,
+                                        authenticator = googleDeviceAuthenticator,
+                                    ),
+                            )
+                        },
+                        cacheDir = driveCacheDir,
                         ioDispatcher = Dispatchers.IO,
                     ),
                 ),
@@ -561,6 +598,25 @@ fun main(args: Array<String>) {
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
                         onServeOverLan = { appScope.launch { syncRuntime.enable() } },
                         onPickLocalFolder = { pickLibraryFolder() },
+                        // Google sign-in is offered only when an OAuth client is configured; the
+                        // authorizer runs the device flow with the read-only scope (Reader role).
+                        googleDriveAuthorizer =
+                            googleOAuthConfig.clientId
+                                .takeIf { it.isNotEmpty() }
+                                ?.let {
+                                    GoogleDriveAuthorizer { onCode ->
+                                        runGoogleDeviceFlow(
+                                            authenticator = googleDeviceAuthenticator,
+                                            scope = GoogleOAuthConfig.SCOPE_DRIVE_READONLY,
+                                            onCode = onCode,
+                                        ).mapCatching { authorized ->
+                                            GoogleDriveAuthorization(
+                                                refreshToken = authorized.refreshToken ?: error("Google returned no refresh token"),
+                                                scope = GoogleOAuthConfig.SCOPE_DRIVE_READONLY,
+                                            )
+                                        }
+                                    }
+                                },
                         onBack = onBack,
                     )
                 },

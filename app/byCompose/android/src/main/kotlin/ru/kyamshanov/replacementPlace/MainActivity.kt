@@ -40,7 +40,15 @@ import ru.kyamshanov.notepen.document.infrastructure.RegistryFileIdentityCache
 import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
 import ru.kyamshanov.notepen.library.impl.GitHubLibraryBackend
 import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
+import ru.kyamshanov.notepen.library.impl.google.GoogleDeviceAuthenticator
+import ru.kyamshanov.notepen.library.impl.google.GoogleDriveLibraryBackend
+import ru.kyamshanov.notepen.library.impl.google.GoogleDriveStore
+import ru.kyamshanov.notepen.library.impl.google.GoogleOAuthConfig
+import ru.kyamshanov.notepen.library.impl.google.RefreshingAccessTokenSource
+import ru.kyamshanov.notepen.library.impl.google.runGoogleDeviceFlow
 import ru.kyamshanov.notepen.library.infrastructure.AndroidLibraryConnectionStore
+import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorization
+import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorizer
 import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
@@ -244,7 +252,16 @@ class MainActivity : ComponentActivity() {
         // client-only, so no Local connection is ever persisted (Local backend isn't registered).
         val libraryConnectionStore = AndroidLibraryConnectionStore(context)
         val githubCacheDir = java.io.File(context.cacheDir, "github-library").absolutePath
-        val githubHttpClient by lazy { HttpClient(CIO) }
+        val driveCacheDir = java.io.File(context.cacheDir, "google-drive-library").absolutePath
+        // One lazily-built CIO engine shared by every cloud client (GitHub + Google Drive).
+        val cloudHttpClient by lazy { HttpClient(CIO) }
+        // Google OAuth client credentials; empty when unset (sign-in cannot start, backend still registered).
+        val googleOAuthConfig =
+            GoogleOAuthConfig(
+                clientId = System.getenv("NOTEPEN_GOOGLE_CLIENT_ID").orEmpty(),
+                clientSecret = System.getenv("NOTEPEN_GOOGLE_CLIENT_SECRET").orEmpty(),
+            )
+        val googleDeviceAuthenticator = GoogleDeviceAuthenticator(httpClient = cloudHttpClient, config = googleOAuthConfig)
         val libraryRegistry =
             DefaultLibraryRegistry(
                 backends =
@@ -268,7 +285,7 @@ class MainActivity : ComponentActivity() {
                         GitHubLibraryBackend(
                             providerFactory = { coords ->
                                 GitHubContentsCloudProvider(
-                                    httpClient = githubHttpClient,
+                                    httpClient = cloudHttpClient,
                                     owner = coords.owner,
                                     repo = coords.name,
                                     branch = coords.branch,
@@ -276,6 +293,22 @@ class MainActivity : ComponentActivity() {
                                 )
                             },
                             cacheDir = githubCacheDir,
+                            ioDispatcher = Dispatchers.IO,
+                        ),
+                        // Cloud (Google Drive): a Drive folder read as a shelf via the Drive v3 REST
+                        // API; the role follows the granted OAuth scope (readonly → Reader).
+                        GoogleDriveLibraryBackend(
+                            storeFactory = { coords ->
+                                GoogleDriveStore(
+                                    httpClient = cloudHttpClient,
+                                    tokenSource =
+                                        RefreshingAccessTokenSource(
+                                            refreshToken = coords.refreshToken,
+                                            authenticator = googleDeviceAuthenticator,
+                                        ),
+                                )
+                            },
+                            cacheDir = driveCacheDir,
                             ioDispatcher = Dispatchers.IO,
                         ),
                     ),
@@ -526,6 +559,24 @@ class MainActivity : ComponentActivity() {
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
                         onServeOverLan = null,
                         onPickLocalFolder = null,
+                        // Google sign-in is offered only when an OAuth client is configured.
+                        googleDriveAuthorizer =
+                            googleOAuthConfig.clientId
+                                .takeIf { it.isNotEmpty() }
+                                ?.let {
+                                    GoogleDriveAuthorizer { onCode ->
+                                        runGoogleDeviceFlow(
+                                            authenticator = googleDeviceAuthenticator,
+                                            scope = GoogleOAuthConfig.SCOPE_DRIVE_READONLY,
+                                            onCode = onCode,
+                                        ).mapCatching { authorized ->
+                                            GoogleDriveAuthorization(
+                                                refreshToken = authorized.refreshToken ?: error("Google returned no refresh token"),
+                                                scope = GoogleOAuthConfig.SCOPE_DRIVE_READONLY,
+                                            )
+                                        }
+                                    }
+                                },
                         onBack = onBack,
                     )
                 },
