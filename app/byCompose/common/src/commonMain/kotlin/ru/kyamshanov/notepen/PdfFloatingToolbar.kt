@@ -22,10 +22,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 
 /**
- * Icon toggle for the tool wheel. When [selected] the icon switches to
- * `onPrimaryContainer` so the active toggle stands out.
+ * Icon toggle for the tool wheel. When [selected] the button fills with the
+ * accent [ColorScheme.primary] and the icon switches to `onPrimary`, so the active
+ * toggle stands out clearly against the cream rail — the pale `primaryContainer`
+ * tint used previously was nearly invisible on the surface.
  *
- * @param showSelectionBackground draw this button's own circular `primaryContainer`
+ * @param showSelectionBackground draw this button's own circular `primary`
  *   indicator when selected. Independent toggles (magnifier, thumbnails…) keep it
  *   `true`; the mutually-exclusive drawing tools pass `false` because the wheel
  *   draws one shared indicator that physically slides between them.
@@ -45,7 +47,7 @@ internal fun ToolToggleButton(
     val indicatorColor by animateColorAsState(
         targetValue =
             if (selected && showSelectionBackground && enabled) {
-                MaterialTheme.colorScheme.primaryContainer
+                MaterialTheme.colorScheme.primary
             } else {
                 Color.Transparent
             },
@@ -55,7 +57,7 @@ internal fun ToolToggleButton(
         targetValue =
             when {
                 !enabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = TOOL_DISABLED_ALPHA)
-                selected -> MaterialTheme.colorScheme.onPrimaryContainer
+                selected -> MaterialTheme.colorScheme.onPrimary
                 else -> MaterialTheme.colorScheme.onSurfaceVariant
             },
         label = "toolIconTint",

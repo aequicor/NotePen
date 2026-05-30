@@ -48,6 +48,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
@@ -329,6 +330,9 @@ actual fun PdfPagesViewer(
     LaunchedEffect(pages) {
         state.pages = pages
         state.applyPendingInitialScrollIfNeeded()
+        // Разделение страниц (#4) меняет [pages]: layout пере-строен — применяем
+        // отложенный fit-to-width + центрирование на свежем layout'е.
+        state.applyPendingFitIfNeeded()
     }
     LaunchedEffect(state.viewportSize, pages.size) {
         state.applyPendingInitialScrollIfNeeded()
@@ -472,6 +476,23 @@ actual fun PdfPagesViewer(
                             ),
                         )
                     }
+                }
+            }
+    }
+
+    // React when the layout mode flips (book-spread on/off). The row width changes
+    // (single column ⇄ two columns + gutter), so the old pan/zoom leaves the page
+    // off-centre — turning spread ON strands the page half-screen with the next
+    // page glued to the right, turning it OFF strands the single column left of
+    // centre. A pending requestFitToWidth (set by the toggle handler) re-fits and
+    // centres on the fresh layout; absent one, just re-centre. `drop(1)` skips the
+    // initial value so a restored scroll position isn't clobbered on first compose.
+    LaunchedEffect(state) {
+        snapshotFlow { state.spreadMode }
+            .drop(1)
+            .collect {
+                if (!state.applyPendingFitIfNeeded() && state.viewportSize.width > 0) {
+                    state.reCenterAfterResize()
                 }
             }
     }

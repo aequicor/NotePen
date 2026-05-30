@@ -163,14 +163,6 @@ private const val TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val TOOLBAR_ZOOM_STEP_OUT = 1f / 1.1f
 private const val THUMBNAIL_SIDEBAR_ANIM_MS = 300
 
-/**
- * Порог соотношения сторон окна (ширина/высота), выше которого книжный разворот
- * «Две страницы» (FEATURE #5) включается АВТОМАТИЧЕСКИ (если пользователь не задал
- * явный выбор). ~1.5 — типичный «широкий» альбомный планшет/окно, где две
- * портретные страницы рядом читаются комфортно.
- */
-private const val SPREAD_AUTO_ASPECT_THRESHOLD = 1.5f
-
 /** Прозрачность затемнения позади модальной боковой шторки (портретный режим). */
 private const val PORTRAIT_SCRIM_ALPHA = 0.4f
 
@@ -222,14 +214,6 @@ fun DetailsContent(
     // «отставал» на один поворот: рельса/верхний бар показывали прошлую ориентацию.
     val windowSizeInPx = currentWindowSizePx()
     val isLandscape = windowSizeInPx.width > windowSizeInPx.height
-    // Широкий экран для авто-включения книжного разворота (FEATURE #5, «Две
-    // страницы»): альбомная ориентация И соотношение сторон ≥ ~1.5. На таких
-    // экранах две страницы рядом читаются комфортно; EditorPanel включает разворот
-    // автоматически, если пользователь не задал явный выбор (spreadViewOverride).
-    val wideScreenForSpread =
-        isLandscape &&
-            windowSizeInPx.height > 0 &&
-            windowSizeInPx.width.toFloat() / windowSizeInPx.height.toFloat() >= SPREAD_AUTO_ASPECT_THRESHOLD
     val density = LocalDensity.current
     val model by component.model.subscribeAsState()
     val initialFilePath = remember(model.title) { model.title }
@@ -1004,7 +988,6 @@ fun DetailsContent(
                         onControlsChanged = { c -> if (panel.id == layout.focusedPanelId) focusedControls = c },
                         fitWidthStartInset = fitWidthStartInset,
                         fitWidthTopInset = fitWidthTopInset,
-                        wideScreenForSpread = wideScreenForSpread,
                     )
                 }
             }

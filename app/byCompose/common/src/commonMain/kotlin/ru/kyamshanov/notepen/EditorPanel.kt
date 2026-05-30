@@ -294,12 +294,6 @@ fun EditorPanel(
     sessionsMenu: @Composable (expanded: Boolean, onDismiss: () -> Unit) -> Unit,
     fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
     fitWidthTopInset: androidx.compose.ui.unit.Dp = 0.dp,
-    /**
-     * `true`, когда экран «широкий» (альбомный, aspect ≥ ~1.5) — критерий
-     * авто-включения книжного разворота «Две страницы» (FEATURE #5). Эффективный
-     * разворот = `spreadViewOverride ?: (wideScreenForSpread && !readingMode)`.
-     */
-    wideScreenForSpread: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val openDocs = panel.tabs
@@ -323,13 +317,13 @@ fun EditorPanel(
     // поэтому переключение пере-строит pages и резолвер источника ниже.
     val spreadSplit = pdfState.spreadSplit
     // Книжный разворот «Две страницы» (FEATURE #5) — отдельный от #4 и reflow
-    // механизм. Эффективное состояние: явный выбор пользователя (если задан),
-    // иначе авто по ширине экрана. В режиме чтения разворот неприменим (reflow —
-    // одноколоночный текст), поэтому форсим SINGLE — это и есть выполнение
-    // пользовательского требования «разворот ≠ режим чтения».
+    // механизм. По умолчанию ВЫКЛЮЧЕН (как и разделение #4): включается только
+    // явным выбором пользователя ([spreadViewOverride] == true). В режиме чтения
+    // разворот неприменим (reflow — одноколоночный текст), поэтому форсим SINGLE —
+    // это и есть выполнение пользовательского требования «разворот ≠ режим чтения».
     val spreadViewOverride = pdfState.spreadViewOverride
     val bookSpreadEnabled =
-        !pdfState.readingMode && (spreadViewOverride ?: wideScreenForSpread)
+        !pdfState.readingMode && (spreadViewOverride ?: false)
 
     // Пользовательский поворот страницы по ЛОГИЧЕСКОМУ индексу (читает наблюдаемую
     // карту, поэтому смена дёргает релэйаут/ре-рендер). Передаётся и в рендерер
@@ -1381,7 +1375,10 @@ fun EditorPanel(
             } else {
                 srcPage
             }
-        pdfViewerState.scrollToPage(targetLogical, 0)
+        // Фит-по-ширине + центрирование применятся после пере-layout'а (смена
+        // [pages]) на уже свежем layout'е — не на старом, как делал scrollToPage,
+        // из-за чего страница уезжала вбок и прыгала по вертикали.
+        pdfViewerState.requestFitToWidth(targetLogical)
     }
     // Переключает книжный разворот «Две страницы» (FEATURE #5) как ЯВНЫЙ выбор
     // пользователя — он перекрывает авто-по-ширине. В режиме чтения — no-op
@@ -1394,9 +1391,11 @@ fun EditorPanel(
         // Явный выбор = инверсия ТЕКУЩЕГО эффективного состояния, чтобы один тап
         // всегда видимо переключал (даже если авто уже включило разворот).
         pdfState.spreadViewOverride = !bookSpreadEnabled
-        // Пере-садка на левую страницу пары произойдёт через scrollToPage:
-        // в развороте он сам приводит индекс к левой половине ряда.
-        pdfViewerState.scrollToPage(current, 0)
+        // Фит-по-ширине ряда + центрирование применятся после пере-layout'а
+        // (смена [spreadMode]) на свежем layout'е: в развороте обе страницы пары
+        // встают рядом и по центру, а не «текущая на полэкрана + следующая
+        // прилеплена справа»; верх страницы пары прижимается к верху вьюпорта.
+        pdfViewerState.requestFitToWidth(current)
     }
 
     // В режиме чтения с тапом-скрытым хромом панель с единственной вкладкой прячет и

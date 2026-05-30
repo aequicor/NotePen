@@ -149,6 +149,11 @@ internal fun railSelectionColorScheme(
         base
     } else {
         base.copy(
+            // Заливка выбранной кнопки-переключателя ([ToolToggleButton]) — accent
+            // [primary]; в режиме чтения красим её в чернила ридера, а значок — в
+            // фон ридера, чтобы активный переключатель совпадал с темой читалки.
+            primary = readerContentColor,
+            onPrimary = readerBackground ?: base.onPrimary,
             primaryContainer = readerContentColor.copy(alpha = READER_SELECTION_FILL_ALPHA),
             onPrimaryContainer = readerContentColor,
             // В режиме чтения колесо инструментов держим в палитре ридера: стрелки прокрутки

@@ -141,6 +141,9 @@ actual class PdfViewerState internal constructor(
     private var pendingInitialScalePercent: Int? = null
     private var hasInitialCentered: Boolean = false
 
+    /** Отложенный «fit-to-width + центрирование» (см. [requestFitToWidth]). */
+    private var pendingFitPage: Int? = null
+
     internal fun applyPendingInitialScrollIfNeeded() {
         pendingInitialScalePercent?.let { sc ->
             if (viewportSize.width > 0) {
@@ -524,14 +527,31 @@ actual class PdfViewerState internal constructor(
         pan = clamped(newPan)
     }
 
-    /** Зум "по ширине" — страница занимает всю ширину вьюпорта. */
-    fun fitToWidth(pageIndex: Int = firstVisiblePageIndex) {
-        if (viewportSize.width <= 0 || pages.isEmpty()) return
+    actual fun requestFitToWidth(pageIndex: Int) {
+        pendingFitPage = pageIndex
+        // Не применяем сразу: layout ещё старый (смена режима пере-строит его
+        // асинхронно). Применит [applyPendingFitIfNeeded] из вьюера после
+        // пере-layout'а. Если же вьюпорт уже готов и пере-layout не придёт,
+        // последующий resize/spreadMode-хук всё равно его подхватит.
+    }
+
+    /**
+     * Если есть отложенный [requestFitToWidth] — подбирает зум «по ширине ряда»
+     * и центрирует ряд, прижимая верх запрошенной страницы к верху вьюпорта,
+     * уже на АКТУАЛЬНОМ (пере-строенном) layout'е. Возвращает `true`, если фит
+     * применён. Вызывается вьюером после смены [pages] / [spreadMode].
+     */
+    internal fun applyPendingFitIfNeeded(): Boolean {
+        val page = pendingFitPage
+        if (page == null || viewportSize.width <= 0 || pages.isEmpty()) return false
+        pendingFitPage = null
+        val idx = page.coerceIn(0, pages.lastIndex)
         val newZoom = PdfViewerMath.fitToWidthZoom(layout, viewportSize.width.toFloat())
         zoom = newZoom
         pan =
-            PdfViewerMath.panForPageTop(layout, pageIndex, newZoom, viewportSize.width.toFloat())
+            PdfViewerMath.panForPageTop(layout, idx, newZoom, viewportSize.width.toFloat())
                 .let(::clamped)
+        return true
     }
 
     actual fun doubleTapZoom(focus: Offset) {
