@@ -20,6 +20,7 @@ import ru.kyamshanov.notepen.library.api.NotLibrarianException
 import ru.kyamshanov.notepen.library.api.OpenableDocument
 import ru.kyamshanov.notepen.sync.cloud.domain.CloudFile
 import ru.kyamshanov.notepen.sync.cloud.domain.CloudStorageProvider
+import ru.kyamshanov.notepen.sync.infrastructure.okio_delete
 import ru.kyamshanov.notepen.sync.infrastructure.okio_readBytes
 import ru.kyamshanov.notepen.sync.infrastructure.okio_writeBytes
 
@@ -51,7 +52,9 @@ private const val CONTENTS_API_RAW_LIMIT_BYTES = 1L * 1024 * 1024
  * ## Caching
  * [open] downloads the book bytes (raw Contents API for files up to ~1 MB, the blob-by-sha endpoint
  * for larger ones) and writes them to [cacheDir]; the cached path becomes the [OpenableDocument].
- * Files are only cached, never evicted (eviction is M6).
+ * On [refresh], any cached file whose blob sha changed upstream is invalidated (deleted) so the next
+ * [open] re-downloads the new content (M6 re-sync). Cap-bounded eviction of the cache dir is handled
+ * out-of-band by `CacheEvictor` in the DI layer.
  *
  * @param descriptor immutable description of this library (id derived from the repo slug + role).
  * @param provider the cloud provider configured for this repo + token (read/list/download/upload).
@@ -85,6 +88,7 @@ internal class GitHubLibrary(
         connectionStateFlow.value = LibraryConnectionState.Connecting
         runCatching { withContext(ioDispatcher) { provider.list(GITHUB_LIBRARY_BOOKS_PATH) } }
             .onSuccess { files ->
+                invalidateChangedCaches(files)
                 shaByPath.clear()
                 files.forEach { shaByPath[it.path] = it.sha }
                 booksState.value = files.map(CloudFile::toLibraryEntry)
@@ -92,6 +96,26 @@ internal class GitHubLibrary(
             }.onFailure { e ->
                 connectionStateFlow.value = LibraryConnectionState.Error(e.message ?: e::class.simpleName ?: "error")
             }
+    }
+
+    /**
+     * M6 re-sync: for every listed book whose blob sha differs from the one we cached on the last
+     * refresh, delete the stale local cache file so the next [open] re-downloads the new content.
+     *
+     * The blob sha is GitHub's change-detection token, NOT the canonical id — a changed file is new
+     * content, so on re-materialization it correctly hashes to a new
+     * [ru.kyamshanov.notepen.document.domain.model.CanonicalBookId]. This does not fight canonical
+     * identity; it simply ensures the bytes on disk are the current ones before they are re-hashed.
+     * Runs before [shaByPath] is rebuilt so it can compare new-vs-previous.
+     */
+    private suspend fun invalidateChangedCaches(files: List<CloudFile>) {
+        files.forEach { file ->
+            val previousSha = shaByPath[file.path]
+            if (previousSha != null && previousSha != file.sha) {
+                val cachedPath = cachePathFor(file.path)
+                withContext(ioDispatcher) { okio_delete(cachedPath) }
+            }
+        }
     }
 
     override suspend fun open(id: LibraryBookId): Result<OpenableDocument> =

@@ -204,6 +204,50 @@ class GitHubLibraryTest {
         }
 
     @Test
+    fun refresh_blobShaChange_invalidatesCachedFile_soNextOpenReDownloads() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            // FakeCloudProvider.shaOf depends on the byte size, so a content change ⇒ a new blob sha,
+            // which is exactly the change-detection signal GitHubLibrary keys re-sync off.
+            val files = mutableMapOf("books/a.pdf" to "%PDF old".encodeToByteArray())
+            val provider = FakeCloudProvider(files)
+            val (backend, spec) = backend(provider, token = null)
+            val library = backend.connect(spec, scope).getOrThrow()
+
+            val firstOpen = library.open(LibraryBookId("books/a.pdf")).getOrThrow()
+            val cached = File(firstOpen.localPath)
+            assertTrue(cached.isFile, "first open caches the book")
+            assertEquals("%PDF old", cached.readText())
+
+            // Upstream content changes (e.g. the librarian replaced the book) → new blob sha.
+            files["books/a.pdf"] = "%PDF brand new content".encodeToByteArray()
+            library.refresh()
+
+            assertFalse(cached.exists(), "the stale cache file is invalidated when the blob sha changed")
+
+            // The next open re-downloads the new bytes into the (same) cache path.
+            val secondOpen = library.open(LibraryBookId("books/a.pdf")).getOrThrow()
+            assertEquals("%PDF brand new content", File(secondOpen.localPath).readText())
+            scope.cancel()
+        }
+
+    @Test
+    fun refresh_unchangedBlobSha_keepsCachedFile() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val provider = FakeCloudProvider(mutableMapOf("books/a.pdf" to "%PDF stable".encodeToByteArray()))
+            val (backend, spec) = backend(provider, token = null)
+            val library = backend.connect(spec, scope).getOrThrow()
+            val cached = File(library.open(LibraryBookId("books/a.pdf")).getOrThrow().localPath)
+            assertTrue(cached.isFile)
+
+            library.refresh() // nothing changed upstream → sha identical
+
+            assertTrue(cached.exists(), "an unchanged book's cache is preserved across refresh")
+            scope.cancel()
+        }
+
+    @Test
     fun replaceBook_uploadsWithPreviousSha_forLibrarian() =
         runTest {
             val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))

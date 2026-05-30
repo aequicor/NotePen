@@ -13,6 +13,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.document.domain.model.CanonicalBookId
 import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryBackend
 import ru.kyamshanov.notepen.library.api.LibraryBackendKind
@@ -27,9 +28,11 @@ import ru.kyamshanov.notepen.library.api.MergedLibraryEntry
  * Default [LibraryRegistry]: aggregates one or more connected [Library] instances behind a single
  * reactive view, routing connection specs to the matching [LibraryBackend].
  *
- * In M1 a single local-folder library is connected at startup, so [mergedBooks] flattens that one
- * library's books one-to-one (no cross-library dedup yet — that lands with canonical identity in a
- * later milestone). The combine logic is already written for N libraries.
+ * [mergedBooks] is the cross-library shelf: books carrying the same canonical
+ * [ru.kyamshanov.notepen.document.domain.model.CanonicalBookId] (e.g. the same file held by the
+ * local library AND served by a LAN peer) collapse into a single [MergedLibraryEntry] tagged with
+ * every [LibraryId] that holds it (M6 dedup). Entries without an identity stay distinct — the
+ * absence of an id is never treated as "same book", so two un-hashed books can never falsely merge.
  *
  * ## Persistence (M2b)
  * Successfully connected specs accepted by [shouldPersist] are written to the [connectionStore] so
@@ -128,25 +131,53 @@ public class DefaultLibraryRegistry(
 }
 
 /**
- * Combines the [Library.books] flows of [libraries] into a single flat merged listing.
+ * Combines the [Library.books] flows of [libraries] into a single deduplicated merged listing.
  *
- * Each emitted [MergedLibraryEntry] pairs a book entry with the libraries that hold it. In M1 each
- * book belongs to exactly one library (no canonical-identity dedup), so the result is the flat
- * concatenation of every library's books in library order. An empty library set yields an empty
- * list immediately.
+ * Dedup is by canonical identity ([LibraryEntry.identity]): entries that share an identity collapse
+ * into one [MergedLibraryEntry] carrying the union of the [LibraryId]s that hold them. Entries with
+ * a `null` identity are NOT merged — each stays its own [MergedLibraryEntry] (an unknown id is never
+ * treated as equal to another unknown id), so two un-hashed books never falsely collapse.
+ *
+ * Order is deterministic and stable: books are emitted in first-appearance order while scanning
+ * libraries in registry order then each library's book order. A duplicate seen later only widens the
+ * already-placed entry's [MergedLibraryEntry.libraryIds] (preserving its original slot); it does not
+ * reorder the listing. An empty library set yields an empty list immediately.
  */
 private fun combineBooks(libraries: List<Library>): Flow<List<MergedLibraryEntry>> =
     if (libraries.isEmpty()) {
         flowOf(emptyList())
     } else {
         combine(libraries.map { lib -> lib.books }) { perLibraryBooks ->
-            buildList {
-                perLibraryBooks.forEachIndexed { index, books ->
-                    val libraryId = libraries[index].descriptor.id
-                    books.forEach { entry: LibraryEntry ->
-                        add(MergedLibraryEntry(entry = entry, libraryIds = listOf(libraryId)))
-                    }
+            dedupByIdentity(libraries, perLibraryBooks.toList())
+        }
+    }
+
+/**
+ * Folds the per-library book lists into the deduplicated shelf. See [combineBooks] for the ordering
+ * and merge contract. [perLibraryBooks] is index-aligned with [libraries].
+ */
+private fun dedupByIdentity(
+    libraries: List<Library>,
+    perLibraryBooks: List<List<LibraryEntry>>,
+): List<MergedLibraryEntry> {
+    val ordered = ArrayList<MergedLibraryEntry>()
+    // Identity -> position in `ordered`, so a later duplicate widens the existing entry in place.
+    val positionByIdentity = HashMap<CanonicalBookId, Int>()
+    perLibraryBooks.forEachIndexed { index, books ->
+        val libraryId = libraries[index].descriptor.id
+        books.forEach { entry ->
+            val identity = entry.identity
+            val existingPos = identity?.let { positionByIdentity[it] }
+            if (existingPos == null) {
+                if (identity != null) positionByIdentity[identity] = ordered.size
+                ordered.add(MergedLibraryEntry(entry = entry, libraryIds = listOf(libraryId)))
+            } else {
+                val existing = ordered[existingPos]
+                if (libraryId !in existing.libraryIds) {
+                    ordered[existingPos] = existing.copy(libraryIds = existing.libraryIds + libraryId)
                 }
             }
         }
     }
+    return ordered
+}

@@ -9,7 +9,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import ru.kyamshanov.notepen.document.domain.model.CanonicalBookId
+import ru.kyamshanov.notepen.library.api.Library
+import ru.kyamshanov.notepen.library.api.LibraryBackend
+import ru.kyamshanov.notepen.library.api.LibraryBackendKind
+import ru.kyamshanov.notepen.library.api.LibraryBookId
+import ru.kyamshanov.notepen.library.api.LibraryCapabilities
 import ru.kyamshanov.notepen.library.api.LibraryConnection
+import ru.kyamshanov.notepen.library.api.LibraryConnectionState
+import ru.kyamshanov.notepen.library.api.LibraryDescriptor
+import ru.kyamshanov.notepen.library.api.LibraryEntry
+import ru.kyamshanov.notepen.library.api.LibraryId
+import ru.kyamshanov.notepen.library.api.LibraryRole
+import ru.kyamshanov.notepen.library.api.OpenableDocument
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
 import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolderItem
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
@@ -199,6 +211,162 @@ class DefaultLibraryRegistryTest {
 
             assertTrue(registry.libraries.value.isEmpty())
             assertTrue(registry.mergedBooks.value.isEmpty())
+            scope.cancel()
+        }
+
+    // --- M6: cross-library dedup by canonical identity --------------------------------------------
+
+    /** Bare [Library] over a fixed book list — lets a test drive [DefaultLibraryRegistry.mergedBooks]
+     *  with entries that carry canonical identities. */
+    private class FakeLibrary(
+        private val libId: String,
+        private val kind: LibraryBackendKind,
+        books: List<LibraryEntry>,
+    ) : Library {
+        override val descriptor =
+            LibraryDescriptor(id = LibraryId(libId), displayName = libId, kind = kind, role = LibraryRole.Reader)
+        override val capabilities = LibraryCapabilities.fromRole(LibraryRole.Reader)
+        override val books = MutableStateFlow(books)
+        override val connectionState = MutableStateFlow<LibraryConnectionState>(LibraryConnectionState.Connected)
+
+        override suspend fun refresh() = Unit
+
+        override suspend fun open(id: LibraryBookId): Result<OpenableDocument> = Result.failure(UnsupportedOperationException())
+    }
+
+    /** Backend that hands back a pre-built [FakeLibrary] for a given connection kind. */
+    private class FakeBackend(
+        override val kind: LibraryBackendKind,
+        private val library: Library,
+    ) : LibraryBackend {
+        override suspend fun connect(
+            spec: LibraryConnection,
+            scope: CoroutineScope,
+        ): Result<Library> = Result.success(library)
+
+        override suspend fun probe(spec: LibraryConnection): Result<LibraryDescriptor> = Result.success(library.descriptor)
+    }
+
+    private fun entry(
+        bookId: String,
+        name: String,
+        identityHex: String?,
+    ) = LibraryEntry(
+        libraryBookId = LibraryBookId(bookId),
+        displayName = name,
+        identity = identityHex?.let { CanonicalBookId(it) },
+    )
+
+    @Test
+    fun mergedBooks_dedupsSameIdentityAcrossLibraries_intoOneEntryWithBothLibraryIds() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val sharedHex = "a".repeat(64)
+            // The SAME book (same canonical id) lives in the local folder AND is served by a LAN peer.
+            val local = FakeLibrary("local:root", LibraryBackendKind.Local, listOf(entry("local/book.pdf", "Book", sharedHex)))
+            val peer = FakeLibrary("peer:42", LibraryBackendKind.PeerLan, listOf(entry("remote#1", "Book", sharedHex)))
+            val registry =
+                DefaultLibraryRegistry(
+                    backends =
+                        listOf(
+                            FakeBackend(LibraryBackendKind.Local, local),
+                            FakeBackend(LibraryBackendKind.PeerLan, peer),
+                        ),
+                    scope = scope,
+                    ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+                )
+
+            registry.connect(LibraryConnection.Local(rootPath)).getOrThrow()
+            registry.connect(LibraryConnection.PeerLan(peerId = "42")).getOrThrow()
+
+            val merged = registry.mergedBooks.value
+            assertEquals(1, merged.size, "same canonical id collapses to ONE merged entry")
+            assertEquals(
+                listOf(LibraryId("local:root"), LibraryId("peer:42")),
+                merged.single().libraryIds,
+                "the merged entry carries every library that holds the book, in registry order",
+            )
+            scope.cancel()
+        }
+
+    @Test
+    fun mergedBooks_nullIdentityEntriesStayDistinct_noFalseMerge() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            // Two different books, both WITHOUT a canonical id — must never collapse together.
+            val local =
+                FakeLibrary(
+                    "local:root",
+                    LibraryBackendKind.Local,
+                    listOf(entry("a.pdf", "A", identityHex = null), entry("b.pdf", "B", identityHex = null)),
+                )
+            val peer =
+                FakeLibrary("peer:42", LibraryBackendKind.PeerLan, listOf(entry("c.pdf", "C", identityHex = null)))
+            val registry =
+                DefaultLibraryRegistry(
+                    backends =
+                        listOf(
+                            FakeBackend(LibraryBackendKind.Local, local),
+                            FakeBackend(LibraryBackendKind.PeerLan, peer),
+                        ),
+                    scope = scope,
+                    ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+                )
+
+            registry.connect(LibraryConnection.Local(rootPath)).getOrThrow()
+            registry.connect(LibraryConnection.PeerLan(peerId = "42")).getOrThrow()
+
+            val merged = registry.mergedBooks.value
+            assertEquals(3, merged.size, "null-identity entries never merge")
+            assertEquals(listOf("A", "B", "C"), merged.map { it.entry.displayName }, "stable first-appearance order")
+            assertTrue(merged.all { it.libraryIds.size == 1 }, "each distinct entry belongs to one library")
+            scope.cancel()
+        }
+
+    @Test
+    fun mergedBooks_orderIsStableFirstAppearance_duplicateOnlyWidensExistingSlot() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val xHex = "1".repeat(64)
+            val yHex = "2".repeat(64)
+            val zHex = "3".repeat(64)
+            // local: [X, Y]; peer also holds Y plus a new Z. Expected order: X, Y, Z — Y is placed at
+            // its local slot (index 1) and the peer copy only widens its libraryIds, not the order.
+            val local =
+                FakeLibrary(
+                    "local:root",
+                    LibraryBackendKind.Local,
+                    listOf(entry("x.pdf", "X", xHex), entry("y.pdf", "Y", yHex)),
+                )
+            val peer =
+                FakeLibrary(
+                    "peer:42",
+                    LibraryBackendKind.PeerLan,
+                    listOf(entry("y2.pdf", "Y", yHex), entry("z.pdf", "Z", zHex)),
+                )
+            val registry =
+                DefaultLibraryRegistry(
+                    backends =
+                        listOf(
+                            FakeBackend(LibraryBackendKind.Local, local),
+                            FakeBackend(LibraryBackendKind.PeerLan, peer),
+                        ),
+                    scope = scope,
+                    ioDispatcher = UnconfinedTestDispatcher(testScheduler),
+                )
+
+            registry.connect(LibraryConnection.Local(rootPath)).getOrThrow()
+            registry.connect(LibraryConnection.PeerLan(peerId = "42")).getOrThrow()
+
+            val merged = registry.mergedBooks.value
+            assertEquals(listOf("X", "Y", "Z"), merged.map { it.entry.displayName }, "stable first-appearance order")
+            assertEquals(listOf(LibraryId("local:root")), merged[0].libraryIds, "X only in local")
+            assertEquals(
+                listOf(LibraryId("local:root"), LibraryId("peer:42")),
+                merged[1].libraryIds,
+                "Y held by both, deduped to its first (local) slot",
+            )
+            assertEquals(listOf(LibraryId("peer:42")), merged[2].libraryIds, "Z only on the peer")
             scope.cancel()
         }
 }

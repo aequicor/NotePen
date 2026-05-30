@@ -68,6 +68,7 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
 import ru.kyamshanov.notepen.setupJbrTitleBar
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
+import ru.kyamshanov.notepen.sync.domain.CacheEvictor
 import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
@@ -78,6 +79,7 @@ import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.JvmCacheFileStore
 import ru.kyamshanov.notepen.sync.infrastructure.JvmLibrarianGrantStore
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
@@ -306,6 +308,20 @@ fun main(args: Array<String>) {
     val libraryRegistryHolder = java.util.concurrent.atomic.AtomicReference<DefaultLibraryRegistry?>(null)
     val libraryMutationTarget = LibraryRegistryMutationTarget(registryProvider = { libraryRegistryHolder.get() })
 
+    // M6: bound the downloaded-document caches (the LAN received dir + the GitHub library cache),
+    // which previously grew without limit. LRU by last-access under a 300 MB cap; a file whose
+    // document is currently open (pinned in openDocumentRegistry) is never evicted. Runs once at
+    // startup (below) and after each fresh LAN download (via SyncRuntime → RemoteDocumentOpener).
+    val githubCacheDir = getAppDataDir().resolve("github-library").absolutePath
+    val cacheEvictor =
+        CacheEvictor(
+            fileStore = JvmCacheFileStore(),
+            openDocumentRegistry = openDocumentRegistry,
+            documentIdRegistry = localDocumentIdRegistry,
+            ioDispatcher = Dispatchers.IO,
+        )
+    val downloadCacheDirs = listOf(receivedDir, githubCacheDir)
+
     // Lazy owner of the heavy sync/network stack: Ktor server/client, CIO engine,
     // jmDNS registrar, SQLite pending-delta queue, projection, coordinators —
     // all build inside SyncRuntime.enable(), and are torn down on disable().
@@ -330,6 +346,11 @@ fun main(args: Array<String>) {
             // M5b: persist the host's per-peer Librarian grants so an approved
             // librarian survives a desktop restart (re-granted on the next enable()).
             librarianGrantStore = JvmLibrarianGrantStore(ioDispatcher = Dispatchers.IO),
+            // M6: trim the caches right after the opener streams in a fresh file.
+            onAfterRemoteDownload = {
+                runCatching { cacheEvictor.evict(downloadCacheDirs) }
+                    .onFailure { e -> mainLogger.warn(e) { "Cache eviction after download failed" } }
+            },
         )
 
     // The QR pairing VM stays light: it only holds state flows for the panel
@@ -370,13 +391,16 @@ fun main(args: Array<String>) {
     // Saved user-added libraries (PeerLan/GitHub) persist to library_connections.json under the app
     // data dir; the always-on local library below is wired explicitly and NOT persisted there.
     val libraryConnectionStore = JvmLibraryConnectionStore()
-    val githubCacheDir = getAppDataDir().resolve("github-library").absolutePath
     val githubHttpClient by lazy { io.ktor.client.HttpClient(io.ktor.client.engine.cio.CIO) }
     val libraryRegistry =
         DefaultLibraryRegistry(
             backends =
                 listOf(
-                    LocalFolderLibraryBackend { rootPath, _ ->
+                    LocalFolderLibraryBackend(
+                        // M6: populate canonical ids on local entries (sidecar-cached) so the
+                        // same book held by the local library and a LAN peer dedups in mergedBooks.
+                        identityProvider = documentIdentityProvider,
+                    ) { rootPath, _ ->
                         if (File(rootPath).canonicalPath == libraryRoot.canonicalPath) {
                             libraryFolder
                         } else {
@@ -439,6 +463,13 @@ fun main(args: Array<String>) {
                     .onFailure { e -> mainLogger.warn(e) { "Failed to auto-connect saved library $spec" } }
             }
         }
+    }
+
+    // M6: run a one-shot cache eviction pass at startup (the evictor + dirs are defined above so the
+    // post-download hook can share them). LRU-trims the LAN + GitHub caches under the cap.
+    appScope.launch {
+        runCatching { cacheEvictor.evict(downloadCacheDirs) }
+            .onFailure { e -> mainLogger.warn(e) { "Cache eviction at startup failed" } }
     }
 
     // Always create the root component outside Compose on the UI thread

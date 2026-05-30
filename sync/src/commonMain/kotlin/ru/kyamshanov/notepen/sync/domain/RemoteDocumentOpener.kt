@@ -56,6 +56,9 @@ sealed class RemoteDocumentResult {
  * @param catalogs per-host catalog snapshots — drives host selection.
  * @param destDir directory where received files are written.
  * @param requestTimeoutMs upper bound on the whole open flow.
+ * @param onAfterDownload invoked after a file is freshly streamed in from a host (NOT on an offline
+ *   cache hit). Lets the caller bound the cache after it just grew — wired to [CacheEvictor] in the
+ *   DI layer. Defaults to a no-op so the domain stays decoupled from eviction.
  */
 class RemoteDocumentOpener(
     private val client: SyncClient,
@@ -64,6 +67,7 @@ class RemoteDocumentOpener(
     /** Реестр, в котором запоминаем `localPath → documentId`. Null отключает запись. */
     private val documentIdRegistry: LocalDocumentIdRegistry? = null,
     private val requestTimeoutMs: Long = 60_000L,
+    private val onAfterDownload: suspend () -> Unit = {},
 ) {
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun open(
@@ -126,6 +130,8 @@ class RemoteDocumentOpener(
                             }
                             received.onAwait { file ->
                                 documentIdRegistry?.register(file.destPath, documentId)
+                                // The cache just grew by a fresh download; let the caller trim it.
+                                runCatching { onAfterDownload() }
                                 RemoteDocumentResult.Success(documentId, file.destPath)
                             }
                         }

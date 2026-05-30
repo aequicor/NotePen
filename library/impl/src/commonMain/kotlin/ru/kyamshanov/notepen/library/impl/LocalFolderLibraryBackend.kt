@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen.library.impl
 
 import kotlinx.coroutines.CoroutineScope
+import ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider
 import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryBackend
 import ru.kyamshanov.notepen.library.api.LibraryBackendKind
@@ -33,8 +34,12 @@ public fun interface LibraryFolderFactory {
  * [folderFactory] to `FileSystemLibraryFolder`, while Android does not register it at all.
  *
  * @param folderFactory platform-specific factory that produces a [LibraryFolder] for a root path.
+ * @param identityProvider computes/caches the content-addressed canonical id used for cross-library
+ *   dedup (M6); `null` leaves entry identities unset (e.g. in tests). Reused across all local
+ *   libraries this backend connects so the sidecar cache is shared.
  */
 public class LocalFolderLibraryBackend(
+    private val identityProvider: DocumentIdentityProvider? = null,
     private val folderFactory: LibraryFolderFactory,
 ) : LibraryBackend {
     override val kind: LibraryBackendKind = LibraryBackendKind.Local
@@ -49,6 +54,7 @@ public class LocalFolderLibraryBackend(
             LocalFolderLibrary(
                 descriptor = localFolderDescriptor(local.rootPath),
                 libraryFolder = folder,
+                identityProvider = identityProvider,
                 scope = scope,
             )
         }

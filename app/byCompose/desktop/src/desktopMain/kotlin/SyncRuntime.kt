@@ -110,6 +110,9 @@ class SyncRuntime(
     // non-null, librarian grants persist across host restarts and are re-granted
     // on enable(). Null keeps the M5a in-memory-only behaviour.
     private val librarianGrantStore: LibrarianGrantStore? = null,
+    // M6: invoked after RemoteDocumentOpener streams a fresh file into the LAN
+    // cache, so the caller can bound that cache right after it grew. Default no-op.
+    private val onAfterRemoteDownload: suspend () -> Unit = {},
 ) {
     private val _session = MutableStateFlow<SyncSession?>(null)
     val session: StateFlow<SyncSession?> = _session.asStateFlow()
@@ -183,11 +186,9 @@ class SyncRuntime(
             startReplayCoordinators(sessionScope, syncEngineRegistry, peerServer, syncClient)
 
             val remoteCatalogProvider = buildCatalogProvider(sessionScope, peerServer, syncClient)
-            // M5b: re-grant durable librarian peers before any peer connects, so a
-            // reconnecting librarian's mutations are honoured straight away.
+            // M5b: re-grant durable librarian peers before any peer connects, so a reconnecting librarian is honoured straight away.
             remoteCatalogProvider.restoreLibrarianGrants()
-            DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider)
-                .start(scope = sessionScope)
+            DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider).start(scope = sessionScope)
 
             // Librarian-over-LAN (M5a): accept add/remove/replace from peers in the
             // write allow-set, reassemble + verify uploaded bytes, apply to the host
@@ -210,8 +211,8 @@ class SyncRuntime(
                     catalogs = remoteCatalogCache.catalogs,
                     destDir = receivedDir,
                     documentIdRegistry = localDocumentIdRegistry,
+                    onAfterDownload = onAfterRemoteDownload, // M6: trim the LAN cache after a fresh stream-in.
                 )
-
             wireSession(
                 scope = sessionScope,
                 peerServer = peerServer,

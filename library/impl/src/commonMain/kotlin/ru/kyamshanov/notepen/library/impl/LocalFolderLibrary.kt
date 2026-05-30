@@ -5,6 +5,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.document.domain.model.CanonicalBookId
+import ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider
 import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryBackendKind
 import ru.kyamshanov.notepen.library.api.LibraryBookId
@@ -23,18 +25,30 @@ import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolderItem
  * [LibraryFolder] port (whose desktop implementation is `FileSystemLibraryFolder`).
  *
  * The user is always the [LibraryRole.Librarian] of their own local folder, so all mutating
- * operations are available. Book identity ([LibraryEntry.identity]) is left `null` in M1 — the
- * content-addressed [ru.kyamshanov.notepen.document.domain.model.CanonicalBookId] is wired in a
- * later milestone.
+ * operations are available.
+ *
+ * ## Canonical identity (M6 — enables cross-library dedup)
+ * The local library is the one place where computing the content-addressed
+ * [CanonicalBookId] is cheap enough to do eagerly: the injected [identityProvider] caches the
+ * `sha256` in a `.notepen.id` sidecar, so it is hashed at most once per file across runs.
+ *
+ * Identities are filled **asynchronously** so the shelf is never blocked on hashing the whole
+ * library: each `items` snapshot is published immediately with `identity = null`, then a background
+ * job resolves [DocumentIdentityProvider.identityForPath] per file and re-publishes each entry with
+ * its identity as it lands. On a warm sidecar cache this resolves almost instantly. Failures (e.g. a
+ * file deleted mid-scan) leave that entry's identity `null` — it simply won't participate in dedup.
  *
  * @param descriptor the immutable description of this library (id derived from the root path).
  * @param libraryFolder the underlying local folder port providing the reactive book listing.
- * @param scope long-lived scope used to keep [books] hot for the lifetime of the connection.
+ * @param identityProvider computes/caches the canonical id; `null` disables identity population
+ *   (entries keep `identity = null`, matching pre-M6 behaviour).
+ * @param scope long-lived scope used to keep [books] hot and run identity resolution.
  */
 internal class LocalFolderLibrary(
     override val descriptor: LibraryDescriptor,
     private val libraryFolder: LibraryFolder,
-    scope: CoroutineScope,
+    private val identityProvider: DocumentIdentityProvider?,
+    private val scope: CoroutineScope,
 ) : Library {
     override val capabilities: LibraryCapabilities = LibraryCapabilities.fromRole(descriptor.role)
 
@@ -44,12 +58,59 @@ internal class LocalFolderLibrary(
         MutableStateFlow(libraryFolder.items.value.map(LibraryFolderItem::toLibraryEntry))
     override val books: StateFlow<List<LibraryEntry>> = booksState.asStateFlow()
 
+    /** Resolved canonical id per book uri, so a re-scan re-uses already-computed identities. */
+    private val identityByUri = mutableMapOf<String, CanonicalBookId>()
+
     init {
         scope.launch {
             libraryFolder.items.collect { items ->
-                booksState.value = items.map(LibraryFolderItem::toLibraryEntry)
+                booksState.value =
+                    items.map { item -> item.toLibraryEntry().withCachedIdentity() }
+                resolveIdentities(items)
             }
         }
+    }
+
+    /** Returns a copy of this entry stamped with a previously-resolved identity, if any. */
+    private fun LibraryEntry.withCachedIdentity(): LibraryEntry =
+        identityByUri[libraryBookIdToUri(libraryBookId.value)]?.let { copy(identity = it) } ?: this
+
+    private fun libraryBookIdToUri(id: String): String = libraryFolder.items.value.firstOrNull { it.id == id }?.uri ?: id
+
+    /**
+     * Resolves canonical ids for [items] off the shelf path. Each resolved id is cached and patched
+     * into [booksState] individually, so a slow file never holds up the rest of the shelf.
+     */
+    private fun resolveIdentities(items: List<LibraryFolderItem>) {
+        val provider = identityProvider ?: return
+        items.forEach { item ->
+            if (identityByUri.containsKey(item.uri)) {
+                patchIdentity(item.id, identityByUri.getValue(item.uri))
+                return@forEach
+            }
+            scope.launch {
+                val canonical =
+                    runCatching { provider.identityForPath(item.uri) }.getOrNull()?.canonicalId
+                        ?: return@launch
+                identityByUri[item.uri] = canonical
+                patchIdentity(item.id, canonical)
+            }
+        }
+    }
+
+    /** Patches the [identity] of the entry with the given book id in [booksState], if still present. */
+    private fun patchIdentity(
+        bookId: String,
+        identity: CanonicalBookId,
+    ) {
+        booksState.value =
+            booksState.value.map { entry ->
+                if (entry.libraryBookId.value == bookId && entry.identity != identity) {
+                    entry.copy(identity = identity)
+                } else {
+                    entry
+                }
+            }
     }
 
     // A local folder is always reachable; there is no connection to lose.
