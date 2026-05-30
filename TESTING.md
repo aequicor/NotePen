@@ -2,6 +2,13 @@
 
 The single source of truth for how NotePen is tested. Three tiers, one governing principle, one gating policy.
 
+> **What a test case *is*** — its fields, ID scheme, and tier rule — lives in
+> [`testing/TEST-CASE-STANDARD.md`](testing/TEST-CASE-STANDARD.md). The catalogs:
+> [`testing/regression-cases.md`](testing/regression-cases.md) (`RC-*`, mined from shipped fixes),
+> [`testing/ai-vision-scenarios.md`](testing/ai-vision-scenarios.md) (`AV-*`, Tier 2),
+> [`testing/release-checklist.md`](testing/release-checklist.md) (`MAN-*`, Tier 3), and the per-feature
+> `vault/**/test-cases.md` (`TC-N`). The code→case map is [`testing/area-map.md`](testing/area-map.md).
+
 ## Governing principle
 
 **Each tier tests only what the tier below physically cannot reach.** Determinism, speed, and trust fall — cost, flakiness, and human/hardware dependency rise — as you go up. So if a behavior can be asserted deterministically, it stays in **Tier 1** and never escalates: a golden-able pixel check (e.g. reflow-reader layout) belongs in Tier 1's Roborazzi suite, **not** in AI-vision. AI-vision exists only for renderers/gestures the headless tier cannot drive; manual exists only for real hardware that neither automated tier can touch.
@@ -83,12 +90,14 @@ The **only** deterministic rendered-pixel goldens in the repo are the 9 reflow s
 
 ### How to run it
 
-- **Trigger:** any prompt containing the keyword **`ai-vision`**.
-- **Desktop harness:** MCP `notepen-desktop` (`screenshot` / `click` / `drag` / `type_text` / `press_key` / …).
-- **Android harness:** helper `.claude/tools/bin/notepen-android` (`shot` / `tap` / `swipe` / `install` / …).
-- **Live-driving tools** live at `tools/uitest/` + `.claude/tools/` (do not relocate).
+- **Trigger:** any prompt containing the keyword **`ai-vision`** (a `UserPromptSubmit` hook injects the standing instruction — see [`tools/uitest/ai-vision-hook.ps1`](tools/uitest/ai-vision-hook.ps1)).
+- **Desktop harness:** [`tools/uitest/Launch-Desktop.ps1`](tools/uitest/Launch-Desktop.ps1) to launch/locate the `NotePen` JBR window, then drive via **computer-use** (`screenshot` / `left_click` / `left_click_drag` / `type` / `key`) after granting **`java.exe`**.
+- **Android harness:** [`tools/uitest/Start-AndroidTarget.ps1`](tools/uitest/Start-AndroidTarget.ps1) (boot AVD / pick device, install debug APK), then `adb -s <serial> shell input …` + `adb … exec-out screencap -p`.
+- **Animation capture:** [`Capture-DesktopAnim.ps1`](tools/uitest/Capture-DesktopAnim.ps1) / [`Capture-AndroidAnim.ps1`](tools/uitest/Capture-AndroidAnim.ps1) → looping **GIF + PNG filmstrip** (the diffable artifact); pure PowerShell, no ffmpeg.
+- **Live-driving tools** live at [`tools/uitest/`](tools/uitest/) (do not relocate). The former `notepen-desktop` MCP and `.claude/tools/bin/notepen-android` helper were **removed** — do not reference them.
 - **Reports:** `.claude/ux-reports/<runid>/`.
-- **Scenario catalog:** [`/testing/ai-vision-scenarios.md`](testing/ai-vision-scenarios.md).
+- **Case shape:** governed by [`testing/TEST-CASE-STANDARD.md`](testing/TEST-CASE-STANDARD.md).
+- **Scenario catalog:** [`testing/ai-vision-scenarios.md`](testing/ai-vision-scenarios.md). **Regression catalog (mined from fixes):** [`testing/regression-cases.md`](testing/regression-cases.md). **Code→case map:** [`testing/area-map.md`](testing/area-map.md).
 
 **Advisory only** — a Tier-2 run surfaces regressions but never blocks a merge.
 
@@ -117,3 +126,23 @@ Only what neither automated tier can reach. Required before tagging a release; f
 | **Release** | Tier 3 hardware checklist signed off — required before tagging |
 
 Release reminders: tag **`v1.0.0`+** only (jpackage rejects `0.x`; re-release = move the tag); bump `app.version`; set the `ANDROID_*` signing env; verify the **obfuscated** `createReleaseDistributable`, not just `runDesktop`.
+
+---
+
+## Testing discipline (edit-time)
+
+**When you touch functionality, run that area's related cases before you finish — not the whole suite.**
+The link from *code* to *cases* is [`testing/area-map.md`](testing/area-map.md): a path/glob → area →
+case-ID table. The rule (full version in [`testing/TEST-CASE-STANDARD.md`](testing/TEST-CASE-STANDARD.md) § 7):
+
+1. **Edited a source file** → find its row in `area-map.md`; that gives the area's `RC-*` (regression)
+   and `AV-*` (AI-vision) case IDs and the gradle/harness command to run them.
+2. **Run the Tier-1 cases** the area maps to (`./gradlew :<module>:test` etc.) and report pass/fail.
+3. **If the change is visual/gesture/animation and an `AV-*` exists**, run it via the `tools/uitest/`
+   harness (screenshots + GIF/filmstrip), or state why Tier 2 was deferred — Tier 2 is advisory.
+4. **New behavior with no case** → add one per the standard (§6) and a row to `area-map.md`.
+
+A `PostToolUse` hook ([`tools/uitest/related-cases-hook.ps1`](tools/uitest/related-cases-hook.ps1), wired in
+the gitignored `.claude/settings.local.json`) automates step 1: after a Kotlin edit it reads the path,
+resolves the area from `area-map.md`, and injects the related case IDs + run command as a standing
+instruction. The hook is a convenience; this section is the contract and holds even with the hook off.
