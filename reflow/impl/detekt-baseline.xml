@@ -14,18 +14,11 @@
     <ID>LongMethod:ReaderAirbar.kt:@Composable private fun CollapsedPill</ID>
     <ID>LongMethod:ReaderAirbar.kt:@Composable private fun TuneSheet</ID>
     <ID>LongMethod:ReflowReader.kt:@Composable private fun PagedReflowContent</ID>
+    <ID>LongMethod:ReflowReader.kt:@Composable private fun ReflowBlockView</ID>
     <ID>LongMethod:ReflowReader.kt:@Composable public fun ReflowReader</ID>
     <ID>LoopWithTooManyJumpStatements:LatticeTableRefiner.kt:LatticeTableRefiner$for</ID>
     <ID>LoopWithTooManyJumpStatements:ReflowAssembler.kt:ReflowAssembler$while</ID>
     <ID>LoopWithTooManyJumpStatements:TaggedPdfHeadings.kt:TaggedPdfHeadings$for</ID>
-    <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$is ReflowBlock.Code -&gt; measureSplittable(block.text, block.source, settings.codeStyle(), 0, w, settings, textMeasurer)</ID>
-    <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$is ReflowBlock.Footnote -&gt; measureSplittable(block.text, block.source, settings.footnoteStyle(), 0, w, settings, textMeasurer)</ID>
-    <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$is ReflowBlock.Paragraph -&gt; measureSplittable(block.text, block.source, settings.paragraphStyle(), 0, w, settings, textMeasurer)</ID>
-    <ID>MaxLineLength:BlockHeightCalculator.kt:BlockHeightCalculator$measureSplittable(block.text, block.source, settings.paragraphStyle(), indent, w, settings, textMeasurer)</ID>
-    <ID>MaxLineLength:FontStyles.kt:FontStyles$private fun String?.matchesAny: Boolean</ID>
-    <ID>MaxLineLength:ReflowAssembler.kt:ReflowAssembler$/** Горизонтальный зазор (доля кегля строки), трактуемый как пробел между словами (когда ширина пробела неизвестна). */</ID>
-    <ID>MaxLineLength:ReflowAssembler.kt:ReflowAssembler.BlockBuilder$private fun isSoftHyphen: Boolean</ID>
-    <ID>MaxLineLength:ReflowReader.kt:if (rowIndex == 0) settings.textColor.copy(alpha = TABLE_HEADER_ALPHA) else Color.Transparent</ID>
     <ID>ReturnCount:FootnoteExtractor.kt:FootnoteExtractor$fun extractFootnote: FootnoteSplit</ID>
     <ID>ReturnCount:ReadingErgonomics.kt:ReadingErgonomics$fun dimAlpha: Float</ID>
     <ID>ReturnCount:ReflowAssembler.kt:ReflowAssembler$private fun buildTable: ReflowBlock.Table?</ID>
@@ -46,5 +39,6 @@
     <ID>TooManyFunctions:ReflowAssembler.kt:ReflowAssembler</ID>
     <ID>TooManyFunctions:ReflowAssembler.kt:ReflowAssembler$BlockBuilder</ID>
     <ID>TooManyFunctions:ReflowReader.kt:ru.kyamshanov.notepen.reflow.ui.ReflowReader.kt</ID>
+    <ID>TooManyFunctions:StrokeTextMapper.kt:StrokeTextMapper</ID>
   </CurrentIssues>
 </SmellBaseline>

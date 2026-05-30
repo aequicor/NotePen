@@ -173,16 +173,19 @@ sealed class NetworkMessage {
     ) : NetworkMessage()
 
     /**
-     * Host → tablet: full annotation snapshot for [documentId]. Each entry is
-     * a stroke that already exists on the host (loaded from disk and/or drawn
-     * earlier). Receiver must de-duplicate by [StrokeDelta.Added.strokeId]
-     * against any strokes already known locally.
+     * Host → tablet: full annotation snapshot for [documentId]. [strokes] are
+     * existing strokes (loaded from disk and/or drawn earlier). [notes] are
+     * existing text notes, one [StrokeDelta.NoteUpserted] per note. Receiver
+     * de-duplicates strokes by [StrokeDelta.Added.strokeId] and notes by note id
+     * against state it already holds. [notes] defaults empty for wire
+     * compatibility with peers predating note sync.
      */
     @Serializable
     @SerialName("annotation_snapshot")
     data class AnnotationSnapshot(
         val strokes: List<StrokeDelta.Added>,
         val documentId: String = "",
+        val notes: List<StrokeDelta.NoteUpserted> = emptyList(),
     ) : NetworkMessage()
 
     /**

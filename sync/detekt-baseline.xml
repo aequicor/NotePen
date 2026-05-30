@@ -25,6 +25,7 @@
     <ID>ReturnCount:SyncEngine.kt:SyncEngine$suspend fun drainAndReplay</ID>
     <ID>TooGenericExceptionCaught:KtorPeerServer.kt:KtorPeerServer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:KtorSyncClient.kt:HostSession$e: Exception</ID>
+    <ID>TooManyFunctions:HostAnnotationProjection.kt:HostAnnotationProjection</ID>
     <ID>TooManyFunctions:KtorPeerServer.kt:KtorPeerServer : PeerServer</ID>
     <ID>TooManyFunctions:RemoteCatalogProvider.kt:RemoteCatalogProvider</ID>
   </CurrentIssues>

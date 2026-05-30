@@ -5,6 +5,8 @@ data class AnnotationBundle(
     val pages: Map<Int, List<DrawingPath>> = emptyMap(),
     /** Sticky-marker highlights per zero-based page index (see [StickyHighlight]). */
     val highlights: Map<Int, List<StickyHighlight>> = emptyMap(),
+    /** Text notes per zero-based page index, keyed exactly like [highlights] (see [PageNote]). */
+    val notes: Map<Int, List<PageNote>> = emptyMap(),
     val scale: Int = 100,
     val pen: PenSettings = PenSettings(),
     val marker: MarkerSettings = MarkerSettings(),

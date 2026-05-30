@@ -13,6 +13,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.model.UnionAllPolicy
@@ -36,6 +37,9 @@ data class DocumentAnnotationState(
     // Не синхронизируется дельтами (нет StrokeDelta для выделений) — переносится как есть,
     // чтобы headless-сохранение на хосте не затирало липкие выделения с диска.
     val highlights: Map<Int, List<StickyHighlight>> = emptyMap(),
+    // Заметки в v1 не проецируются из дельт (apply NoteUpserted/NoteRemoved — no-op):
+    // переносятся с диска как есть, чтобы headless-сохранение не затирало их.
+    val notes: Map<Int, List<PageNote>> = emptyMap(),
 )
 
 private val logger = KotlinLogging.logger {}
@@ -184,6 +188,7 @@ class HostAnnotationProjection(
                 favoritePageIndices = state.favoritePageIndices,
                 pageExtents = state.pageExtents,
                 highlights = state.highlights,
+                notes = state.notes,
             )
         logger.info { "Projection autosave to disk: doc=$documentId success=${result.isSuccess}" }
     }
@@ -219,6 +224,7 @@ class HostAnnotationProjection(
                     state.pageExtents[page] = ext
                 }
                 state.highlights = bundle.highlights
+                state.notes = bundle.notes
                 logger.info {
                     "Projection loaded from disk: doc=$documentId pages=${bundle.pages.size}"
                 }
@@ -255,6 +261,12 @@ class HostAnnotationProjection(
                         layerPages[delta.pageIndex]?.removeAll { it.strokeId == delta.strokeId }
                     }
                 }
+                // The headless host projection tracks strokes only (v1). Notes are
+                // persisted/restored through the disk sidecar, so peer note deltas
+                // need no in-memory projection here. See Step 3.4 to extend this if
+                // the host must accumulate notes headlessly.
+                is StrokeDelta.NoteUpserted -> Unit
+                is StrokeDelta.NoteRemoved -> Unit
             }
         }
     }
@@ -305,6 +317,37 @@ class HostAnnotationProjection(
         }
     }
 
+    /**
+     * Snapshot of every note currently held for [documentId], as
+     * [StrokeDelta.NoteUpserted] wire-deltas — one per note. Mirrors
+     * [snapshotDtos] (strokes). Notes carry no per-author provenance in the
+     * projection (they are loaded from the on-disk sidecar), so each is stamped
+     * with the reserved host layer and clock 0, exactly like disk-loaded strokes.
+     * The receiver applies them by note id (replace-by-id / LWW upstream), so a
+     * clock of 0 is harmless for an initial catch-up against unseen notes.
+     */
+    suspend fun noteSnapshotDtos(documentId: String): List<StrokeDelta.NoteUpserted>? {
+        ensureLoaded(documentId) ?: return null
+        return mutex.withLock {
+            val state = states[documentId] ?: return@withLock null
+            val out = mutableListOf<StrokeDelta.NoteUpserted>()
+            for ((pageIndex, pageNotes) in state.notes.toSortedMap()) {
+                for (note in pageNotes) {
+                    out.add(
+                        StrokeDelta.NoteUpserted(
+                            strokeId = note.noteId,
+                            pageIndex = pageIndex,
+                            authorDeviceId = AnnotationLayer.HOST,
+                            clock = 0,
+                            note = note.toDto(),
+                        ),
+                    )
+                }
+            }
+            out
+        }
+    }
+
     private class MutableDocumentState {
         /** Strokes per author device id (the layer key), then per page index. */
         val layers: MutableMap<String, MutableMap<Int, MutableList<DrawingPath>>> = linkedMapOf()
@@ -317,6 +360,7 @@ class HostAnnotationProjection(
         var currentPageOffset: Int = 0
         var favoritePageIndices: Set<Int> = emptySet()
         var highlights: Map<Int, List<StickyHighlight>> = emptyMap()
+        var notes: Map<Int, List<PageNote>> = emptyMap()
     }
 
     private fun MutableDocumentState.toImmutable() =
@@ -332,6 +376,7 @@ class HostAnnotationProjection(
             pageExtents = pageExtents.toMap(),
             favoritePageIndices = favoritePageIndices,
             highlights = highlights,
+            notes = notes,
         )
 
     private fun MutableDocumentState.toAnnotationLayers(): List<AnnotationLayer> =

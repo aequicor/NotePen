@@ -11,6 +11,9 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
  *
  * [Added]: a new stroke was drawn on [pageIndex] by [authorDeviceId].
  * [Removed]: the stroke with [strokeId] was erased. Last-writer-wins by [clock].
+ * [NoteUpserted]: a text note (PageNote) was created or edited; [strokeId] carries
+ * the note's stable id and it is merged like [Added] (strictly-greater clock wins).
+ * [NoteRemoved]: a note tombstone, merged like [Removed] (equal-or-earlier clock loses).
  *
  * All coordinates in [DrawingPath] are normalised [0..1].
  */
@@ -43,6 +46,35 @@ sealed class StrokeDelta {
     @Serializable
     @SerialName("removed")
     data class Removed(
+        override val strokeId: String,
+        override val pageIndex: Int,
+        override val authorDeviceId: String,
+        override val clock: Long,
+    ) : StrokeDelta()
+
+    /**
+     * A text note (PageNote) created or edited on [pageIndex] by [authorDeviceId].
+     * [strokeId] carries the note's stable id (PageNote.noteId). Treated like
+     * [Added] for LWW: applied only on a strictly-greater [clock]. A body edit is
+     * a new NoteUpserted with a higher clock — the whole note is replaced.
+     */
+    @Serializable
+    @SerialName("note_upserted")
+    data class NoteUpserted(
+        override val strokeId: String,
+        override val pageIndex: Int,
+        override val authorDeviceId: String,
+        override val clock: Long,
+        val note: PageNoteDto,
+    ) : StrokeDelta()
+
+    /**
+     * Tombstone: the note with [strokeId] (== PageNote.noteId) was deleted.
+     * Treated like [Removed]: wins over a NoteUpserted with an equal/earlier clock.
+     */
+    @Serializable
+    @SerialName("note_removed")
+    data class NoteRemoved(
         override val strokeId: String,
         override val pageIndex: Int,
         override val authorDeviceId: String,

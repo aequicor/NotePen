@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.tabs
 import ru.kyamshanov.notepen.PdfDrawingState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -12,8 +13,8 @@ import kotlin.test.assertTrue
 /**
  * Verifies the touch-reachable undo engine surfaced on [PdfDocumentState]
  * (Defect A): [PdfDocumentState.undo] / [PdfDocumentState.redo] pop their
- * stacks, restore the page snapshot (strokes + highlights), and keep the
- * Compose-derived [PdfDocumentState.canUndo] / [PdfDocumentState.canRedo]
+ * stacks, restore the page snapshot (strokes + highlights + notes), and keep
+ * the Compose-derived [PdfDocumentState.canUndo] / [PdfDocumentState.canRedo]
  * enabled flags in sync.
  */
 class PdfDocumentStateUndoTest {
@@ -97,5 +98,24 @@ class PdfDocumentStateUndoTest {
 
         assertEquals(listOf(path(1f)), st.drawingStates[0]!!.currentPaths.toList())
         assertTrue(st.highlights[0].orEmpty().isEmpty())
+    }
+
+    @Test
+    fun `undo restores notes together with strokes`() {
+        val st = newState()
+        val drawing = PdfDrawingState()
+        st.drawingStates[0] = drawing
+        drawing.currentPaths.add(path(1f))
+
+        // Note create: snapshot stroke+note state, then add a note on page 0.
+        st.pushUndoSnapshot(0, drawing.currentPaths.toList())
+        val note = PageNote(noteId = "n1", pageIndex = 0, body = "hi")
+        st.notes[0] = listOf(note)
+
+        st.undo()
+        assertTrue(st.notes[0].orEmpty().isEmpty())
+
+        st.redo()
+        assertEquals(listOf(note), st.notes[0].orEmpty())
     }
 }

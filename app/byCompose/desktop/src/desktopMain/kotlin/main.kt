@@ -753,8 +753,11 @@ fun main(args: Array<String>) {
                             AnnotationResyncRequester { documentId ->
                                 appScope.launch(Dispatchers.IO) {
                                     runCatching {
+                                        val engine = reg.get(documentId)
                                         projection.snapshotDtos(documentId).orEmpty()
-                                            .forEach { added -> reg.get(documentId).processPeer(added) }
+                                            .forEach { added -> engine.processPeer(added) }
+                                        projection.noteSnapshotDtos(documentId).orEmpty()
+                                            .forEach { upserted -> engine.processPeer(upserted) }
                                     }
                                 }
                             }
