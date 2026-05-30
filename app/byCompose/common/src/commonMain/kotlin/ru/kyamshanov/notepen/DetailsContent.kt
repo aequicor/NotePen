@@ -751,31 +751,21 @@ fun DetailsContent(
             0.dp
         }
 
-    // Defect C — reading-mode chrome reserve. The reflow reader, unlike the PDF
-    // page path, reserved no room for the floating chrome, so the H1/first lines
-    // hid under the top bar / «Страница N/M» chip and (on tablets) the left tool
-    // rail clipped the first chars of every line. We reserve a STATIC inset (it
-    // must NOT animate with chrome visibility — a changing reader viewport would
-    // force re-pagination on every tap). In reading mode the focused panel shows
-    // the reader, not the PDF viewer, so reusing the same EditorPanel inset params
-    // doesn't regress fit-to-width.
-    //   • Landscape uses LandscapeToolRail for ALL landscape (not only FULL), so we
-    //     reserve the rail strip (its 16.dp start pad + measured width + 16.dp gap to
-    //     clear the first glyphs) regardless of the strict width>height FULL gate.
-    //   • Portrait uses the full-width PortraitTopBar — no horizontal room, top inset
-    //     = its measured height (status-bar inset + toolbar row).
-    val readingStartInset =
-        if (isLandscape) {
-            16.dp + landscapeToolbarWidthDp + 16.dp
-        } else {
-            0.dp
-        }
-    val readingTopInset =
-        if (isLandscape) {
-            8.dp + landscapePageCounterHeightDp + 16.dp
-        } else {
-            portraitTopBarHeightDp
-        }
+    // Reading-mode reader insets. The text-view is FULLSCREEN and the chrome (top
+    // bar / «Страница N/M» chip, tool rail) floats ON TOP of it — we do NOT reserve a
+    // strip for it. That is what keeps the text from jumping when you tap into focus
+    // mode: pagination is computed once for the full viewport and never changes when
+    // the chrome shows/hides, so no re-pagination, no reflow. The only thing reserved
+    // is the unavoidable OS safe area (status bar ∪ display cutout, i.e. the Android
+    // camera notch) so the first line doesn't slide under the notch — that value is
+    // constant in reading mode (immersive hides the status bar), so it doesn't move
+    // either. On desktop it is 0 → the reader is truly fullscreen. The horizontal
+    // cutout is already consumed at the root Box (windowInsetsPadding above), so the
+    // start inset is 0. In reading mode the focused panel shows the reader, not the
+    // PDF viewer, so reusing the same EditorPanel inset params doesn't regress
+    // fit-to-width.
+    val readingStartInset = 0.dp
+    val readingTopInset = topChromeInset
 
     // In reading mode the chrome insets clear the reader; otherwise keep the exact
     // PDF fit-to-width behaviour. Both feed the same EditorPanel params (#256-257),

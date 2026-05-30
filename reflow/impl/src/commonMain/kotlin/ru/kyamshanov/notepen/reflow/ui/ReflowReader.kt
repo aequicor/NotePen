@@ -387,13 +387,18 @@ public fun ReflowReader(
     Box(
         modifier =
             modifier
-                // Статический резерв под плавающий хром редактора (верхний бар/чип, боковой
-                // tool-rail). До fillMaxSize/onSizeChanged, чтобы вьюпорт ридера (LazyColumn/
-                // пейджер) ужался и тап-зоны пересчитались от нового размера. Пользовательские
-                // topMargin/contentPadding остаются внутри и складываются с этим резервом.
-                .padding(top = topInset, start = startInset)
                 .fillMaxSize()
+                // Фон рисуем ДО padding'а — во всю площадь ридера, включая полоску под
+                // плавающим хромом. Иначе резерв оставался незакрашенным и сквозь него
+                // просвечивал фон родителя (без тёплого сдвига заката) — это и были «полосы»
+                // сверху и слева на стыке с контентом.
                 .background(effectiveBackground)
+                // Резерв под плавающий хром редактора (верхний бар/чип, боковой tool-rail).
+                // После background/перед onSizeChanged: вьюпорт ридера (LazyColumn/пейджер)
+                // ужимается под резерв и тап-зоны считаются от нового размера, а фон под
+                // хромом остаётся закрашенным. Пользовательские topMargin/contentPadding
+                // остаются внутри и складываются с этим резервом.
+                .padding(top = topInset, start = startInset)
                 .onSizeChanged { viewportHeightPx = it.height }
                 .pointerInput(barVisible, settings.tapToTurn) {
                     // Тап-зоны: лево — назад, право — вперёд, центр — показать/скрыть панель
