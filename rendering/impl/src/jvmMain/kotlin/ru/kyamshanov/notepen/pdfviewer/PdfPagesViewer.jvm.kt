@@ -331,8 +331,8 @@ actual fun PdfPagesViewer(
         state.pages = pages
         state.applyPendingInitialScrollIfNeeded()
         // Разделение страниц (#4) меняет [pages]: layout пере-строен — применяем
-        // отложенный fit-to-width + центрирование на свежем layout'е.
-        state.applyPendingFitIfNeeded()
+        // отложенную перецентровку (с сохранением масштаба) на свежем layout'е.
+        state.applyPendingRecenterIfNeeded()
     }
     LaunchedEffect(state.viewportSize, pages.size) {
         state.applyPendingInitialScrollIfNeeded()
@@ -484,14 +484,16 @@ actual fun PdfPagesViewer(
     // (single column ⇄ two columns + gutter), so the old pan/zoom leaves the page
     // off-centre — turning spread ON strands the page half-screen with the next
     // page glued to the right, turning it OFF strands the single column left of
-    // centre. A pending requestFitToWidth (set by the toggle handler) re-fits and
-    // centres on the fresh layout; absent one, just re-centre. `drop(1)` skips the
-    // initial value so a restored scroll position isn't clobbered on first compose.
+    // centre. A pending requestRecenter (set by the toggle handler) re-centres the
+    // page on the fresh layout while PRESERVING the current zoom (the mode toggle
+    // must not rescale the page to fill the screen); absent one, just re-centre.
+    // `drop(1)` skips the initial value so a restored scroll position isn't
+    // clobbered on first compose.
     LaunchedEffect(state) {
         snapshotFlow { state.spreadMode }
             .drop(1)
             .collect {
-                if (!state.applyPendingFitIfNeeded() && state.viewportSize.width > 0) {
+                if (!state.applyPendingRecenterIfNeeded() && state.viewportSize.width > 0) {
                     state.reCenterAfterResize()
                 }
             }
