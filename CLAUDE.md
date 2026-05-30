@@ -27,7 +27,7 @@ Most logic tests live in `commonTest`/`jvmTest` and run on the JVM. The Android 
 
 ## Toolchain & build specifics
 
-- **JDK split:** library and Android modules compile to **JVM 11**. The desktop module pins a **JetBrains Runtime (JBR) 21** toolchain — required for the custom Windows title bar (`setupJbrTitleBar`). foojay cannot auto-provision JBR; a machine without one auto-detected must set `org.gradle.java.installations.paths` in its user `gradle.properties`.
+- **JDK split:** library and Android modules compile to **JVM 11**. The desktop module pins a **JetBrains Runtime (JBR) 25** toolchain — required for the custom Windows title bar (`setupJbrTitleBar`). foojay cannot auto-provision JBR; a machine without one auto-detected must set `org.gradle.java.installations.paths` in its user `gradle.properties`.
 - **Version catalog:** all dependencies/plugins are declared in [gradle/libs.versions.toml](gradle/libs.versions.toml). Add deps there, reference as `libs.*` / `projects.*` (type-safe project accessors are enabled).
 - **Configuration cache is ON** (`org.gradle.configuration-cache=true`). Build logic must stay configuration-cache compatible.
 - `-Xexpect-actual-classes` is enabled in several modules — expect/actual **classes** (not just functions) are used.
