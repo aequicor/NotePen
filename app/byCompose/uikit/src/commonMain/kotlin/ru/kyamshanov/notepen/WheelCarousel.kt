@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyItemScope
+import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
@@ -51,7 +52,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutCoordinates
-import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -64,45 +64,46 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * «Барабан»/wheel-эффект как в пикере часов: масштабирует и притеняет элемент
- * Lazy-списка тем сильнее, чем дальше его центр от центра вьюпорта вдоль оси
- * прокрутки. Центральный элемент — в полную величину, крайние — уменьшены до
- * [minScale] и приглушены до [minAlpha].
+ * «Барабан»/wheel-эффект как в пикере часов: чем дальше центр элемента от центра
+ * вьюпорта вдоль оси прокрутки, тем сильнее он уменьшается (`1 → [minScale]`),
+ * приглушается (`1 → [minAlpha]`) И ПОДТЯГИВАЕТСЯ к центру, «слипаясь» с соседом.
+ * Центральный элемент — полноразмерный; уезжающие к краю — мельче, бледнее и
+ * прижаты друг к другу, без зияющих пустот между ними.
  *
- * Считается от [LazyListState.layoutInfo] (а НЕ от `onGloballyPositioned`):
- * прокрутка в Compose реализована сдвигом слоя, поэтому `onGloballyPositioned`
- * детей при скролле не дёргается, и эффект был бы статичным. `layoutInfo` —
- * snapshot-state, обновляется каждый кадр прокрутки, так что чтение его внутри
- * `graphicsLayer` пересчитывает трансформу на лету.
+ * **Только paint, без изменения следа (footprint).** Масштаб/альфа/сдвиг живут
+ * целиком в `graphicsLayer`; слот элемента в layout остаётся натуральным. Это
+ * принципиально: если ужимать сам след, измеренная длина контента начинает
+ * зависеть от затухания → `canScrollForward` дёргается кадр-в-кадр → ужатие
+ * крайних слотов входит в предельный цикл (мерцание тул-рейла на планшете в
+ * ландшафте). При неизменном следе длина контента постоянна, и петля
+ * замкнуться не может — отсюда отсутствие дёрганья в любом положении ленты.
  *
- * Уменьшается ТОЛЬКО рисунок (`graphicsLayer` scaleX/scaleY/alpha) — СЛЕД
- * (footprint) элемента остаётся натуральным. Это принципиально: если ужимать и
- * след (докладывать слоту `mainAxisSize * scale`), измеренная длина контента
- * начинает зависеть от затухания, которое зависит от позиции прокрутки. На большом
- * планшете в ландшафте длина садится ровно на границу вьюпорта, `canScrollForward`
- * дёргается кадр-в-кадр, а за ним — ужатие крайних слотов: предельный цикл
- * (наблюдавшееся мерцание меню инструментов). `graphicsLayer` на измерение не
- * влияет, поэтому длина контента постоянна и петля замкнуться не может.
+ * **Эффект — снимок [LazyListState.layoutInfo]** (а НЕ `onGloballyPositioned`):
+ * прокрутка в Compose реализована сдвигом слоя, поэтому позиции детей при скролле
+ * не пересчитываются, и эффект был бы статичным. `layoutInfo` — snapshot-state,
+ * обновляется каждый кадр прокрутки, так что чтение его внутри `graphicsLayer`
+ * пересчитывает трансформу на лету.
+ *
+ * **«Слипание» (подтяжка к центру).** Уменьшаясь на месте, элемент оставил бы
+ * пустой зазор. Поэтому каждый слот дополнительно сдвигается к центру на
+ * накопленное «ужатие» всех слотов между ним и центром — так видимый зазор между
+ * соседями остаётся равным исходному, а уезжающие элементы визуально прижимаются
+ * друг к другу. Сдвиг — тоже только в `graphicsLayer`, на измерение не влияет.
  *
  * @param index индекс ЭТОГО элемента в [listState] (в т.ч. trailing-кнопки).
- * Затухание привязано к возможности скролла: элемент тускнеет/уменьшается только
- * если в его сторону ЕЩЁ есть что прокручивать. У границы прокрутки (или когда
- * всё помещается и скролл невозможен) крайний элемент остаётся полного размера —
- * как у настоящего барабана, чьи концы упираются в стоп.
- *
- * @param orientation ось прокрутки списка, вдоль которой кэшируется натуральный
- *   размер для [wheelItemFalloff]. `CollapsedPill`/горизонтальные полосы —
+ *   Затухание привязано к возможности скролла: элемент тускнеет/уменьшается только
+ *   если в его сторону ЕЩЁ есть что прокручивать. У границы прокрутки (или когда
+ *   всё помещается и скролл невозможен) крайний элемент остаётся полного размера —
+ *   как у настоящего барабана, чьи концы упираются в стоп.
+ * @param orientation ось прокрутки списка. Горизонтальные полосы —
  *   [RailOrientation.HORIZONTAL].
  * @param falloffPx расстояние (px) от центра, на котором эффект достигает максимума.
  *   `<= 0` → половина видимого размера вьюпорта (крайние у кромки).
- * @param minAlpha непрозрачность элемента на краю. По умолчанию `0` — уезжающий
- *   за кромку элемент исчезает полностью, без обрезанного «половинчатого» тайла.
+ * @param minAlpha непрозрачность элемента на краю. `0` — уезжающий за кромку
+ *   элемент исчезает полностью; небольшое ненулевое значение оставляет у кромки
+ *   бледный «след» следующего элемента (подсказка «дальше есть ещё»).
  * @param edgeBand доля [falloffPx] у самой кромки, на которой эффект нарастает
  *   `0 → 1`; до неё элемент полноразмерный. Меньше → резче и ближе к краю.
- * @param naturalSizes общий на полосу кэш «индекс → натуральный размер элемента по
- *   главной оси, px», читаемый [wheelItemFalloff]. Передавайте один
- *   `remember { mutableMapOf() }` на полосу; `null` — считать центр от замеренного
- *   размера слота (теперь это одно и то же — след не ужимается).
  */
 public fun Modifier.wheelItem(
     listState: LazyListState,
@@ -112,138 +113,110 @@ public fun Modifier.wheelItem(
     minScale: Float = 0.6f,
     minAlpha: Float = 0f,
     edgeBand: Float = 0.35f,
-    naturalSizes: MutableMap<Int, Int>? = null,
 ): Modifier =
-    this
-        // Кэшируем натуральный размер слота для [wheelItemFalloff]; сам след НЕ
-        // ужимаем (см. KDoc — иначе длина контента зависит от прокрутки и
-        // `canScrollForward` входит в предельный цикл = мерцание).
-        .layout { measurable, constraints ->
-            val placeable = measurable.measure(constraints)
-            val naturalMain = if (orientation == RailOrientation.VERTICAL) placeable.height else placeable.width
-            naturalSizes?.put(index, naturalMain)
-            layout(placeable.width, placeable.height) {
-                placeable.placeRelative(0, 0)
-            }
-        }.graphicsLayer {
-            val t = wheelItemFalloff(listState.layoutInfo, index, falloffPx, edgeBand, naturalSizes) ?: return@graphicsLayer
-            val scale = lerp(1f, minScale, t)
-            scaleX = scale
-            scaleY = scale
-            alpha = lerp(1f, minAlpha, t)
-        }
+    this.graphicsLayer {
+        val t = wheelTransform(listState.layoutInfo, index, falloffPx, edgeBand, minScale) ?: return@graphicsLayer
+        scaleX = t.scale
+        scaleY = t.scale
+        alpha = lerp(1f, minAlpha, t.falloff)
+        if (orientation == RailOrientation.VERTICAL) translationY = t.pull else translationX = t.pull
+    }
+
+/** Результат [wheelTransform]: масштаб слота, подтяжка к центру (px) и доля затухания. */
+internal class WheelTransform(
+    val scale: Float,
+    val pull: Float,
+    val falloff: Float,
+)
 
 /**
- * Доля «отдаления» элемента `[0..1]`: `0` пока его центр в середине вьюпорта
- * (полный размер/непрозрачность), плавно → `1` по мере ухода центра в кромочную
- * полосу [edgeBand] со стороны, в которую ещё есть запас прокрутки. Чистая
- * функция от [layoutInfo] — общий источник для масштаба и альфы [wheelItem].
+ * Считает трансформу барабана для элемента [index] из снимка [layoutInfo]:
+ * масштаб `1 → [minScale]`, подтяжку к центру (px, «слипание» с соседом) и долю
+ * затухания `[0..1]` (для альфы). `null`, если элемент не виден или вьюпорт
+ * вырожден — трансформацию тогда не применяем.
  *
- * `null`, если элемент не виден или вьюпорт вырожден (трансформацию не применяем).
+ * Все величины считаются от НАТУРАЛЬНЫХ `offset`/`size` слотов (след не ужимаем),
+ * поэтому длина контента и хвостовой запас прокрутки от применяемого масштаба не
+ * зависят — петля «ужатие → длина → затухание» не возникает (см. [wheelItem]).
  *
  * @param falloffPx см. [wheelItem]; `<= 0` → половина видимого размера вьюпорта.
- * @param edgeBand см. [wheelItem]: ширина кромочной полосы (доля [falloffPx]),
- *   только внутри которой геометрическая дистанция переводится в эффект.
- * @param naturalSizes см. [wheelItem]: кэш натуральных размеров элементов. Когда
- *   передан, хвостовой запас прокрутки считается от натуральной длины контента
- *   (масштаб сокращается тождественно), поэтому он НЕ зависит от ужатия следа —
- *   тем и разрывается петля «ужатие → длина → затухание → ужатие».
+ * @param edgeBand ширина кромочной полосы (доля [falloffPx]), внутри которой
+ *   геометрическая дистанция переводится в эффект.
  */
-internal fun wheelItemFalloff(
+internal fun wheelTransform(
     layoutInfo: LazyListLayoutInfo,
     index: Int,
     falloffPx: Float,
-    edgeBand: Float = 0.35f,
-    naturalSizes: Map<Int, Int>? = null,
-): Float? {
-    val item = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index } ?: return null
-    // Первый и последний элементы — это сами стопы прокрутки: им НЕ даём ужиматься.
-    // Если крайний элемент ужимает след, то, пристыковавшись к краю, он доразжимается,
-    // удлиняет контент и переоткрывает прокрутку — `canScrollForward` начинает мигать,
-    // и у самого конца лента входит в автоколебание (наблюдаемое «дёрганье» при доезде
-    // стрелкой). Полноразмерный стоп стабилен: длина контента у края не меняется.
-    if (index == 0 || index == layoutInfo.totalItemsCount - 1) return 0f
+    edgeBand: Float,
+    minScale: Float,
+): WheelTransform? {
+    val visible = layoutInfo.visibleItemsInfo
+    val item = visible.firstOrNull { it.index == index }
     val viewportCenter = (layoutInfo.viewportStartOffset + layoutInfo.viewportEndOffset) / 2f
-    // Центр элемента берём в НАТУРАЛЬНЫХ координатах (до ужатия): замеренный offset
-    // включает ужатие всех предыдущих слотов, и на хвостовой стороне эти ужатия
-    // накапливаются (вся кромочная полоса сжата) → сдвиг центра → пересчёт масштаба
-    // → новый сдвиг: петля с усилением >1, из-за которой дёргается ИМЕННО правый
-    // край (левый привязан к якорю прокрутки, ужатие уходит от активной кромки и
-    // затухает). Восстанавливаем натуральный центр: `offset + ужатие предыдущих
-    // видимых слотов + натуральный размер/2` — он от применяемого масштаба не зависит.
-    val naturalThis = (naturalSizes?.get(index) ?: item.size).toFloat()
-    val itemCenter = item.offset + shrinkBefore(layoutInfo, naturalSizes, index) + naturalThis / 2f
-    val falloff = if (falloffPx > 0f) falloffPx else (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f
-    if (falloff <= 0f) return null
-    val raw = (abs(itemCenter - viewportCenter) / falloff).coerceIn(0f, 1f)
-
-    // Эффект только в кромочной полосе: до неё `raw` отображается в 0 (полный
-    // размер), внутри — нарастает 0→1 со сглаживанием (smoothstep), чтобы не было
-    // резкого скачка масштаба на въезде в полосу.
+    val half = (layoutInfo.viewportEndOffset - layoutInfo.viewportStartOffset) / 2f
+    // Элемент не виден или вьюпорт вырожден — трансформацию не применяем.
+    if (item == null || half <= 0f) return null
+    // `falloff > 0` гарантирован: либо явный [falloffPx] > 0, либо `half` (> 0 выше).
+    val falloff = if (falloffPx > 0f) falloffPx else half
     val band = edgeBand.coerceIn(0.01f, 1f)
-    val inBand = ((raw - (1f - band)) / band).coerceIn(0f, 1f)
-    val eased = inBand * inBand * (3f - 2f * inBand)
 
-    // Сколько контента скрыто за кромкой со стороны этого элемента — это и есть
-    // запас прокрутки в его сторону. Нет запаса → не затемняем (элемент «упёрся»).
-    //
-    // Хвостовой конец сдвигается влево на суммарное ужатие всех видимых слотов, так
-    // что замеренный (ужатый) запас зависит от приме′няемого масштаба — это и была
-    // петля. `scaledHidden + totalShrink` равно НАТУРАЛЬНОМУ запасу (масштаб
-    // сокращается), поэтому хвостовой `sideFactor` от ужатия больше не зависит.
-    // Лидирующий конец привязан к якорю прокрутки (offset элемента 0), его ужатие
-    // не двигает — там поправка не нужна.
-    val hiddenOnSide =
-        if (itemCenter >= viewportCenter) {
-            layoutInfo.visibleItemsInfo
-                .firstOrNull { it.index == layoutInfo.totalItemsCount - 1 }
-                ?.let {
-                    val scaledHidden = (it.offset + it.size - layoutInfo.viewportEndOffset).toFloat()
-                    (scaledHidden + totalShrink(layoutInfo, naturalSizes)).coerceAtLeast(0f)
-                }
-                ?: falloff
-        } else {
-            layoutInfo.visibleItemsInfo
-                .firstOrNull { it.index == 0 }
-                ?.let { (layoutInfo.viewportStartOffset - it.offset).coerceAtLeast(0).toFloat() }
-                ?: falloff
+    // Запас прокрутки в каждую сторону = контент, скрытый за соответствующей
+    // кромкой. От натуральных offset'ов (след не ужат) — стабилен под скроллом.
+    val hiddenStart =
+        visible.firstOrNull { it.index == 0 }
+            ?.let { (layoutInfo.viewportStartOffset - it.offset).coerceAtLeast(0).toFloat() } ?: falloff
+    val hiddenEnd =
+        visible.firstOrNull { it.index == layoutInfo.totalItemsCount - 1 }
+            ?.let { (it.offset + it.size - layoutInfo.viewportEndOffset).coerceAtLeast(0).toFloat() } ?: falloff
+
+    val distance = item.offset + item.size / 2f - viewportCenter
+    val t = wheelFalloff(item, viewportCenter, falloff, band, hiddenStart, hiddenEnd)
+    val scale = lerp(1f, minScale, t)
+
+    // Подтяжка к центру: идём по видимым слотам от центра наружу до текущего и
+    // копим `(ужатие_прошлого + ужатие_текущего)/2`. Это ровно тот сдвиг, при
+    // котором видимый зазор между соседями остаётся равным исходному, — уезжающие
+    // элементы «слипаются», а не разъезжаются пустотами.
+    var pull = 0f
+    var prevShrink = 0f
+    visible
+        .filter {
+            val d = it.offset + it.size / 2f - viewportCenter
+            if (distance >= 0f) d in 0f..distance else d in distance..0f
         }
+        .sortedBy { abs(it.offset + it.size / 2f - viewportCenter) }
+        .forEach { slot ->
+            val st = wheelFalloff(slot, viewportCenter, falloff, band, hiddenStart, hiddenEnd)
+            val shrink = slot.size * st * (1f - minScale)
+            pull += (prevShrink + shrink) / 2f
+            prevShrink = shrink
+        }
+    return WheelTransform(scale = scale, pull = if (distance >= 0f) -pull else pull, falloff = t)
+}
+
+/**
+ * Доля «отдаления» слота `[0..1]`: `0` пока его центр в середине вьюпорта (полный
+ * размер), плавно → `1` по мере ухода центра в кромочную полосу [band] со стороны,
+ * в которую ещё есть запас прокрутки ([hiddenStart]/[hiddenEnd]). Сглаживание —
+ * smootherstep `6t⁵−15t⁴+10t³` (C² на обоих концах): нулевая производная у входа в
+ * полосу убирает скачок масштаба, ровный финиш — дёрганье у самой кромки.
+ */
+private fun wheelFalloff(
+    item: LazyListItemInfo,
+    viewportCenter: Float,
+    falloff: Float,
+    band: Float,
+    hiddenStart: Float,
+    hiddenEnd: Float,
+): Float {
+    val distance = item.offset + item.size / 2f - viewportCenter
+    val raw = (abs(distance) / falloff).coerceIn(0f, 1f)
+    val inBand = ((raw - (1f - band)) / band).coerceIn(0f, 1f)
+    val eased = inBand * inBand * inBand * (inBand * (inBand * 6f - 15f) + 10f)
+    val hiddenOnSide = if (distance >= 0f) hiddenEnd else hiddenStart
     val sideFactor = (hiddenOnSide / falloff).coerceIn(0f, 1f)
     return eased * sideFactor
 }
-
-/**
- * Суммарное ужатие следов по главной оси (px, `Σ(натуральный − текущий)`) видимых
- * элементов с индексом строго меньше [beforeIndex]. На столько правее лежал бы
- * элемент [beforeIndex] при натуральных размерах: прибавив это к его замеренному
- * `offset`, получаем натуральный (не зависящий от масштаба) центр. `0`, если
- * [naturalSizes] не передан или предыдущие слоты ещё не измерены.
- */
-private fun shrinkBefore(
-    layoutInfo: LazyListLayoutInfo,
-    naturalSizes: Map<Int, Int>?,
-    beforeIndex: Int,
-): Float {
-    if (naturalSizes == null) return 0f
-    var sum = 0f
-    layoutInfo.visibleItemsInfo.forEach { info ->
-        if (info.index < beforeIndex) {
-            val natural = naturalSizes[info.index] ?: info.size
-            sum += (natural - info.size).coerceAtLeast(0)
-        }
-    }
-    return sum
-}
-
-/**
- * Суммарное ужатие следов ВСЕХ видимых элементов по главной оси, px. Прибавленная
- * к замеренному хвостовому запасу прокрутки, восстанавливает натуральную длину
- * контента, делая затухание независимым от масштаба (см. [wheelItemFalloff]).
- */
-private fun totalShrink(
-    layoutInfo: LazyListLayoutInfo,
-    naturalSizes: Map<Int, Int>?,
-): Float = shrinkBefore(layoutInfo, naturalSizes, Int.MAX_VALUE)
 
 /**
  * Draws [content] with its leading and trailing [edgeWidth]-px bands faded to
@@ -430,9 +403,6 @@ public fun WheelStrip(
     // toward whichever end still has hidden items, so an unscrollable rail stays
     // full-size — the taper only appears when there is actually somewhere to scroll.
     val edgeBand = WHEEL_EDGE_BAND_WIDE
-    // Кэш натуральных размеров слотов: хвостовой запас прокрутки считается от
-    // натуральной длины, чтобы ужатие следа не запускало петлю дрожания (см. wheelItem).
-    val naturalSizes = remember { mutableMapOf<Int, Int>() }
     BoxWithConstraints(modifier, contentAlignment = contentAlignment) {
         val itemBox: @Composable LazyItemScope.(Int, WheelEntry) -> Unit = { index, entry ->
             val reportModifier =
@@ -452,10 +422,10 @@ public fun WheelStrip(
             Box(
                 Modifier
                     .animateItem()
-                    // Масштаб/альфа + ужатый след по главной оси (соседи
-                    // подтягиваются). report-модификатор последним: индикатор
-                    // отслеживает фактические (уже ужатые) границы элемента.
-                    .wheelItem(state, index, orientation, falloffPx, minScale, minAlpha, edgeBand, naturalSizes)
+                    // Масштаб/альфа + подтяжка к центру (соседи слипаются).
+                    // report-модификатор последним: индикатор отслеживает
+                    // фактический (уже сдвинутый) центр элемента.
+                    .wheelItem(state, index, orientation, falloffPx, minScale, minAlpha, edgeBand)
                     .then(reportModifier),
             ) { entry.content() }
         }
