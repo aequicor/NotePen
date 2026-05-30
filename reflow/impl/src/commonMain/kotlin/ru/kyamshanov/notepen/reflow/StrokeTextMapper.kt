@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.reflow
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.reflow.api.ReflowBlock
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.ReflowRect
@@ -19,6 +20,9 @@ import ru.kyamshanov.notepen.reflow.api.TextAnchor
  * координат не нужен.
  */
 public object StrokeTextMapper {
+    /** Сколько символов префикса/суффикса вокруг цитаты сохраняем в [PageNote.context]. */
+    private const val CONTEXT_CHARS = 32
+
     /**
      * Прямое сопоставление: какие диапазоны текста перекрывает штрих [path],
      * нарисованный на странице [pageIndex].
@@ -147,6 +151,91 @@ public object StrokeTextMapper {
             mergeIntoLines(bounds).map { NormalizedRect(it.left, it.top, it.right, it.bottom) }
         }
     }
+
+    /**
+     * Ре-анкоринг заметки ([PageNote]) на текущую экстракцию. Сначала по геометрии
+     * ([anchorsForRects] на [PageNote.rects] — источнике истины, как у StickyHighlight);
+     * если геометрия больше ничего не задевает (текст переизвлекли иначе) — откат к
+     * поиску [PageNote.quote] ([anchorsForQuote]).
+     *
+     * @return диапазоны текста для [note]; пусто, если ни геометрия, ни цитата не нашлись
+     */
+    public fun anchorsForNote(
+        document: ReflowDocument,
+        note: PageNote,
+    ): List<TextAnchor> {
+        val byGeometry = anchorsForRects(document, note.pageIndex, note.rects)
+        if (byGeometry.isNotEmpty()) return byGeometry
+        return anchorsForQuote(document, note.quote)
+    }
+
+    /**
+     * Откат TextQuoteSelector: первое вхождение первой строки [quote] в текст любого
+     * блока. Достаточно, чтобы поставить маркер; полная геометрия восстанавливается
+     * через [spansFor] по полученному анкеру.
+     *
+     * @return один анкер на найденное вхождение; пусто, если цитата пуста или не найдена
+     */
+    public fun anchorsForQuote(
+        document: ReflowDocument,
+        quote: String,
+    ): List<TextAnchor> {
+        val needle = quote.substringBefore('\n').trim()
+        if (needle.isEmpty()) return emptyList()
+        val hit =
+            document.blocks.withIndex().firstNotNullOfOrNull { (blockIndex, block) ->
+                val at = block.blockText().indexOf(needle)
+                if (at >= 0) TextAnchor(blockIndex, at, at + needle.length) else null
+            }
+        return hit?.let { listOf(it) }.orEmpty()
+    }
+
+    /**
+     * `(quote, context)` для [PageNote], создаваемой из выделения [anchors] в режиме
+     * чтения. `quote` — подстроки текста блоков по анкерам, склеенные через `"\n"` (тот
+     * же join, что видит пользователь в выделении). `context` — до [CONTEXT_CHARS]
+     * символов префикса перед первым анкером и суффикса после последнего, в форме
+     * `"prefix…suffix"` (W3C TextQuoteSelector — для устойчивого ре-поиска).
+     */
+    public fun quoteForAnchors(
+        document: ReflowDocument,
+        anchors: List<TextAnchor>,
+    ): Pair<String, String> {
+        val parts = mutableListOf<String>()
+        anchors.forEach { anchor ->
+            val text = document.blocks.getOrNull(anchor.blockIndex)?.blockText().orEmpty()
+            if (text.isEmpty()) return@forEach
+            val start = anchor.charStart.coerceIn(0, text.length)
+            val end = anchor.charEnd.coerceIn(start, text.length)
+            if (end > start) parts += text.substring(start, end)
+        }
+        val quote = parts.joinToString("\n")
+        if (quote.isEmpty()) return "" to ""
+        val first = anchors.first()
+        val last = anchors.last()
+        val firstText = document.blocks.getOrNull(first.blockIndex)?.blockText().orEmpty()
+        val lastText = document.blocks.getOrNull(last.blockIndex)?.blockText().orEmpty()
+        val prefixEnd = first.charStart.coerceIn(0, firstText.length)
+        val suffixStart = last.charEnd.coerceIn(0, lastText.length)
+        val prefix = firstText.substring((prefixEnd - CONTEXT_CHARS).coerceAtLeast(0), prefixEnd)
+        val suffix = lastText.substring(suffixStart, (suffixStart + CONTEXT_CHARS).coerceAtMost(lastText.length))
+        val context = if (prefix.isEmpty() && suffix.isEmpty()) "" else "$prefix…$suffix"
+        return quote to context
+    }
+
+    /** Текст текстонесущего блока (для цитаты/контекста заметки); пусто для не-текстовых. */
+    private fun ReflowBlock.blockText(): String =
+        when (this) {
+            is ReflowBlock.Paragraph -> text
+            is ReflowBlock.Heading -> text
+            is ReflowBlock.ListItem -> text
+            is ReflowBlock.Blockquote -> text
+            is ReflowBlock.Code -> text
+            is ReflowBlock.Footnote -> text
+            is ReflowBlock.Table -> ""
+            is ReflowBlock.Figure -> ""
+            ReflowBlock.Divider -> ""
+        }
 
     private fun ReflowBlock.sourceSpans(): List<SourceSpan> =
         when (this) {

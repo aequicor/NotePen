@@ -133,7 +133,9 @@ class MagnifierInputController(
                     ).also { it.start(page.x, page.y) }
                 activeMode = Mode.ERASE
             }
-            ToolMode.NONE -> activeMode = Mode.NONE
+            // «Заметка» не рисует на полотне (создаётся из выделения текста в чтении),
+            // поэтому в лупе ведёт себя как [NONE].
+            ToolMode.NONE, ToolMode.NOTE -> activeMode = Mode.NONE
         }
     }
 

@@ -223,9 +223,12 @@ class SyncEngine(
         val seen = clocks[incoming.strokeId]
         return when {
             seen == null -> true
-            // Tombstone always wins over add with equal clock
+            // Tombstones (stroke erase / note delete) win on equal-or-earlier clock.
             incoming is StrokeDelta.Removed && incoming.clock >= seen -> true
+            incoming is StrokeDelta.NoteRemoved && incoming.clock >= seen -> true
+            // Adds and note upserts apply only on a strictly newer clock.
             incoming is StrokeDelta.Added && incoming.clock > seen -> true
+            incoming is StrokeDelta.NoteUpserted && incoming.clock > seen -> true
             else -> false
         }
     }
@@ -238,4 +241,6 @@ private fun StrokeDelta.withClock(clock: Long): StrokeDelta =
     when (this) {
         is StrokeDelta.Added -> copy(clock = clock)
         is StrokeDelta.Removed -> copy(clock = clock)
+        is StrokeDelta.NoteUpserted -> copy(clock = clock)
+        is StrokeDelta.NoteRemoved -> copy(clock = clock)
     }

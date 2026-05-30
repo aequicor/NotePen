@@ -108,12 +108,14 @@ class HostHeadlessAnnotationHandler(
         }
         projection.follow(documentId, scope)
         val snapshot = projection.snapshotDtos(documentId).orEmpty()
-        logger.info { "Headless snapshot doc=$documentId strokes=${snapshot.size}" }
+        val noteSnapshot = projection.noteSnapshotDtos(documentId).orEmpty()
+        logger.info { "Headless snapshot doc=$documentId strokes=${snapshot.size} notes=${noteSnapshot.size}" }
         server.send(
             peerId,
             NetworkMessage.AnnotationSnapshot(
                 strokes = snapshot,
                 documentId = documentId,
+                notes = noteSnapshot,
             ),
         )
     }

@@ -118,7 +118,8 @@ private fun slotsFor(
         ToolMode.PEN -> penSlots(penSettings, onPenSettingsChange)
         ToolMode.MARKER -> markerSlots(markerSettings, onMarkerSettingsChange)
         ToolMode.ERASER -> eraserSlots(eraserSettings, onEraserSettingsChange)
-        ToolMode.NONE -> emptyList()
+        // «Заметка» не имеет настроек рисования — слотов нет (как у [NONE]).
+        ToolMode.NONE, ToolMode.NOTE -> emptyList()
     }
 
 /**
@@ -404,7 +405,8 @@ internal fun toolPresetEntries(
                 showAdd = all.none { it.settings == eraserSettings },
             )
         }
-        ToolMode.NONE -> emptyList()
+        // «Заметка» не имеет пресетов рисования (как [NONE]).
+        ToolMode.NONE, ToolMode.NOTE -> emptyList()
     }
 
 /** Maps a slider position `[0..1]` to a preview diameter in [PREVIEW_MIN]..[PREVIEW_MAX]. */

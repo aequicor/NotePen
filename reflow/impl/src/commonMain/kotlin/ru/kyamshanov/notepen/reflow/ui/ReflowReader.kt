@@ -41,6 +41,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
@@ -79,6 +80,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -102,7 +104,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.blur.glassSource
+import ru.kyamshanov.notepen.reflow.NoteAnchor
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
@@ -196,6 +200,8 @@ public fun ReflowReader(
     newPresetIdProvider: () -> String,
     modifier: Modifier = Modifier,
     highlights: List<TextAnchor> = emptyList(),
+    notes: List<NoteAnchor> = emptyList(),
+    onNoteTap: (PageNote) -> Unit = {},
     listState: LazyListState = rememberLazyListState(),
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)? = null,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit = {},
@@ -232,6 +238,11 @@ public fun ReflowReader(
             }
         }
     val anchorsByBlock = remember(highlights) { highlights.groupBy { it.blockIndex } }
+    // Заметки, сгруппированные по блоку — для тап-бейджа на полях у строки заметки.
+    // Диапазон-подсветка заметки приходит «бесплатно» через [highlights] (вызывающий слой
+    // подмешивает note-анкеры в общий список), поэтому здесь рисуем только бейдж.
+    val notesByBlock = remember(notes) { notes.groupBy { it.anchor.blockIndex } }
+    val latestOnNoteTap = rememberUpdatedState(onNoteTap)
 
     // Сессия чтения тикает всегда: нужна и для эргономики, и для контекстного
     // предложения «режим долгого чтения» через ~45 минут.
@@ -515,6 +526,8 @@ public fun ReflowReader(
                     PagedReflowContent(
                         document = document,
                         anchorsByBlock = anchorsByBlock,
+                        notesByBlock = notesByBlock,
+                        onNoteTap = { latestOnNoteTap.value(it) },
                         settings = settings,
                         renderPage = renderPage,
                         initialAnchor = readingAnchor,
@@ -529,6 +542,8 @@ public fun ReflowReader(
                     ScrollReflowContent(
                         document = document,
                         anchorsByBlock = anchorsByBlock,
+                        notesByBlock = notesByBlock,
+                        onNoteTap = { latestOnNoteTap.value(it) },
                         settings = settings,
                         listState = listState,
                         renderPage = renderPage,
@@ -695,6 +710,8 @@ private fun Modifier.reflowSelectionDrag(
 private fun BoxScope.ScrollReflowContent(
     document: ReflowDocument,
     anchorsByBlock: Map<Int, List<TextAnchor>>,
+    notesByBlock: Map<Int, List<NoteAnchor>>,
+    onNoteTap: (PageNote) -> Unit,
     settings: ReflowReaderSettings,
     listState: LazyListState,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
@@ -729,6 +746,8 @@ private fun BoxScope.ScrollReflowContent(
                     settings,
                     renderPage,
                     blockIndex = index,
+                    notes = notesByBlock[index].orEmpty(),
+                    onNoteTap = onNoteTap,
                 )
                 if (settings.ergonomicsEnabled &&
                     index < document.blocks.lastIndex &&
@@ -821,6 +840,8 @@ private fun anchorLineTopY(
 private fun PagedReflowContent(
     document: ReflowDocument,
     anchorsByBlock: Map<Int, List<TextAnchor>>,
+    notesByBlock: Map<Int, List<NoteAnchor>>,
+    onNoteTap: (PageNote) -> Unit,
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
     initialAnchor: TextAnchor,
@@ -1262,6 +1283,8 @@ private fun PagedReflowContent(
                                 settings,
                                 renderPage,
                                 blockIndex = index,
+                                notes = notesByBlock[index].orEmpty(),
+                                onNoteTap = onNoteTap,
                             )
                         }
                     }
@@ -1279,6 +1302,8 @@ private fun ReflowBlockView(
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
     blockIndex: Int,
     onLines: ((List<Float>) -> Unit)? = null,
+    notes: List<NoteAnchor> = emptyList(),
+    onNoteTap: (PageNote) -> Unit = {},
 ) {
     when (block) {
         is ReflowBlock.Heading ->
@@ -1289,6 +1314,8 @@ private fun ReflowBlockView(
                 style = settings.headingStyle(block.level),
                 settings = settings,
                 blockIndex = blockIndex,
+                notes = notes,
+                onNoteTap = onNoteTap,
             )
 
         is ReflowBlock.Paragraph ->
@@ -1299,6 +1326,8 @@ private fun ReflowBlockView(
                 settings = settings,
                 blockIndex = blockIndex,
                 onLines = onLines,
+                notes = notes,
+                onNoteTap = onNoteTap,
             )
 
         is ReflowBlock.ListItem ->
@@ -1317,10 +1346,12 @@ private fun ReflowBlockView(
                 blockIndex = blockIndex,
                 onLines = onLines,
                 contentPadding = PaddingValues(start = settings.contentPadding * (block.level + 1)),
+                notes = notes,
+                onNoteTap = onNoteTap,
             )
 
         is ReflowBlock.Blockquote ->
-            BlockquoteView(block, anchors, settings, blockIndex, onLines)
+            BlockquoteView(block, anchors, settings, blockIndex, onLines, notes, onNoteTap)
 
         is ReflowBlock.Table -> TableView(block, settings)
 
@@ -1339,6 +1370,8 @@ private fun ReflowBlockView(
                 settings = settings,
                 blockIndex = blockIndex,
                 onLines = onLines,
+                notes = notes,
+                onNoteTap = onNoteTap,
             )
 
         is ReflowBlock.Footnote ->
@@ -1351,6 +1384,8 @@ private fun ReflowBlockView(
                 settings = settings,
                 blockIndex = blockIndex,
                 onLines = onLines,
+                notes = notes,
+                onNoteTap = onNoteTap,
             )
     }
 }
@@ -1385,6 +1420,8 @@ private fun SelectableReflowText(
     blockIndex: Int,
     onLines: ((List<Float>) -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(),
+    notes: List<NoteAnchor> = emptyList(),
+    onNoteTap: (PageNote) -> Unit = {},
 ) {
     val selectionState = LocalReflowSelectionState.current
     DisposableEffect(selectionState, blockIndex) {
@@ -1393,26 +1430,56 @@ private fun SelectableReflowText(
     val liveAnchor = selectionState.selectionAnchorFor(blockIndex)
     val liveAnchors = if (liveAnchor != null) anchors + liveAnchor else anchors
 
-    BasicText(
-        text = styledText(content.text, content.source, liveAnchors, settings),
-        style = style,
-        onTextLayout = { layout ->
-            selectionState.reportLayout(blockIndex, layout)
-            // Нижние границы строк (для построчной раскладки страниц): снимаем только когда
-            // нужно (проход обмера в PagedReflowContent передаёт onLines).
-            onLines?.invoke(List(layout.lineCount) { layout.getLineBottom(it) })
-        },
-        // Отступ блока (indent списка / втяжка цитаты) — на самом BasicText и ДО
-        // onGloballyPositioned, чтобы публикуемые координаты совпадали с началом текста.
-        // Раньше отступ давал внешний Box: его координаты включали padding, и хит-тест
-        // выделения мог промахнуться по строке (defect «выделяется не та строка»).
-        modifier =
-            Modifier
-                .padding(contentPadding)
-                .onGloballyPositioned { coordinates ->
-                    selectionState.reportCoordinates(blockIndex, coordinates)
-                },
-    )
+    // Раскладка текущего блока — нужна, чтобы поставить бейдж заметки напротив строки её
+    // анкера (getCursorRect(charStart).top). Захватываем из того же onTextLayout, что
+    // публикует раскладку в selectionState.
+    var textLayout by remember(blockIndex) { mutableStateOf<TextLayoutResult?>(null) }
+
+    Box {
+        BasicText(
+            text = styledText(content.text, content.source, liveAnchors, settings),
+            style = style,
+            onTextLayout = { layout ->
+                textLayout = layout
+                selectionState.reportLayout(blockIndex, layout)
+                // Нижние границы строк (для построчной раскладки страниц): снимаем только когда
+                // нужно (проход обмера в PagedReflowContent передаёт onLines).
+                onLines?.invoke(List(layout.lineCount) { layout.getLineBottom(it) })
+            },
+            // Отступ блока (indent списка / втяжка цитаты) — на самом BasicText и ДО
+            // onGloballyPositioned, чтобы публикуемые координаты совпадали с началом текста.
+            // Раньше отступ давал внешний Box: его координаты включали padding, и хит-тест
+            // выделения мог промахнуться по строке (defect «выделяется не та строка»).
+            modifier =
+                Modifier
+                    .padding(contentPadding)
+                    .onGloballyPositioned { coordinates ->
+                        selectionState.reportCoordinates(blockIndex, coordinates)
+                    },
+        )
+
+        // Тап-бейджи заметок: цветной кружок на левом поле напротив строки анкера.
+        // Подсветка диапазона заметки приходит через общий список [anchors] (вызывающий
+        // слой подмешивает note-анкеры), поэтому здесь рисуем только бейдж. Накладывается
+        // поверх (x=0) и не сдвигает раскладку текста.
+        val layout = textLayout
+        if (layout != null) {
+            notes.forEach { na ->
+                val charStart = na.anchor.charStart.coerceIn(0, content.text.length)
+                val top = layout.getCursorRect(charStart).top
+                Box(
+                    modifier =
+                        Modifier
+                            .offset { IntOffset(0, top.roundToInt()) }
+                            .size(NOTE_MARKER_SIZE)
+                            // colorArgb — упакованный ARGB; Color(Int) трактует биты как ARGB
+                            // (Color(Long) трактовал бы как RGBA — другой порядок).
+                            .background(color = Color(na.note.colorArgb.toInt()), shape = CircleShape)
+                            .clickable { onNoteTap(na.note) },
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -1426,6 +1493,8 @@ private fun BlockquoteView(
     settings: ReflowReaderSettings,
     blockIndex: Int,
     onLines: ((List<Float>) -> Unit)? = null,
+    notes: List<NoteAnchor> = emptyList(),
+    onNoteTap: (PageNote) -> Unit = {},
 ) {
     Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
         Box(
@@ -1446,6 +1515,8 @@ private fun BlockquoteView(
             blockIndex = blockIndex,
             onLines = onLines,
             contentPadding = PaddingValues(start = settings.contentPadding),
+            notes = notes,
+            onNoteTap = onNoteTap,
         )
     }
 }
@@ -2135,6 +2206,9 @@ private val SELECTION_BAR_GAP = 8.dp
 private val SELECTION_BAR_CORNER = 10.dp
 private const val SELECTION_BAR_BG_ALPHA = 0.92f
 private const val COPIED_TOAST_MS = 1500L
+
+// Тап-бейдж заметки на левом поле напротив строки её анкера.
+private val NOTE_MARKER_SIZE = 10.dp
 
 internal val TABLE_BORDER_WIDTH = 1.dp
 internal val TABLE_CELL_PADDING = 8.dp

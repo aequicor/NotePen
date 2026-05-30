@@ -12,6 +12,7 @@ import androidx.compose.runtime.snapshots.SnapshotStateMap
 import ru.kyamshanov.notepen.PdfDrawingState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PageRotation
 import ru.kyamshanov.notepen.annotation.domain.model.SpreadSplit
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
@@ -87,6 +88,11 @@ class PdfDocumentState internal constructor(
      * like [sharedDrawingStates] so a highlight made in one tab shows in the other.
      */
     sharedHighlights: SnapshotStateMap<Int, List<StickyHighlight>> = mutableStateMapOf(),
+    /**
+     * Текстовые заметки ([PageNote]) по индексу страницы. Shared across same-file
+     * tabs exactly like [sharedHighlights] so a note made in one tab shows in the other.
+     */
+    sharedNotes: SnapshotStateMap<Int, List<PageNote>> = mutableStateMapOf(),
     /**
      * Пользовательский поворот страницы (четверти CW, `[0, 3]`) по индексу.
      * Shared across same-file tabs — поворот, сделанный в одной вкладке,
@@ -211,6 +217,9 @@ class PdfDocumentState internal constructor(
     /** Sticky-marker highlights per page index; persisted to the annotation bundle. */
     val highlights: SnapshotStateMap<Int, List<StickyHighlight>> = sharedHighlights
 
+    /** Text notes ([PageNote]) per page index; persisted to the annotation bundle. */
+    val notes: SnapshotStateMap<Int, List<PageNote>> = sharedNotes
+
     /**
      * Пользовательский поворот каждой страницы в четвертях CW (`[0, 3]`),
      * персистится в лёгкий сайдкар вида. Отсутствие ключа — `0` (без доворота).
@@ -313,35 +322,39 @@ class PdfDocumentState internal constructor(
         internal set
 
     /**
-     * Pushes the current snapshot of [pageIndex] onto [undoStack] and
+     * Pushes the current snapshot of [pageIndex] (strokes plus the page's
+     * sticky-marker [highlights] and text [notes]) onto [undoStack] and
      * clears [redoStack]. Called at the start of each stroke / erase
      * gesture (mirrors the previous `onGestureStart` body in
-     * `DetailsContent`).
+     * `DetailsContent`) and before each note create / edit / remove.
      */
     fun pushUndoSnapshot(
         pageIndex: Int,
         snapshot: List<DrawingPath>,
     ) {
-        undoStack.addLast(UndoEntry(pageIndex, snapshot, highlights[pageIndex].orEmpty()))
+        undoStack.addLast(UndoEntry(pageIndex, snapshot, highlights[pageIndex].orEmpty(), notes[pageIndex].orEmpty()))
         redoStack.clear()
         undoVersionState.value++
     }
 
     /**
      * Pops the most recent [UndoEntry] off [undoStack], pushes the current
-     * strokes + highlights of that page onto [redoStack], and restores the
-     * snapshot (strokes via [PdfDrawingState.restoreSnapshot] and sticky-marker
-     * [highlights]) so a sticky-marker swipe reverts as one step. No-op when
-     * [undoStack] is empty. Touch toolbars and the Ctrl+Z key handler share this.
+     * strokes + highlights + notes of that page onto [redoStack], and restores
+     * the snapshot (strokes via [PdfDrawingState.restoreSnapshot], sticky-marker
+     * [highlights] and text [notes]) so a sticky-marker swipe or note mutation
+     * reverts as one step. No-op when [undoStack] is empty. Touch toolbars and
+     * the Ctrl+Z key handler share this.
      */
     fun undo() {
         if (undoStack.isEmpty()) return
         val entry = undoStack.removeLast()
         val current = drawingStates[entry.pageIndex]?.currentPaths?.toList() ?: emptyList()
         val currentHighlights = highlights[entry.pageIndex].orEmpty()
-        redoStack.addLast(UndoEntry(entry.pageIndex, current, currentHighlights))
+        val currentNotes = notes[entry.pageIndex].orEmpty()
+        redoStack.addLast(UndoEntry(entry.pageIndex, current, currentHighlights, currentNotes))
         drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
         highlights[entry.pageIndex] = entry.highlights
+        notes[entry.pageIndex] = entry.notes
         undoVersionState.value++
     }
 
@@ -355,9 +368,10 @@ class PdfDocumentState internal constructor(
     fun redo() {
         if (redoStack.isEmpty()) return
         val entry = redoStack.removeLast()
-        undoStack.addLast(UndoEntry(entry.pageIndex, entry.paths, entry.highlights))
+        undoStack.addLast(UndoEntry(entry.pageIndex, entry.paths, entry.highlights, entry.notes))
         drawingStates[entry.pageIndex]?.restoreSnapshot(entry.paths)
         highlights[entry.pageIndex] = entry.highlights
+        notes[entry.pageIndex] = entry.notes
         undoVersionState.value++
     }
 
@@ -399,6 +413,11 @@ class PdfDocumentState internal constructor(
                 highlights[pageIndex] = hs.map { PageRotation.rotateHighlightCw(it) }
             }
         }
+        notes[pageIndex]?.let { ns ->
+            if (ns.isNotEmpty()) {
+                notes[pageIndex] = ns.map { it.copy(rects = it.rects.map(PageRotation::rotateRectCw)) }
+            }
+        }
         // Снапшоты undo/redo сделаны в старой системе координат и после поворота
         // визуально некорректны — чистим, чтобы «отмена» не вернула неповёрнутые
         // штрихи поверх повёрнутого растра.
@@ -434,6 +453,7 @@ class PdfDocumentState internal constructor(
         // Снимаем текущее состояние, ПЕРЕД тем как менять, чтобы пересобрать карты.
         val strokesByPage = drawingStates.mapValues { (_, s) -> s.currentPaths.toList() }
         val highlightsByPage = highlights.toMap()
+        val notesByPage = notes.toMap()
         val extentsByPage = drawingStates.mapValues { (_, s) -> s.extent.value }
         val rotationsByPage = pageRotations.toMap()
 
@@ -458,6 +478,9 @@ class PdfDocumentState internal constructor(
             }
         highlights.clear()
         newHighlights.forEach { (page, hs) -> highlights[page] = hs }
+
+        // Текстовые заметки (та же X-математика, что и у выделений; плюс смена pageIndex).
+        migrateNotesForSpreadSplit(notesByPage, enabling)
 
         // Области рисования (extent): при включении обе половины наследуют extent
         // исходной страницы; при слиянии extent берётся из ЛЕВОЙ половины (правая
@@ -540,15 +563,79 @@ class PdfDocumentState internal constructor(
         return result
     }
 
+    private fun splitNotesByPage(source: Map<Int, List<PageNote>>): Map<Int, List<PageNote>> {
+        val result = HashMap<Int, MutableList<PageNote>>()
+        source.forEach { (srcPage, ns) ->
+            ns.forEach { n ->
+                val firstRectLeft = n.rects.firstOrNull()?.left ?: 0f
+                val right = firstRectLeft >= SpreadSplit.GUTTER_X
+                val remapped =
+                    n.rects.map { r ->
+                        if (right) {
+                            r.copy(
+                                left = (r.left - SpreadSplit.GUTTER_X) / SpreadSplit.GUTTER_X,
+                                right = (r.right - SpreadSplit.GUTTER_X) / SpreadSplit.GUTTER_X,
+                            )
+                        } else {
+                            r.copy(left = r.left / SpreadSplit.GUTTER_X, right = r.right / SpreadSplit.GUTTER_X)
+                        }
+                    }
+                val target = if (right) SpreadSplit.rightLogical(srcPage) else SpreadSplit.leftLogical(srcPage)
+                result.getOrPut(target) { mutableListOf() }.add(n.copy(rects = remapped, pageIndex = target))
+            }
+        }
+        return result
+    }
+
+    private fun mergeNotesByPage(logical: Map<Int, List<PageNote>>): Map<Int, List<PageNote>> {
+        val result = HashMap<Int, MutableList<PageNote>>()
+        logical.forEach { (logicalPage, ns) ->
+            val srcPage = SpreadSplit.sourceIndexOf(logicalPage)
+            val right = SpreadSplit.isRightHalf(logicalPage)
+            ns.forEach { n ->
+                val remapped =
+                    n.rects.map { r ->
+                        if (right) {
+                            r.copy(
+                                left = SpreadSplit.GUTTER_X + r.left * SpreadSplit.GUTTER_X,
+                                right = SpreadSplit.GUTTER_X + r.right * SpreadSplit.GUTTER_X,
+                            )
+                        } else {
+                            r.copy(left = r.left * SpreadSplit.GUTTER_X, right = r.right * SpreadSplit.GUTTER_X)
+                        }
+                    }
+                result.getOrPut(srcPage) { mutableListOf() }.add(n.copy(rects = remapped, pageIndex = srcPage))
+            }
+        }
+        return result
+    }
+
+    /**
+     * Re-maps text notes for a spread-split toggle and re-publishes them into [notes].
+     * Extracted from [toggleSpreadSplit] so the toggle's own cyclomatic complexity stays
+     * within the limit; the split/merge rect math lives in [splitNotesByPage] /
+     * [mergeNotesByPage] (twins of the highlight helpers).
+     */
+    private fun migrateNotesForSpreadSplit(
+        notesByPage: Map<Int, List<PageNote>>,
+        enabling: Boolean,
+    ) {
+        val newNotes = if (enabling) splitNotesByPage(notesByPage) else mergeNotesByPage(notesByPage)
+        notes.clear()
+        newNotes.forEach { (page, ns) -> notes[page] = ns }
+    }
+
     /**
      * Snapshot of one page's strokes (re-applied via [PdfDrawingState.restoreSnapshot])
-     * plus its sticky-marker [highlights] — captured together so undo/redo of a
-     * sticky-marker swipe (stroke removed, highlight added) reverts as one step.
+     * plus its sticky-marker [highlights] and text [notes] — captured together so
+     * undo/redo of a sticky-marker swipe (stroke removed, highlight added) or a note
+     * create/edit/remove reverts as one step.
      */
     data class UndoEntry(
         val pageIndex: Int,
         val paths: List<DrawingPath>,
         val highlights: List<StickyHighlight> = emptyList(),
+        val notes: List<PageNote> = emptyList(),
     )
 
     /**
@@ -603,6 +690,7 @@ class PdfDocumentState internal constructor(
                 sharedRedoStack = from.redoStack,
                 sharedAnnotationsLoaded = from.annotationsLoadedState,
                 sharedHighlights = from.highlights,
+                sharedNotes = from.notes,
                 sharedPageRotations = from.pageRotations,
                 sharedSpreadSplit = from.spreadSplitState,
                 sharedSpreadViewOverride = from.spreadViewOverrideState,

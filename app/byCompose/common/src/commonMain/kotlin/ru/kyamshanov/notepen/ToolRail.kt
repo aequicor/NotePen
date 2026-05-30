@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.automirrored.filled.MenuBook
+import androidx.compose.material.icons.automirrored.filled.NoteAdd
 import androidx.compose.material.icons.automirrored.filled.Redo
 import androidx.compose.material.icons.automirrored.filled.RotateRight
 import androidx.compose.material.icons.automirrored.filled.Undo
@@ -75,11 +76,15 @@ import kotlin.math.roundToInt
  * @param includePen when `false`, the pen/brush toggle is omitted (the marker and
  *   eraser remain). Reading mode passes `false`: free-hand drawing is meaningless
  *   on reflowed text, but highlighting (marker) and erasing it stay available.
+ * @param includeNote when `true`, the note toggle is added (a text selection becomes
+ *   a `PageNote`). Only reading mode passes `true` — note creation is selection-driven
+ *   and the edit-mode canvas has no creation gesture yet.
  */
 internal fun toolSelectorEntries(
     toolMode: ToolMode,
     onToolModeChange: (ToolMode) -> Unit,
     includePen: Boolean = true,
+    includeNote: Boolean = false,
 ): List<WheelEntry> =
     buildList {
         if (includePen) {
@@ -117,6 +122,19 @@ internal fun toolSelectorEntries(
                 )
             },
         )
+        if (includeNote) {
+            add(
+                WheelEntry(TOOL_NOTE_KEY) {
+                    ToolToggleButton(
+                        icon = Icons.AutoMirrored.Filled.NoteAdd,
+                        contentDescription = "Заметка",
+                        selected = toolMode == ToolMode.NOTE,
+                        onClick = { onToolModeChange(nextToolModeOnToggle(toolMode, ToolMode.NOTE)) },
+                        showSelectionBackground = false,
+                    )
+                },
+            )
+        }
     }
 
 /** Wheel-entry key of the currently selected drawing tool, or `null` for [ToolMode.NONE]. */
@@ -125,6 +143,7 @@ internal fun selectedToolWheelKey(toolMode: ToolMode): Any? =
         ToolMode.PEN -> TOOL_PEN_KEY
         ToolMode.MARKER -> TOOL_MARKER_KEY
         ToolMode.ERASER -> TOOL_ERASER_KEY
+        ToolMode.NOTE -> TOOL_NOTE_KEY
         ToolMode.NONE -> null
     }
 
@@ -167,6 +186,7 @@ internal fun railSelectionColorScheme(
 private const val TOOL_PEN_KEY = "tool_pen"
 private const val TOOL_MARKER_KEY = "tool_marker"
 private const val TOOL_ERASER_KEY = "tool_eraser"
+private const val TOOL_NOTE_KEY = "tool_note"
 
 /**
  * Assembles the unified tool wheel: tool toggles, then (for an active tool) its
@@ -230,6 +250,9 @@ internal fun unifiedToolWheelEntries(
     // (вместе с его настройками/пресетами), а маркер/ластик и их настройки
     // оставляем. Для остальных режимов поведение прежнее.
     val includePen = !readingModeEnabled
+    // «Заметка» — только в режиме чтения: заметка рождается из текстового выделения,
+    // а у edit-mode-полотна жеста создания пока нет.
+    val includeNote = readingModeEnabled
     val penHidden = readingModeEnabled && toolMode == ToolMode.PEN
     val settings =
         if (penHidden) {
@@ -301,7 +324,7 @@ internal fun unifiedToolWheelEntries(
         )
     return buildList {
         // В чтении перо скрыто, но маркер/ластик остаются (см. includePen).
-        addAll(toolSelectorEntries(toolMode, onToolModeChange, includePen = includePen))
+        addAll(toolSelectorEntries(toolMode, onToolModeChange, includePen = includePen, includeNote = includeNote))
         if (settings.isNotEmpty()) {
             add(WheelEntry("div_settings", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
             addAll(settings)

@@ -1,18 +1,22 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -31,6 +35,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
@@ -48,6 +53,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
@@ -68,6 +74,15 @@ private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
 
 /** Толщина обводки индикатора зоны ластика, в пикселях canvas. */
 private const val ERASER_INDICATOR_STROKE_WIDTH_PX = 2f
+
+/** Прозрачность заливки зоны заметки ([PageNote]) поверх PDF. */
+private const val NOTE_FILL_ALPHA = 0.18f
+
+/** Толщина подчёркивания заметки под её зоной, в пикселях canvas. */
+private const val NOTE_UNDERLINE_PX = 2.5f
+
+/** Размер тап-бэйджа заметки (открывает редактор тела заметки). */
+private val NOTE_BADGE_SIZE = 18.dp
 
 /** Прозрачность контура hover-индикатора кончика пера. */
 private const val HOVER_INDICATOR_ALPHA = 0.5f
@@ -205,6 +220,16 @@ fun DrawablePdfPage(
     eraserSettings: EraserSettings,
     /** Sticky-marker highlights for this page; rendered as filled word-aligned rects. */
     highlights: List<StickyHighlight> = emptyList(),
+    /**
+     * Текстовые заметки ([PageNote]) для этой страницы. Геометрия ([PageNote.rects])
+     * — источник истины, как у [highlights]: рисуются заливкой + подчёркиванием.
+     */
+    notes: List<PageNote> = emptyList(),
+    /**
+     * Колбэк тапа по бэйджу заметки. Если `null`, бэйджи не монтируются (лупа /
+     * превью), так что заметки рисуются, но не перехватывают ввод пером.
+     */
+    onNoteTapped: ((PageNote) -> Unit)? = null,
     /**
      * Ширина PDF-битмапа в Dp (без учёта extent-полей). Берётся вызывающим
      * из [ru.kyamshanov.notepen.pdfviewer.PdfPageScope.pdfWidth] — это значение
@@ -434,6 +459,31 @@ fun DrawablePdfPage(
                 }
             }
 
+            // Text notes — geometry is the source of truth (like highlights). A faint
+            // multiply-blended fill marks the note's area and a solid underline at the
+            // bottom edge anchors it visually; the tappable badge (below the Canvas)
+            // opens the note body. Never depends on text extraction.
+            for (n in notes) {
+                val nColor = Color(n.colorArgb.toInt())
+                for (r in n.rects) {
+                    val x0 = (r.left - ext.left) * pdfW
+                    val y0 = (r.top - ext.top) * pdfH
+                    val w = (r.right - r.left) * pdfW
+                    val h = (r.bottom - r.top) * pdfH
+                    drawRect(
+                        color = nColor.copy(alpha = NOTE_FILL_ALPHA),
+                        topLeft = Offset(x0, y0),
+                        size = Size(w, h),
+                        blendMode = BlendMode.Multiply,
+                    )
+                    drawRect(
+                        color = nColor,
+                        topLeft = Offset(x0, y0 + h - NOTE_UNDERLINE_PX),
+                        size = Size(w, NOTE_UNDERLINE_PX),
+                    )
+                }
+            }
+
             val paths = pdfDrawingState.currentPaths
 
             // Completed MARKER strokes — drawn here, directly over the PDF, with
@@ -588,6 +638,37 @@ fun DrawablePdfPage(
                     center = Offset(cx, cy),
                     style = Stroke(width = ERASER_INDICATOR_STROKE_WIDTH_PX),
                 )
+            }
+        }
+
+        // Tappable note badges — one per note, anchored to the top-right of the
+        // note's first rect. Mounted only when [onNoteTapped] is provided (not in
+        // loupe / preview), and placed BEFORE the low-latency overlay so it never
+        // steals active stylus-draw events. Keyed by noteId for stable identity
+        // under add / remove / sync churn.
+        if (onNoteTapped != null) {
+            val ext = pageExtent
+            for (n in notes) {
+                val r = n.rects.firstOrNull() ?: continue
+                val badgePxX = (r.right - ext.left) * pdfWidthPx
+                val badgePxY = (r.top - ext.top) * pdfHeightPx
+                val badgeXDp = with(density) { badgePxX.toDp() } - NOTE_BADGE_SIZE / 2
+                val badgeYDp = with(density) { badgePxY.toDp() } - NOTE_BADGE_SIZE / 2
+                key(n.noteId) {
+                    Box(
+                        modifier =
+                            Modifier
+                                .offset(x = badgeXDp, y = badgeYDp)
+                                .size(NOTE_BADGE_SIZE)
+                                .background(
+                                    color = Color(n.colorArgb.toInt()),
+                                    shape = RoundedCornerShape(3.dp),
+                                )
+                                .pointerInput(n.noteId) {
+                                    detectTapGestures(onTap = { onNoteTapped(n) })
+                                },
+                    )
+                }
             }
         }
 

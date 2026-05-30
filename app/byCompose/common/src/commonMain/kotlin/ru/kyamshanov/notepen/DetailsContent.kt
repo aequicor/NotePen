@@ -495,7 +495,7 @@ fun DetailsContent(
             ToolMode.PEN -> lastPenPresetId = id
             ToolMode.MARKER -> lastMarkerPresetId = id
             ToolMode.ERASER -> lastEraserPresetId = id
-            ToolMode.NONE -> Unit
+            ToolMode.NONE, ToolMode.NOTE -> Unit
         }
     }
 
@@ -524,7 +524,9 @@ fun DetailsContent(
                 val preset = lastEraserPresetId?.let { id -> all.firstOrNull { it.id == id } } ?: all.firstOrNull()
                 preset?.let { eraserSettings = it.settings }
             }
-            ToolMode.NONE -> Unit
+            // «Заметка» не имеет настроек/пресетов рисования (создаётся из выделения);
+            // как и [NONE], применять нечего.
+            ToolMode.NONE, ToolMode.NOTE -> Unit
         }
     }
 
@@ -563,7 +565,14 @@ fun DetailsContent(
     // тап по полотну (см. Initial-pass focusRequester ниже) — а в чистом mouse-only
     // сценарии после переключения в режим чтения первый Right часто не доходил.
     LaunchedEffect(readingModeEnabled) {
-        if (readingModeEnabled) focusRequester.requestFocus()
+        if (readingModeEnabled) {
+            focusRequester.requestFocus()
+        } else if (toolMode == ToolMode.NOTE) {
+            // «Заметка» — инструмент только для чтения (создаёт заметку из выделения
+            // текста). Вне чтения он бессмыслен и заблокировал бы пан/рисование, поэтому
+            // при выходе из чтения сбрасываем его в [ToolMode.NONE].
+            toolMode = ToolMode.NONE
+        }
     }
     val readingModeAvailable = controls?.readingModeAvailable ?: true
     // В режиме чтения тап по тексту прячет инструменты и быстрые действия вместе с

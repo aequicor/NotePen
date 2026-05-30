@@ -18,6 +18,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
@@ -87,6 +88,23 @@ private data class StickyHighlightDto(
     val strokeId: String = "",
 )
 
+// Дисковый DTO заметки. Самостоятельный тип (не путать с проводным
+// ru.kyamshanov.notepen.sync.domain.model.PageNoteDto) — переиспользует
+// существующий NormalizedRectDto этого файла. Геометрия (rects) — источник
+// истины; quote/context — запасной TextQuoteSelector для ре-анкоринга.
+@Serializable
+private data class PageNoteDto(
+    val noteId: String = "",
+    val rects: List<NormalizedRectDto> = emptyList(),
+    val pageIndex: Int = 0,
+    val quote: String = "",
+    val context: String = "",
+    val body: String = "",
+    val colorArgb: Long = MarkerSettings.PRESET_COLORS[0],
+    val createdAt: Long = 0,
+    val updatedAt: Long = 0,
+)
+
 @Serializable
 private data class PageExtentDto(
     val l: Float = 0f,
@@ -130,6 +148,8 @@ private data class AnnotationDataDto(
     val pageExtents: Map<String, PageExtentDto> = emptyMap(),
     // Отсутствие ключа у легаси-файлов даёт пустую карту — выделения добавлены позже штрихов.
     val highlights: Map<String, List<StickyHighlightDto>> = emptyMap(),
+    // Отсутствие ключа у легаси-файлов даёт пустую карту — заметки добавлены позже выделений.
+    val notes: Map<String, List<PageNoteDto>> = emptyMap(),
 )
 
 // ── Mappers ──────────────────────────────────────────────────────────────────
@@ -174,6 +194,13 @@ private fun StickyHighlightDto.toDomain() = StickyHighlight(rects.map { it.toDom
 
 private fun StickyHighlight.toDto() = StickyHighlightDto(rects.map { it.toDto() }, colorArgb, strokeId)
 
+// Позиционные мапперы: порядок полей обязан совпадать с PageNote (см. план §0.1).
+private fun PageNoteDto.toDomain() =
+    PageNote(noteId, rects.map { it.toDomain() }, pageIndex, quote, context, body, colorArgb, createdAt, updatedAt)
+
+private fun PageNote.toDto() =
+    PageNoteDto(noteId, rects.map { it.toDto() }, pageIndex, quote, context, body, colorArgb, createdAt, updatedAt)
+
 // ── Repository ───────────────────────────────────────────────────────────────
 
 /**
@@ -215,6 +242,7 @@ class AnnotationRepositoryJvmAndroid(
         favoritePageIndices: Set<Int>,
         pageExtents: Map<Int, PageExtent>,
         highlights: Map<Int, List<StickyHighlight>>,
+        notes: Map<Int, List<PageNote>>,
     ): Result<Unit> =
         withContext(ioDispatcher) {
             try {
@@ -240,6 +268,11 @@ class AnnotationRepositoryJvmAndroid(
                                 .filterValues { it.isNotEmpty() }
                                 .mapKeys { it.key.toString() }
                                 .mapValues { (_, hs) -> hs.map { it.toDto() } },
+                        notes =
+                            notes
+                                .filterValues { it.isNotEmpty() }
+                                .mapKeys { it.key.toString() }
+                                .mapValues { (_, ns) -> ns.map { it.toDto() } },
                     )
                 val file = storeFileFor(pdfPath)
                 file.parentFile?.mkdirs()
@@ -307,10 +340,15 @@ class AnnotationRepositoryJvmAndroid(
                         dto.highlights.mapNotNull { (k, hs) ->
                             k.toIntOrNull()?.let { it to hs.map { h -> h.toDomain() } }
                         }.toMap()
+                    val notes =
+                        dto.notes.mapNotNull { (k, ns) ->
+                            k.toIntOrNull()?.let { it to ns.map { n -> n.toDomain() } }
+                        }.toMap()
                     Result.success(
                         AnnotationBundle(
                             pages = pages,
                             highlights = highlights,
+                            notes = notes,
                             scale = dto.scale,
                             pen = dto.pen?.toDomain() ?: PenSettings(),
                             marker = dto.marker?.toDomain() ?: MarkerSettings(),

@@ -13,15 +13,19 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -37,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -71,7 +76,9 @@ import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
@@ -147,6 +154,11 @@ private const val PANEL_SIDEBAR_ANIM_MS = 220
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
+
+/** Размеры поповера редактирования тела заметки ([NoteBodyPopover]). */
+private val NOTE_POPOVER_WIDTH = 320.dp
+private val NOTE_POPOVER_PADDING = 16.dp
+private val NOTE_POPOVER_ELEVATION = 6.dp
 
 /**
  * Per-panel actions and read-outs the unified toolbar drives for the focused
@@ -429,6 +441,10 @@ fun EditorPanel(
     // фоном при наличии текстового слоя и липком маркере; переиспользуется режимом чтения.
     val reflowDocCacheState = remember(pdfState) { mutableStateOf<ReflowDocument?>(null) }
     var reflowReading by remember(pdfState) { mutableStateOf<ReflowReading?>(null) }
+    // Заметка, открытая в поповере для редактирования/удаления тела (тап по бейджу в
+    // редакторе или по маркеру заметки в ридере). null — поповер скрыт. Сбрасывается
+    // при смене документа.
+    var editingNote by remember(pdfState) { mutableStateOf<PageNote?>(null) }
     // Якорь чтения уровня документа: «валюта» позиции в reflow-режиме (см. TextAnchor).
     // Живёт здесь, а не в ReflowReader: переживает закрытие/открытие reader-mode в сессии
     // и пишется в .view-сайдкар (autosave ниже), чтобы при следующем открытии документа
@@ -590,7 +606,14 @@ fun EditorPanel(
 
     val syncBridge =
         remember(syncEngine) {
-            syncEngine?.let { SyncBridge(engine = it, drawingStates = drawingStates, scope = coroutineScope) }
+            syncEngine?.let {
+                SyncBridge(
+                    engine = it,
+                    drawingStates = drawingStates,
+                    notes = pdfState.notes,
+                    scope = coroutineScope,
+                )
+            }
         }
     LaunchedEffect(syncBridge) { syncBridge?.start() }
 
@@ -614,6 +637,17 @@ fun EditorPanel(
                         state.currentPaths.add(added.path.toDomain())
                         state.markHistoryChanged()
                     }
+                }
+                snapshot.notes.forEach { upserted ->
+                    val incoming = upserted.note.toDomain()
+                    val page = upserted.pageIndex
+                    val existing = pdfState.notes[page].orEmpty()
+                    pdfState.notes[page] =
+                        if (existing.any { it.noteId == incoming.noteId }) {
+                            existing.map { if (it.noteId == incoming.noteId) incoming else it }
+                        } else {
+                            existing + incoming
+                        }
                 }
             }
     }
@@ -670,6 +704,7 @@ fun EditorPanel(
                 favoritePageIndices = favoritePageIndices.toSet(),
                 pageExtents = extents,
                 highlights = pdfState.highlights.toMap(),
+                notes = pdfState.notes.toMap(),
             )
         showSnackbar(if (result.isSuccess) message else "Ошибка локального сохранения")
     }
@@ -893,6 +928,9 @@ fun EditorPanel(
             // Липкие выделения не синхронизируются дельтами — грузим с диска всегда,
             // независимо от projection-штрихов.
             bundle.highlights.forEach { (pageIndex, hs) -> pdfState.highlights[pageIndex] = hs }
+            // Заметки, как и липкие выделения, не приходят начальным снапшотом дельт —
+            // грузим с диска всегда.
+            bundle.notes.forEach { (pageIndex, ns) -> pdfState.notes[pageIndex] = ns }
             favoritePageIndices.clear()
             favoritePageIndices.addAll(bundle.favoritePageIndices)
         }
@@ -925,6 +963,7 @@ fun EditorPanel(
                 favoritePageIndices = state.favoritePageIndices.toSet(),
                 pageExtents = extents,
                 highlights = state.highlights.toMap(),
+                notes = state.notes.toMap(),
             ).onFailure { e -> panelLogger.warn { "Auto-save failed for ${state.filePath}: ${e::class.simpleName}" } }
     }
     val requestRemoteSaveIfConnected: suspend () -> Unit = {
@@ -946,6 +985,8 @@ fun EditorPanel(
             for ((_, s) in pdfState.drawingStates) acc += s.historyVersion.value
             acc + pdfState.favoritePageIndices.size +
                 pdfState.highlights.values.sumOf { it.size } +
+                pdfState.notes.values.sumOf { it.size } +
+                pdfState.notes.values.sumOf { ns -> ns.sumOf { n -> n.updatedAt } }.toInt() +
                 penSettings.hashCode() + markerSettings.hashCode() + eraserSettings.hashCode()
         }.drop(1)
             .distinctUntilChanged()
@@ -1590,6 +1631,8 @@ fun EditorPanel(
                             markerSettings = markerSettings,
                             eraserSettings = eraserSettings,
                             highlights = pdfState.highlights[pageIndex].orEmpty(),
+                            notes = pdfState.notes[pageIndex].orEmpty(),
+                            onNoteTapped = { note -> editingNote = note },
                             pdfWidth = pdfWidth,
                             pdfHeight = pdfHeight,
                             pageExtent = extent,
@@ -1791,30 +1834,80 @@ fun EditorPanel(
                             }
                         }
                     }
+                    // Заметки тоже геометрически привязаны к страницам — маппим их анкеры
+                    // тем же путём, что подсветки (anchorsForNote → геометрия, с фолбэком на
+                    // quote), и кэшируем по значению заметки. Складываем в readerHighlights,
+                    // чтобы диапазон заметки красился «бесплатно» через тот же highlight-слой;
+                    // ReflowReader дополнительно рисует тап-бейдж на полях.
+                    val noteAnchorCache = remember(reading) { mutableMapOf<PageNote, List<TextAnchor>>() }
+                    val noteAnchors by remember(reading) {
+                        derivedStateOf {
+                            val doc = reading.document
+                            pdfState.notes.values.flatMap { ns ->
+                                ns.flatMap { n ->
+                                    noteAnchorCache.getOrPut(n) { StrokeTextMapper.anchorsForNote(doc, n) }
+                                }
+                            }
+                        }
+                    }
                     val readerHighlights by remember(reading) {
-                        derivedStateOf { strokeAnchors + highlightAnchors }
+                        derivedStateOf { strokeAnchors + highlightAnchors + noteAnchors }
                     }
                     // Сквозное выделение отдаёт анкеры по всем покрытым блокам сразу; маппим их
                     // в геометрию по страницам (selectionRectsByPage уже сливает по строкам) и
                     // на каждую затронутую страницу добавляем StickyHighlight цвета маркера. Один
                     // pushUndoSnapshot на страницу (до правки её подсветок) — откат жеста по шагам.
+                    // Инструмент «заметка» (доступен только в чтении): текстовое выделение
+                    // создаёт [PageNote] вместо липкого выделения. Owner — тулбар выше
+                    // ([DetailsContent]); здесь выводим из активного [toolMode].
+                    val noteToolActive = toolMode == ToolMode.NOTE
                     val createHighlight: (List<TextAnchor>) -> Unit = { anchors ->
-                        StrokeTextMapper.selectionRectsByPage(reading.document, anchors)
-                            .forEach { (page, rects) ->
-                                if (rects.isNotEmpty()) {
-                                    pdfState.pushUndoSnapshot(
-                                        page,
-                                        drawingStates[page]?.currentPaths?.toList() ?: emptyList(),
-                                    )
-                                    pdfState.highlights[page] =
-                                        pdfState.highlights[page].orEmpty() +
-                                        StickyHighlight(rects = rects, colorArgb = markerSettings.colorArgb)
+                        if (noteToolActive) {
+                            // Заметку рождаем из выделения: проецируем анкеры обратно в page-rects
+                            // (источник истины) и сохраняем quote+context как фолбэк ре-анкера.
+                            val (quote, context) = StrokeTextMapper.quoteForAnchors(reading.document, anchors)
+                            StrokeTextMapper.selectionRectsByPage(reading.document, anchors)
+                                .forEach { (page, rects) ->
+                                    if (rects.isNotEmpty()) {
+                                        pdfState.pushUndoSnapshot(
+                                            page,
+                                            drawingStates[page]?.currentPaths?.toList() ?: emptyList(),
+                                        )
+                                        val created =
+                                            handlePanelNoteCreated(
+                                                notesState = pdfState.notes,
+                                                pageIndex = page,
+                                                rects = rects,
+                                                quote = quote,
+                                                context = context,
+                                                colorArgb = markerSettings.colorArgb,
+                                                nowMillis = 0L,
+                                                engine = syncEngineProvider.value,
+                                            )
+                                        if (created != null) editingNote = created
+                                    }
                                 }
-                            }
+                        } else {
+                            StrokeTextMapper.selectionRectsByPage(reading.document, anchors)
+                                .forEach { (page, rects) ->
+                                    if (rects.isNotEmpty()) {
+                                        pdfState.pushUndoSnapshot(
+                                            page,
+                                            drawingStates[page]?.currentPaths?.toList() ?: emptyList(),
+                                        )
+                                        pdfState.highlights[page] =
+                                            pdfState.highlights[page].orEmpty() +
+                                            StickyHighlight(rects = rects, colorArgb = markerSettings.colorArgb)
+                                    }
+                                }
+                        }
                     }
                     CompositionLocalProvider(
                         LocalReflowSelection provides
-                            ReflowSelection(immediate = toolMode == ToolMode.MARKER, onCreate = createHighlight),
+                            ReflowSelection(
+                                immediate = toolMode == ToolMode.MARKER || noteToolActive,
+                                onCreate = createHighlight,
+                            ),
                         LocalReflowLayoutCache provides reflowLayoutCache,
                     ) {
                         ReflowReader(
@@ -1828,6 +1921,8 @@ fun EditorPanel(
                             },
                             modifier = Modifier.fillMaxSize(),
                             highlights = readerHighlights,
+                            notes = reading.notes,
+                            onNoteTap = { note -> editingNote = note },
                             listState = reflowListState,
                             renderPage = renderFigurePage,
                             onPageDeltaReady = { reflowPageDelta.value = it },
@@ -1922,7 +2017,175 @@ fun EditorPanel(
                     },
             )
         }
+
+        // Поповер редактирования/удаления тела заметки — общий для редактора (тап по
+        // бейджу) и ридера (тап по маркеру заметки). Центрируется, без привязки к бейджу.
+        editingNote?.let { note ->
+            NoteBodyPopover(
+                note = note,
+                onDismiss = { editingNote = null },
+                onSave = { body ->
+                    pdfState.pushUndoSnapshot(
+                        note.pageIndex,
+                        pdfState.drawingStates[note.pageIndex]?.currentPaths?.toList() ?: emptyList(),
+                    )
+                    handlePanelNoteEdited(pdfState.notes, note, body, 0L, syncEngineProvider.value)
+                    editingNote = null
+                },
+                onDelete = {
+                    pdfState.pushUndoSnapshot(
+                        note.pageIndex,
+                        pdfState.drawingStates[note.pageIndex]?.currentPaths?.toList() ?: emptyList(),
+                    )
+                    handlePanelNoteRemoved(pdfState.notes, note, syncEngineProvider.value)
+                    editingNote = null
+                },
+            )
+        }
     }
+}
+
+/**
+ * Centred popover editing the [PageNote.body] of [note]. Save persists the new body
+ * (a fresh NoteUpserted via the editor glue); Delete tombstones the note. Dismiss
+ * closes without changes.
+ */
+@Composable
+private fun NoteBodyPopover(
+    note: PageNote,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+    onDelete: () -> Unit,
+) {
+    var body by remember(note.noteId) { mutableStateOf(note.body) }
+    Popup(
+        alignment = Alignment.Center,
+        onDismissRequest = onDismiss,
+        properties = PopupProperties(focusable = true),
+    ) {
+        Surface(
+            tonalElevation = NOTE_POPOVER_ELEVATION,
+            shadowElevation = NOTE_POPOVER_ELEVATION,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.width(NOTE_POPOVER_WIDTH),
+        ) {
+            Column(
+                modifier = Modifier.padding(NOTE_POPOVER_PADDING),
+                verticalArrangement = Arrangement.spacedBy(NOTE_POPOVER_PADDING),
+            ) {
+                if (note.quote.isNotEmpty()) {
+                    Text(
+                        text = note.quote,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                OutlinedTextField(
+                    value = body,
+                    onValueChange = { body = it },
+                    label = { Text("Заметка") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(NOTE_POPOVER_PADDING),
+                ) {
+                    TextButton(onClick = onDelete) { Text("Удалить") }
+                    Box(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("Отмена") }
+                    TextButton(onClick = { onSave(body) }) { Text("Сохранить") }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Mints a [PageNote] from a reader selection (rects = source of truth, quote/context
+ * = re-anchor fallback), inserts it into [notesState], and publishes a
+ * [StrokeDelta.NoteUpserted] (LWW like Added; the engine stamps the real clock).
+ * Returns the created note, or `null` when there is nothing to create / no engine.
+ */
+private fun handlePanelNoteCreated(
+    notesState: SnapshotStateMap<Int, List<PageNote>>,
+    pageIndex: Int,
+    rects: List<NormalizedRect>,
+    quote: String,
+    context: String,
+    colorArgb: Long,
+    nowMillis: Long,
+    engine: SyncEngine?,
+): PageNote? {
+    if (rects.isEmpty() || engine == null) return null
+    val id = engine.newStrokeId()
+    val note =
+        PageNote(
+            noteId = id,
+            rects = rects,
+            pageIndex = pageIndex,
+            quote = quote,
+            context = context,
+            body = "",
+            colorArgb = colorArgb,
+            createdAt = nowMillis,
+            updatedAt = nowMillis,
+        )
+    notesState[pageIndex] = notesState[pageIndex].orEmpty() + note
+    engine.applyLocal(
+        StrokeDelta.NoteUpserted(
+            strokeId = id,
+            pageIndex = pageIndex,
+            authorDeviceId = engine.deviceId,
+            clock = 0,
+            note = note.toDto(),
+        ),
+    )
+    return note
+}
+
+/**
+ * Edits a note's [PageNote.body]: replaces it in [notesState] and publishes a new
+ * [StrokeDelta.NoteUpserted] with a higher clock (whole-note LWW).
+ */
+private fun handlePanelNoteEdited(
+    notesState: SnapshotStateMap<Int, List<PageNote>>,
+    note: PageNote,
+    newBody: String,
+    nowMillis: Long,
+    engine: SyncEngine?,
+) {
+    if (engine == null) return
+    val updated = note.copy(body = newBody, updatedAt = nowMillis)
+    notesState[note.pageIndex] =
+        notesState[note.pageIndex].orEmpty().map { if (it.noteId == note.noteId) updated else it }
+    engine.applyLocal(
+        StrokeDelta.NoteUpserted(
+            strokeId = updated.noteId,
+            pageIndex = updated.pageIndex,
+            authorDeviceId = engine.deviceId,
+            clock = 0,
+            note = updated.toDto(),
+        ),
+    )
+}
+
+/** Removes a note locally and publishes a [StrokeDelta.NoteRemoved] tombstone. */
+private fun handlePanelNoteRemoved(
+    notesState: SnapshotStateMap<Int, List<PageNote>>,
+    note: PageNote,
+    engine: SyncEngine?,
+) {
+    if (engine == null) return
+    notesState[note.pageIndex] =
+        notesState[note.pageIndex].orEmpty().filterNot { it.noteId == note.noteId }
+    engine.applyLocal(
+        StrokeDelta.NoteRemoved(
+            strokeId = note.noteId,
+            pageIndex = note.pageIndex,
+            authorDeviceId = engine.deviceId,
+            clock = 0,
+        ),
+    )
 }
 
 /** strokeId-stamp + sync publish for a finished stroke. */
