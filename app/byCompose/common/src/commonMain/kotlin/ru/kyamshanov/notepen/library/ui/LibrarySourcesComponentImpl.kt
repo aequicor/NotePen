@@ -23,6 +23,8 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  * @param onServeOverLan platform serve-over-LAN action (desktop); `null` hides it (Android).
  * @param onPickLocalFolder platform folder picker for adding a local-folder library (desktop);
  *   `null` hides the "local folder" add option (Android — client-only, no local backend).
+ * @param googleDriveAuthorizer drives the Google device-flow sign-in for a Drive library; `null`
+ *   hides the "Google Drive" add option when no OAuth client is configured.
  * @param onBack navigation back to the main screen.
  */
 @Suppress("LongParameterList")
@@ -34,6 +36,7 @@ class LibrarySourcesComponentImpl(
     onlinePeerIdsFlow: Flow<Set<String>>?,
     onServeOverLan: (() -> Unit)?,
     val onPickLocalFolder: (suspend () -> String?)?,
+    googleDriveAuthorizer: GoogleDriveAuthorizer? = null,
     val onBack: () -> Unit,
 ) : LibrarySourcesComponent,
     ComponentContext by componentContext {
@@ -45,6 +48,7 @@ class LibrarySourcesComponentImpl(
             catalogsFlow = catalogsFlow,
             onlinePeerIdsFlow = onlinePeerIdsFlow,
             onServeOverLan = onServeOverLan,
+            googleDriveAuthorizer = googleDriveAuthorizer,
         )
 
     override fun onBack() {

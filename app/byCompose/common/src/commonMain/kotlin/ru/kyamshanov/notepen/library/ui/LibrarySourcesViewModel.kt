@@ -5,6 +5,7 @@ import com.arkivanov.essenty.lifecycle.coroutines.withLifecycle
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -15,6 +16,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.appsettings.domain.port.AppSettingsRepository
+import ru.kyamshanov.notepen.library.api.CloudProviderIds
 import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.api.LibraryId
@@ -39,6 +41,8 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  * @param onlinePeerIdsFlow reactive set of online peer ids; refines the "available peers" list.
  * @param onServeOverLan platform action enabling serve-over-LAN (desktop: `SyncRuntime.enable()`);
  *   `null` on platforms that cannot host (Android, client-only) — the action is then hidden.
+ * @param googleDriveAuthorizer drives the Google device-flow sign-in for a Drive library; `null`
+ *   when no OAuth client is configured — the "Google Drive" add option is then hidden.
  */
 @Suppress("LongParameterList")
 class LibrarySourcesViewModel(
@@ -48,6 +52,7 @@ class LibrarySourcesViewModel(
     private val catalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>?,
     private val onlinePeerIdsFlow: Flow<Set<String>>?,
     private val onServeOverLan: (() -> Unit)?,
+    private val googleDriveAuthorizer: GoogleDriveAuthorizer? = null,
 ) {
     private val logger = KotlinLogging.logger {}
 
@@ -55,8 +60,14 @@ class LibrarySourcesViewModel(
 
     private val _state =
         MutableStateFlow(
-            LibrarySourcesUiState(serveOverLanSupported = onServeOverLan != null),
+            LibrarySourcesUiState(
+                serveOverLanSupported = onServeOverLan != null,
+                googleDriveSupported = googleDriveAuthorizer != null,
+            ),
         )
+
+    /** The in-flight Google sign-in, so a new attempt (or cancel) supersedes the previous one. */
+    private var googleSignInJob: Job? = null
 
     /** Screen state (read-only). */
     val state: StateFlow<LibrarySourcesUiState> = _state.asStateFlow()
@@ -121,6 +132,63 @@ class LibrarySourcesViewModel(
                     _state.update { it.copy(errorMessage = "Не удалось подключить GitHub-библиотеку") }
                 }
         }
+    }
+
+    /**
+     * Connects a Google Drive library reading the shared folder [folderId] as a shelf. Runs the
+     * Google OAuth device flow first: the user code + verification URL surface via
+     * [LibrarySourcesUiState.googleDevicePrompt] while polling, then the resulting refresh token (and
+     * its scope, which sets the Reader/Librarian role) persists in the connection spec. A read-only
+     * scope yields a Reader; a write scope a Librarian.
+     */
+    fun addGoogleDriveLibrary(folderId: String) {
+        val authorizer = googleDriveAuthorizer
+        val id = folderId.trim()
+        if (id.isBlank()) {
+            _state.update { it.copy(errorMessage = "Укажите id папки Google Drive") }
+            return
+        }
+        if (authorizer == null) {
+            _state.update { it.copy(errorMessage = "Вход через Google не настроен") }
+            return
+        }
+        googleSignInJob?.cancel()
+        googleSignInJob =
+            scope.launch {
+                authorizer
+                    .authorize { code ->
+                        _state.update {
+                            it.copy(
+                                googleDevicePrompt =
+                                    GoogleDeviceCodeUiModel(userCode = code.userCode, verificationUri = code.verificationUri),
+                            )
+                        }
+                    }.onSuccess { auth ->
+                        registry
+                            .connect(
+                                LibraryConnection.Cloud(
+                                    providerId = CloudProviderIds.GOOGLE_DRIVE,
+                                    accountId = id,
+                                    refreshToken = auth.refreshToken,
+                                    scope = auth.scope,
+                                ),
+                            ).onFailure { e ->
+                                logger.warn(e) { "addGoogleDriveLibrary connect failed: ${e::class.simpleName}" }
+                                _state.update { it.copy(errorMessage = "Не удалось подключить Google Drive") }
+                            }
+                        _state.update { it.copy(googleDevicePrompt = null) }
+                    }.onFailure { e ->
+                        logger.warn(e) { "addGoogleDriveLibrary sign-in failed: ${e::class.simpleName}" }
+                        _state.update { it.copy(googleDevicePrompt = null, errorMessage = "Вход через Google не выполнен") }
+                    }
+            }
+    }
+
+    /** Cancels an in-progress Google sign-in and dismisses its prompt. */
+    fun cancelGoogleSignIn() {
+        googleSignInJob?.cancel()
+        googleSignInJob = null
+        _state.update { it.copy(googleDevicePrompt = null) }
     }
 
     /** Connects a local-folder library rooted at [rootPath] (desktop only). */
@@ -191,10 +259,14 @@ class LibrarySourcesViewModel(
         online: Set<String>?,
         libraries: List<Library>,
     ): List<AvailablePeerUiModel> {
+        // Peer id of a PeerLan library (`peerlan:<peerId>`), or null for other kinds.
         val connectedPeerIds =
             libraries
-                .mapNotNull { lib -> peerIdOfLibrary(lib.descriptor.id.value) }
-                .toSet()
+                .mapNotNull { lib ->
+                    lib.descriptor.id.value
+                        .takeIf { it.startsWith(PEER_LAN_ID_PREFIX) }
+                        ?.removePrefix(PEER_LAN_ID_PREFIX)
+                }.toSet()
         return catalogs.entries
             .filter { (device, _) -> device.id !in connectedPeerIds }
             .filter { (device, _) -> online == null || device.id in online }
@@ -207,10 +279,6 @@ class LibrarySourcesViewModel(
             }
             .sortedBy { it.displayName.lowercase() }
     }
-
-    /** Extracts the peer id from a PeerLan library id (`peerlan:<peerId>`), or `null` for other kinds. */
-    private fun peerIdOfLibrary(libraryId: String): String? =
-        libraryId.takeIf { it.startsWith(PEER_LAN_ID_PREFIX) }?.removePrefix(PEER_LAN_ID_PREFIX)
 
     private companion object {
         const val PEER_LAN_ID_PREFIX = "peerlan:"

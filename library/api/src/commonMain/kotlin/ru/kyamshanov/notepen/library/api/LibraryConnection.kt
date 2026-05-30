@@ -56,15 +56,23 @@ public sealed interface LibraryConnection {
     ) : LibraryConnection
 
     /**
-     * A library backed by a generic cloud storage provider.
+     * A library backed by a generic cloud storage provider (first provider: Google Drive).
      *
-     * @property providerId identifier of the cloud provider (Drive/Dropbox/…).
-     * @property accountId account or root identifier within the provider.
+     * @property providerId identifier of the cloud provider (e.g. `google_drive`).
+     * @property accountId account or root identifier within the provider. For Google Drive this is
+     *   the **folder id** of the shared folder used as the book shelf.
+     * @property refreshToken an OAuth refresh token granting durable access, or `null` for stores
+     *   that need no per-user auth. Persisted as part of the spec (plaintext, like the GitHub token).
+     * @property scope the OAuth scope the [refreshToken] was granted (e.g. `drive.readonly` →
+     *   Reader, a write scope → Librarian), or `null` when not applicable. Backends derive the role
+     *   from it. New fields default so older connection files stay deserializable.
      */
     @Serializable
     @SerialName("cloud")
     public data class Cloud(
         public val providerId: String,
         public val accountId: String,
+        public val refreshToken: String? = null,
+        public val scope: String? = null,
     ) : LibraryConnection
 }

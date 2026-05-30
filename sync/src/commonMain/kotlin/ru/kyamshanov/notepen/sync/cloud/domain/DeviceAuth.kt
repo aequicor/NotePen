@@ -15,9 +15,20 @@ data class DeviceAuthorization(
 
 /** Outcome of one poll for the device-flow access token. */
 sealed interface DeviceTokenResult {
-    /** The user approved; [accessToken] is a bearer token for the provider API. */
+    /**
+     * The user approved; [accessToken] is a bearer token for the provider API.
+     *
+     * @property accessToken short-lived bearer token for the provider API.
+     * @property refreshToken durable token used to mint new access tokens after [accessToken]
+     *   expires, or `null` for providers whose device flow returns no refresh token (e.g. GitHub,
+     *   whose tokens do not expire). Google returns one when offline access is requested.
+     * @property expiresInSeconds lifetime of [accessToken] in seconds, or `null` when the provider
+     *   does not report it (e.g. GitHub).
+     */
     data class Authorized(
         val accessToken: String,
+        val refreshToken: String? = null,
+        val expiresInSeconds: Int? = null,
     ) : DeviceTokenResult
 
     /** The user has not approved yet — keep polling at the current interval. */
