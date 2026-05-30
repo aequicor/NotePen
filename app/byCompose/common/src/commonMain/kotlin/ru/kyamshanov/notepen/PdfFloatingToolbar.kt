@@ -62,30 +62,32 @@ internal fun ToolToggleButton(
             },
         label = "toolIconTint",
     )
-    IconButton(
-        onClick = onClick,
-        enabled = enabled,
-        modifier =
-            modifier
-                .size(RAIL_BUTTON_SIZE)
-                .semantics {
-                    role = Role.Button
-                    this.selected = selected
-                },
-    ) {
-        Box(
+    Tooltip(text = contentDescription) {
+        IconButton(
+            onClick = onClick,
+            enabled = enabled,
             modifier =
-                Modifier
-                    .size(RAIL_INDICATOR_SIZE)
-                    .clip(CircleShape)
-                    .background(indicatorColor),
-            contentAlignment = Alignment.Center,
+                modifier
+                    .size(RAIL_BUTTON_SIZE)
+                    .semantics {
+                        role = Role.Button
+                        this.selected = selected
+                    },
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = if (selected) "$contentDescription (активен)" else contentDescription,
-                tint = iconTint,
-            )
+            Box(
+                modifier =
+                    Modifier
+                        .size(RAIL_INDICATOR_SIZE)
+                        .clip(CircleShape)
+                        .background(indicatorColor),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = if (selected) "$contentDescription (активен)" else contentDescription,
+                    tint = iconTint,
+                )
+            }
         }
     }
 }
