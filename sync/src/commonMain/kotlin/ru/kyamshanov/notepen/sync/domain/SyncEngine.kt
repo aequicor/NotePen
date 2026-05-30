@@ -58,7 +58,15 @@ class SyncEngine(
     private val pendingQueue: PendingDeltaQueue? = null,
 ) {
     private val clocks = mutableMapOf<String, Long>() // strokeId → last seen clock
-    private val _merged = MutableSharedFlow<StrokeDelta>(extraBufferCapacity = 128)
+
+    // `replay` keeps the most recent deltas so a presentation-layer subscriber
+    // (SyncBridge) that attaches slightly AFTER an emit still drains them — most
+    // importantly the OFF→ON resync catch-up, which fires a burst from
+    // LiveDocumentSyncController.enable and could otherwise race the bridge's
+    // subscription (a no-replay SharedFlow drops emissions made with zero
+    // collectors). Re-delivery is safe: SyncBridge dedupes adds by strokeId and
+    // removals are idempotent.
+    private val _merged = MutableSharedFlow<StrokeDelta>(replay = 64, extraBufferCapacity = 128)
     private var strokeSeq = 0L
 
     /** Incoming deltas after merge — presentation layer subscribes here. */

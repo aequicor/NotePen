@@ -58,11 +58,13 @@ import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -269,6 +271,12 @@ fun EditorPanel(
     onReaderStoredChange: (StoredReaderSettings) -> Unit,
     syncEngineFor: ((documentId: String) -> SyncEngine)?,
     peerClient: SyncClient?,
+    /**
+     * Host-side peer server (desktop). Used together with [peerClient] only to
+     * detect whether any peer is currently connected, so opening a document can
+     * auto-enable live sync (the «share just works» path). `null` on the client.
+     */
+    peerServer: ru.kyamshanov.notepen.sync.domain.port.PeerServer?,
     pendingDeltaCounts: kotlinx.coroutines.flow.Flow<Map<String, Int>>?,
     receivedPdfDir: String?,
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry?,
@@ -385,9 +393,28 @@ fun EditorPanel(
         val controller = liveSyncController ?: return@produceState
         controller.isLive(documentId).collect { value = it }
     }
+    // Есть ли хотя бы один подключённый пир (как хост, так и клиент).
+    val anyPeerConnected by produceState(false, peerClient, peerServer) {
+        val hosts = peerClient?.connectedHosts ?: flowOf(emptySet())
+        val peers = peerServer?.connectedPeers ?: flowOf(emptySet())
+        combine(hosts, peers) { h, p -> h.isNotEmpty() || p.isNotEmpty() }
+            .collect { value = it }
+    }
     DisposableEffect(liveSyncController, documentId) {
         liveSyncController?.bind(documentId)
         onDispose { liveSyncController?.disable(documentId) }
+    }
+    // Явная ручная пауза пользователя для ЭТОГО документа. Нужна, чтобы авто-
+    // включение при ПЕРЕподключении пира (Wi-Fi моргнул, кабель передёрнули, пир
+    // свернулся) не перетирало осознанное выключение синка. Сбрасывается при смене
+    // документа (remember(documentId)).
+    var userPausedSync by remember(documentId) { mutableStateOf(false) }
+    // Шаринг «из коробки»: пока есть подключённый пир, открытие документа само
+    // включает живую синхронизацию — одна книга на двух спаренных устройствах
+    // синхронизирует надписи без ручного тумблера. Если пользователь явно поставил
+    // документ на паузу, авто-включение не срабатывает даже при переподключении.
+    LaunchedEffect(liveSyncController, documentId, anyPeerConnected, userPausedSync) {
+        if (anyPeerConnected && !userPausedSync) liveSyncController?.enable(documentId)
     }
 
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
@@ -1481,7 +1508,12 @@ fun EditorPanel(
                     toggleBookSpread = onToggleBookSpread,
                     liveSyncAvailable = liveSyncController != null,
                     liveSyncEnabled = liveSyncVisible,
-                    toggleLiveSync = { liveSyncController?.toggle(documentId) },
+                    toggleLiveSync = {
+                        // Запоминаем явную ручную паузу: если выключаем включённый
+                        // синк — больше не авто-включаем при переподключении пира.
+                        userPausedSync = liveSyncEnabled
+                        liveSyncController?.toggle(documentId)
+                    },
                 ),
             )
         }

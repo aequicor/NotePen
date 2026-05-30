@@ -36,6 +36,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.LiquidGlassAlertDialog
 import ru.kyamshanov.notepen.qrconnect.application.HostQrPairingCoordinator
+import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
+import ru.kyamshanov.notepen.qrconnect.domain.port.QrMatrix
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 
 /**
@@ -82,6 +84,10 @@ fun HostQrPairingPanel(
                 ShowingQrContent(
                     state = s,
                     canGrantLibrarian = viewModel.canGrantLibrarian,
+                    cableState = if (viewModel.cableSupported) viewModel.cableState?.collectAsState()?.value else null,
+                    encodeCableQr = viewModel::encodeCableQr,
+                    onStartCable = { port, serial -> viewModel.startCable(port, serial) },
+                    onStopCable = { port, serial -> viewModel.stopCable(port, serial) },
                     onApprove = { peerId -> viewModel.approve(peerId) },
                     onApproveAsLibrarian = { peerId -> viewModel.approveAsLibrarian(peerId) },
                     onReject = { peerId -> viewModel.reject(peerId) },
@@ -113,6 +119,10 @@ fun HostQrPairingPanel(
 private fun ShowingQrContent(
     state: HostQrPairingCoordinator.State.ShowingQr,
     canGrantLibrarian: Boolean,
+    cableState: CableState?,
+    encodeCableQr: (PairingUri) -> QrMatrix,
+    onStartCable: (Int, String?) -> Unit,
+    onStopCable: (Int, String?) -> Unit,
     onApprove: (String) -> Unit,
     onApproveAsLibrarian: (String) -> Unit,
     onReject: (String) -> Unit,
@@ -129,6 +139,17 @@ private fun ShowingQrContent(
     )
 
     ManualConnectionDetails(payload = state.uri.encode())
+
+    if (cableState != null) {
+        Spacer(Modifier.height(4.dp))
+        CablePairingSection(
+            uri = state.uri,
+            cableState = cableState,
+            encodeCableQr = encodeCableQr,
+            onStart = onStartCable,
+            onStop = onStopCable,
+        )
+    }
 
     Spacer(Modifier.height(4.dp))
 
@@ -209,6 +230,98 @@ private fun ManualConnectionDetails(payload: String) {
             }
         }
     }
+}
+
+/**
+ * USB-cable pairing section. Renders the current [CableState]: a button to set
+ * up `adb reverse`, device-picker for multiple devices, or — once [CableState.Ready]
+ * — a `127.0.0.1` QR + manual string the tethered tablet scans/pastes. The host
+ * server binds `0.0.0.0`, so the loopback payload reaches it over the cable.
+ */
+@Composable
+private fun CablePairingSection(
+    uri: PairingUri,
+    cableState: CableState,
+    encodeCableQr: (PairingUri) -> QrMatrix,
+    onStart: (Int, String?) -> Unit,
+    onStop: (Int, String?) -> Unit,
+) {
+    val cableUri = remember(uri) { uri.copy(host = "127.0.0.1") }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            text = "Подключение по кабелю (USB)",
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        when (cableState) {
+            CableState.Idle ->
+                Button(onClick = { onStart(uri.port, null) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Включить подключение по кабелю")
+                }
+
+            CableState.NoTool ->
+                Text(
+                    text =
+                        "adb не найден. Установите Android platform-tools, подключите " +
+                            "планшет по USB и включите «Отладку по USB».",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+
+            CableState.NoDevice -> {
+                Text(
+                    text = "Планшет не обнаружен. Подключите его по USB и разрешите отладку на устройстве.",
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+                TextButton(onClick = { onStart(uri.port, null) }) { Text("Повторить") }
+            }
+
+            is CableState.MultipleDevices -> {
+                Text("Выберите устройство:", style = MaterialTheme.typography.bodySmall)
+                cableState.devices.forEach { device ->
+                    TextButton(onClick = { onStart(uri.port, device.serial) }) { Text(device.serial) }
+                }
+            }
+
+            is CableState.Ready ->
+                CableReadyContent(
+                    cableUri = cableUri,
+                    encodeCableQr = encodeCableQr,
+                    onStop = { onStop(cableState.port, cableState.serial) },
+                )
+
+            is CableState.Error -> {
+                Text(
+                    text = "Ошибка: ${cableState.message}",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                TextButton(onClick = { onStart(uri.port, null) }) { Text("Повторить") }
+            }
+        }
+    }
+}
+
+/** [CableState.Ready] content: the loopback QR + manual string + disconnect action. */
+@Composable
+private fun CableReadyContent(
+    cableUri: PairingUri,
+    encodeCableQr: (PairingUri) -> QrMatrix,
+    onStop: () -> Unit,
+) {
+    QrCodeImage(matrix = remember(cableUri) { encodeCableQr(cableUri) }, sizeDp = 200.dp)
+    Text(
+        text = "Отсканируйте этот QR на планшете, подключённом по USB.",
+        style = MaterialTheme.typography.bodySmall,
+        textAlign = TextAlign.Center,
+    )
+    ManualConnectionDetails(payload = cableUri.encode())
+    TextButton(onClick = onStop) { Text("Отключить кабель") }
 }
 
 @Composable

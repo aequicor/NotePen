@@ -46,6 +46,7 @@ import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.qrconnect.SyncPairingButton
@@ -70,6 +71,7 @@ fun SettingsContent(
     manualConnectViewModel: ManualConnectViewModel? = null,
     peerServer: PeerServer? = null,
     peerClient: SyncClient? = null,
+    hostDiscoveryViewModel: HostDiscoveryViewModel? = null,
     modifier: Modifier = Modifier,
 ) {
     val settings by component.settings.collectAsState()
@@ -96,6 +98,7 @@ fun SettingsContent(
                 manualConnectViewModel = manualConnectViewModel,
                 peerServer = peerServer,
                 peerClient = peerClient,
+                hostDiscoveryViewModel = hostDiscoveryViewModel,
             )
             SettingsTopBar(modifier = Modifier.align(Alignment.TopCenter), onBack = component::onBack)
         }
@@ -117,6 +120,7 @@ private fun SettingsList(
     manualConnectViewModel: ManualConnectViewModel?,
     peerServer: PeerServer?,
     peerClient: SyncClient?,
+    hostDiscoveryViewModel: HostDiscoveryViewModel?,
 ) {
     Column(
         modifier =
@@ -144,6 +148,7 @@ private fun SettingsList(
                 manualConnectViewModel = manualConnectViewModel,
                 peerServer = peerServer,
                 peerClient = peerClient,
+                hostDiscoveryViewModel = hostDiscoveryViewModel,
             )
         }
         SettingsClickableSection(

@@ -8,7 +8,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.qrconnect.application.HostQrPairingCoordinator
+import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.qrconnect.domain.port.QrEncoder
+import ru.kyamshanov.notepen.qrconnect.domain.port.QrMatrix
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 
 /**
@@ -35,6 +37,13 @@ class HostQrPairingViewModel(
     private val scope: CoroutineScope,
     private val onStop: (suspend () -> Unit)? = null,
     private val grantLibrarian: (suspend (peerId: String) -> Unit)? = null,
+    /**
+     * Optional cable (USB) bridge. When non-null the host panel offers a
+     * «Подключение по кабелю» section that runs `adb reverse` so a tethered
+     * tablet reaches this host at `127.0.0.1`. Null (no adb tooling, or a
+     * non-desktop build) hides that section entirely.
+     */
+    private val cablePairing: CablePairing? = null,
 ) {
     private val _state = MutableStateFlow<HostQrPairingCoordinator.State?>(null)
     val state: StateFlow<HostQrPairingCoordinator.State?> = _state.asStateFlow()
@@ -75,9 +84,38 @@ class HostQrPairingViewModel(
         runJob = null
         _state.value = null
         scope.launch {
+            // Remove any cable reverse first — the port is about to be released.
+            (cablePairing?.state?.value as? CableState.Ready)?.let { cablePairing.stop(it.port, it.serial) }
             peerServerProvider().stop()
             onStop?.invoke()
         }
+    }
+
+    // ---- Cable (USB) pairing ---------------------------------------------
+
+    /** True when this host can offer a cable (USB) connection path. */
+    val cableSupported: Boolean get() = cablePairing != null
+
+    /** Cable state stream for the panel's USB section; null when unsupported. */
+    val cableState: StateFlow<CableState>? = cablePairing?.state
+
+    /** Encodes a `127.0.0.1` cable payload to a QR matrix using the host's encoder. */
+    fun encodeCableQr(uri: PairingUri): QrMatrix = qrEncoder.encode(uri.encode(), HostQrPairingCoordinator.DEFAULT_QR_SIZE)
+
+    /** Installs `adb reverse` for [port] (server's bound port). [serial] disambiguates multiple devices. */
+    fun startCable(
+        port: Int,
+        serial: String? = null,
+    ) {
+        scope.launch { cablePairing?.start(port, serial) }
+    }
+
+    /** Removes the cable reverse for [port]. */
+    fun stopCable(
+        port: Int,
+        serial: String? = null,
+    ) {
+        scope.launch { cablePairing?.stop(port, serial) }
     }
 
     /** Approves the pending peer as a read-only reader; no-op if none. */

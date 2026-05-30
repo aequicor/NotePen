@@ -27,6 +27,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
@@ -57,6 +58,8 @@ fun RootContent(
     clientScanViewModel: ClientQrScanViewModel? = null,
     /** Forwarded to [DetailsContent] to drive the manual-connect form of the sync dialog. */
     manualConnectViewModel: ManualConnectViewModel? = null,
+    /** Forwarded to the sync dialog to drive the mDNS LAN-discovery list. */
+    hostDiscoveryViewModel: HostDiscoveryViewModel? = null,
     /** Forwarded to [DetailsContent] so it can detect remote-opened PDFs. */
     receivedPdfDir: String? = null,
     /** Forwarded to [DetailsContent] for open/close tracking. */
@@ -69,6 +72,8 @@ fun RootContent(
     documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     /** Forwarded to [DetailsContent] to seed host-side projection strokes on local open. */
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
+    /** Forwarded to [DetailsContent]: editor publishes open tabs for peer «open on device» advertising. */
+    openDocumentsSink: ((List<ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo>) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val childStack by component.stack.subscribeAsState()
@@ -146,6 +151,7 @@ fun RootContent(
                     hostQrViewModel = hostQrViewModel,
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
+                    hostDiscoveryViewModel = hostDiscoveryViewModel,
                     peerServer = peerServer,
                     peerClient = peerClient,
                     modifier = modifier,
@@ -164,12 +170,14 @@ fun RootContent(
                     hostQrViewModel = hostQrViewModel,
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
+                    hostDiscoveryViewModel = hostDiscoveryViewModel,
                     receivedPdfDir = receivedPdfDir,
                     openDocumentRegistry = openDocumentRegistry,
                     liveSyncController = liveSyncController,
                     localDocumentIdRegistry = localDocumentIdRegistry,
                     documentIdentityProvider = documentIdentityProvider,
                     hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
+                    openDocumentsSink = openDocumentsSink,
                     modifier = modifier,
                 )
             is RootComponent.Child.PeerCatalogChild -> {
@@ -193,6 +201,7 @@ fun RootContent(
                     hostQrViewModel = hostQrViewModel,
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
+                    hostDiscoveryViewModel = hostDiscoveryViewModel,
                     peerServer = peerServer,
                     peerClient = peerClient,
                     modifier = modifier,

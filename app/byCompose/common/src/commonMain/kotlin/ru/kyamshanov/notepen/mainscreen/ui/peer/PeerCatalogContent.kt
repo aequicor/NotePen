@@ -6,12 +6,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material.icons.Icons
@@ -82,48 +85,12 @@ fun PeerCatalogContent(
                         .glassSource(),
             )
             Box(modifier = Modifier.fillMaxSize()) {
-                if (state.entries.isEmpty()) {
-                    Text(
-                        text = if (state.isDisconnected) "Пир отключился" else "Библиотека пуста",
-                        modifier = Modifier.align(Alignment.Center).padding(16.dp),
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                } else if (isWide) {
-                    LazyVerticalGrid(
-                        columns = GridCells.Adaptive(minSize = 280.dp),
-                        contentPadding = gridPadding,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        modifier = Modifier.fillMaxSize(),
-                    ) {
-                        gridItemsIndexed(
-                            state.entries,
-                            key = { idx, it -> "${idx}_${it.documentId}" },
-                        ) { _, entry ->
-                            RemoteEntryCard(
-                                model = entry,
-                                onClick = {
-                                    component.viewModel.openEntry(entry.documentId, entry.displayName)
-                                },
-                            )
-                        }
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        contentPadding = gridPadding,
-                    ) {
-                        itemsIndexed(state.entries, key = { idx, it -> "${idx}_${it.documentId}" }) { _, entry ->
-                            RemoteEntryCard(
-                                model = entry,
-                                onClick = {
-                                    component.viewModel.openEntry(entry.documentId, entry.displayName)
-                                },
-                                modifier = Modifier.padding(vertical = 4.dp),
-                            )
-                        }
-                    }
-                }
+                PeerCatalogBody(
+                    state = state,
+                    isWide = isWide,
+                    contentPadding = gridPadding,
+                    onOpen = { entry -> component.viewModel.openEntry(entry.documentId, entry.displayName) },
+                )
             }
 
             LiquidGlassTopBar(
@@ -154,4 +121,69 @@ fun PeerCatalogContent(
             )
         }
     }
+}
+
+/**
+ * The scrollable catalog body: an «Открыто на устройстве» section (the peer's
+ * active tabs) above the «Библиотека» recents. Grid on wide screens, single
+ * column otherwise.
+ */
+@Composable
+private fun PeerCatalogBody(
+    state: PeerCatalogUiState,
+    isWide: Boolean,
+    contentPadding: PaddingValues,
+    onOpen: (ru.kyamshanov.notepen.mainscreen.ui.model.RemoteEntryUiModel) -> Unit,
+) {
+    if (state.entries.isEmpty() && state.openDocuments.isEmpty()) {
+        Text(
+            text = if (state.isDisconnected) "Пир отключился" else "Библиотека пуста",
+            modifier = Modifier.fillMaxSize().wrapContentSize(Alignment.Center).padding(16.dp),
+            color = MaterialTheme.colorScheme.outline,
+        )
+        return
+    }
+    val hasOpen = state.openDocuments.isNotEmpty()
+    if (isWide) {
+        LazyVerticalGrid(
+            columns = GridCells.Adaptive(minSize = 280.dp),
+            contentPadding = contentPadding,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (hasOpen) {
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Открыто на устройстве") }
+                gridItemsIndexed(state.openDocuments, key = { i, m -> "open_${i}_${m.documentId}" }) { _, e ->
+                    RemoteEntryCard(model = e, onClick = { onOpen(e) })
+                }
+                item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Библиотека") }
+            }
+            gridItemsIndexed(state.entries, key = { i, m -> "${i}_${m.documentId}" }) { _, e ->
+                RemoteEntryCard(model = e, onClick = { onOpen(e) })
+            }
+        }
+    } else {
+        LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = contentPadding) {
+            if (hasOpen) {
+                item { SectionHeader("Открыто на устройстве") }
+                itemsIndexed(state.openDocuments, key = { i, m -> "open_${i}_${m.documentId}" }) { _, e ->
+                    RemoteEntryCard(model = e, onClick = { onOpen(e) }, modifier = Modifier.padding(vertical = 4.dp))
+                }
+                item { SectionHeader("Библиотека") }
+            }
+            itemsIndexed(state.entries, key = { i, m -> "${i}_${m.documentId}" }) { _, e ->
+                RemoteEntryCard(model = e, onClick = { onOpen(e) }, modifier = Modifier.padding(vertical = 4.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SectionHeader(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+    )
 }

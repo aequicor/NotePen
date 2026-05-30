@@ -121,6 +121,7 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdfviewer.ScrollMode
 import ru.kyamshanov.notepen.qrconnect.ClientPairingPanel
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingPanel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
@@ -198,12 +199,14 @@ fun DetailsContent(
     hostQrViewModel: HostQrPairingViewModel? = null,
     clientScanViewModel: ClientQrScanViewModel? = null,
     manualConnectViewModel: ManualConnectViewModel? = null,
+    hostDiscoveryViewModel: HostDiscoveryViewModel? = null,
     receivedPdfDir: String? = null,
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
     liveSyncController: ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController? = null,
     localDocumentIdRegistry: ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry? = null,
     documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
+    openDocumentsSink: ((List<ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo>) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Размер окна редактора берём из достоверного для платформы источника
@@ -316,8 +319,34 @@ fun DetailsContent(
         }
     }
 
+    // Публикуем открытые во вкладках документы, чтобы хост раздал их пирам
+    // (раздел «Открыто на устройстве» в каталоге пира). Remote-кешированные файлы
+    // пропускаем — их documentId принадлежит чужому хосту. Wire-id берём тем же
+    // [syncDocumentIdFor], что и для синхронизации, чтобы пир попал в тот же документ.
+    if (openDocumentsSink != null) {
+        LaunchedEffect(tabSession, openDocumentsSink, receivedPdfDir, syncDocumentIdFor) {
+            snapshotFlow {
+                tabSession.layout.panels
+                    .flatMap { panel -> panel.tabs.tabs }
+                    .filterNot { tab -> receivedPdfDir != null && tab.filePath.startsWith(receivedPdfDir) }
+                    .map { tab ->
+                        ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo(
+                            documentId = syncDocumentIdFor(tab.filePath),
+                            displayName = tab.displayName,
+                            absolutePath = tab.filePath,
+                        )
+                    }.filter { it.documentId.isNotBlank() }
+                    .distinctBy { it.documentId }
+            }.collect { openDocumentsSink(it) }
+        }
+    }
+
     DisposableEffect(tabSession) {
-        onDispose { tabSession.disposeAll() }
+        onDispose {
+            tabSession.disposeAll()
+            // Редактор закрыт — больше нечего «отдавать как открытое».
+            openDocumentsSink?.invoke(emptyList())
+        }
     }
 
     // ---- Global tool state (shared across all panels) ---------------------
@@ -924,6 +953,7 @@ fun DetailsContent(
                         onReaderStoredChange = onReaderStoredChange,
                         syncEngineFor = syncEngineFor,
                         peerClient = peerClient,
+                        peerServer = peerServer,
                         pendingDeltaCounts = pendingDeltaCounts,
                         receivedPdfDir = receivedPdfDir,
                         openDocumentRegistry = openDocumentRegistry,
@@ -1439,6 +1469,7 @@ fun DetailsContent(
                                     peerClient = peerClient,
                                     onClose = { showSyncPanel = false },
                                     onConnected = { showSyncPanel = false },
+                                    discoveryViewModel = hostDiscoveryViewModel,
                                 )
                             }
                         }

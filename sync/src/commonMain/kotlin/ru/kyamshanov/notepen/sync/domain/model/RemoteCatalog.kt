@@ -40,6 +40,10 @@ enum class RemoteLibraryRole {
  * @property recent Files in the host's "recent" list, newest first.
  * @property folders User-defined folders on the host.
  * @property folderLinks Many-to-many `(folderId, documentId)` membership.
+ * @property openDocuments Documents currently open in active tabs on the host,
+ *   newest/first-tab order. Lets a peer open what the other device is actively
+ *   working on (not just its library). Defaults to empty for wire compatibility
+ *   with hosts that don't advertise open tabs.
  * @property grantedRole the access level the host has granted the receiving peer
  *   (M5b). Defaults to [RemoteLibraryRole.Reader] so older hosts (which never
  *   populate it) keep wire compatibility — the peer is treated as a reader.
@@ -50,6 +54,7 @@ data class RemoteCatalog(
     val recent: List<RemoteEntry>,
     val folders: List<RemoteFolder>,
     val folderLinks: List<RemoteFolderLink>,
+    val openDocuments: List<RemoteEntry> = emptyList(),
     val grantedRole: RemoteLibraryRole = RemoteLibraryRole.Reader,
 )
 

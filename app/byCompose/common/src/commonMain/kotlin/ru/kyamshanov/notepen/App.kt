@@ -11,6 +11,7 @@ import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
@@ -67,6 +68,8 @@ fun App(
     clientScanViewModel: ClientQrScanViewModel? = null,
     /** Drives manual host/port/code form. `null` hides the manual-connect option. */
     manualConnectViewModel: ManualConnectViewModel? = null,
+    /** Drives mDNS LAN-discovery list. `null` hides the «Найти ПК в сети» option. */
+    hostDiscoveryViewModel: HostDiscoveryViewModel? = null,
     receivedPdfDir: String? = null,
     /** Реестр открытых документов; нужен `LocalCachedDocumentCleaner`-у. */
     openDocumentRegistry: ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry? = null,
@@ -83,6 +86,8 @@ fun App(
     documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     /** Host-side провайдер накопленных проекцией штрихов; см. [RootContent]. */
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
+    /** Редактор публикует сюда открытые вкладки — хост раздаёт их пирам как «открыто на устройстве». */
+    openDocumentsSink: ((List<ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo>) -> Unit)? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     val appSettings = rememberAppSettings()
@@ -103,12 +108,14 @@ fun App(
                 hostQrViewModel = hostQrViewModel,
                 clientScanViewModel = clientScanViewModel,
                 manualConnectViewModel = manualConnectViewModel,
+                hostDiscoveryViewModel = hostDiscoveryViewModel,
                 receivedPdfDir = receivedPdfDir,
                 openDocumentRegistry = openDocumentRegistry,
                 liveSyncController = liveSyncController,
                 localDocumentIdRegistry = localDocumentIdRegistry,
                 documentIdentityProvider = documentIdentityProvider,
                 hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
+                openDocumentsSink = openDocumentsSink,
                 modifier = Modifier.fillMaxSize(),
             )
         }

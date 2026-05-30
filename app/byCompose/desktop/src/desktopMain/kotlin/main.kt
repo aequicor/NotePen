@@ -84,6 +84,7 @@ import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
 import ru.kyamshanov.notepen.sync.infrastructure.FileSystemLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentsRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
@@ -336,6 +337,9 @@ fun main(args: Array<String>) {
     // all build inside SyncRuntime.enable(), and are torn down on disable().
     // Until the user opens "Разрешить подключение по QR" the runtime stays idle
     // (no class-loading, no log noise from catalog broadcast / projection).
+    // Открытые во вкладках документы — редактор публикует их сюда, а каталог
+    // раздаёт пирам как RemoteCatalog.openDocuments («открыто на этом ПК»).
+    val openDocumentsRegistry = InMemoryOpenDocumentsRegistry()
     val syncRuntime =
         SyncRuntime(
             selfInfo = selfInfo,
@@ -360,6 +364,7 @@ fun main(args: Array<String>) {
                 runCatching { cacheEvictor.evict(downloadCacheDirs) }
                     .onFailure { e -> mainLogger.warn(e) { "Cache eviction after download failed" } }
             },
+            openDocumentsProvider = openDocumentsRegistry,
         )
 
     // The QR pairing VM stays light: it only holds state flows for the panel
@@ -381,6 +386,9 @@ fun main(args: Array<String>) {
                 session.remoteCatalogProvider.grantLibrarian(peerId)
                 session.remoteCatalogProvider.pushCatalogTo(session.peerServer, peerId)
             },
+            // Cable (USB) pairing: runs `adb reverse` so a tethered tablet reaches
+            // this host at 127.0.0.1. adb is auto-detected from the user's SDK.
+            cablePairing = AdbReverse(ioDispatcher = Dispatchers.IO),
         )
 
     // Single instance of the combined online-peers flow. Empty when the runtime
@@ -794,6 +802,7 @@ fun main(args: Array<String>) {
                         syncSession?.hostAnnotationProjection?.let { projection ->
                             { docId -> projection.snapshotDtos(docId).orEmpty() }
                         },
+                    openDocumentsSink = openDocumentsRegistry::publish,
                 )
             }
         }

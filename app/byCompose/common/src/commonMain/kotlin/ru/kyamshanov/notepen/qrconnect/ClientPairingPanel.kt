@@ -22,6 +22,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,6 +36,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.DiscoveredHost
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 /**
@@ -53,6 +55,9 @@ enum class ClientPairingScreen {
 
     /** Manual host / port / code entry. */
     Manual,
+
+    /** mDNS-discovered hosts on the LAN — one-tap connect, no QR. */
+    Discovery,
 
     /** List of currently connected hosts with per-host disconnect. */
     Connections,
@@ -78,16 +83,18 @@ fun ClientPairingPanel(
     onClose: () -> Unit,
     onConnected: () -> Unit,
     modifier: Modifier = Modifier,
+    discoveryViewModel: HostDiscoveryViewModel? = null,
 ) {
     val connectedHosts by peerClient.connectedHosts.collectAsState(emptySet())
     val coroutineScope = rememberCoroutineScope()
 
     var screen by remember {
         mutableStateOf(
-            if (connectedHosts.isNotEmpty()) {
-                ClientPairingScreen.Connections
-            } else {
-                ClientPairingScreen.Onboarding
+            when {
+                connectedHosts.isNotEmpty() -> ClientPairingScreen.Connections
+                // Prefer one-tap LAN discovery as the entry point when available.
+                discoveryViewModel != null -> ClientPairingScreen.Discovery
+                else -> ClientPairingScreen.Onboarding
             },
         )
     }
@@ -129,6 +136,17 @@ fun ClientPairingPanel(
                     onBackToScan = { screen = ClientPairingScreen.Camera },
                     onConnected = { screen = ClientPairingScreen.Connections },
                 )
+            ClientPairingScreen.Discovery ->
+                if (discoveryViewModel != null) {
+                    DiscoveryScreen(
+                        viewModel = discoveryViewModel,
+                        onConnected = { screen = ClientPairingScreen.Connections },
+                        onScanQr = { screen = ClientPairingScreen.Camera },
+                        onManual = { screen = ClientPairingScreen.Manual },
+                    )
+                } else {
+                    screen = ClientPairingScreen.Onboarding
+                }
             ClientPairingScreen.Connections ->
                 ConnectionsScreen(
                     hosts = connectedHosts.toList(),
@@ -140,6 +158,7 @@ fun ClientPairingPanel(
                     },
                     onAddViaQr = { screen = ClientPairingScreen.Camera },
                     onAddManually = { screen = ClientPairingScreen.Manual },
+                    onDiscover = if (discoveryViewModel != null) ({ screen = ClientPairingScreen.Discovery }) else null,
                 )
         }
     }
@@ -243,6 +262,114 @@ private fun ManualScreen(
     ) { Text("Назад к сканированию") }
 }
 
+/** List of mDNS-discovered hosts; each row connects on tap. */
+@Composable
+private fun DiscoveredHostsList(
+    hosts: List<DiscoveredHost>,
+    connectingHostId: String?,
+    onConnect: (DiscoveredHost) -> Unit,
+) {
+    if (hosts.isEmpty()) {
+        Text(
+            text = "Ищем доступные ПК…",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        hosts.forEach { host ->
+            val connecting = connectingHostId == host.deviceInfo.id
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(host.deviceInfo.name, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        text = "${host.deviceInfo.host}:${host.deviceInfo.port}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Button(onClick = { onConnect(host) }, enabled = !connecting) {
+                    Text(if (connecting) "Подключение…" else "Подключиться")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * LAN discovery screen: browses for NotePen hosts via mDNS and connects with the
+ * code carried in the host's advert. Browsing is bound to this screen's lifetime
+ * via [DisposableEffect]. Falls back to QR / manual entry.
+ */
+@Composable
+private fun DiscoveryScreen(
+    viewModel: HostDiscoveryViewModel,
+    onConnected: () -> Unit,
+    onScanQr: () -> Unit,
+    onManual: () -> Unit,
+) {
+    val hosts by viewModel.hosts.collectAsState()
+    val status by viewModel.status.collectAsState()
+
+    DisposableEffect(viewModel) {
+        viewModel.startDiscovery()
+        onDispose { viewModel.stopDiscovery() }
+    }
+    LaunchedEffect(status) {
+        when (status) {
+            is HostDiscoveryViewModel.Status.Connected -> onConnected()
+            HostDiscoveryViewModel.Status.NeedsManualCode -> onManual()
+            else -> Unit
+        }
+    }
+
+    Text(
+        text = "Поиск ПК в сети",
+        style = MaterialTheme.typography.titleLarge,
+        textAlign = TextAlign.Center,
+    )
+    Text(
+        text = "Убедитесь, что ПК и планшет в одной сети Wi-Fi, а на ПК включён QR-сервер.",
+        style = MaterialTheme.typography.bodySmall,
+        textAlign = TextAlign.Center,
+    )
+
+    DiscoveredHostsList(
+        hosts = hosts,
+        connectingHostId = (status as? HostDiscoveryViewModel.Status.Connecting)?.hostId,
+        onConnect = viewModel::connect,
+    )
+
+    (status as? HostDiscoveryViewModel.Status.Failed)?.let { failed ->
+        Text(
+            text = "Ошибка: ${failed.message}",
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+
+    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(onClick = onScanQr, modifier = Modifier.weight(1f)) {
+            Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+            Spacer(Modifier.width(4.dp))
+            Text("По QR")
+        }
+        OutlinedButton(onClick = onManual, modifier = Modifier.weight(1f)) { Text("Вручную") }
+    }
+}
+
 @Composable
 private fun ConnectionsScreen(
     hosts: List<DeviceInfo>,
@@ -250,6 +377,7 @@ private fun ConnectionsScreen(
     onDisconnectAll: () -> Unit,
     onAddViaQr: () -> Unit,
     onAddManually: () -> Unit,
+    onDiscover: (() -> Unit)? = null,
 ) {
     Text(
         text = "Активные подключения",
@@ -295,6 +423,9 @@ private fun ConnectionsScreen(
         style = MaterialTheme.typography.titleSmall,
         modifier = Modifier.fillMaxWidth(),
     )
+    onDiscover?.let { discover ->
+        Button(onClick = discover, modifier = Modifier.fillMaxWidth()) { Text("Найти ПК в сети") }
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),

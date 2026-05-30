@@ -46,6 +46,7 @@ import ru.kyamshanov.notepen.sync.domain.port.LibraryManifestProvider
 import ru.kyamshanov.notepen.sync.domain.port.LibraryMutationTarget
 import ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry
+import ru.kyamshanov.notepen.sync.domain.port.OpenDocumentsProvider
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.JmDnsServiceRegistrar
@@ -113,6 +114,9 @@ class SyncRuntime(
     // M6: invoked after RemoteDocumentOpener streams a fresh file into the LAN
     // cache, so the caller can bound that cache right after it grew. Default no-op.
     private val onAfterRemoteDownload: suspend () -> Unit = {},
+    // Documents currently open in the editor — advertised to peers as
+    // RemoteCatalog.openDocuments so a peer can open what this device is working on.
+    private val openDocumentsProvider: OpenDocumentsProvider? = null,
 ) {
     private val _session = MutableStateFlow<SyncSession?>(null)
     val session: StateFlow<SyncSession?> = _session.asStateFlow()
@@ -273,6 +277,7 @@ class SyncRuntime(
                 manifestProvider = libraryManifestProvider,
                 folderRepository = folderRepository,
                 grantStore = librarianGrantStore,
+                openDocumentsProvider = openDocumentsProvider,
             )
         provider.serve(server = peerServer, scope = scope)
         provider.serve(client = syncClient, scope = scope)
@@ -367,7 +372,7 @@ class SyncRuntime(
                 withContext(Dispatchers.IO) {
                     when (state) {
                         is ServerLifecycleState.Running ->
-                            registrar.register(selfInfo.copy(host = state.host, port = state.port))
+                            registrar.register(selfInfo.copy(host = state.host, port = state.port), state.code)
                         is ServerLifecycleState.Idle,
                         is ServerLifecycleState.Stopped,
                         -> registrar.unregister()

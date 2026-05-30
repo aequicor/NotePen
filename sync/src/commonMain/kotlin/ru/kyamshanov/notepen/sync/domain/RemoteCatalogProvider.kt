@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -17,6 +18,7 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteLibraryRole
 import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.domain.port.LibrarianGrantStore
 import ru.kyamshanov.notepen.sync.domain.port.LibraryManifestProvider
+import ru.kyamshanov.notepen.sync.domain.port.OpenDocumentsProvider
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
@@ -53,6 +55,14 @@ class RemoteCatalogProvider(
     private val manifestProvider: LibraryManifestProvider,
     private val folderRepository: FolderRepository,
     private val grantStore: LibrarianGrantStore? = null,
+    /**
+     * Optional source of documents currently open in this device's editor tabs.
+     * When non-null, the served catalog advertises them in
+     * [RemoteCatalog.openDocuments] (and authorises their transfer), and changes
+     * to the open set trigger a [NetworkMessage.RemoteCatalogChanged] push. Null
+     * keeps the pre-feature behaviour (library/recents only).
+     */
+    private val openDocumentsProvider: OpenDocumentsProvider? = null,
 ) {
     private val mutex = Mutex()
     private val allowedByPeer = mutableMapOf<String, Set<String>>()
@@ -242,6 +252,16 @@ class RemoteCatalogProvider(
                 }
             }
         }
+        // Открытые вкладки — отдельный источник изменений каталога: при их смене
+        // тоже шлём RemoteCatalogChanged, чтобы у пира список «открыто на ПК» был живым.
+        val openDocs = openDocumentsProvider?.openDocuments ?: return
+        scope.launch {
+            openDocs.drop(1).collect {
+                logger.info { "Open documents changed — broadcasting RemoteCatalogChanged" }
+                if (server != null) runCatching { server.broadcast(NetworkMessage.RemoteCatalogChanged) }
+                if (client != null) runCatching { client.broadcast(NetworkMessage.RemoteCatalogChanged) }
+            }
+        }
     }
 
     /**
@@ -296,6 +316,54 @@ class RemoteCatalogProvider(
             }
         val uriToDocumentId = booksWithUri.associate { (book, uri) -> uri to book.id.value }
         val modifiedByUri = booksWithUri.associate { (book, uri) -> uri to book.modifiedAt }
+        val (folders, folderLinks) = buildFolders(uriToDocumentId, modifiedByUri)
+        // Documents currently open in this device's editor tabs. They join the
+        // allow-list + uri map so the peer can stream them via the same
+        // DocumentOpenRequest path as library files (authorisation is the served
+        // catalog, so no separate gate is needed).
+        val openDocInfos =
+            openDocumentsProvider
+                ?.openDocuments
+                ?.value
+                .orEmpty()
+                .filter { it.documentId.isNotBlank() }
+        val openDocuments =
+            openDocInfos.map { doc ->
+                RemoteEntry(
+                    documentId = doc.documentId,
+                    displayName = doc.displayName,
+                    fileSize = doc.fileSize,
+                    lastOpenedAt = 0L,
+                )
+            }
+        val allowed = (recent.map { it.documentId } + openDocInfos.map { it.documentId }).toSet()
+        val docToUri =
+            booksWithUri.associate { (book, uri) -> book.id.value to uri } +
+                openDocInfos.associate { it.documentId to it.absolutePath }
+        val grantedRole =
+            mutex.withLock {
+                allowedByPeer[peerId] = allowed
+                uriByPeer[peerId] = docToUri
+                // Advertise the peer's role from the SAME authoritative write
+                // allow-set the mutation handler gates on — so the client can light
+                // up librarian UI/capabilities. Still re-verified on every mutation.
+                if (peerId in librarianPeerIds) RemoteLibraryRole.Librarian else RemoteLibraryRole.Reader
+            }
+        return RemoteCatalog(
+            hostName = hostName,
+            recent = recent,
+            folders = folders,
+            folderLinks = folderLinks,
+            openDocuments = openDocuments,
+            grantedRole = grantedRole,
+        )
+    }
+
+    /** Maps the host's folders + folder/file links to their wire form for [buildSnapshotFor]. */
+    private suspend fun buildFolders(
+        uriToDocumentId: Map<String, String>,
+        modifiedByUri: Map<String, Long>,
+    ): Pair<List<RemoteFolder>, List<RemoteFolderLink>> {
         val foldersDomain = folderRepository.getAll()
         val folders =
             foldersDomain.map { folder ->
@@ -321,23 +389,6 @@ class RemoteCatalogProvider(
                     }
                 }
             }
-        val allowed = recent.map { it.documentId }.toSet()
-        val docToUri = booksWithUri.associate { (book, uri) -> book.id.value to uri }
-        val grantedRole =
-            mutex.withLock {
-                allowedByPeer[peerId] = allowed
-                uriByPeer[peerId] = docToUri
-                // Advertise the peer's role from the SAME authoritative write
-                // allow-set the mutation handler gates on — so the client can light
-                // up librarian UI/capabilities. Still re-verified on every mutation.
-                if (peerId in librarianPeerIds) RemoteLibraryRole.Librarian else RemoteLibraryRole.Reader
-            }
-        return RemoteCatalog(
-            hostName = hostName,
-            recent = recent,
-            folders = folders,
-            folderLinks = folderLinks,
-            grantedRole = grantedRole,
-        )
+        return folders to folderLinks
     }
 }

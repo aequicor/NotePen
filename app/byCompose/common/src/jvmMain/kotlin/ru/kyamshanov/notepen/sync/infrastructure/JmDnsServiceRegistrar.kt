@@ -10,8 +10,8 @@ private const val SERVICE_TYPE = "_notepen._tcp.local."
 private val logger = KotlinLogging.logger {}
 
 /**
- * Registers and un-registers the local NotePen server as an mDNS service
- * so peers can discover it via [JmDnsDeviceDiscovery].
+ * Registers and un-registers the local NotePen server as an mDNS service so
+ * clients can discover it (Android: `NsdPeerDiscovery`) without scanning a QR.
  *
  * Intended to be created once the [KtorPeerServer] has started and a port is known.
  */
@@ -20,14 +20,20 @@ class JmDnsServiceRegistrar {
     private var registered: ServiceInfo? = null
 
     /**
-     * Registers the local server described by [device] on the LAN.
+     * Registers the local server described by [device] on the LAN, publishing
+     * the pairing [code] in the `c` TXT record so a discovering client can
+     * one-tap connect. The host's manual approval dialog remains the real
+     * security gate — the code on the LAN is the same trust posture as the QR.
      *
      * Binds JmDNS explicitly to [DeviceInfo.host] so the announcement goes
      * out on the LAN interface and not on a VPN / virtual adapter that JmDNS
      * would otherwise pick by default.
      */
-    fun register(device: DeviceInfo) {
-        val props = mapOf("id" to device.id, "name" to device.name)
+    fun register(
+        device: DeviceInfo,
+        code: String,
+    ) {
+        val props = mapOf("id" to device.id, "name" to device.name, "c" to code)
         val serviceInfo =
             ServiceInfo.create(
                 SERVICE_TYPE,
