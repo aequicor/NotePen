@@ -8,6 +8,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteFolderUiModel
  *
  * @property peerName Заголовок (имя пира; берётся из hostName каталога, fallback на DeviceInfo.name).
  * @property entries Recent-файлы пира.
+ * @property openDocuments Документы, открытые во вкладках на устройстве пира (показываем в корне).
  * @property folders Папки пира.
  * @property isDisconnected true, если пир пропал из подключённых — каталог последний известный.
  * @property errorMessage Одноразовое сообщение об ошибке открытия документа.
@@ -18,6 +19,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.RemoteFolderUiModel
 data class PeerCatalogUiState(
     val peerName: String = "",
     val entries: List<RemoteEntryUiModel> = emptyList(),
+    val openDocuments: List<RemoteEntryUiModel> = emptyList(),
     val folders: List<RemoteFolderUiModel> = emptyList(),
     val isDisconnected: Boolean = false,
     val errorMessage: String? = null,

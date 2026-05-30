@@ -63,6 +63,7 @@ import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPageRenderer
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
@@ -86,6 +87,7 @@ import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.KtorSyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFileHistoryRepository
 import ru.kyamshanov.notepen.sync.infrastructure.NotifyingFolderRepository
+import ru.kyamshanov.notepen.sync.infrastructure.NsdPeerDiscovery
 import ru.kyamshanov.notepen.sync.infrastructure.RecentsLibraryManifestProvider
 import ru.kyamshanov.notepen.sync.infrastructure.SqlDelightPendingDeltaQueue
 import ru.kyamshanov.notepen.sync.infrastructure.createSyncDatabaseAndroid
@@ -104,6 +106,7 @@ private class HeavyDeps(
     val pendingDeltaQueue: SqlDelightPendingDeltaQueue,
     val clientScanViewModel: ClientQrScanViewModel,
     val manualConnectViewModel: ManualConnectViewModel,
+    val hostDiscoveryViewModel: HostDiscoveryViewModel,
     val remoteDocumentOpener: RemoteDocumentOpener,
     val resyncRequester: AnnotationResyncRequester,
 )
@@ -353,6 +356,15 @@ class MainActivity : ComponentActivity() {
                     selfInfo = selfInfo,
                     scope = appScope,
                 )
+            // LAN host auto-discovery (mDNS via NsdManager): the client browses for
+            // hosts the desktop advertises and connects with the code from the advert.
+            val hostDiscoveryViewModel =
+                HostDiscoveryViewModel(
+                    discovery = NsdPeerDiscovery(context = applicationContext),
+                    syncClient = syncClient,
+                    selfInfo = selfInfo,
+                    scope = appScope,
+                )
 
             // Feed peer-originated stroke deltas into the right engine so SyncBridge
             // can mirror them onto the local drawing state once DetailsContent opens.
@@ -434,6 +446,7 @@ class MainActivity : ComponentActivity() {
                     pendingDeltaQueue = pendingDeltaQueue,
                     clientScanViewModel = clientScanViewModel,
                     manualConnectViewModel = manualConnectViewModel,
+                    hostDiscoveryViewModel = hostDiscoveryViewModel,
                     remoteDocumentOpener = remoteDocumentOpener,
                     resyncRequester = resyncRequester,
                 )
@@ -570,6 +583,7 @@ class MainActivity : ComponentActivity() {
                     pendingDeltaCounts = heavyDeps?.pendingDeltaQueue?.pendingCounts(),
                     clientScanViewModel = heavyDeps?.clientScanViewModel,
                     manualConnectViewModel = heavyDeps?.manualConnectViewModel,
+                    hostDiscoveryViewModel = heavyDeps?.hostDiscoveryViewModel,
                     receivedPdfDir = receivedDir,
                     openDocumentRegistry = openDocumentRegistry,
                     liveSyncController = liveSyncController,

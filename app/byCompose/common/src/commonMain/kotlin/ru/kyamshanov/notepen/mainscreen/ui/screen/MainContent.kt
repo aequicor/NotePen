@@ -94,6 +94,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.SuccessEvent
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
+import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
 import ru.kyamshanov.notepen.qrconnect.SyncPairingButton
@@ -135,6 +136,7 @@ fun MainContent(
     manualConnectViewModel: ManualConnectViewModel? = null,
     peerServer: PeerServer? = null,
     peerClient: SyncClient? = null,
+    hostDiscoveryViewModel: HostDiscoveryViewModel? = null,
     modifier: Modifier = Modifier,
 ) {
     val windowWidth = currentWindowSizePx().width
@@ -358,6 +360,7 @@ fun MainContent(
                         manualConnectViewModel = manualConnectViewModel,
                         peerServer = peerServer,
                         peerClient = peerClient,
+                        hostDiscoveryViewModel = hostDiscoveryViewModel,
                     )
                     if (onOpenLibrarySources != null) {
                         IconButton(

@@ -56,6 +56,7 @@ fun SyncPairingButton(
     manualConnectViewModel: ManualConnectViewModel?,
     peerServer: PeerServer?,
     peerClient: SyncClient?,
+    hostDiscoveryViewModel: HostDiscoveryViewModel? = null,
 ) {
     val syncPaneEnabled = hostQrViewModel != null || clientScanViewModel != null
     if (!syncPaneEnabled) return
@@ -110,6 +111,7 @@ fun SyncPairingButton(
                             peerClient = peerClient,
                             onClose = { showSyncPanel = false },
                             onConnected = { showSyncPanel = false },
+                            discoveryViewModel = hostDiscoveryViewModel,
                         )
                     }
                 }

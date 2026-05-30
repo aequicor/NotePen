@@ -148,8 +148,11 @@ class RemoteDocumentOpener(
     private suspend fun pickHost(documentId: String): DeviceInfo? {
         val snapshot = catalogs.first()
         return snapshot.entries
-            .firstOrNull { entry -> entry.value.recent.any { it.documentId == documentId } }
-            ?.key
+            .firstOrNull { entry ->
+                val catalog = entry.value
+                catalog.recent.any { it.documentId == documentId } ||
+                    catalog.openDocuments.any { it.documentId == documentId }
+            }?.key
     }
 }
 

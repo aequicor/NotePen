@@ -127,10 +127,26 @@ class PeerCatalogViewModel(
                             }
                     }
                 val currentName = currentFolderId?.let { id -> catalog.folders.firstOrNull { it.folderId == id }?.name }
+                // «Открыто на устройстве» показываем только в корне и пока пир онлайн
+                // (потоковая отдача файла требует живого соединения).
+                val openDocuments =
+                    if (currentFolderId == null && !isOffline) {
+                        catalog.openDocuments.map { e ->
+                            RemoteEntryUiModel(
+                                documentId = e.documentId,
+                                displayName = e.displayName,
+                                fileSize = e.fileSize,
+                                lastOpenedAt = e.lastOpenedAt,
+                            )
+                        }
+                    } else {
+                        emptyList()
+                    }
                 _state.update {
                     it.copy(
                         peerName = catalog.hostName.ifBlank { device.name },
                         entries = entries,
+                        openDocuments = openDocuments,
                         folders = folders,
                         isDisconnected = isOffline,
                         currentFolderId = currentFolderId,
