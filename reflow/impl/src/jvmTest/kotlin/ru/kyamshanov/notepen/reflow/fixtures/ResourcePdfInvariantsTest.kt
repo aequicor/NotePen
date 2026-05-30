@@ -46,6 +46,7 @@ class ResourcePdfInvariantsTest {
     @Test
     fun `thesis extract under 2s on ~1MB document`() {
         val pdf = thesisFixture() ?: return
+        pdfBoxWarmUp
         val extractor = JvmPdfReflowExtractor(Dispatchers.IO)
         val mark = TimeSource.Monotonic.markNow()
         runBlocking { extractor.extract(pdf.absolutePath) }
@@ -154,6 +155,7 @@ class ResourcePdfInvariantsTest {
     @Test
     fun `article classifies as TEXT_BASED and extracts fast`() {
         val pdf = articleFixture() ?: return
+        pdfBoxWarmUp
         val extractor = JvmPdfReflowExtractor(Dispatchers.IO)
         val mark = TimeSource.Monotonic.markNow()
         val kind = runBlocking { extractor.probe(pdf.absolutePath) }
@@ -255,5 +257,27 @@ class ResourcePdfInvariantsTest {
         label: String,
     ) {
         assertTrue(actual in range, "$label=$actual outside expected range $range")
+    }
+
+    private companion object {
+        /**
+         * PDFBox pays a large one-time cost on its first extract in a JVM (font-cache
+         * build, classloading, JIT). The wall-clock budgets below target steady-state
+         * extraction — the warm discovery numbers (probe+extract ~130ms, thesis ~567ms)
+         * the budgets were sized against — so a cold first run can blow them depending on
+         * test order (observed 1666ms cold vs 1s budget). Priming the pipeline once before
+         * any timed assertion keeps the budgets meaningful and CI-stable. Touching this
+         * `val` from a timed test forces the (idempotent) warm-up exactly once per JVM.
+         */
+        val pdfBoxWarmUp: Unit by lazy {
+            extractFixtureToTemp(ResourcePdfDiscoveryTest.ARTICLE_ORG_RISKS_RESOURCE)?.let { pdf ->
+                val extractor = JvmPdfReflowExtractor(Dispatchers.IO)
+                runBlocking {
+                    extractor.probe(pdf.absolutePath)
+                    extractor.extract(pdf.absolutePath)
+                }
+            }
+            Unit
+        }
     }
 }
