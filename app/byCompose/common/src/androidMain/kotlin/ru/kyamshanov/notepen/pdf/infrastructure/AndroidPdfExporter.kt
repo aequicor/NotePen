@@ -39,29 +39,41 @@ class AndroidPdfExporter(
             runCatching {
                 val sourceFile = File(sourcePdfPath)
                 ParcelFileDescriptor.open(sourceFile, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-                    PdfRenderer(pfd).use { renderer ->
+                    // Every pdfium read (renderer open, openPage, render, page close) is held
+                    // under the process-global lock; concurrent access across PdfRenderer
+                    // instances corrupts the shared, non-thread-safe font module (native
+                    // FT_Done_Face crash). See PdfiumRenderLock. The lock is acquired PER PAGE,
+                    // never across the whole export loop, so a long export doesn't serialise the
+                    // entire app. Annotation drawing and PdfDocument writing are not pdfium reads
+                    // and run outside the lock.
+                    val renderer = synchronized(PdfiumRenderLock.lock) { PdfRenderer(pfd) }
+                    renderer.closeLocked {
                         PdfDocument().use { outDoc ->
                             for (i in 0 until renderer.pageCount) {
-                                renderer.openPage(i).use { page ->
-                                    val aspectRatio = page.height.toFloat() / page.width.toFloat()
-                                    val bitmapWidth = EXPORT_WIDTH_PX
-                                    val bitmapHeight = (bitmapWidth * aspectRatio).toInt()
-
-                                    val bitmap = Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
-                                    bitmap.eraseColor(Color.WHITE)
-                                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
-
-                                    annotations[i]?.let { paths ->
-                                        val canvas = Canvas(bitmap)
-                                        drawPaths(canvas, paths, bitmapWidth.toFloat(), bitmapHeight.toFloat())
+                                val bitmap =
+                                    synchronized(PdfiumRenderLock.lock) {
+                                        renderer.openPage(i).use { page ->
+                                            val aspectRatio = page.height.toFloat() / page.width.toFloat()
+                                            val bitmapWidth = EXPORT_WIDTH_PX
+                                            val bitmapHeight = (bitmapWidth * aspectRatio).toInt()
+                                            val bmp =
+                                                Bitmap.createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.ARGB_8888)
+                                            bmp.eraseColor(Color.WHITE)
+                                            page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+                                            bmp
+                                        }
                                     }
 
-                                    val pageInfo = PdfDocument.PageInfo.Builder(bitmapWidth, bitmapHeight, i + 1).create()
-                                    val outPage = outDoc.startPage(pageInfo)
-                                    outPage.canvas.drawBitmap(bitmap, 0f, 0f, null)
-                                    outDoc.finishPage(outPage)
-                                    bitmap.recycle()
+                                annotations[i]?.let { paths ->
+                                    val canvas = Canvas(bitmap)
+                                    drawPaths(canvas, paths, bitmap.width.toFloat(), bitmap.height.toFloat())
                                 }
+
+                                val pageInfo = PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, i + 1).create()
+                                val outPage = outDoc.startPage(pageInfo)
+                                outPage.canvas.drawBitmap(bitmap, 0f, 0f, null)
+                                outDoc.finishPage(outPage)
+                                bitmap.recycle()
                             }
                             FileOutputStream(outputPath).use { fos -> outDoc.writeTo(fos) }
                         }
@@ -139,17 +151,24 @@ class AndroidPdfExporter(
     }
 }
 
-private fun PdfRenderer.use(block: (PdfRenderer) -> Unit) {
+/**
+ * Runs [block] then closes this renderer under [PdfiumRenderLock]. The opening
+ * `PdfRenderer(pfd)` is locked at the call site; the final `close()` destroys
+ * pdfium fonts and must not race other instances (native FT_Done_Face crash).
+ * [block] is NOT held under the lock — it locks per page itself — so a long
+ * export never serialises the whole app.
+ */
+private inline fun PdfRenderer.closeLocked(block: () -> Unit) {
     try {
-        block(this)
+        block()
     } finally {
-        close()
+        synchronized(PdfiumRenderLock.lock) { close() }
     }
 }
 
-private fun PdfRenderer.Page.use(block: (PdfRenderer.Page) -> Unit) {
+private fun <R> PdfRenderer.Page.use(block: (PdfRenderer.Page) -> R): R {
     try {
-        block(this)
+        return block(this)
     } finally {
         close()
     }

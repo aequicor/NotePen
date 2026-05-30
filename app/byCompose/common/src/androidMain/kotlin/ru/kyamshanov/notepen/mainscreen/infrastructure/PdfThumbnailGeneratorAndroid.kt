@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.mainscreen.domain.exception.ThumbnailGenerationException
 import ru.kyamshanov.notepen.mainscreen.domain.port.PdfThumbnailGenerator
+import ru.kyamshanov.notepen.pdf.infrastructure.PdfiumRenderLock
 
 /**
  * Android-реализация [PdfThumbnailGenerator].
@@ -33,24 +34,32 @@ class PdfThumbnailGeneratorAndroid(
                     context.contentResolver.openFileDescriptor(Uri.parse(uri), "r")
                         ?: throw ThumbnailGenerationException("Cannot open file descriptor for uri")
                 descriptor.use { fd ->
-                    PdfRenderer(fd).use { renderer ->
-                        if (renderer.pageCount == 0) throw ThumbnailGenerationException("Empty PDF: no pages")
-                        renderer.openPage(0).use { page ->
-                            val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
-                            try {
-                                page.render(
-                                    bitmap,
-                                    null,
-                                    null,
-                                    PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
-                                )
-                                val stream = java.io.ByteArrayOutputStream()
-                                bitmap.compress(Bitmap.CompressFormat.PNG, 85, stream)
-                                stream.toByteArray()
-                            } finally {
-                                bitmap.recycle()
+                    // pdfium open/render/close held under the process-global lock; concurrent
+                    // access across PdfRenderer instances corrupts the shared font module
+                    // (native FT_Done_Face crash). See PdfiumRenderLock. PNG encode is pure
+                    // CPU and runs outside the lock.
+                    val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+                    try {
+                        synchronized(PdfiumRenderLock.lock) {
+                            PdfRenderer(fd).use { renderer ->
+                                if (renderer.pageCount == 0) {
+                                    throw ThumbnailGenerationException("Empty PDF: no pages")
+                                }
+                                renderer.openPage(0).use { page ->
+                                    page.render(
+                                        bitmap,
+                                        null,
+                                        null,
+                                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                                    )
+                                }
                             }
                         }
+                        val stream = java.io.ByteArrayOutputStream()
+                        bitmap.compress(Bitmap.CompressFormat.PNG, 85, stream)
+                        stream.toByteArray()
+                    } finally {
+                        bitmap.recycle()
                     }
                 }
             }.mapFailure { cause ->

@@ -58,7 +58,10 @@ class AndroidPdfPageRenderer(
             val renderH = (croppedH / cropH).toInt().coerceAtLeast(1)
 
             val bitmap = Bitmap.createBitmap(renderW, renderH, Bitmap.Config.ARGB_8888)
-            synchronized(androidDoc.renderer) {
+            // Process-global pdfium lock, not per-renderer: concurrent open/render/close
+            // across different PdfRenderer instances corrupts pdfium's shared, non-thread-safe
+            // FreeType font module → native crash in FT_Done_Face. See PdfiumRenderLock.
+            synchronized(PdfiumRenderLock.lock) {
                 val page: PdfRenderer.Page = androidDoc.renderer.openPage(pageIndex)
                 try {
                     page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)

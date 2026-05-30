@@ -38,9 +38,13 @@ class AndroidPdfDocumentLoader(
                             ?: throw IllegalArgumentException("Cannot open file descriptor for: $path")
                 }
 
+            // Opening the renderer and reading page sizes go through the process-global
+            // pdfium lock: concurrent access across PdfRenderer instances corrupts the
+            // shared, non-thread-safe font module (native FT_Done_Face crash). See
+            // PdfiumRenderLock. Acquired per page so the loop never holds the lock app-wide.
             val renderer =
                 try {
-                    PdfRenderer(pfd)
+                    synchronized(PdfiumRenderLock.lock) { PdfRenderer(pfd) }
                 } catch (e: Exception) {
                     pfd.close()
                     throw IllegalArgumentException("Failed to open PDF renderer: $path", e)
@@ -48,15 +52,17 @@ class AndroidPdfDocumentLoader(
 
             val pages =
                 (0 until renderer.pageCount).map { index ->
-                    val page = renderer.openPage(index)
-                    val info =
-                        PdfPageInfo(
-                            pageIndex = index,
-                            widthPt = page.width.toFloat(),
-                            heightPt = page.height.toFloat(),
-                        )
-                    page.close()
-                    info
+                    synchronized(PdfiumRenderLock.lock) {
+                        val page = renderer.openPage(index)
+                        val info =
+                            PdfPageInfo(
+                                pageIndex = index,
+                                widthPt = page.width.toFloat(),
+                                heightPt = page.height.toFloat(),
+                            )
+                        page.close()
+                        info
+                    }
                 }
 
             AndroidPdfDocument(
