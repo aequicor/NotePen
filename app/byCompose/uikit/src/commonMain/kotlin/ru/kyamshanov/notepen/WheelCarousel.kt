@@ -62,7 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.util.lerp
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
  * «Барабан»/wheel-эффект как в пикере часов: масштабирует и притеняет элемент
@@ -74,16 +73,16 @@ import kotlin.math.roundToInt
  * прокрутка в Compose реализована сдвигом слоя, поэтому `onGloballyPositioned`
  * детей при скролле не дёргается, и эффект был бы статичным. `layoutInfo` —
  * snapshot-state, обновляется каждый кадр прокрутки, так что чтение его внутри
- * `graphicsLayer`/`layout` пересчитывает трансформу и след на лету.
+ * `graphicsLayer` пересчитывает трансформу на лету.
  *
- * Уменьшается не только рисунок (`graphicsLayer`), но и СЛЕД элемента по главной
- * оси (`layout`): слоту в Lazy-списке докладывается `mainAxisSize * scale`, а
- * ребёнок центрируется в нём. Поэтому крайние элементы не оставляют пустого
- * полноразмерного зазора — `LazyRow`/`LazyColumn` подтягивает соседей внутрь, и
- * рисунок ровно заполняет свой ужатый слот (тот же `scale` из [wheelItemFalloff]
- * управляет и следом, и визуальным масштабом, так что в покое они совпадают).
- * Затухание сосредоточено в узкой кромочной полосе ([edgeBand]) — в середине
- * элементы полноразмерны и зазоры не «гуляют».
+ * Уменьшается ТОЛЬКО рисунок (`graphicsLayer` scaleX/scaleY/alpha) — СЛЕД
+ * (footprint) элемента остаётся натуральным. Это принципиально: если ужимать и
+ * след (докладывать слоту `mainAxisSize * scale`), измеренная длина контента
+ * начинает зависеть от затухания, которое зависит от позиции прокрутки. На большом
+ * планшете в ландшафте длина садится ровно на границу вьюпорта, `canScrollForward`
+ * дёргается кадр-в-кадр, а за ним — ужатие крайних слотов: предельный цикл
+ * (наблюдавшееся мерцание меню инструментов). `graphicsLayer` на измерение не
+ * влияет, поэтому длина контента постоянна и петля замкнуться не может.
  *
  * @param index индекс ЭТОГО элемента в [listState] (в т.ч. trailing-кнопки).
  * Затухание привязано к возможности скролла: элемент тускнеет/уменьшается только
@@ -91,22 +90,19 @@ import kotlin.math.roundToInt
  * всё помещается и скролл невозможен) крайний элемент остаётся полного размера —
  * как у настоящего барабана, чьи концы упираются в стоп.
  *
- * @param orientation ось прокрутки списка: вдоль неё ужимается след элемента.
- *   Поперечная ось не меняется. `CollapsedPill`/горизонтальные полосы — [RailOrientation.HORIZONTAL].
+ * @param orientation ось прокрутки списка, вдоль которой кэшируется натуральный
+ *   размер для [wheelItemFalloff]. `CollapsedPill`/горизонтальные полосы —
+ *   [RailOrientation.HORIZONTAL].
  * @param falloffPx расстояние (px) от центра, на котором эффект достигает максимума.
  *   `<= 0` → половина видимого размера вьюпорта (крайние у кромки).
  * @param minAlpha непрозрачность элемента на краю. По умолчанию `0` — уезжающий
  *   за кромку элемент исчезает полностью, без обрезанного «половинчатого» тайла.
  * @param edgeBand доля [falloffPx] у самой кромки, на которой эффект нарастает
  *   `0 → 1`; до неё элемент полноразмерный. Меньше → резче и ближе к краю.
- * @param naturalSizes общий на полосу кэш «индекс → натуральный (до ужатия) размер
- *   элемента по главной оси, px». Заполняется здесь же при измерении и читается
- *   [wheelItemFalloff], чтобы хвостовой запас прокрутки считался от НАТУРАЛЬНОЙ
- *   длины контента, а не от ужатой. Без этого ужатие следа меняло бы измеренную
- *   длину → пересчёт затухания → новое ужатие: петля, из-за которой крайние
- *   элементы дёргались при любой форсированной перелейаутизации (движение мыши над
- *   контентом). Передавайте один `remember { mutableMapOf() }` на полосу; `null` —
- *   старое поведение (хвостовой запас от ужатой длины, с риском дрожания).
+ * @param naturalSizes общий на полосу кэш «индекс → натуральный размер элемента по
+ *   главной оси, px», читаемый [wheelItemFalloff]. Передавайте один
+ *   `remember { mutableMapOf() }` на полосу; `null` — считать центр от замеренного
+ *   размера слота (теперь это одно и то же — след не ужимается).
  */
 public fun Modifier.wheelItem(
     listState: LazyListState,
@@ -119,25 +115,15 @@ public fun Modifier.wheelItem(
     naturalSizes: MutableMap<Int, Int>? = null,
 ): Modifier =
     this
-        // След по главной оси ужимается тем же `scale`, что и визуальный масштаб
-        // ниже: слоту докладывается уменьшенный размер, ребёнок центрируется —
-        // соседи подтягиваются, пустого полноразмерного зазора у кромки нет.
+        // Кэшируем натуральный размер слота для [wheelItemFalloff]; сам след НЕ
+        // ужимаем (см. KDoc — иначе длина контента зависит от прокрутки и
+        // `canScrollForward` входит в предельный цикл = мерцание).
         .layout { measurable, constraints ->
             val placeable = measurable.measure(constraints)
             val naturalMain = if (orientation == RailOrientation.VERTICAL) placeable.height else placeable.width
             naturalSizes?.put(index, naturalMain)
-            val t = wheelItemFalloff(listState.layoutInfo, index, falloffPx, edgeBand, naturalSizes) ?: 0f
-            val scale = lerp(1f, minScale, t)
-            if (orientation == RailOrientation.VERTICAL) {
-                val h = (placeable.height * scale).roundToInt()
-                layout(placeable.width, h) {
-                    placeable.placeRelative(0, (h - placeable.height) / 2)
-                }
-            } else {
-                val w = (placeable.width * scale).roundToInt()
-                layout(w, placeable.height) {
-                    placeable.placeRelative((w - placeable.width) / 2, 0)
-                }
+            layout(placeable.width, placeable.height) {
+                placeable.placeRelative(0, 0)
             }
         }.graphicsLayer {
             val t = wheelItemFalloff(listState.layoutInfo, index, falloffPx, edgeBand, naturalSizes) ?: return@graphicsLayer
