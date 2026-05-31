@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title data-i18n="pageTitle">NotePen: заметки и рисунки поверх PDF</title>
+  <meta name="description" data-i18n-attr="content" data-i18n="metaDescription"
+        content="NotePen, приложение для заметок и рисунков поверх PDF и документов на бесконечном холсте. Работает на Android и на десктопе (Windows, macOS, Linux)." />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="logo" href="#top">NotePen</a>
+      <nav class="main-nav" aria-label="Main">
+        <a href="#features" data-i18n="navFeatures">Возможности</a>
+        <a href="#usage" data-i18n="navUsage">Как пользоваться</a>
+        <a href="#sync" data-i18n="navSync">Синхронизация</a>
+        <a href="#platforms" data-i18n="navPlatforms">Платформы</a>
+      </nav>
+      <div class="lang-toggle" role="group" aria-label="Language">
+        <button type="button" data-lang="ru" class="lang-btn">RU</button>
+        <button type="button" data-lang="en" class="lang-btn">EN</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- HERO -->
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <h1 data-i18n="heroTitle">Пишите и рисуйте поверх PDF</h1>
+          <p class="hero-sub" data-i18n="heroSub">
+            NotePen открывает PDF и документы и даёт писать прямо по странице пером. Вокруг страницы есть бесконечный холст, так что заметки и схемы не упираются в поля. Работает на Android и на компьютере.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="https://github.com/aequicor/NotePen" data-i18n="heroCta">Открыть на GitHub</a>
+            <a class="btn btn-ghost" href="#usage" data-i18n="heroCta2">Как это работает</a>
+          </div>
+        </div>
+        <div class="hero-shot">
+          <figure class="mockup">
+            <div class="mockup-bar"><span></span><span></span><span></span></div>
+            <img src="assets/screenshots/02-annotate.png"
+                 data-i18n-attr="alt" data-i18n="altAnnotate"
+                 alt="Перо и маркер поверх страницы PDF: обведённое слово, подчёркивание и жёлтая подсветка." />
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- FEATURES -->
+    <section id="features" class="section">
+      <div class="container">
+        <h2 class="section-title" data-i18n="featuresTitle">Что умеет NotePen</h2>
+        <p class="section-lead" data-i18n="featuresLead">Набор инструментов для чтения и разметки документов пером.</p>
+        <div class="features-grid">
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#9633;</div>
+            <h3 data-i18n="f1Title">Бесконечный холст</h3>
+            <p data-i18n="f1Desc">Размечайте PDF и документы на холсте, который продолжается за краями страницы. Заметки, наброски и схемы не ограничены полями документа.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#9998;</div>
+            <h3 data-i18n="f2Title">Перо поверх PDF</h3>
+            <p data-i18n="f2Desc">Откройте любой PDF и пишите по нему, как по бумаге. Поддерживается нажим пера для стилуса.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#9646;</div>
+            <h3 data-i18n="f3Title">Маркер</h3>
+            <p data-i18n="f3Desc">Отдельный инструмент-маркер, чтобы подсвечивать нужные места в документе.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#9003;</div>
+            <h3 data-i18n="f4Title">Ластик</h3>
+            <p data-i18n="f4Desc">Стирайте линии. Стирание тоже передаётся между устройствами при синхронизации.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#9711;</div>
+            <h3 data-i18n="f5Title">Распознавание фигур</h3>
+            <p data-i18n="f5Desc">Нарисуйте линию или фигуру от руки, затем задержите перо. NotePen выпрямит штрих в ровную линию или превратит набросок в выделение.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#128279;</div>
+            <h3 data-i18n="f6Title">Ссылки от руки</h3>
+            <p data-i18n="f6Desc">Обведите текст или нарисуйте символ, чтобы сделать ссылку на другую страницу документа или на внешний адрес.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#9776;</div>
+            <h3 data-i18n="f7Title">Режим чтения с перевёрсткой</h3>
+            <p data-i18n="f7Desc">Текст документа извлекается и перекомпоновывается в удобный для чтения вид. Есть готовые пресеты под комфорт чтения и свои настройки, а заметки остаются привязаны к тексту.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#128462;</div>
+            <h3 data-i18n="f8Title">Просмотр по страницам</h3>
+            <p data-i18n="f8Desc">Листайте документ по одной странице или разворотом из двух. Есть лупа для точного попадания пером.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#128190;</div>
+            <h3 data-i18n="f9Title">Автосохранение</h3>
+            <p data-i18n="f9Desc">Изменения сохраняются сами. Закройте документ и вернитесь позже, заметки будут на месте.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#128225;</div>
+            <h3 data-i18n="f10Title">Синхронизация по локальной сети</h3>
+            <p data-i18n="f10Desc">Заметки синхронизируются между устройствами по локальной сети через Ktor WebSocket и mDNS. Слияние по правилу «последний выигрывает» для каждого документа. Без облака.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#9636;</div>
+            <h3 data-i18n="f11Title">Связь по QR-коду</h3>
+            <p data-i18n="f11Desc">Соедините устройства, показав и отсканировав QR-код NotePen. Генерация через zxing, сканирование на Android через ML Kit и CameraX.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#128214;</div>
+            <h3 data-i18n="f12Title">EPUB и FB2</h3>
+            <p data-i18n="f12Desc">Встроенная конвертация превращает книги EPUB и FB2 в постраничные документы, по которым можно писать как по PDF.</p>
+          </article>
+
+        </div>
+      </div>
+    </section>
+
+    <!-- USAGE -->
+    <section id="usage" class="section section-alt">
+      <div class="container">
+        <h2 class="section-title" data-i18n="usageTitle">Как пользоваться</h2>
+        <p class="section-lead" data-i18n="usageLead">Несколько шагов от открытия документа до синхронизации заметок.</p>
+
+        <div class="usage-step">
+          <div class="usage-text">
+            <span class="step-num">1</span>
+            <h3 data-i18n="u1Title">Откройте документ</h3>
+            <p data-i18n="u1Desc">Откройте PDF или импортируйте книгу EPUB или FB2. Книга превращается в постраничный документ. На главном экране лежат недавние файлы и папки.</p>
+          </div>
+          <figure class="usage-shot">
+            <img src="assets/screenshots/01-library.png"
+                 data-i18n-attr="alt" data-i18n="altLibrary"
+                 alt="Главный экран: недавние файлы и папки." />
+          </figure>
+        </div>
+
+        <div class="usage-step reverse">
+          <div class="usage-text">
+            <span class="step-num">2</span>
+            <h3 data-i18n="u2Title">Пишите по странице</h3>
+            <p data-i18n="u2Desc">Пишите и рисуйте пером с поддержкой нажима. Переключайтесь на маркер или ластик, когда нужно. Задержите перо после штриха, чтобы выпрямить его в линию или превратить в выделение.</p>
+          </div>
+          <figure class="usage-shot">
+            <img src="assets/screenshots/02-annotate.png"
+                 data-i18n-attr="alt" data-i18n="altAnnotate"
+                 alt="Перо и маркер поверх страницы PDF: обведённое слово, подчёркивание и жёлтая подсветка." />
+          </figure>
+        </div>
+
+        <div class="usage-step">
+          <div class="usage-text">
+            <span class="step-num">3</span>
+            <h3 data-i18n="u3Title">Читайте с перевёрсткой</h3>
+            <p data-i18n="u3Desc">Переключитесь в режим чтения и выберите пресет под комфорт чтения. В просмотрщике можно включить одну страницу или разворот из двух. Заметки остаются привязаны к тексту.</p>
+          </div>
+          <figure class="usage-shot">
+            <img src="assets/screenshots/03-reading.png"
+                 data-i18n-attr="alt" data-i18n="altReading"
+                 alt="Режим чтения с перевёрсткой и пресетами комфорта чтения внизу." />
+          </figure>
+        </div>
+
+        <div class="usage-step reverse">
+          <div class="usage-text">
+            <span class="step-num">4</span>
+            <h3 data-i18n="u4Title">Синхронизируйте устройства</h3>
+            <p data-i18n="u4Desc">Подключите второе устройство, отсканировав QR-код. Заметки синхронизируются по локальной сети. Изменения сохраняются автоматически.</p>
+          </div>
+          <figure class="usage-shot">
+            <img src="assets/screenshots/04-sync.png"
+                 data-i18n-attr="alt" data-i18n="altSync"
+                 alt="Диалог связи устройств: QR-код и список подключённых клиентов." />
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- SYNC HIGHLIGHT -->
+    <section id="sync" class="section">
+      <div class="container sync-grid">
+        <div class="sync-copy">
+          <h2 class="section-title" data-i18n="syncTitle">Синхронизация без облака</h2>
+          <p data-i18n="syncDesc">Устройства обмениваются заметками напрямую по локальной сети. NotePen находит соседние устройства через mDNS и держит соединение по Ktor WebSocket. Для каждого документа правки сливаются по правилу «последний выигрывает», стирание тоже передаётся. Ничего не уходит в облако.</p>
+          <p data-i18n="syncDesc2">Связать устройства можно по QR-коду: одно показывает код, второе сканирует.</p>
+        </div>
+        <figure class="sync-shot">
+          <img src="assets/screenshots/04-sync.png"
+               data-i18n-attr="alt" data-i18n="altSync"
+               alt="Диалог связи устройств: QR-код и список подключённых клиентов." />
+        </figure>
+      </div>
+    </section>
+
+    <!-- PLATFORMS -->
+    <section id="platforms" class="section section-alt">
+      <div class="container">
+        <h2 class="section-title" data-i18n="platformsTitle">Платформы</h2>
+        <p class="section-lead" data-i18n="platformsLead">Один общий код на Kotlin Multiplatform для всех целей.</p>
+        <ul class="platforms-strip">
+          <li data-i18n="plat1">Android</li>
+          <li data-i18n="plat2">Windows</li>
+          <li data-i18n="plat3">macOS</li>
+          <li data-i18n="plat4">Linux</li>
+        </ul>
+        <div class="run-box">
+          <h3 data-i18n="runTitle">Запуск из исходников</h3>
+          <p data-i18n="runDesc">Соберите проект Gradle и запустите. На десктопе нужна JetBrains Runtime (JBR) 25.</p>
+          <ul class="run-list">
+            <li><code>./gradlew runDesktop</code> <span data-i18n="runDesktop">запуск десктопной версии</span></li>
+            <li><code>./gradlew :app:byCompose:android:installDebug</code> <span data-i18n="runAndroid">установка debug-сборки на Android</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div>
+        <span class="footer-logo">NotePen</span>
+        <p data-i18n="footerTag">Заметки и рисунки поверх PDF на Android и десктопе.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/aequicor/NotePen" data-i18n="footerRepo">Репозиторий на GitHub</a>
+        <span data-i18n="footerLicense">Лицензия Apache 2.0</span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
