@@ -30,6 +30,7 @@ Each link opens the latest release page, where you pick the file you need. For d
 
 - **Infinite canvas.** Annotate on an unbounded surface that extends past the page, so notes, sketches, and mind maps are not constrained by the document margins.
 - **Natural ink over PDF.** Import a PDF and draw or write over it like digital paper, with pen-pressure support tuned for stylus input.
+- **Graphics tablet and stylus.** Pen input with pressure and tilt, the barrel (side) button, and the eraser tip. Windows uses WinTab (Wacom and compatible tablets), macOS uses Cocoa tablet events, and Android uses the built-in stylus.
 - **Marker / highlighter.** A dedicated marker tool for highlighting content over the document.
 - **Eraser.** Remove strokes. Erase operations are modeled as tombstone deltas, so they also propagate through sync.
 - **Smart shape gestures.** Draw freehand, then hold the pen or finger to snap a sketch into a clean straight line or a selection, using on-device shape recognition and simplification.
