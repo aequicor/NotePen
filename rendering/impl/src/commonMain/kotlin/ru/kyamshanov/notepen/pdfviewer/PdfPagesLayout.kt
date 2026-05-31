@@ -361,6 +361,57 @@ object PdfViewerMath {
     ): Int = if (layout.spreadMode == SpreadMode.SPREAD && index % 2 == 1) index - 1 else index
 
     /**
+     * Диапазон страниц для РАСТЕРИЗАЦИИ: видимый [visible] плюс буфер
+     * [bufferPages] с каждой стороны, оклампленный в `[0, pageCount-1]`.
+     *
+     * В [SpreadMode.SPREAD] границы выравниваются по разворотам (низ — на левую
+     * страницу пары, верх — на правую), а буфер считается **целыми разворотами**
+     * (`bufferPages` разворотов = `bufferPages × 2` страниц). Иначе при буфере в
+     * 1 страницу переход к соседнему развороту всегда заставал бы ровно одну из
+     * его двух страниц нерастеризованной — та «доезжала» бы на лету (см. F4).
+     * В [SpreadMode.SINGLE] — обычное расширение на [bufferPages] страниц.
+     */
+    fun bufferedRenderRange(
+        layout: PdfPagesLayout,
+        visible: IntRange,
+        bufferPages: Int,
+        pageCount: Int,
+    ): IntRange {
+        if (visible.isEmpty() || pageCount == 0) return IntRange.EMPTY
+        val lastIdx = pageCount - 1
+        return if (layout.spreadMode == SpreadMode.SPREAD) {
+            val visFirst = spreadLeftPageOf(layout, visible.first.coerceIn(0, lastIdx))
+            val visLastRight = (spreadLeftPageOf(layout, visible.last.coerceIn(0, lastIdx)) + 1).coerceAtMost(lastIdx)
+            val first = (visFirst - bufferPages * 2).coerceAtLeast(0)
+            val last = (visLastRight + bufferPages * 2).coerceAtMost(lastIdx)
+            first..last
+        } else {
+            val first = (visible.first - bufferPages).coerceAtLeast(0)
+            val last = (visible.last + bufferPages).coerceAtMost(lastIdx)
+            first..last
+        }
+    }
+
+    /**
+     * Порядок растеризации страниц окна [window]: СНАЧАЛА видимые [visible],
+     * затем буферные (опережающие/отстающие). Под сериализующим растеризатором
+     * (process-global pdfium-лок на Android, PDFBox на JVM) отправленное раньше
+     * раньше и займёт очередь — поэтому видимая страница (в развороте — ОБЕ
+     * страницы пары) рисуется до буфера, а не ждёт, пока отрисуется опережающая
+     * буферная страница соседнего разворота (корень F4: буфер-впереди в цикле
+     * `first..last` блокировал видимое под локом).
+     */
+    fun renderPriorityOrder(
+        window: IntRange,
+        visible: IntRange,
+    ): List<Int> {
+        if (window.isEmpty()) return emptyList()
+        val vis = window.filter { it in visible }
+        val buf = window.filter { it !in visible }
+        return vis + buf
+    }
+
+    /**
      * Индекс первой страницы, у которой верхняя граница уже либо ниже,
      * либо равна верху вьюпорта (т.е. "первая видимая" в смысле LazyColumn).
      * Если все страницы выше — возвращает `pages.lastIndex`. Если нет
