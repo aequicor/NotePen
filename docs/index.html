@@ -15,8 +15,9 @@
       <nav class="main-nav" aria-label="Main">
         <a href="#download" data-i18n="navDownload">Скачать</a>
         <a href="#features" data-i18n="navFeatures">Возможности</a>
+        <a href="#writing" data-i18n="navWriting">Письмо</a>
         <a href="#usage" data-i18n="navUsage">Как пользоваться</a>
-        <a href="#sync" data-i18n="navSync">Синхронизация</a>
+        <a href="#sync" data-i18n="navSync">Библиотека и синхронизация</a>
         <a href="#platforms" data-i18n="navPlatforms">Платформы</a>
       </nav>
       <div class="lang-toggle" role="group" aria-label="Language">
@@ -59,23 +60,25 @@
         <div class="download-grid">
 
           <article class="download-card">
-            <div class="download-os" data-i18n="dlWinInstallerLabel">Windows</div>
-            <div class="download-sub" data-i18n="dlWinInstallerSub">Установщик (.exe)</div>
-            <a class="btn btn-primary download-btn" id="dl-win-installer"
-               href="https://github.com/aequicor/NotePen/releases/latest"
-               data-i18n="downloadBtn"
-               data-i18n-aria="dlWinInstallerAria"
-               aria-label="Скачать установщик NotePen для Windows">Скачать</a>
-          </article>
-
-          <article class="download-card">
-            <div class="download-os" data-i18n="dlWinPortableLabel">Windows</div>
-            <div class="download-sub" data-i18n="dlWinPortableSub">Портативная, без установки (.zip)</div>
-            <a class="btn btn-primary download-btn" id="dl-win-portable"
-               href="https://github.com/aequicor/NotePen/releases/latest"
-               data-i18n="downloadBtn"
-               data-i18n-aria="dlWinPortableAria"
-               aria-label="Скачать портативную версию NotePen для Windows">Скачать</a>
+            <div class="download-os" data-i18n="dlWinLabel">Windows</div>
+            <div class="download-options">
+              <div class="download-option">
+                <span class="download-sub" data-i18n="dlWinInstallerSub">Установщик (.exe)</span>
+                <a class="btn btn-primary download-btn" id="dl-win-installer"
+                   href="https://github.com/aequicor/NotePen/releases/latest"
+                   data-i18n="downloadBtn"
+                   data-i18n-aria="dlWinInstallerAria"
+                   aria-label="Скачать установщик NotePen для Windows">Скачать</a>
+              </div>
+              <div class="download-option">
+                <span class="download-sub" data-i18n="dlWinPortableSub">Портативная, без установки (.zip)</span>
+                <a class="btn btn-primary download-btn" id="dl-win-portable"
+                   href="https://github.com/aequicor/NotePen/releases/latest"
+                   data-i18n="downloadBtn"
+                   data-i18n-aria="dlWinPortableAria"
+                   aria-label="Скачать портативную версию NotePen для Windows">Скачать</a>
+              </div>
+            </div>
           </article>
 
           <article class="download-card">
@@ -135,12 +138,6 @@
           </article>
 
           <article class="card">
-            <div class="card-icon" aria-hidden="true">&#128396;</div>
-            <h3 data-i18n="fTabletTitle">Графический планшет и стилус</h3>
-            <p data-i18n="fTabletDesc">Перьевой ввод с нажимом и наклоном, кнопкой на пере и ластиком-наконечником. На Windows работает через WinTab (планшеты Wacom и совместимые), на macOS — через события планшета Cocoa, на Android — встроенный стилус.</p>
-          </article>
-
-          <article class="card">
             <div class="card-icon" aria-hidden="true">&#9646;</div>
             <h3 data-i18n="f3Title">Маркер</h3>
             <p data-i18n="f3Desc">Отдельный инструмент-маркер, чтобы подсвечивать нужные места в документе.</p>
@@ -183,18 +180,6 @@
           </article>
 
           <article class="card">
-            <div class="card-icon" aria-hidden="true">&#128225;</div>
-            <h3 data-i18n="f10Title">Синхронизация по локальной сети</h3>
-            <p data-i18n="f10Desc">Заметки синхронизируются между устройствами по локальной сети через Ktor WebSocket и mDNS. Слияние по правилу «последний выигрывает» для каждого документа. Без облака.</p>
-          </article>
-
-          <article class="card">
-            <div class="card-icon" aria-hidden="true">&#9636;</div>
-            <h3 data-i18n="f11Title">Связь по QR-коду</h3>
-            <p data-i18n="f11Desc">Соедините устройства, показав и отсканировав QR-код NotePen. Генерация через zxing, сканирование на Android через ML Kit и CameraX.</p>
-          </article>
-
-          <article class="card">
             <div class="card-icon" aria-hidden="true">&#128214;</div>
             <h3 data-i18n="f12Title">EPUB и FB2</h3>
             <p data-i18n="f12Desc">Встроенная конвертация превращает книги EPUB и FB2 в постраничные документы, по которым можно писать как по PDF.</p>
@@ -204,8 +189,31 @@
       </div>
     </section>
 
+    <!-- WRITING COMFORT -->
+    <section id="writing" class="section section-alt">
+      <div class="container">
+        <h2 class="section-title" data-i18n="writingTitle">Удобное письмо и заметки</h2>
+        <p class="section-lead" data-i18n="writingLead">Пишите пером так, как привыкли на бумаге, и держите почерк аккуратным.</p>
+        <div class="writing-grid">
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#128396;</div>
+            <h3 data-i18n="wTabletTitle">Графический планшет и стилус</h3>
+            <p data-i18n="wTabletDesc">Перо понимает нажим и наклон, кнопку на корпусе и ластик-наконечник. На Windows работают планшеты Wacom и совместимые через WinTab, на macOS перо подключается напрямую, на Android пишет встроенный стилус.</p>
+          </article>
+
+          <article class="card">
+            <div class="card-icon" aria-hidden="true">&#128269;</div>
+            <h3 data-i18n="wLoupeTitle">Лупа для письма</h3>
+            <p data-i18n="wLoupeDesc">Пишите в плавающей панели крупно и спокойно, а чернила ложатся на страницу мелко и точно. Лупа сама едет вдоль строки, так что писать получается быстро. Её можно закрепить на месте, и она дотягивается даже через границу страницы. Включается с панели инструментов.</p>
+          </article>
+
+        </div>
+      </div>
+    </section>
+
     <!-- USAGE -->
-    <section id="usage" class="section section-alt">
+    <section id="usage" class="section">
       <div class="container">
         <h2 class="section-title" data-i18n="usageTitle">Как пользоваться</h2>
         <p class="section-lead" data-i18n="usageLead">Несколько шагов от открытия документа до синхронизации заметок.</p>
@@ -264,19 +272,36 @@
       </div>
     </section>
 
-    <!-- SYNC HIGHLIGHT -->
+    <!-- LIBRARY & SYNC -->
     <section id="sync" class="section">
-      <div class="container sync-grid">
-        <div class="sync-copy">
-          <h2 class="section-title" data-i18n="syncTitle">Синхронизация без облака</h2>
-          <p data-i18n="syncDesc">Устройства обмениваются заметками напрямую по локальной сети. NotePen находит соседние устройства через mDNS и держит соединение по Ktor WebSocket. Для каждого документа правки сливаются по правилу «последний выигрывает», стирание тоже передаётся. Ничего не уходит в облако.</p>
-          <p data-i18n="syncDesc2">Связать устройства можно по QR-коду: одно показывает код, второе сканирует.</p>
+      <div class="container">
+        <h2 class="section-title" data-i18n="libsyncTitle">Библиотека и синхронизация</h2>
+        <p class="section-lead" data-i18n="libsyncLead">Все документы под рукой, а заметки одни и те же на всех устройствах.</p>
+
+        <div class="sync-grid">
+          <div class="sync-copy">
+            <h3 data-i18n="libraryTitle">Ваша библиотека</h3>
+            <p data-i18n="libraryDesc">Все документы в одном месте. На главном экране видны недавние файлы, папки и обложки страниц. Откройте PDF или книгу EPUB либо FB2, и она станет страницами, по которым можно писать. Всё остаётся на вашем устройстве, аккаунт не нужен.</p>
+          </div>
+          <figure class="sync-shot">
+            <img src="assets/screenshots/01-library.png"
+                 data-i18n-attr="alt" data-i18n="altLibrary"
+                 alt="Главный экран: недавние файлы и папки." />
+          </figure>
         </div>
-        <figure class="sync-shot">
-          <img src="assets/screenshots/04-sync.png"
-               data-i18n-attr="alt" data-i18n="altSync"
-               alt="Диалог связи устройств: QR-код и список подключённых клиентов." />
-        </figure>
+
+        <div class="sync-grid reverse">
+          <div class="sync-copy">
+            <h3 data-i18n="syncTitle">Заметки на всех устройствах</h3>
+            <p data-i18n="syncDesc">Заметки остаются одинаковыми на всех ваших устройствах в одной сети. Начните на планшете и продолжите на компьютере. Без облака и без аккаунта.</p>
+            <p data-i18n="syncDesc2">Чтобы связать два устройства, покажите QR-код на одном и отсканируйте его на другом.</p>
+          </div>
+          <figure class="sync-shot">
+            <img src="assets/screenshots/04-sync.png"
+                 data-i18n-attr="alt" data-i18n="altSync"
+                 alt="Диалог связи устройств: QR-код и список подключённых клиентов." />
+          </figure>
+        </div>
       </div>
     </section>
 
