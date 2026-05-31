@@ -12,9 +12,6 @@ import ru.kyamshanov.notepen.qrconnect.domain.port.QrMatrix
  * @property availablePeers LAN peers that are cached/known but not yet added as a library — the
  *   "add LAN library" picker connects one of these as a [LibraryBackendKind.PeerLan] library.
  * @property openLibraryAtStartup current value of the `openLibraryAtStartup` app setting.
- * @property serveOverLanSupported whether this platform can serve its library over LAN (desktop only;
- *   Android is client-only). Hides the "Открыть свою библиотеку" action when `false`.
- * @property serving whether serve-over-LAN has been switched on this session (drives the action label).
  * @property googleDriveSupported whether a Google sign-in path is wired (an OAuth client is
  *   configured); hides the "Google Drive" add option when `false`.
  * @property googleDevicePrompt the active Google device-flow prompt (user code + URL) to display
@@ -25,8 +22,6 @@ data class LibrarySourcesUiState(
     val libraries: List<LibrarySourceUiModel> = emptyList(),
     val availablePeers: List<AvailablePeerUiModel> = emptyList(),
     val openLibraryAtStartup: Boolean = false,
-    val serveOverLanSupported: Boolean = false,
-    val serving: Boolean = false,
     val googleDriveSupported: Boolean = false,
     val googleDevicePrompt: GoogleDeviceCodeUiModel? = null,
     val errorMessage: String? = null,

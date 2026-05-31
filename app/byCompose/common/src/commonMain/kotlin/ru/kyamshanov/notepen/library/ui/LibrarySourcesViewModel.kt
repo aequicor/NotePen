@@ -28,10 +28,9 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  * ViewModel of the «Источники библиотек» (LibrarySources) screen.
  *
  * Reactively projects [LibraryRegistry.libraries] into the screen state and drives connect /
- * disconnect, the `openLibraryAtStartup` toggle ([AppSettingsRepository]) and (desktop only) the
- * serve-over-LAN action. Adding a LAN library reuses the already-paired peer catalog cache — the
- * pairing itself happens out of band through the sync QR / manual flow, which is what populates
- * [catalogsFlow].
+ * disconnect and the `openLibraryAtStartup` toggle ([AppSettingsRepository]). Adding a LAN library
+ * reuses the already-paired peer catalog cache — the pairing itself happens out of band through the
+ * sync QR / manual flow, which is what populates [catalogsFlow].
  *
  * @param lifecycle Decompose lifecycle; scopes the hot subscriptions.
  * @param registry the central library registry, connected/disconnected through here.
@@ -39,8 +38,6 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  * @param catalogsFlow shared peer→catalog cache, used to list LAN peers available to add and to
  *   resolve friendly display names; `null` when sync is not wired.
  * @param onlinePeerIdsFlow reactive set of online peer ids; refines the "available peers" list.
- * @param onServeOverLan platform action enabling serve-over-LAN (desktop: `SyncRuntime.enable()`);
- *   `null` on platforms that cannot host (Android, client-only) — the action is then hidden.
  * @param googleDriveAuthorizer drives the Google device-flow sign-in for a Drive library; `null`
  *   when no OAuth client is configured — the "Google Drive" add option is then hidden.
  */
@@ -51,7 +48,6 @@ class LibrarySourcesViewModel(
     private val settingsRepository: AppSettingsRepository,
     private val catalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>?,
     private val onlinePeerIdsFlow: Flow<Set<String>>?,
-    private val onServeOverLan: (() -> Unit)?,
     private val googleDriveAuthorizer: GoogleDriveAuthorizer? = null,
 ) {
     private val logger = KotlinLogging.logger {}
@@ -61,7 +57,6 @@ class LibrarySourcesViewModel(
     private val _state =
         MutableStateFlow(
             LibrarySourcesUiState(
-                serveOverLanSupported = onServeOverLan != null,
                 googleDriveSupported = googleDriveAuthorizer != null,
             ),
         )
@@ -220,16 +215,6 @@ class LibrarySourcesViewModel(
         scope.launch {
             settingsRepository.save(settingsRepository.settings.value.copy(openLibraryAtStartup = enabled))
         }
-    }
-
-    /**
-     * Enables serve-over-LAN on supported platforms (desktop). No-op (and the action is hidden) where
-     * unsupported. The transport itself is owned by the platform layer; this only flips it on.
-     */
-    fun openMyLibrary() {
-        val serve = onServeOverLan ?: return
-        serve()
-        _state.update { it.copy(serving = true) }
     }
 
     /** Resets the one-shot error message after the UI shows it. */

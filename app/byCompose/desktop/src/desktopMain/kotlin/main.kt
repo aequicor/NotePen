@@ -692,9 +692,6 @@ fun main(args: Array<String>) {
                     )
                 },
                 // M2c: the LibrarySources screen drives the same registry/store/settings as the shelf.
-                // - onServeOverLan enables the heavy sync stack (Ktor server + mDNS) AND registers the
-                //   served root (libraryRoot) as a writable local library, so an inbound remote-librarian
-                //   upload (resolved through the registry) has a local target.
                 // - onPickLocalFolder shows a native directory chooser so the user can add a named
                 //   local-folder library (there is no always-on default library anymore).
                 librarySourcesComponentFactory = { ctx, onBack ->
@@ -704,23 +701,6 @@ fun main(args: Array<String>) {
                         settingsRepository = defaultAppSettingsRepository(),
                         catalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
-                        onServeOverLan = {
-                            appScope.launch {
-                                syncRuntime.enable()
-                                // Sharing your library over LAN makes its served root (libraryRoot, what
-                                // FileSystemLibraryManifestProvider walks) a real, writable library: register
-                                // it so remote-librarian uploads have a local target. Idempotent — reconnect
-                                // by id replaces in place.
-                                libraryRegistry.connect(
-                                    LibraryConnection.Local(
-                                        rootPath = libraryRoot.canonicalPath,
-                                        displayName = libraryRoot.name,
-                                    ),
-                                ).onFailure { e ->
-                                    mainLogger.warn(e) { "Failed to register served library: ${e::class.simpleName}" }
-                                }
-                            }
-                        },
                         onPickLocalFolder = { pickLibraryFolder() },
                         // Connect a LAN library by pasting a host's QR string: dial the host directly
                         // (no mDNS) and register the targeted PeerLan library in one step.

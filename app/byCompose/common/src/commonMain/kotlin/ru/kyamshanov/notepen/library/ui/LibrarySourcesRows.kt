@@ -65,17 +65,6 @@ internal fun ToggleRow(
     }
 }
 
-/** Settings-style row with a custom [trailing] action slot. */
-@Composable
-internal fun ActionRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-    trailing: @Composable () -> Unit,
-) {
-    BaseRow(icon = icon, title = title, subtitle = subtitle, trailing = trailing)
-}
-
 /** Shared layout for an icon + title/subtitle + trailing slot, matching SettingsContent rows. */
 @Composable
 internal fun BaseRow(
