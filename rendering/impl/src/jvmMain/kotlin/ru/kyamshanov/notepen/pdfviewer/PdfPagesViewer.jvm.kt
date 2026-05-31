@@ -135,7 +135,15 @@ private const val SCROLL_H_CENTER_TOLERANCE_PX = 2f
  * → cache.put на main → рекомпозиция всей видимой страницы → cascade.
  */
 private const val RENDER_DEBOUNCE_MS = 300L
-private const val MAX_CACHE_ENTRIES = 6
+
+/**
+ * Лимит записей кэша растров. В книжном развороте ([SpreadMode.SPREAD]) окно
+ * растеризации — текущий разворот + по одному соседнему с каждой стороны (см.
+ * [PdfViewerMath.bufferedRenderRange]) = до 6 страниц; прежние 6 не оставляли
+ * запаса и при churn'е вытесняли видимое. 10 держит полное окно разворота;
+ * объём всё равно ограничен pixel-ceiling LRU внутри [PdfBitmapCache].
+ */
+private const val MAX_CACHE_ENTRIES = 10
 private const val MAX_RENDER_DIM_PX = 4000
 
 /**
@@ -389,11 +397,21 @@ actual fun PdfPagesViewer(
                     zoom = state.zoom,
                     viewportHeight = state.viewportSize.height.toFloat(),
                 )
-            val first = (range.first - BUFFER_PAGES).coerceAtLeast(0)
-            val last = (range.last + BUFFER_PAGES).coerceAtMost(state.pages.lastIndex)
+            // Окно растеризации: видимое + буфер, выровненный по разворотам (#F4).
+            val window =
+                PdfViewerMath.bufferedRenderRange(
+                    layout = state.layout,
+                    visible = range,
+                    bufferPages = BUFFER_PAGES,
+                    pageCount = state.pages.size,
+                )
+            val first = if (window.isEmpty()) -1 else window.first
+            val last = if (window.isEmpty()) -1 else window.last
             VisibleSnapshot(
                 first = first,
                 last = last,
+                visFirst = if (range.isEmpty()) -1 else range.first,
+                visLast = if (range.isEmpty()) -1 else range.last,
                 // Растеризуем до layoutCap; зум сверх него — GPU-апскейл.
                 scalePercent = state.renderScalePercent,
                 basePageWidthPx = state.basePageWidthPx,
@@ -423,13 +441,21 @@ actual fun PdfPagesViewer(
                 }
                 val basePageWidthPx = snap.basePageWidthPx
                 if (basePageWidthPx <= 0f) return@collectLatest
-                val visible = (snap.first..snap.last).toSet()
+                val window = (snap.first..snap.last).toSet()
                 cache.evictStaleScale(
-                    visibleIndices = visible,
+                    visibleIndices = window,
                     currentScale = snap.scalePercent,
                     maxScaleRatio = STALE_SCALE_RATIO_THRESHOLD,
                 )
-                for (i in snap.first..snap.last) {
+                // Видимые страницы — раньше буферных: под сериализованной
+                // растеризацией PDFBox обе страницы текущего разворота должны
+                // занять очередь раньше опережающего буфера (#F4).
+                val order =
+                    PdfViewerMath.renderPriorityOrder(
+                        window = snap.first..snap.last,
+                        visible = snap.visFirst..snap.visLast,
+                    )
+                for (i in order) {
                     val rotation = userRotationQuarters(i)
                     val src = currentPageSource(i)
                     // Защита от транзиентного рассинхрона при переключении #4:
@@ -676,6 +702,8 @@ actual fun PdfPagesViewer(
 private data class VisibleSnapshot(
     val first: Int,
     val last: Int,
+    val visFirst: Int = first,
+    val visLast: Int = last,
     val scalePercent: Int,
     val basePageWidthPx: Float,
     val viewportSize: IntSize,

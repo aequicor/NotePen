@@ -507,6 +507,38 @@ class PdfPagesLayoutTest {
     }
 
     @Test
+    fun `bufferedRenderRange in single mode extends by bufferPages each side`() {
+        val layout = PdfPagesLayout.build(pages(1f, 1f, 1f, 1f, 1f, 1f), basePageWidthPx = 100f)
+        // видимое 2..2, буфер 1 → 1..3
+        assertEquals(1..3, PdfViewerMath.bufferedRenderRange(layout, 2..2, bufferPages = 1, pageCount = 6))
+        // клампится к границам документа
+        assertEquals(0..1, PdfViewerMath.bufferedRenderRange(layout, 0..0, bufferPages = 1, pageCount = 6))
+        assertEquals(4..5, PdfViewerMath.bufferedRenderRange(layout, 5..5, bufferPages = 1, pageCount = 6))
+    }
+
+    @Test
+    fun `bufferedRenderRange in spread covers whole adjacent spreads`() {
+        val layout =
+            PdfPagesLayout.build(pages(1f, 1f, 1f, 1f, 1f, 1f), basePageWidthPx = 100f, spreadMode = SpreadMode.SPREAD)
+        // На развороте (2,3): обе видны → окно с буфером 1 разворот = пары (0,1)+(2,3)+(4,5) = 0..5.
+        assertEquals(0..5, PdfViewerMath.bufferedRenderRange(layout, 2..3, bufferPages = 1, pageCount = 6))
+        // На первом развороте (0,1): предыдущего нет, следующий (2,3) предзагружен = 0..3.
+        assertEquals(0..3, PdfViewerMath.bufferedRenderRange(layout, 0..1, bufferPages = 1, pageCount = 6))
+        // Видимо только правая половина (3) → выравнивается на свой разворот (2,3) и буферит соседние.
+        assertEquals(0..5, PdfViewerMath.bufferedRenderRange(layout, 3..3, bufferPages = 1, pageCount = 6))
+    }
+
+    @Test
+    fun `renderPriorityOrder puts visible pages before buffer pages`() {
+        // окно 1..4, видимо 2..3 → сначала 2,3 затем буфер 1,4
+        assertEquals(listOf(2, 3, 1, 4), PdfViewerMath.renderPriorityOrder(window = 1..4, visible = 2..3))
+        // окно == видимое → порядок без изменений
+        assertEquals(listOf(2, 3), PdfViewerMath.renderPriorityOrder(window = 2..3, visible = 2..3))
+        // пустое окно → пусто
+        assertEquals(emptyList(), PdfViewerMath.renderPriorityOrder(window = IntRange.EMPTY, visible = 2..3))
+    }
+
+    @Test
     fun `firstVisiblePageIndex returns the left page of the visible pair in spread`() {
         val layout = PdfPagesLayout.build(pages(1f, 1f, 1f, 1f), basePageWidthPx = 100f, spreadMode = SpreadMode.SPREAD)
         // Ряд 0 виден (pan.y = 0) → первая видимая = левая страница пары = 0.
