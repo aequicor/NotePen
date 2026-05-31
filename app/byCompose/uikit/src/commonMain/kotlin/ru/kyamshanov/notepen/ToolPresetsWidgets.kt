@@ -66,13 +66,13 @@ public fun toolPresetWheelEntries(
     buildList {
         items.forEach { item ->
             add(
-                WheelEntry(item.id, PRESET_ITEM_SIZE) {
+                WheelEntry(item.id) {
                     PresetChip(item = item, onApply = { onApply(item.id) }, onDelete = { onDelete(item.id) })
                 },
             )
         }
         if (showAdd) {
-            add(WheelEntry(ADD_PRESET_KEY, PRESET_ITEM_SIZE) { AddPresetButton(icon = addIcon, onClick = onAdd) })
+            add(WheelEntry(ADD_PRESET_KEY) { AddPresetButton(icon = addIcon, onClick = onAdd) })
         }
     }
 

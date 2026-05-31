@@ -326,11 +326,11 @@ internal fun unifiedToolWheelEntries(
         // В чтении перо скрыто, но маркер/ластик остаются (см. includePen).
         addAll(toolSelectorEntries(toolMode, onToolModeChange, includePen = includePen, includeNote = includeNote))
         if (settings.isNotEmpty()) {
-            add(WheelEntry("div_settings", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
+            add(WheelEntry("div_settings") { RailDivider(orientation) })
             addAll(settings)
         }
         if (presets.isNotEmpty()) {
-            add(WheelEntry("div_presets", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
+            add(WheelEntry("div_presets") { RailDivider(orientation) })
             addAll(presets)
         }
         // Системные кнопки (миниатюры, режим чтения, лупа, зум, экспорт, undo/redo…)
@@ -340,7 +340,7 @@ internal fun unifiedToolWheelEntries(
         // прокручиваемый LazyRow/LazyColumn, поэтому лишние элементы уезжают в скролл,
         // а не исчезают.
         if (system.isNotEmpty()) {
-            add(WheelEntry("div_system", WHEEL_DIVIDER_ENTRY_SIZE) { RailDivider(orientation) })
+            add(WheelEntry("div_system") { RailDivider(orientation) })
             addAll(system)
         }
     }
@@ -680,7 +680,7 @@ internal fun systemControlEntries(
         // собственным кеглем), поэтому зум-кластер прячем.
         if (!readingModeEnabled) {
             add(WheelEntry("sys_zoom_in") { zoomInButton() })
-            add(WheelEntry("sys_zoom_label", SCALE_LABEL_WIDTH) { zoomLabel() })
+            add(WheelEntry("sys_zoom_label") { zoomLabel() })
             add(WheelEntry("sys_zoom_out") { zoomOutButton() })
         }
     }
@@ -898,10 +898,13 @@ fun LandscapeToolRail(
 /**
  * The landscape rail's glass island: the pinned undo / redo [PinnedHistoryButtons]
  * fixed at the TOP with the scrollable vertical [WheelStrip] of [entries] below
- * them. The wheel is capped to the leftover height (`weight(fill = false)`) so the
- * pinned buttons never get pushed off-screen when the tool list overflows, and
- * undo stays visible regardless of how far the wheel is scrolled. Recolours to the
- * reader palette in reading mode via [railSelectionColorScheme].
+ * them, capped to the leftover height (`weight(fill = false)`). The wheel wraps its
+ * real content: when the tools fit, the island is a compact pill (no trailing gap);
+ * when they overflow, the wheel caps at the leftover height and scrolls with a
+ * gentle taper, every item reachable at the stops. The pinned buttons never get
+ * pushed off-screen (the weight reserves their space first), so undo stays visible
+ * regardless of how far the wheel is scrolled. Recolours to the reader palette in
+ * reading mode via [railSelectionColorScheme].
  */
 @Composable
 private fun LandscapeToolRailIsland(
@@ -921,9 +924,11 @@ private fun LandscapeToolRailIsland(
         ) {
             // Отмена/повтор — ЗАКРЕПЛЁННЫЕ кнопки СВЕРХУ острова: всегда видны
             // независимо от прокрутки и активного инструмента. Колесо ниже ограничено
-            // остатком высоты (weight, fill = false) и прокручивается внутри него,
-            // поэтому при переполнении списка инструментов кнопки не выдавливаются
-            // за экран.
+            // остатком высоты (weight, fill = false) и прокручивается внутри него:
+            // при переполнении кнопки не выдавливаются за экран. Колесо подгоняется
+            // под РЕАЛЬНУЮ высоту контента (а не оценку по числу элементов) — пока
+            // инструменты помещаются, остров остаётся компактной «пилюлей» без
+            // зияющего хвоста снизу; переполняясь, упирается в остаток и скроллится.
             Column(
                 modifier = Modifier.padding(ISLAND_PADDING),
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -1147,9 +1152,6 @@ private val WHEEL_DIVIDER_SPACING = 6.dp
 private val WHEEL_DIVIDER_LENGTH = 28.dp
 private val WHEEL_DIVIDER_THICKNESS = 1.5.dp
 private const val WHEEL_DIVIDER_ALPHA = 0.7f
-
-/** Main-axis size estimate for the divider wheel entry (for tight strip sizing). */
-private val WHEEL_DIVIDER_ENTRY_SIZE = 16.dp
 
 private val SCALE_LABEL_WIDTH = 40.dp
 private val ISLAND_GAP = 8.dp
