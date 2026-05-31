@@ -1,7 +1,6 @@
 package ru.kyamshanov.notepen
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
@@ -15,7 +14,6 @@ import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -283,16 +281,13 @@ public fun Modifier.fadingEdges(
 /**
  * One entry in a [WheelStrip]: a stable [key] and the composable [content] drawn
  * for it. The content owns its own click handling — the wheel only scrolls and
- * applies the visual [wheelItem] transform.
- *
- * @property mainAxisSize the entry's size along the scroll axis. Used only to
- *   estimate the strip's natural length so it wraps its content tightly; pass an
- *   accurate value for short entries (dividers, labels, small chips) or the strip
- *   over-reserves space and shows large internal padding.
+ * applies the visual [wheelItem] transform. The entry's size along the scroll axis
+ * is taken from [content]'s own measurement (the strip wraps real content), so a
+ * narrow icon, a wide label and a thin divider each reserve exactly their rendered
+ * extent — no per-entry size hint is needed.
  */
 public class WheelEntry(
     public val key: Any,
-    public val mainAxisSize: Dp = 40.dp,
     public val content: @Composable () -> Unit,
 )
 
@@ -303,33 +298,46 @@ public class WheelEntry(
  *
  * Heterogeneous entries (tool toggles, settings slots, preset chips) share one
  * scroll axis so everything fits on a phone where a fixed strip would overflow.
- * The strip sizes itself to its content and is centred in the available space;
- * once the content would exceed it, the strip caps at the available size and
- * scrolls. Entry slots stay full-size with even gaps — only the rendered icon
- * scales/fades near the ends ([wheelItem]) and a fading-edge mask
- * ([fadingEdges]) dissolves whatever crosses either end, so no half-clipped
- * tile is ever shown.
+ * **The strip wraps its real content along the scroll axis, capped at the extent
+ * the caller gives it** (so it sizes to the lazy list's measured content, never to
+ * a per-entry estimate): when the entries fit it is exactly as long as they are —
+ * a compact drum the caller centres in the available space, with no trailing gap;
+ * when they would overflow it caps at the available extent and scrolls. Measuring
+ * the content instead of estimating it is what makes the layout correct *in any
+ * condition on any platform*: the old flat per-entry size estimate (40dp) ran short
+ * of the real heights — Material3 icon buttons round up to the 48dp minimum
+ * interactive size on touch, undercounting ~8dp per entry across a dozen-plus tools
+ * — leaving the viewport too short, so the rail showed a dead gap, faded its top
+ * items away on the first scroll tick, and clipped its last items near the end. A
+ * real-measured viewport has none of those failure modes: the falloff is always
+ * half the true on-screen length, so the taper is gentle and every item is
+ * reachable at the stops.
+ *
+ * Entry slots stay full-size with even gaps — only the rendered icon scales/fades
+ * near the ends ([wheelItem]) and a fading-edge mask ([fadingEdges]) dissolves
+ * whatever crosses either end, so no half-clipped tile is ever shown.
  *
  * @param crossAxisSize Fixed size across the scroll axis (height for a
  *   horizontal strip, width for a vertical one). Pinned so the strip's thickness
  *   stays constant regardless of which entries are currently on-screen — a lazy
  *   list otherwise measures only visible items and the bar would resize (and
  *   shift neighbours) as the tallest entry scrolls out of view.
- * @param minAlpha edge opacity of the [wheelItem] falloff; `0` (default) lets an
- *   item fully vanish before it would clip at the viewport edge.
+ * @param minAlpha edge opacity of the [wheelItem] falloff. Defaults to a partial
+ *   `0.5` (matching the reader airbar) so the item past either end stays a faint
+ *   readable hint that there is more to scroll, rather than vanishing outright.
  * @param fadeEdgeWidth width of the leading/trailing fade band applied to the
- *   whole strip (see [fadingEdges]); defaults to one [crossAxisSize] (≈ one
- *   tile). `0.dp` disables the mask.
+ *   whole strip (see [fadingEdges]); a small band that just softens the hard clip
+ *   at the very edge without occluding a whole tile. `0.dp` disables the mask.
  * @param selectedKey key of the entry to mark as selected. A single circular
  *   indicator is drawn behind that entry and physically slides to its position
  *   when the selection changes (and follows the entry while scrolling). Pass
  *   `null` for no selection — the indicator fades out.
- * @param contentAlignment where the (content-sized) strip sits inside the space
- *   the caller gives it. Defaults to [Alignment.Center]. Pass e.g.
- *   [Alignment.CenterEnd] to pin a horizontal strip to the right edge while keeping
- *   the strip's own width stable — important when the caller hands it a fixed
- *   ([Modifier.weight]) box, so the strip width can't animate and wobble the
- *   [wheelItem] falloff on outer recompositions.
+ * @param contentAlignment where the wrapped (content-sized) strip sits inside the
+ *   space the caller gives it. Defaults to [Alignment.Center]. Pass e.g.
+ *   [Alignment.CenterEnd] to pin a non-overflowing horizontal strip to its trailing
+ *   edge while the caller still hands it a fixed ([Modifier.weight]) box, so the
+ *   strip can't animate its width and wobble the [wheelItem] falloff on outer
+ *   recompositions.
  */
 @Composable
 public fun WheelStrip(
@@ -342,17 +350,14 @@ public fun WheelStrip(
     edgePadding: Dp = 4.dp,
     falloff: Dp = 0.dp,
     minScale: Float = 0.6f,
-    minAlpha: Float = 0f,
-    fadeEdgeWidth: Dp = crossAxisSize,
+    minAlpha: Float = 0.5f,
+    fadeEdgeWidth: Dp = 16.dp,
     selectedKey: Any? = null,
     indicatorColor: Color = MaterialTheme.colorScheme.primaryContainer,
     indicatorSize: Dp = 40.dp,
     contentAlignment: Alignment = Alignment.Center,
 ) {
     val falloffPx = if (falloff > 0.dp) with(LocalDensity.current) { falloff.toPx() } else 0f
-    val count = entries.size
-    val naturalLength =
-        edgePadding * 2 + entries.fold(0.dp) { acc, e -> acc + e.mainAxisSize } + gap * (count - 1).coerceAtLeast(0)
 
     // Single sliding selection indicator. Its center is taken from the selected
     // entry's ACTUAL rendered bounds (via onGloballyPositioned, in root coords so
@@ -403,7 +408,7 @@ public fun WheelStrip(
     // toward whichever end still has hidden items, so an unscrollable rail stays
     // full-size — the taper only appears when there is actually somewhere to scroll.
     val edgeBand = WHEEL_EDGE_BAND_WIDE
-    BoxWithConstraints(modifier, contentAlignment = contentAlignment) {
+    Box(modifier, contentAlignment = contentAlignment) {
         val itemBox: @Composable LazyItemScope.(Int, WheelEntry) -> Unit = { index, entry ->
             val reportModifier =
                 if (index == selectedIndex) {
@@ -435,10 +440,8 @@ public fun WheelStrip(
                     modifier =
                         Modifier
                             .height(crossAxisSize)
-                            .width(naturalLength.coerceAtMost(maxWidth))
                             .fadingEdges(orientation, fadeEdgeWidth, fadeStart = state.canScrollBackward, fadeEnd = state.canScrollForward)
                             .then(indicatorModifier)
-                            .animateContentSize()
                             .onGloballyPositioned(onListPositioned),
                     state = state,
                     horizontalArrangement = Arrangement.spacedBy(gap),
@@ -452,10 +455,8 @@ public fun WheelStrip(
                     modifier =
                         Modifier
                             .width(crossAxisSize)
-                            .height(naturalLength.coerceAtMost(maxHeight))
                             .fadingEdges(orientation, fadeEdgeWidth, fadeStart = state.canScrollBackward, fadeEnd = state.canScrollForward)
                             .then(indicatorModifier)
-                            .animateContentSize()
                             .onGloballyPositioned(onListPositioned),
                     state = state,
                     verticalArrangement = Arrangement.spacedBy(gap),
