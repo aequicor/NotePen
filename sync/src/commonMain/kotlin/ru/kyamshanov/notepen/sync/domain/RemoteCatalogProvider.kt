@@ -14,6 +14,7 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
 import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolder
 import ru.kyamshanov.notepen.sync.domain.model.RemoteFolderLink
+import ru.kyamshanov.notepen.sync.domain.model.RemoteLibraryInfo
 import ru.kyamshanov.notepen.sync.domain.model.RemoteLibraryRole
 import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.domain.port.LibrarianGrantStore
@@ -42,8 +43,12 @@ private const val CATALOG_BROADCAST_DEBOUNCE_MS = 500L
  * [ru.kyamshanov.notepen.sync.domain.model.DeviceInfo.id].
  *
  * @param hostName Display name of this host, embedded in the served catalog.
- * @param manifestProvider Source of the published library — the books a peer
- *   may see and the id→path resolution used when streaming a document.
+ * @param sharedLibrariesProvider Source of the named libraries this host publishes — evaluated per
+ *   request so the set can change at runtime (the user shares/unshares a library). The served
+ *   catalog is the union of every source's books, each tagged with its
+ *   [SharedLibrarySource.libraryId]; a client connected to one library projects only its subset.
+ *   For a single anonymous shelf use the secondary constructor (the entries stay untagged, exactly
+ *   reproducing the pre-feature wire shape).
  * @param folderRepository Source of user folders and folder/file links.
  * @param grantStore Optional durable store of the librarian write allow-set
  *   (M5b). When non-null, grants are persisted on [grantLibrarian]/[revokeLibrarian]
@@ -52,7 +57,7 @@ private const val CATALOG_BROADCAST_DEBOUNCE_MS = 500L
  */
 class RemoteCatalogProvider(
     private val hostName: String,
-    private val manifestProvider: LibraryManifestProvider,
+    private val sharedLibrariesProvider: suspend () -> List<SharedLibrarySource>,
     private val folderRepository: FolderRepository,
     private val grantStore: LibrarianGrantStore? = null,
     /**
@@ -64,6 +69,28 @@ class RemoteCatalogProvider(
      */
     private val openDocumentsProvider: OpenDocumentsProvider? = null,
 ) {
+    /**
+     * Convenience constructor for a host that publishes a **single** library through one
+     * [manifestProvider] — Android (which shares its recents to a paired host) and tests. [libraryId]
+     * defaults to blank, i.e. an anonymous shelf advertised as no named library (back-compatible),
+     * so paired peers see one untagged catalog exactly as before.
+     */
+    constructor(
+        hostName: String,
+        manifestProvider: LibraryManifestProvider,
+        folderRepository: FolderRepository,
+        grantStore: LibrarianGrantStore? = null,
+        openDocumentsProvider: OpenDocumentsProvider? = null,
+        libraryId: String = "",
+        libraryName: String = "",
+    ) : this(
+        hostName = hostName,
+        sharedLibrariesProvider = { listOf(SharedLibrarySource(libraryId, libraryName, manifestProvider)) },
+        folderRepository = folderRepository,
+        grantStore = grantStore,
+        openDocumentsProvider = openDocumentsProvider,
+    )
+
     private val mutex = Mutex()
     private val allowedByPeer = mutableMapOf<String, Set<String>>()
     private val uriByPeer = mutableMapOf<String, Map<String, String>>()
@@ -298,29 +325,12 @@ class RemoteCatalogProvider(
      * push proactive updates as well (Phase 5).
      */
     suspend fun buildSnapshotFor(peerId: String): RemoteCatalog {
-        val manifest = manifestProvider.current()
-        // Resolve every book to its concrete host path once. A book that fails
-        // to resolve (e.g. deleted between the walk and now) is simply dropped.
-        val booksWithUri =
-            manifest.books.mapNotNull { book ->
-                manifestProvider.resolveAbsolutePath(book.id)?.let { uri -> book to uri }
-            }
-        val recent =
-            booksWithUri.map { (book, _) ->
-                RemoteEntry(
-                    documentId = book.id.value,
-                    displayName = book.displayName,
-                    fileSize = book.fileSize,
-                    lastOpenedAt = book.modifiedAt,
-                )
-            }
-        val uriToDocumentId = booksWithUri.associate { (book, uri) -> uri to book.id.value }
-        val modifiedByUri = booksWithUri.associate { (book, uri) -> uri to book.modifiedAt }
-        val (folders, folderLinks) = buildFolders(uriToDocumentId, modifiedByUri)
-        // Documents currently open in this device's editor tabs. They join the
-        // allow-list + uri map so the peer can stream them via the same
-        // DocumentOpenRequest path as library files (authorisation is the served
-        // catalog, so no separate gate is needed).
+        // Union of every shared library, evaluated fresh per request; each book tagged with its library.
+        val sources = sharedLibrariesProvider()
+        val books = collectSharedBooks(sources)
+        val (folders, folderLinks) = buildFolders(books.uriToDocumentId, books.modifiedByUri)
+        // Documents currently open in this device's editor tabs join the allow-list + uri map so the
+        // peer can stream them via the same DocumentOpenRequest path as library files.
         val openDocInfos =
             openDocumentsProvider
                 ?.openDocuments
@@ -336,27 +346,82 @@ class RemoteCatalogProvider(
                     lastOpenedAt = 0L,
                 )
             }
-        val allowed = (recent.map { it.documentId } + openDocInfos.map { it.documentId }).toSet()
-        val docToUri =
-            booksWithUri.associate { (book, uri) -> book.id.value to uri } +
-                openDocInfos.associate { it.documentId to it.absolutePath }
+        val allowed = (books.recent.map { it.documentId } + openDocInfos.map { it.documentId }).toSet()
+        val fullDocToUri = books.docToUri + openDocInfos.associate { it.documentId to it.absolutePath }
         val grantedRole =
             mutex.withLock {
                 allowedByPeer[peerId] = allowed
-                uriByPeer[peerId] = docToUri
+                uriByPeer[peerId] = fullDocToUri
                 // Advertise the peer's role from the SAME authoritative write
                 // allow-set the mutation handler gates on — so the client can light
                 // up librarian UI/capabilities. Still re-verified on every mutation.
                 if (peerId in librarianPeerIds) RemoteLibraryRole.Librarian else RemoteLibraryRole.Reader
             }
+        // Advertise only genuinely-named libraries; a single anonymous shelf (blank id) lists none,
+        // preserving the pre-feature wire shape for clients that don't filter by library.
+        val libraries =
+            sources
+                .filter { it.libraryId.isNotBlank() }
+                .map { RemoteLibraryInfo(libraryId = it.libraryId, displayName = it.displayName) }
         return RemoteCatalog(
             hostName = hostName,
-            recent = recent,
+            recent = books.recent,
             folders = folders,
             folderLinks = folderLinks,
             openDocuments = openDocuments,
             grantedRole = grantedRole,
+            libraries = libraries,
         )
+    }
+
+    /** Collected per-peer book union across all shared libraries, with the lookups [buildFolders] needs. */
+    private class SharedBooks(
+        val recent: List<RemoteEntry>,
+        val docToUri: Map<String, String>,
+        val uriToDocumentId: Map<String, String>,
+        val modifiedByUri: Map<String, Long>,
+    )
+
+    /**
+     * Walks every shared library, resolving each book to its host path and tagging it with the
+     * library id. A book that fails to resolve is dropped; a documentId already taken by an earlier
+     * library is kept as-is (the wire id can't distinguish two files at the same relative path).
+     */
+    private suspend fun collectSharedBooks(sources: List<SharedLibrarySource>): SharedBooks {
+        val recent = mutableListOf<RemoteEntry>()
+        val docToUri = mutableMapOf<String, String>()
+        val uriToDocumentId = mutableMapOf<String, String>()
+        val modifiedByUri = mutableMapOf<String, Long>()
+        for (source in sources) {
+            val manifest =
+                runCatching { source.manifestProvider.current() }
+                    .onFailure { logger.warn { "Manifest for library '${source.libraryId}' failed: ${it::class.simpleName}" } }
+                    .getOrElse { continue }
+            for (book in manifest.books) {
+                val uri = source.manifestProvider.resolveAbsolutePath(book.id) ?: continue
+                val documentId = book.id.value
+                when (docToUri[documentId]) {
+                    null -> {
+                        recent +=
+                            RemoteEntry(
+                                documentId = documentId,
+                                displayName = book.displayName,
+                                fileSize = book.fileSize,
+                                lastOpenedAt = book.modifiedAt,
+                                libraryId = source.libraryId,
+                            )
+                        docToUri[documentId] = uri
+                        uriToDocumentId[uri] = documentId
+                        modifiedByUri[uri] = book.modifiedAt
+                    }
+                    // Same path/id served by an earlier library: an exact duplicate is silently fine;
+                    // a different-content collision (rare) keeps the first and is logged.
+                    uri -> Unit
+                    else -> logger.warn { "Duplicate documentId '$documentId' across shared libraries — keeping first" }
+                }
+            }
+        }
+        return SharedBooks(recent, docToUri, uriToDocumentId, modifiedByUri)
     }
 
     /** Maps the host's folders + folder/file links to their wire form for [buildSnapshotFor]. */

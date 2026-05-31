@@ -37,6 +37,7 @@ import ru.kyamshanov.notepen.book.AndroidEbookToPdfConverter
 import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
 import ru.kyamshanov.notepen.document.infrastructure.RegistryFileIdentityCache
+import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
 import ru.kyamshanov.notepen.library.impl.GitHubLibraryBackend
 import ru.kyamshanov.notepen.library.impl.PeerLanLibraryBackend
@@ -74,6 +75,9 @@ import ru.kyamshanov.notepen.pdf.infrastructure.AndroidPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
+import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
+import ru.kyamshanov.notepen.qrconnect.peerLanConnectionFor
+import ru.kyamshanov.notepen.qrconnect.peerLibraryRegistrar
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
@@ -378,18 +382,44 @@ class MainActivity : ComponentActivity() {
                 connectionEstablished = clientConnected,
             ).start(scope = appScope)
 
+            // Bridge: a camera scan / manual paste that carries a library QR auto-adds that PeerLan
+            // library to the shelf in one step (the catalog coordinator then fills in its books).
+            val registerPairedLibrary = peerLibraryRegistrar { libraryRegistry }
             val clientScanViewModel =
                 ClientQrScanViewModel(
                     syncClient = syncClient,
                     selfInfo = selfInfo,
                     scope = appScope,
+                    onLibraryPaired = registerPairedLibrary,
                 )
             val manualConnectViewModel =
                 ManualConnectViewModel(
                     syncClient = syncClient,
                     selfInfo = selfInfo,
                     scope = appScope,
+                    onLibraryPaired = registerPairedLibrary,
                 )
+            // Direct-dial saved LAN libraries so their transport relinks WITHOUT mDNS — the durability
+            // half of connect-by-QR (the address + code came from the scanned QR and were persisted).
+            if (defaultAppSettingsRepository().load().openLibraryAtStartup) {
+                libraryRegistry
+                    .savedConnections()
+                    .filterIsInstance<LibraryConnection.PeerLan>()
+                    .forEach { peer ->
+                        val host = peer.host
+                        val port = peer.port
+                        val code = peer.pairingCode
+                        if (!host.isNullOrBlank() && port != null && !code.isNullOrBlank()) {
+                            runCatching {
+                                syncClient.connect(
+                                    DeviceInfo(id = "$host:$port", name = peer.libraryName, host = host, port = port),
+                                    code,
+                                    selfInfo,
+                                )
+                            }
+                        }
+                    }
+            }
             // LAN host auto-discovery (mDNS via NsdManager): the client browses for
             // hosts the desktop advertises and connects with the code from the advert.
             val hostDiscoveryViewModel =
@@ -582,6 +612,18 @@ class MainActivity : ComponentActivity() {
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
                         onServeOverLan = null,
                         onPickLocalFolder = null,
+                        // Paste-to-connect: dial the host directly from the pasted QR string and add the
+                        // targeted PeerLan library (camera scanning is the other path, via the Sync dialog).
+                        connectLibraryByQr = { payload ->
+                            runCatching {
+                                val uri = PairingUri.parse(payload.trim()) ?: error("Некорректная строка подключения")
+                                val client = heavyDepsFlow.value?.syncClient ?: error("Синхронизация ещё не готова")
+                                val server = client.connect(uri.toServerDeviceInfo(), uri.code, selfInfo).getOrThrow()
+                                libraryRegistry.connect(peerLanConnectionFor(uri, server)).getOrThrow()
+                                uri.libraryName.ifBlank { server.name.ifBlank { uri.host } }
+                            }
+                        },
+                        // Android cannot host a library over LAN (client-only) — no per-library share QR.
                         // Google sign-in is offered only when an OAuth client is configured.
                         googleDriveAuthorizer =
                             googleOAuthConfig.clientId

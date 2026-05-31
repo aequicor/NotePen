@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.qrconnect.application.ClientQrPairingCoordinator
+import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.qrconnect.domain.port.QrScanner
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
@@ -23,6 +24,12 @@ class ClientQrScanViewModel(
     private val syncClient: SyncClient,
     private val selfInfo: DeviceInfo,
     private val scope: CoroutineScope,
+    /**
+     * Bridges a successful scan to the library shelf: invoked with the scanned [PairingUri] and the
+     * paired host so a [ru.kyamshanov.notepen.library.api.LibraryConnection.PeerLan] is registered in
+     * one step. Defaults to a no-op (transport-only pairing).
+     */
+    private val onLibraryPaired: suspend (PairingUri, DeviceInfo) -> Unit = { _, _ -> },
 ) {
     private val _state =
         MutableStateFlow<ClientQrPairingCoordinator.State>(
@@ -45,6 +52,7 @@ class ClientQrScanViewModel(
                 syncClient = syncClient,
                 scanner = scanner,
                 selfInfo = selfInfo,
+                onLibraryPaired = onLibraryPaired,
             )
         val job =
             scope.launch {

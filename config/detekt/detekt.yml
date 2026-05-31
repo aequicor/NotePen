@@ -3,6 +3,13 @@
 # `buildUponDefaultConfig = true` is set in the root build script, so detekt's full
 # default rule set is active. Only deviations from those defaults belong here.
 
+complexity:
+  LongMethod:
+    # Jetpack Compose @Composable functions are declarative UI trees that are naturally long;
+    # splitting them purely to satisfy a statement count harms readability rather than helping.
+    # Same Compose rationale as the FunctionNaming / Unused* exemptions below.
+    ignoreAnnotated: ['Composable']
+
 naming:
   FunctionNaming:
     # Jetpack Compose @Composable functions are intentionally PascalCase.

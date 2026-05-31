@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.library.ui
 import ru.kyamshanov.notepen.library.api.LibraryBackendKind
 import ru.kyamshanov.notepen.library.api.LibraryConnectionState
 import ru.kyamshanov.notepen.library.api.LibraryRole
+import ru.kyamshanov.notepen.qrconnect.domain.port.QrMatrix
 
 /**
  * Immutable state of the «Источники библиотек» (LibrarySources) screen.
@@ -59,6 +60,20 @@ data class LibrarySourceUiModel(
     val role: LibraryRole,
     val connectionState: LibraryConnectionState,
     val bookCount: Int,
+)
+
+/**
+ * A scannable per-library share QR produced by the host for a single local library.
+ *
+ * @property payload the canonical `notepen://pair?…&l=<libraryId>&ln=<libraryName>` string, also
+ *   offered as copyable text so a desktop client can paste it (no camera).
+ * @property matrix the QR matrix to render for a scanning client.
+ * @property libraryName the shared library's display name, for the dialog heading.
+ */
+data class SharedLibraryQr(
+    val payload: String,
+    val matrix: QrMatrix,
+    val libraryName: String,
 )
 
 /**

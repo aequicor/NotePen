@@ -35,6 +35,7 @@ import ru.kyamshanov.notepen.book.EbookAwarePdfDocumentLoader
 import ru.kyamshanov.notepen.book.JvmEbookToPdfConverter
 import ru.kyamshanov.notepen.document.infrastructure.CachingDocumentIdentityProvider
 import ru.kyamshanov.notepen.document.infrastructure.SidecarIdentityCache
+import ru.kyamshanov.notepen.library.api.LibraryBackendKind
 import ru.kyamshanov.notepen.library.api.LibraryConnection
 import ru.kyamshanov.notepen.library.impl.DefaultLibraryRegistry
 import ru.kyamshanov.notepen.library.impl.GitHubLibraryBackend
@@ -51,6 +52,7 @@ import ru.kyamshanov.notepen.library.infrastructure.JvmLibraryConnectionStore
 import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorization
 import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorizer
 import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
+import ru.kyamshanov.notepen.library.ui.SharedLibraryQr
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -73,12 +75,15 @@ import ru.kyamshanov.notepen.pdf.infrastructure.JvmPageRenderer
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.infrastructure.JvmPdfPageRenderer
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
+import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
+import ru.kyamshanov.notepen.qrconnect.peerLanConnectionFor
 import ru.kyamshanov.notepen.setupJbrTitleBar
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.domain.CacheEvictor
 import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
+import ru.kyamshanov.notepen.sync.domain.SharedLibrarySource
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
 import ru.kyamshanov.notepen.sync.infrastructure.FileSystemLibraryManifestProvider
@@ -110,6 +115,9 @@ import kotlin.system.exitProcess
 
 /** См. [WindowsPenFix] — задержка перед повторным проходом по дереву окон Skiko. */
 private const val SKIA_HWND_SETTLE_DELAY_MS: Long = 500L
+
+/** Pixel size of the generated per-library share QR matrix. */
+private const val SHARE_QR_SIZE_PX: Int = 512
 
 /**
  * Маршрутизация запросов «открыть документ через NotePen» от ОС в навигацию приложения.
@@ -174,6 +182,28 @@ private suspend fun pickLibraryFolder(): String? =
         picked
     }
 
+/**
+ * Stable per-install device id, persisted under the app data dir.
+ *
+ * A QR-connected client stores this id in its `PeerLan` connection spec; persisting it here (instead
+ * of minting a fresh per-launch UUID) is what lets a saved LAN library keep matching the host after a
+ * desktop restart — the prerequisite for reconnecting a LAN library directly without mDNS. Falls back
+ * to a volatile UUID if the file can't be read/written (reproducing the pre-feature behaviour).
+ */
+private fun loadOrCreateDesktopDeviceId(): String {
+    val file = getAppDataDir().resolve("device-id")
+    runCatching { if (file.isFile) file.readText().trim() else "" }
+        .getOrDefault("")
+        .takeIf { it.isNotBlank() }
+        ?.let { return it }
+    val fresh = UUID.randomUUID().toString()
+    runCatching {
+        file.parentFile?.mkdirs()
+        file.writeText(fresh)
+    }.onFailure { mainLogger.warn(it) { "Persisting device id failed; using a volatile id this run" } }
+    return fresh
+}
+
 fun main(args: Array<String>) {
     // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
     // (macOS использует Apple Event "odoc", регистрируем OpenFileHandler ниже.)
@@ -216,7 +246,7 @@ fun main(args: Array<String>) {
     val lifecycle = LifecycleRegistry()
     val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    val selfId = UUID.randomUUID().toString()
+    val selfId = loadOrCreateDesktopDeviceId()
     val selfName = runCatching { InetAddress.getLocalHost().hostName }.getOrDefault("NotePen Desktop")
     val selfInfo = DeviceInfo(id = selfId, name = selfName, host = "", port = 0)
 
@@ -317,6 +347,48 @@ fun main(args: Array<String>) {
     val libraryRegistryHolder = java.util.concurrent.atomic.AtomicReference<DefaultLibraryRegistry?>(null)
     val libraryMutationTarget = LibraryRegistryMutationTarget(registryProvider = { libraryRegistryHolder.get() })
 
+    // The named libraries this host shares over LAN: every local-folder library currently in the
+    // registry, plus the default library root so a bare QR-pair still browses the host's shelf. The
+    // served catalog is their union (each book tagged with its library id); a client that scanned a
+    // specific library's QR projects only that subset. Evaluated per request so a newly-added local
+    // library becomes shareable without restarting the sync stack. Manifest providers are memoised
+    // per root so each one's path cache stays warm across requests.
+    val sharedManifestProviders = java.util.concurrent.ConcurrentHashMap<String, FileSystemLibraryManifestProvider>()
+
+    fun manifestProviderForRoot(root: File): FileSystemLibraryManifestProvider =
+        if (root.canonicalPath == libraryRoot.canonicalPath) {
+            libraryManifestProvider
+        } else {
+            sharedManifestProviders.getOrPut(root.canonicalPath) {
+                FileSystemLibraryManifestProvider(root = root, isBook = isBook)
+            }
+        }
+    val sharedLibrariesProvider: suspend () -> List<SharedLibrarySource> = {
+        val libRootId = "local:${libraryRoot.canonicalPath}"
+        val fromRegistry =
+            libraryRegistryHolder
+                .get()
+                ?.libraries
+                ?.value
+                .orEmpty()
+                .filter { it.descriptor.kind == LibraryBackendKind.Local }
+                .map { lib ->
+                    val rootPath = lib.descriptor.id.value.removePrefix("local:")
+                    SharedLibrarySource(
+                        libraryId = lib.descriptor.id.value,
+                        displayName = lib.descriptor.displayName,
+                        manifestProvider = manifestProviderForRoot(File(rootPath)),
+                    )
+                }
+        // Always publish the default root, even before it is registered, so a bare QR-pair (no
+        // explicit named library shared yet) still browses the host's shelf — the pre-feature behaviour.
+        if (fromRegistry.any { it.libraryId == libRootId }) {
+            fromRegistry
+        } else {
+            fromRegistry + SharedLibrarySource(libRootId, libraryRoot.name, libraryManifestProvider)
+        }
+    }
+
     // M6: bound the downloaded-document caches (the LAN received dir + the GitHub library cache),
     // which previously grew without limit. LRU by last-access under a 300 MB cap; a file whose
     // document is currently open (pinned in openDocumentRegistry) is never evicted. Runs once at
@@ -348,7 +420,7 @@ fun main(args: Array<String>) {
             parentScope = appScope,
             receivedDir = receivedDir,
             syncDatabasePath = getAppDataDir().resolve("sync.db").absolutePath,
-            libraryManifestProvider = libraryManifestProvider,
+            sharedLibrariesProvider = sharedLibrariesProvider,
             folderRepository = folderRepo,
             catalogChangeNotifier = catalogChangeNotifier,
             remoteCatalogCache = remoteCatalogCache,
@@ -510,6 +582,26 @@ fun main(args: Array<String>) {
         }
         if (defaultAppSettingsRepository().load().openLibraryAtStartup) {
             remoteSpecs.forEach { spec ->
+                // A QR-connected LAN library persisted a reachable host+port+code: dial the host
+                // directly so the transport relinks WITHOUT mDNS (the point of connect-by-QR under
+                // VPN / AP isolation). Best-effort — on failure (e.g. host regenerated its code) the
+                // tile simply stays offline until the user re-scans, rather than blocking startup.
+                if (spec is LibraryConnection.PeerLan) {
+                    val host = spec.host
+                    val port = spec.port
+                    val code = spec.pairingCode
+                    if (!host.isNullOrBlank() && port != null && !code.isNullOrBlank()) {
+                        runCatching {
+                            syncRuntime.enable().syncClient.connect(
+                                DeviceInfo(id = "$host:$port", name = spec.libraryName, host = host, port = port),
+                                code,
+                                selfInfo,
+                            )
+                        }.onFailure { e ->
+                            mainLogger.warn(e) { "Direct-dial reconnect to saved LAN library failed (will fall back to mDNS)" }
+                        }
+                    }
+                }
                 libraryRegistry.connect(spec)
                     .onFailure { e -> mainLogger.warn(e) { "Failed to auto-connect saved library $spec" } }
             }
@@ -630,6 +722,44 @@ fun main(args: Array<String>) {
                             }
                         },
                         onPickLocalFolder = { pickLibraryFolder() },
+                        // Connect a LAN library by pasting a host's QR string: dial the host directly
+                        // (no mDNS) and register the targeted PeerLan library in one step.
+                        connectLibraryByQr = { payload ->
+                            runCatching {
+                                val uri = PairingUri.parse(payload.trim()) ?: error("Некорректная строка подключения")
+                                val session = syncRuntime.enable()
+                                val server =
+                                    session.syncClient
+                                        .connect(uri.toServerDeviceInfo(), uri.code, selfInfo)
+                                        .getOrThrow()
+                                libraryRegistry.connect(peerLanConnectionFor(uri, server)).getOrThrow()
+                                uri.libraryName.ifBlank { server.name.ifBlank { uri.host } }
+                            }
+                        },
+                        // Share one of this host's local libraries by QR: start the server (if needed)
+                        // and encode a per-library notepen://pair?…&l=<id> payload for a client to scan/paste.
+                        shareLibraryByQr = { libraryId, libraryName ->
+                            runCatching {
+                                val session = syncRuntime.enable()
+                                // start() is idempotent: returns the existing Running state if the server
+                                // is already up (e.g. the QR-pairing panel started it), else binds it.
+                                val running = session.peerServer.start().getOrThrow()
+                                val uri =
+                                    PairingUri(
+                                        host = running.host,
+                                        port = running.port,
+                                        code = running.code,
+                                        deviceName = selfName,
+                                        libraryId = libraryId,
+                                        libraryName = libraryName,
+                                    )
+                                SharedLibraryQr(
+                                    payload = uri.encode(),
+                                    matrix = ZxingQrEncoder().encode(uri.encode(), SHARE_QR_SIZE_PX),
+                                    libraryName = libraryName,
+                                )
+                            }.getOrNull()
+                        },
                         // Google sign-in is offered only when an OAuth client is configured; the
                         // authorizer runs the device flow with the read-only scope (Reader role).
                         googleDriveAuthorizer =

@@ -74,7 +74,6 @@ import ru.kyamshanov.notepen.blur.LocalBlurEnabled
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.currentWindowSizePx
 import ru.kyamshanov.notepen.fadingEdges
-import ru.kyamshanov.notepen.wheelItem
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.MainScreenIntent
@@ -103,6 +102,7 @@ import ru.kyamshanov.notepen.session.seedFilePath
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
+import ru.kyamshanov.notepen.wheelItem
 
 private val WIDE_SCREEN_THRESHOLD: Dp = 600.dp
 private val RECENT_CARD_WIDTH: Dp = 132.dp
