@@ -610,7 +610,6 @@ class MainActivity : ComponentActivity() {
                         settingsRepository = defaultAppSettingsRepository(),
                         catalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
-                        onServeOverLan = null,
                         onPickLocalFolder = null,
                         // Paste-to-connect: dial the host directly from the pasted QR string and add the
                         // targeted PeerLan library (camera scanning is the other path, via the Sync dialog).

@@ -20,7 +20,6 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  * @param settingsRepository read/write of the `openLibraryAtStartup` app setting.
  * @param catalogsFlow shared peer→catalog cache for listing addable LAN peers; `null` when sync off.
  * @param onlinePeerIdsFlow online-peer set, refining the addable-peer list.
- * @param onServeOverLan platform serve-over-LAN action (desktop); `null` hides it (Android).
  * @param onPickLocalFolder platform folder picker for adding a local-folder library (desktop);
  *   `null` hides the "local folder" add option (Android — client-only, no local backend).
  * @param googleDriveAuthorizer drives the Google device-flow sign-in for a Drive library; `null`
@@ -40,7 +39,6 @@ class LibrarySourcesComponentImpl(
     settingsRepository: AppSettingsRepository,
     catalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>?,
     onlinePeerIdsFlow: Flow<Set<String>>?,
-    onServeOverLan: (() -> Unit)?,
     val onPickLocalFolder: (suspend () -> String?)?,
     googleDriveAuthorizer: GoogleDriveAuthorizer? = null,
     val connectLibraryByQr: (suspend (payload: String) -> Result<String>)? = null,
@@ -55,7 +53,6 @@ class LibrarySourcesComponentImpl(
             settingsRepository = settingsRepository,
             catalogsFlow = catalogsFlow,
             onlinePeerIdsFlow = onlinePeerIdsFlow,
-            onServeOverLan = onServeOverLan,
             googleDriveAuthorizer = googleDriveAuthorizer,
         )
 

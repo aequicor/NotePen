@@ -35,7 +35,6 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -123,7 +122,6 @@ fun LibrarySourcesContent(
                 googleDriveSupported = state.googleDriveSupported,
                 onAddGoogleDrive = component.viewModel::addGoogleDriveLibrary,
                 onToggleStartup = component.viewModel::setOpenLibraryAtStartup,
-                onOpenMyLibrary = component.viewModel::openMyLibrary,
                 onConnectByQr = if (component.connectLibraryByQr != null) ({ connectByQrVisible = true }) else null,
                 onShareLibrary = if (component.shareLibraryByQr != null) ({ model -> shareTarget = model }) else null,
             )
@@ -170,7 +168,6 @@ private fun LibrarySourcesList(
     googleDriveSupported: Boolean,
     onAddGoogleDrive: (folderId: String) -> Unit,
     onToggleStartup: (Boolean) -> Unit,
-    onOpenMyLibrary: () -> Unit,
     onConnectByQr: (() -> Unit)?,
     onShareLibrary: ((LibrarySourceUiModel) -> Unit)?,
 ) {
@@ -220,7 +217,6 @@ private fun LibrarySourcesList(
         LibrarySettingsSection(
             state = state,
             onToggleStartup = onToggleStartup,
-            onOpenMyLibrary = onOpenMyLibrary,
         )
     }
 }
@@ -229,7 +225,6 @@ private fun LibrarySourcesList(
 private fun LibrarySettingsSection(
     state: LibrarySourcesUiState,
     onToggleStartup: (Boolean) -> Unit,
-    onOpenMyLibrary: () -> Unit,
 ) {
     LibraryRowSurface {
         ToggleRow(
@@ -239,25 +234,6 @@ private fun LibrarySettingsSection(
             checked = state.openLibraryAtStartup,
             onCheckedChange = onToggleStartup,
         )
-    }
-    if (state.serveOverLanSupported) {
-        LibraryRowSurface {
-            ActionRow(
-                icon = Icons.Default.Wifi,
-                title = "Открыть свою библиотеку",
-                subtitle =
-                    if (state.serving) {
-                        "Библиотека доступна другим устройствам в локальной сети"
-                    } else {
-                        "Раздать свою библиотеку другим устройствам по локальной сети"
-                    },
-                trailing = {
-                    OutlinedButton(onClick = onOpenMyLibrary, enabled = !state.serving) {
-                        Text(if (state.serving) "Раздаётся" else "Открыть")
-                    }
-                },
-            )
-        }
     }
 }
 
