@@ -267,3 +267,126 @@ public fun SpreadSplit.mergeRotations(logical: Map<Int, Int>): Map<Int, Int> {
     }
     return result
 }
+
+/**
+ * Обрезает прямоугольник [r] (координаты исходной страницы) к одной половине
+ * разворота и пересчитывает X в систему координат этой половины `[0, 1]`. Режется
+ * только по корешку (`x = 0.5`); внешний край сохраняет лёгкий выход за `[0..1]`,
+ * как и у обычной (неразделённой) подсветки. `null` — прямоугольник не пересекает
+ * выбранную половину. Y не меняется.
+ */
+private fun SpreadSplit.clipRectToHalf(
+    r: NormalizedRect,
+    right: Boolean,
+): NormalizedRect? {
+    val left = if (right) maxOf(r.left, GUTTER_X) else r.left
+    val rightEdge = if (right) r.right else minOf(r.right, GUTTER_X)
+    if (rightEdge <= left) return null
+    val base = if (right) GUTTER_X else 0f
+    return r.copy(
+        left = (left - base) / GUTTER_X,
+        right = (rightEdge - base) / GUTTER_X,
+    )
+}
+
+/**
+ * Пере-строит карту липких выделений из ИСХОДНОГО пространства в ЛОГИЧЕСКОЕ при
+ * включении разделения. В отличие от штриха (целиком уходит в половину по первой
+ * точке), подсветку РЕЖЕМ по корешку: каждый прямоугольник обрезается к левой и
+ * правой половине отдельно ([clipRectToHalf]) и попадает в свою логическую страницу.
+ * Иначе широкая подсветка, целиком отнесённая к одной половине и отмасштабированная
+ * (`right / 0.5` → до 2×), вылезала бы за край половины в гаттер.
+ */
+public fun SpreadSplit.splitHighlightsByPage(source: Map<Int, List<StickyHighlight>>): Map<Int, List<StickyHighlight>> {
+    val result = HashMap<Int, MutableList<StickyHighlight>>()
+    source.forEach { (srcPage, hs) ->
+        hs.forEach { h ->
+            val leftRects = h.rects.mapNotNull { clipRectToHalf(it, right = false) }
+            val rightRects = h.rects.mapNotNull { clipRectToHalf(it, right = true) }
+            if (leftRects.isNotEmpty()) {
+                result.getOrPut(leftLogical(srcPage)) { mutableListOf() }.add(h.copy(rects = leftRects))
+            }
+            if (rightRects.isNotEmpty()) {
+                result.getOrPut(rightLogical(srcPage)) { mutableListOf() }.add(h.copy(rects = rightRects))
+            }
+        }
+    }
+    return result
+}
+
+/**
+ * Обратный к [splitHighlightsByPage]: объединяет логические половины обратно в
+ * выделения исходных страниц, пересчитывая X каждого прямоугольника из системы
+ * координат половины в исходную (`left → x * 0.5`, `right → 0.5 + x * 0.5`).
+ */
+public fun SpreadSplit.mergeHighlightsByPage(logical: Map<Int, List<StickyHighlight>>): Map<Int, List<StickyHighlight>> {
+    val result = HashMap<Int, MutableList<StickyHighlight>>()
+    logical.forEach { (logicalPage, hs) ->
+        val srcPage = sourceIndexOf(logicalPage)
+        val right = isRightHalf(logicalPage)
+        hs.forEach { h ->
+            val remapped =
+                h.rects.map { r ->
+                    if (right) {
+                        r.copy(left = GUTTER_X + r.left * GUTTER_X, right = GUTTER_X + r.right * GUTTER_X)
+                    } else {
+                        r.copy(left = r.left * GUTTER_X, right = r.right * GUTTER_X)
+                    }
+                }
+            result.getOrPut(srcPage) { mutableListOf() }.add(h.copy(rects = remapped))
+        }
+    }
+    return result
+}
+
+/**
+ * Пере-строит карту текстовых заметок из ИСХОДНОГО пространства в ЛОГИЧЕСКОЕ при
+ * включении разделения. Как штрих, заметка целиком относится к половине по X её
+ * первого прямоугольника (не дробится по корешку); X пересчитывается в систему
+ * координат половины, а [PageNote.pageIndex] переписывается на логический.
+ */
+public fun SpreadSplit.splitNotesByPage(source: Map<Int, List<PageNote>>): Map<Int, List<PageNote>> {
+    val result = HashMap<Int, MutableList<PageNote>>()
+    source.forEach { (srcPage, ns) ->
+        ns.forEach { n ->
+            val firstRectLeft = n.rects.firstOrNull()?.left ?: 0f
+            val right = firstRectLeft >= GUTTER_X
+            val remapped =
+                n.rects.map { r ->
+                    if (right) {
+                        r.copy(left = (r.left - GUTTER_X) / GUTTER_X, right = (r.right - GUTTER_X) / GUTTER_X)
+                    } else {
+                        r.copy(left = r.left / GUTTER_X, right = r.right / GUTTER_X)
+                    }
+                }
+            val target = if (right) rightLogical(srcPage) else leftLogical(srcPage)
+            result.getOrPut(target) { mutableListOf() }.add(n.copy(rects = remapped, pageIndex = target))
+        }
+    }
+    return result
+}
+
+/**
+ * Обратный к [splitNotesByPage]: объединяет логические половины обратно в заметки
+ * исходных страниц, пересчитывая X прямоугольников и [PageNote.pageIndex] в исходное
+ * пространство.
+ */
+public fun SpreadSplit.mergeNotesByPage(logical: Map<Int, List<PageNote>>): Map<Int, List<PageNote>> {
+    val result = HashMap<Int, MutableList<PageNote>>()
+    logical.forEach { (logicalPage, ns) ->
+        val srcPage = sourceIndexOf(logicalPage)
+        val right = isRightHalf(logicalPage)
+        ns.forEach { n ->
+            val remapped =
+                n.rects.map { r ->
+                    if (right) {
+                        r.copy(left = GUTTER_X + r.left * GUTTER_X, right = GUTTER_X + r.right * GUTTER_X)
+                    } else {
+                        r.copy(left = r.left * GUTTER_X, right = r.right * GUTTER_X)
+                    }
+                }
+            result.getOrPut(srcPage) { mutableListOf() }.add(n.copy(rects = remapped, pageIndex = srcPage))
+        }
+    }
+    return result
+}
