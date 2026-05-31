@@ -8,6 +8,7 @@
       pageTitle: "NotePen: заметки и рисунки поверх PDF",
       metaDescription: "NotePen, приложение для заметок и рисунков поверх PDF и документов на бесконечном холсте. Работает на Android и на десктопе (Windows, macOS, Linux).",
 
+      navDownload: "Скачать",
       navFeatures: "Возможности",
       navUsage: "Как пользоваться",
       navSync: "Синхронизация",
@@ -15,8 +16,30 @@
 
       heroTitle: "Пишите и рисуйте поверх PDF",
       heroSub: "NotePen открывает PDF и документы и даёт писать прямо по странице пером. Вокруг страницы есть бесконечный холст, так что заметки и схемы не упираются в поля. Работает на Android и на компьютере.",
-      heroCta: "Открыть на GitHub",
-      heroCta2: "Как это работает",
+      heroCta: "Скачать",
+      heroCta2: "GitHub",
+
+      downloadTitle: "Скачать NotePen",
+      downloadLead: "Готовые сборки для десктопа и Android. Установка не нужна для портативной версии Windows.",
+      downloadVersionUnknown: "Последняя версия с GitHub",
+      downloadVersionPrefix: "Последняя версия:",
+      downloadBtn: "Скачать",
+      downloadAllReleases: "Все сборки на странице релизов",
+      dlWinInstallerLabel: "Windows",
+      dlWinInstallerSub: "Установщик (.exe)",
+      dlWinInstallerAria: "Скачать установщик NotePen для Windows",
+      dlWinPortableLabel: "Windows",
+      dlWinPortableSub: "Портативная, без установки (.zip)",
+      dlWinPortableAria: "Скачать портативную версию NotePen для Windows",
+      dlMacLabel: "macOS",
+      dlMacSub: "Образ диска (.dmg)",
+      dlMacAria: "Скачать NotePen для macOS",
+      dlLinuxLabel: "Linux",
+      dlLinuxSub: "Debian / Ubuntu (.deb)",
+      dlLinuxAria: "Скачать NotePen для Linux",
+      dlAndroidLabel: "Android",
+      dlAndroidSub: "APK (.apk)",
+      dlAndroidAria: "Скачать NotePen для Android",
       altAnnotate: "Перо и маркер поверх страницы PDF: обведённое слово, подчёркивание и жёлтая подсветка.",
 
       featuresTitle: "Что умеет NotePen",
@@ -26,6 +49,8 @@
       f1Desc: "Размечайте PDF и документы на холсте, который продолжается за краями страницы. Заметки, наброски и схемы не ограничены полями документа.",
       f2Title: "Перо поверх PDF",
       f2Desc: "Откройте любой PDF и пишите по нему, как по бумаге. Поддерживается нажим пера для стилуса.",
+      fTabletTitle: "Графический планшет и стилус",
+      fTabletDesc: "Перьевой ввод с нажимом и наклоном, кнопкой на пере и ластиком-наконечником. На Windows работает через WinTab (планшеты Wacom и совместимые), на macOS — через события планшета Cocoa, на Android — встроенный стилус.",
       f3Title: "Маркер",
       f3Desc: "Отдельный инструмент-маркер, чтобы подсвечивать нужные места в документе.",
       f4Title: "Ластик",
@@ -72,10 +97,9 @@
       plat2: "Windows",
       plat3: "macOS",
       plat4: "Linux",
-      runTitle: "Запуск из исходников",
-      runDesc: "Соберите проект Gradle и запустите. На десктопе нужна JetBrains Runtime (JBR) 25.",
-      runDesktop: "запуск десктопной версии",
-      runAndroid: "установка debug-сборки на Android",
+      contribTitle: "Сборка из исходников",
+      contribDesc: "Это для тех, кто хочет участвовать в разработке. Если вам нужно просто пользоваться приложением, берите готовую сборку выше.",
+      contribLink: "Как собрать и внести вклад",
 
       footerTag: "Заметки и рисунки поверх PDF на Android и десктопе.",
       footerRepo: "Репозиторий на GitHub",
@@ -86,6 +110,7 @@
       pageTitle: "NotePen: write and draw over PDFs",
       metaDescription: "NotePen is an app for writing and drawing over PDFs and documents on an infinite canvas. It runs on Android and desktop (Windows, macOS, Linux).",
 
+      navDownload: "Download",
       navFeatures: "Features",
       navUsage: "How to use it",
       navSync: "Sync",
@@ -93,8 +118,30 @@
 
       heroTitle: "Write and draw over PDFs",
       heroSub: "NotePen opens PDFs and documents and lets you write right on the page with a pen. There is an infinite canvas around the page, so notes and diagrams are not stuck inside the margins. It runs on Android and on the desktop.",
-      heroCta: "View on GitHub",
-      heroCta2: "See how it works",
+      heroCta: "Download",
+      heroCta2: "GitHub",
+
+      downloadTitle: "Download NotePen",
+      downloadLead: "Ready builds for desktop and Android. The Windows portable build needs no install.",
+      downloadVersionUnknown: "Latest release from GitHub",
+      downloadVersionPrefix: "Latest version:",
+      downloadBtn: "Download",
+      downloadAllReleases: "All builds on the releases page",
+      dlWinInstallerLabel: "Windows",
+      dlWinInstallerSub: "Installer (.exe)",
+      dlWinInstallerAria: "Download the NotePen installer for Windows",
+      dlWinPortableLabel: "Windows",
+      dlWinPortableSub: "Portable, no install (.zip)",
+      dlWinPortableAria: "Download the portable NotePen build for Windows",
+      dlMacLabel: "macOS",
+      dlMacSub: "Disk image (.dmg)",
+      dlMacAria: "Download NotePen for macOS",
+      dlLinuxLabel: "Linux",
+      dlLinuxSub: "Debian / Ubuntu (.deb)",
+      dlLinuxAria: "Download NotePen for Linux",
+      dlAndroidLabel: "Android",
+      dlAndroidSub: "APK (.apk)",
+      dlAndroidAria: "Download NotePen for Android",
       altAnnotate: "Pen and highlighter over a PDF page: a circled word, an underline, and yellow highlights.",
 
       featuresTitle: "What NotePen does",
@@ -104,6 +151,8 @@
       f1Desc: "Mark up PDFs and documents on a canvas that keeps going past the edge of the page. Notes, sketches, and diagrams are not limited by the document margins.",
       f2Title: "Pen over PDF",
       f2Desc: "Open any PDF and write over it like paper. Pen pressure is supported for stylus input.",
+      fTabletTitle: "Graphics tablet & stylus",
+      fTabletDesc: "Pen input with pressure and tilt, the barrel button, and the eraser tip. Windows works through WinTab (Wacom and compatible tablets), macOS through Cocoa tablet events, Android through the built-in stylus.",
       f3Title: "Highlighter",
       f3Desc: "A separate marker tool for highlighting the parts of a document you care about.",
       f4Title: "Eraser",
@@ -150,10 +199,9 @@
       plat2: "Windows",
       plat3: "macOS",
       plat4: "Linux",
-      runTitle: "Run from source",
-      runDesc: "Build the Gradle project and run it. The desktop build needs JetBrains Runtime (JBR) 25.",
-      runDesktop: "run the desktop version",
-      runAndroid: "install the debug build on Android",
+      contribTitle: "Build from source",
+      contribDesc: "This is for people who want to work on NotePen. If you just want to use the app, grab a ready build above.",
+      contribLink: "How to build and contribute",
 
       footerTag: "Write and draw over PDFs on Android and desktop.",
       footerRepo: "Repository on GitHub",
@@ -161,8 +209,86 @@
     }
   };
 
+  var currentLang = "ru";
+
+  var RELEASES_PAGE = "https://github.com/aequicor/NotePen/releases/latest";
+  var RELEASE_API = "https://api.github.com/repos/aequicor/NotePen/releases/latest";
+  var RELEASE_CACHE_KEY = "notepen-release";
+
+  // Latest release version, once known (e.g. "v1.2.0"); null until/unless the fetch succeeds.
+  var latestTag = null;
+
+  // How each download button is matched against a release asset's file name.
+  var DOWNLOAD_TARGETS = [
+    { id: "dl-win-installer", match: function (n) { return /\.exe$/.test(n); } },
+    { id: "dl-win-portable", match: function (n) { return /portable.*\.zip$/.test(n); } },
+    { id: "dl-mac", match: function (n) { return /\.dmg$/.test(n); } },
+    { id: "dl-linux", match: function (n) { return /\.deb$/.test(n); } },
+    { id: "dl-android", match: function (n) { return /\.apk$/.test(n); } }
+  ];
+
+  function renderVersionLine(dict) {
+    var line = document.getElementById("download-version");
+    if (!line) { return; }
+    if (latestTag) {
+      line.textContent = dict.downloadVersionPrefix + " " + latestTag;
+    } else if ("downloadVersionUnknown" in dict) {
+      line.textContent = dict.downloadVersionUnknown;
+    }
+  }
+
+  // Point each platform button at its matching asset; fall back to the releases page.
+  function applyReleaseAssets(assets) {
+    var list = Array.isArray(assets) ? assets : [];
+    for (var i = 0; i < DOWNLOAD_TARGETS.length; i++) {
+      var target = DOWNLOAD_TARGETS[i];
+      var btn = document.getElementById(target.id);
+      if (!btn) { continue; }
+      var url = RELEASES_PAGE;
+      for (var j = 0; j < list.length; j++) {
+        var asset = list[j];
+        var name = (asset && asset.name ? String(asset.name) : "").toLowerCase();
+        if (name && asset.browser_download_url && target.match(name)) {
+          url = asset.browser_download_url;
+          break;
+        }
+      }
+      btn.setAttribute("href", url);
+    }
+  }
+
+  function useReleaseData(data) {
+    if (data && typeof data.tag_name === "string" && data.tag_name) {
+      latestTag = data.tag_name;
+    }
+    applyReleaseAssets(data && data.assets);
+    renderVersionLine(i18n[currentLang] || i18n.ru);
+  }
+
+  function loadRelease() {
+    var cached = null;
+    try { cached = sessionStorage.getItem(RELEASE_CACHE_KEY); } catch (e) { cached = null; }
+    if (cached) {
+      try { useReleaseData(JSON.parse(cached)); return; } catch (e2) { /* refetch below */ }
+    }
+    if (typeof fetch !== "function") { return; }
+    fetch(RELEASE_API, { headers: { Accept: "application/vnd.github+json" } })
+      .then(function (resp) {
+        if (!resp.ok) { throw new Error("release request failed: " + resp.status); }
+        return resp.json();
+      })
+      .then(function (data) {
+        try { sessionStorage.setItem(RELEASE_CACHE_KEY, JSON.stringify(data)); } catch (e) { /* ignore */ }
+        useReleaseData(data);
+      })
+      .catch(function () {
+        // Offline or rate-limited: buttons already default to the releases page, so nothing to do.
+      });
+  }
+
   function applyLang(lang) {
     var dict = i18n[lang] || i18n.ru;
+    currentLang = (lang in i18n) ? lang : "ru";
 
     document.documentElement.setAttribute("lang", lang);
 
@@ -179,7 +305,16 @@
       }
     }
 
+    var ariaNodes = document.querySelectorAll("[data-i18n-aria]");
+    for (var a = 0; a < ariaNodes.length; a++) {
+      var aEl = ariaNodes[a];
+      var aKey = aEl.getAttribute("data-i18n-aria");
+      if (aKey in dict) { aEl.setAttribute("aria-label", dict[aKey]); }
+    }
+
     if (dict.pageTitle) { document.title = dict.pageTitle; }
+
+    renderVersionLine(dict);
 
     var buttons = document.querySelectorAll(".lang-btn");
     for (var j = 0; j < buttons.length; j++) {
@@ -203,6 +338,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     applyLang(getInitialLang());
+    loadRelease();
 
     var buttons = document.querySelectorAll(".lang-btn");
     for (var i = 0; i < buttons.length; i++) {

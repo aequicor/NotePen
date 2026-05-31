@@ -14,10 +14,23 @@
 
 NotePen lets you write and draw over PDFs and documents with a pen. It runs on Android and on Desktop/JVM (Windows, macOS, Linux) from a single shared codebase. The canvas extends beyond the page edges, so your notes are not boxed in by the document margins. If you have a second device on the same network, annotations sync between them directly, with no cloud account in the middle.
 
+## Download
+
+Grab a build from the [latest release](https://github.com/aequicor/NotePen/releases/latest):
+
+- [Windows installer (.exe)](https://github.com/aequicor/NotePen/releases/latest)
+- [Windows portable (.zip)](https://github.com/aequicor/NotePen/releases/latest)
+- [macOS (.dmg)](https://github.com/aequicor/NotePen/releases/latest)
+- [Linux (.deb)](https://github.com/aequicor/NotePen/releases/latest)
+- [Android (.apk)](https://github.com/aequicor/NotePen/releases/latest)
+
+Each link opens the latest release page, where you pick the file you need. For direct per-file download buttons, see the project website.
+
 ## Features
 
 - **Infinite canvas.** Annotate on an unbounded surface that extends past the page, so notes, sketches, and mind maps are not constrained by the document margins.
 - **Natural ink over PDF.** Import a PDF and draw or write over it like digital paper, with pen-pressure support tuned for stylus input.
+- **Graphics tablet and stylus.** Pen input with pressure and tilt, the barrel (side) button, and the eraser tip. Windows uses WinTab (Wacom and compatible tablets), macOS uses Cocoa tablet events, and Android uses the built-in stylus.
 - **Marker / highlighter.** A dedicated marker tool for highlighting content over the document.
 - **Eraser.** Remove strokes. Erase operations are modeled as tombstone deltas, so they also propagate through sync.
 - **Smart shape gestures.** Draw freehand, then hold the pen or finger to snap a sketch into a clean straight line or a selection, using on-device shape recognition and simplification.
@@ -46,52 +59,14 @@ NotePen lets you write and draw over PDFs and documents with a pen. It runs on A
 
 ## Getting started
 
-### Android
+Download a build from the [latest release](https://github.com/aequicor/NotePen/releases/latest) and install it for your platform.
 
-Build and install the debug build onto a connected device or emulator:
+- **Windows:** run the installer, or unzip the portable build and launch it.
+- **macOS:** open the `.dmg` and drag NotePen to Applications.
+- **Linux:** install the `.deb`.
+- **Android:** install the `.apk`. There is no Google Play listing.
 
-```bash
-./gradlew :app:byCompose:android:installDebug
-```
-
-There is no public Google Play listing.
-
-### Desktop (Windows, macOS, Linux)
-
-Run from source:
-
-```bash
-./gradlew runDesktop
-```
-
-Packaged desktop builds are produced via Compose Desktop. `createReleaseDistributable` builds the app-image (ProGuard plus obfuscation). macOS and Linux installers come from jpackage (DMG and DEB). Windows is packaged with Inno Setup (`installer/windows/notepen.iss`), and a portable no-install Windows ZIP is produced by `packageReleasePortableZip`.
-
-Desktop packaging and running need a JetBrains Runtime (JBR) 25. Release tags must be `v1.0.0` or higher, because the macOS jpackage build rejects `0.x` versions.
-
-## Build from source
-
-### Toolchain
-
-Libraries and Android modules compile to JVM 11. The desktop module pins a JetBrains Runtime (JBR) 25 toolchain (`jvmToolchain` language version 25), which is required for the custom Windows title bar (`setupJbrTitleBar`).
-
-foojay cannot auto-provision the JetBrains vendor. On a machine without an auto-detected JBR, set `org.gradle.java.installations.paths` in your user `gradle.properties` to a locally installed JBR 25 (use a full `jbrsdk-25` with `jpackage`/`jlink` if you want to package).
-
-### Common commands
-
-| Task | Command |
-|---|---|
-| Build everything | `./gradlew build` |
-| Run desktop app | `./gradlew runDesktop` |
-| Install Android debug build | `./gradlew :app:byCompose:android:installDebug` |
-| Run tests | `./gradlew test` |
-| Lint / static analysis | `./gradlew detekt` |
-| Format check | `./gradlew ktlintCheck` |
-| Autoformat | `./gradlew ktlintFormat` |
-| Full verification | `./gradlew check` |
-
-`./gradlew check` runs build, tests, ktlintCheck, and detekt. Most logic tests run on the JVM in `commonTest`/`jvmTest`.
-
-Dependencies and plugins live in the version catalog at `gradle/libs.versions.toml`, type-safe project accessors are enabled, and the Gradle configuration cache is on. The app version comes from the `app.version` Gradle property.
+If you want to build it yourself, see [Contributing](#contributing).
 
 ## Tech stack
 
@@ -126,6 +101,35 @@ Package root: `ru.kyamshanov.notepen`.
 - **`:app:byCompose:theme` / `:app:byCompose:uikit` / `:app:byCompose:blur`** — design-system modules (theming, reusable Compose components).
 
 ## Contributing
+
+### Build from source
+
+Clone the repo to get started:
+
+```bash
+git clone https://github.com/aequicor/NotePen.git
+```
+
+Libraries and Android modules compile to JVM 11. The desktop module pins a JetBrains Runtime (JBR) 25 toolchain (`jvmToolchain` language version 25), which is required for the custom Windows title bar (`setupJbrTitleBar`). foojay cannot auto-provision the JetBrains vendor, so on a machine without an auto-detected JBR, set `org.gradle.java.installations.paths` in your user `gradle.properties` to a locally installed JBR 25. Use a full `jbrsdk-25` with `jpackage`/`jlink` if you want to package.
+
+| Task | Command |
+|---|---|
+| Build everything | `./gradlew build` |
+| Run desktop app | `./gradlew runDesktop` |
+| Install Android debug build | `./gradlew :app:byCompose:android:installDebug` |
+| Run tests | `./gradlew test` |
+| Lint / static analysis | `./gradlew detekt` |
+| Format check | `./gradlew ktlintCheck` |
+| Autoformat | `./gradlew ktlintFormat` |
+| Full verification | `./gradlew check` |
+
+`./gradlew check` runs build, tests, ktlintCheck, and detekt. Most logic tests run on the JVM in `commonTest`/`jvmTest`.
+
+Dependencies and plugins live in the version catalog at `gradle/libs.versions.toml`, type-safe project accessors are enabled, and the Gradle configuration cache is on. The app version comes from the `app.version` Gradle property.
+
+Packaged desktop builds are produced via Compose Desktop. `createReleaseDistributable` builds the app-image (ProGuard plus obfuscation). macOS and Linux installers come from jpackage (DMG and DEB). Windows is packaged with Inno Setup (`installer/windows/notepen.iss`), and a portable no-install Windows ZIP is produced by `packageReleasePortableZip`. Release tags must be `v1.0.0` or higher, because the macOS jpackage build rejects `0.x` versions.
+
+### Pull requests
 
 1. Fork the repo and create a branch for your change.
 2. Make your change and add tests where it makes sense.
