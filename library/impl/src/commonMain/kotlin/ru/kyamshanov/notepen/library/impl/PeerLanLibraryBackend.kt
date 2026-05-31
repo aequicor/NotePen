@@ -54,8 +54,15 @@ public class PeerLanLibraryBackend(
         runCatching {
             val peer = spec.requirePeerLan()
             PeerLanLibrary(
-                descriptor = peerLanDescriptor(peer.peerId, displayNameFor(peer.peerId), roleFor(peer.peerId)),
+                descriptor =
+                    peerLanDescriptor(
+                        peerId = peer.peerId,
+                        libraryId = peer.libraryId,
+                        displayName = displayNameFor(peer.peerId, peer.libraryId, peer.libraryName),
+                        role = roleFor(peer.peerId),
+                    ),
                 peerId = peer.peerId,
+                libraryId = peer.libraryId,
                 catalogs = catalogs,
                 documentOpener = documentOpenerProvider,
                 mutationClientProvider = mutationClientProvider,
@@ -67,7 +74,12 @@ public class PeerLanLibraryBackend(
     override suspend fun probe(spec: LibraryConnection): Result<LibraryDescriptor> =
         runCatching {
             val peer = spec.requirePeerLan()
-            peerLanDescriptor(peer.peerId, displayNameFor(peer.peerId), roleFor(peer.peerId))
+            peerLanDescriptor(
+                peerId = peer.peerId,
+                libraryId = peer.libraryId,
+                displayName = displayNameFor(peer.peerId, peer.libraryId, peer.libraryName),
+                role = roleFor(peer.peerId),
+            )
         }
 
     /** The host-advertised role for [peerId] from the cached catalog (Reader if absent). */
@@ -80,14 +92,32 @@ public class PeerLanLibraryBackend(
             ?: LibraryRole.Reader
 
     /**
-     * The peer's host display name if its catalog is already cached, else the peer id itself.
-     * The catalog carries the friendly `hostName`; until it arrives we fall back to the id.
+     * The shelf label for this connection, preferring the most specific name available:
+     *  1. [persistedName] captured from the QR (so the tile is right before any catalog arrives);
+     *  2. for a named library, the host-advertised name of that [libraryId] in the cached catalog;
+     *  3. the peer's host name (whole-shelf connections / name not yet known);
+     *  4. the peer id as a last resort.
      */
-    private fun displayNameFor(peerId: String): String =
-        catalogs.value.entries
-            .firstOrNull { it.key.id == peerId }
-            ?.let { it.value.hostName.ifBlank { it.key.name.ifBlank { peerId } } }
+    private fun displayNameFor(
+        peerId: String,
+        libraryId: String,
+        persistedName: String,
+    ): String {
+        if (persistedName.isNotBlank()) return persistedName
+        val entry = catalogs.value.entries.firstOrNull { it.key.id == peerId }
+        val catalog = entry?.value
+        // For a named library, prefer the host-advertised name of that library; else fall back to the
+        // peer's host name, then its device name, then the peer id.
+        val namedLibrary =
+            catalog
+                ?.libraries
+                ?.firstOrNull { libraryId.isNotBlank() && it.libraryId == libraryId }
+                ?.displayName
+                ?.takeIf { it.isNotBlank() }
+        return namedLibrary
+            ?: catalog?.hostName?.ifBlank { entry?.key?.name?.ifBlank { peerId } }
             ?: peerId
+    }
 
     private fun LibraryConnection.requirePeerLan(): LibraryConnection.PeerLan =
         this as? LibraryConnection.PeerLan

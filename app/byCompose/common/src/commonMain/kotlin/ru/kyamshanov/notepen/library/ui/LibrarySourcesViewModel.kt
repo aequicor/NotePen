@@ -266,13 +266,16 @@ class LibrarySourcesViewModel(
         online: Set<String>?,
         libraries: List<Library>,
     ): List<AvailablePeerUiModel> {
-        // Peer id of a PeerLan library (`peerlan:<peerId>`), or null for other kinds.
+        // Peer id of a PeerLan library, or null for other kinds. The id is `peerlan:<peerId>` for a
+        // whole-shelf connection or `peerlan:<peerId>:<libraryId>` for a named one; the peer id is the
+        // colon-free first segment either way.
         val connectedPeerIds =
             libraries
                 .mapNotNull { lib ->
                     lib.descriptor.id.value
                         .takeIf { it.startsWith(PEER_LAN_ID_PREFIX) }
                         ?.removePrefix(PEER_LAN_ID_PREFIX)
+                        ?.substringBefore(':')
                 }.toSet()
         return catalogs.entries
             .filter { (device, _) -> device.id !in connectedPeerIds }

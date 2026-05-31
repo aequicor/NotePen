@@ -32,6 +32,35 @@ class PairingUriTest {
     }
 
     @Test
+    fun roundTripWithLibraryFields() {
+        val original =
+            PairingUri(
+                host = "192.168.1.5",
+                port = 43211,
+                code = "482193",
+                deviceName = "Konstantin's MacBook Pro",
+                libraryId = "local:/Users/k/NotePen Library/Math",
+                libraryName = "Математика 101",
+            )
+        val parsed = PairingUri.parse(original.encode())
+        assertEquals(original, parsed)
+    }
+
+    @Test
+    fun parsesLegacyUriWithoutLibraryFieldsAsBlank() {
+        val parsed = PairingUri.parse("notepen://pair?h=1.2.3.4&p=80&c=111111&n=x")
+        assertEquals("", parsed?.libraryId)
+        assertEquals("", parsed?.libraryName)
+    }
+
+    @Test
+    fun encodeOmitsBlankLibraryFields() {
+        val encoded = PairingUri("1.2.3.4", 80, "111111", "x").encode()
+        assertEquals(false, encoded.contains("&l="))
+        assertEquals(false, encoded.contains("&ln="))
+    }
+
+    @Test
     fun rejectsWrongScheme() {
         assertNull(PairingUri.parse("https://pair?h=1.2.3.4&p=80&c=111111&n=x"))
     }

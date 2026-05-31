@@ -35,6 +35,14 @@ class ClientQrPairingCoordinator(
     private val syncClient: SyncClient,
     private val scanner: QrScanner,
     private val selfInfo: DeviceInfo,
+    /**
+     * Invoked once pairing succeeds, with the scanned [PairingUri] and the host's resolved
+     * [DeviceInfo] (whose `id` is the real peer id). Lets the caller register the peer's shared
+     * library on the shelf in the same step (the library layer lives above `:qr-connect`, so the
+     * actual `registry.connect` happens in the supplied callback). Defaults to a no-op for callers
+     * that only want a transport pairing. A failure here never fails the pairing.
+     */
+    private val onLibraryPaired: suspend (PairingUri, DeviceInfo) -> Unit = { _, _ -> },
     private val connectTimeout: Duration = DEFAULT_CONNECT_TIMEOUT,
 ) {
     /** UI-facing state machine for the client-side scan flow. */
@@ -83,7 +91,13 @@ class ClientQrPairingCoordinator(
                     emit(State.Failed(QrConnectError.ConnectFailed("Таймаут подключения. Проверьте сеть / VPN.")))
                 }
                 result.isSuccess -> {
-                    emit(State.Connected(result.getOrThrow()))
+                    val server = result.getOrThrow()
+                    // Bridge transport pairing → library shelf: the scanned library is registered in
+                    // one step, then filled in by the existing catalog coordinator. Registration must
+                    // never fail the pairing itself.
+                    runCatching { onLibraryPaired(uri, server) }
+                        .onFailure { logger.warn { "Auto-adding library after pair failed: ${it.message}" } }
+                    emit(State.Connected(server))
                 }
                 else -> {
                     val msg = result.exceptionOrNull()?.message ?: "Не удалось подключиться"

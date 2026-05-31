@@ -71,6 +71,9 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteLibraryRole
 internal class PeerLanLibrary(
     override val descriptor: LibraryDescriptor,
     private val peerId: String,
+    // Which named library on the peer this connection projects; blank = the peer's whole shelf (mDNS /
+    // pre-feature connection), so older connections keep projecting everything.
+    private val libraryId: String,
     private val catalogs: StateFlow<Map<DeviceInfo, RemoteCatalog>>,
     private val documentOpener: () -> RemoteDocumentOpener?,
     private val mutationClientProvider: (peerId: String) -> LibraryMutationClient? = { null },
@@ -83,7 +86,7 @@ internal class PeerLanLibrary(
     // emission (or forever, if no flow was supplied) → connectionState falls back to catalog presence.
     private var onlineSnapshot: Set<String>? = null
 
-    private val booksState = MutableStateFlow(catalogFor(catalogs.value).toLibraryEntries())
+    private val booksState = MutableStateFlow(entriesFor(catalogs.value))
     override val books: StateFlow<List<LibraryEntry>> = booksState.asStateFlow()
 
     private val connectionStateFlow =
@@ -93,7 +96,7 @@ internal class PeerLanLibrary(
     init {
         scope.launch {
             catalogs.collect { snapshot ->
-                booksState.value = catalogFor(snapshot).toLibraryEntries()
+                booksState.value = entriesFor(snapshot)
                 connectionStateFlow.value = connectionStateFor(snapshot, onlineSnapshot)
             }
         }
@@ -197,6 +200,17 @@ internal class PeerLanLibrary(
     private fun catalogFor(snapshot: Map<DeviceInfo, RemoteCatalog>): RemoteCatalog? =
         snapshot.entries.firstOrNull { it.key.id == peerId }?.value
 
+    /**
+     * The library entries this connection projects from [snapshot]: the peer's catalog filtered to
+     * this library's [libraryId]. A blank [libraryId] (mDNS / pre-feature connection) is unscoped and
+     * projects the peer's whole shelf, so older connections keep working unchanged.
+     */
+    private fun entriesFor(snapshot: Map<DeviceInfo, RemoteCatalog>): List<LibraryEntry> {
+        val catalog = catalogFor(snapshot) ?: return emptyList()
+        val scoped = if (libraryId.isBlank()) catalog.recent else catalog.recent.filter { it.libraryId == libraryId }
+        return scoped.map(RemoteEntry::toLibraryEntry)
+    }
+
     private fun connectionStateFor(
         snapshot: Map<DeviceInfo, RemoteCatalog>,
         online: Set<String>?,
@@ -210,13 +224,18 @@ internal class PeerLanLibrary(
         }
 
     companion object {
-        /** Builds a [LibraryId] for the LAN library hosted by [peerId]. */
-        fun idForPeer(peerId: String): LibraryId = LibraryId("peerlan:$peerId")
+        /**
+         * Builds a [LibraryId] for a LAN library hosted by [peerId]. A blank [libraryId] yields the
+         * legacy whole-shelf id `peerlan:<peerId>` (so mDNS / pre-feature connections keep their id);
+         * a specific named library appends it: `peerlan:<peerId>:<libraryId>`. [peerId] is a
+         * colon-free device id, so the peer id stays recoverable as the first segment.
+         */
+        fun idForPeerLibrary(
+            peerId: String,
+            libraryId: String,
+        ): LibraryId = if (libraryId.isBlank()) LibraryId("peerlan:$peerId") else LibraryId("peerlan:$peerId:$libraryId")
     }
 }
-
-/** Maps a peer's catalog entries to [LibraryEntry]s (identity deferred until local materialization). */
-private fun RemoteCatalog?.toLibraryEntries(): List<LibraryEntry> = this?.recent?.map(RemoteEntry::toLibraryEntry).orEmpty()
 
 private fun RemoteEntry.toLibraryEntry(): LibraryEntry =
     LibraryEntry(
@@ -238,11 +257,12 @@ private fun RemoteEntry.toLibraryEntry(): LibraryEntry =
  */
 internal fun peerLanDescriptor(
     peerId: String,
+    libraryId: String,
     displayName: String,
     role: LibraryRole = LibraryRole.Reader,
 ): LibraryDescriptor =
     LibraryDescriptor(
-        id = PeerLanLibrary.idForPeer(peerId),
+        id = PeerLanLibrary.idForPeerLibrary(peerId, libraryId),
         displayName = displayName,
         kind = LibraryBackendKind.PeerLan,
         role = role,

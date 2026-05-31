@@ -27,6 +27,14 @@ class LibraryConnectionSerializationTest {
                 LibraryConnection.Local(rootPath = "/tmp/lib", displayName = "My Lib"),
                 LibraryConnection.PeerLan(peerId = "peer-1", host = "10.0.0.5"),
                 LibraryConnection.PeerLan(peerId = "peer-2", host = null),
+                LibraryConnection.PeerLan(
+                    peerId = "peer-3",
+                    host = "10.0.0.7",
+                    port = 51234,
+                    libraryId = "local:/r/Math",
+                    libraryName = "Math",
+                    pairingCode = "482193",
+                ),
                 LibraryConnection.GitHub(repo = "owner/name", token = "tok"),
                 LibraryConnection.GitHub(repo = "anon/repo", token = null),
                 LibraryConnection.Cloud(providerId = "drive", accountId = "acc"),
@@ -64,6 +72,11 @@ class LibraryConnectionSerializationTest {
             decoded,
             "omitted optional fields fall back to defaults (backward compat)",
         )
+        decoded.filterIsInstance<LibraryConnection.PeerLan>().single().let { peer ->
+            assertEquals(null, peer.port, "legacy peer_lan has no port")
+            assertEquals("", peer.libraryId, "legacy peer_lan targets the whole shelf")
+            assertEquals(null, peer.pairingCode, "legacy peer_lan has no stored pairing code")
+        }
         assertEquals(
             "",
             decoded.filterIsInstance<LibraryConnection.Local>().single().displayName,

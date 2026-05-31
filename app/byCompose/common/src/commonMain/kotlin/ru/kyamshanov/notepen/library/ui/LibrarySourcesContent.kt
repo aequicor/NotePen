@@ -24,6 +24,8 @@ import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Computer
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.QrCode2
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
@@ -58,6 +60,7 @@ import ru.kyamshanov.notepen.LIQUID_GLASS_TOP_BAR_HEIGHT
 import ru.kyamshanov.notepen.LiquidGlassTopBar
 import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.glassSource
+import ru.kyamshanov.notepen.library.api.LibraryBackendKind
 import ru.kyamshanov.notepen.liquidGlassHero
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 
@@ -81,6 +84,9 @@ fun LibrarySourcesContent(
     val coroutineScope = rememberCoroutineScope()
     // The folder picked for a new local library, awaiting a required name (null = no dialog open).
     var pendingLocalFolder by remember { mutableStateOf<String?>(null) }
+    // QR flows: the paste-to-connect dialog visibility, and the per-library share-QR target (null = closed).
+    var connectByQrVisible by remember { mutableStateOf(false) }
+    var shareTarget by remember { mutableStateOf<LibrarySourceUiModel?>(null) }
 
     LaunchedEffect(state.errorMessage) {
         val msg = state.errorMessage ?: return@LaunchedEffect
@@ -118,6 +124,8 @@ fun LibrarySourcesContent(
                 onAddGoogleDrive = component.viewModel::addGoogleDriveLibrary,
                 onToggleStartup = component.viewModel::setOpenLibraryAtStartup,
                 onOpenMyLibrary = component.viewModel::openMyLibrary,
+                onConnectByQr = if (component.connectLibraryByQr != null) ({ connectByQrVisible = true }) else null,
+                onShareLibrary = if (component.shareLibraryByQr != null) ({ model -> shareTarget = model }) else null,
             )
             LibrarySourcesDialogs(
                 googleDevicePrompt = state.googleDevicePrompt,
@@ -125,6 +133,16 @@ fun LibrarySourcesContent(
                 viewModel = component.viewModel,
                 onPendingLocalConsumed = { pendingLocalFolder = null },
             )
+            component.connectLibraryByQr?.let { connect ->
+                if (connectByQrVisible) {
+                    ConnectByQrDialog(connect = connect, onDismiss = { connectByQrVisible = false })
+                }
+            }
+            component.shareLibraryByQr?.let { share ->
+                shareTarget?.let { target ->
+                    ShareLibraryQrDialog(model = target, share = share, onDismiss = { shareTarget = null })
+                }
+            }
             LibrarySourcesTopBar(
                 modifier = Modifier.align(Alignment.TopCenter),
                 onBack = component::onBack,
@@ -153,6 +171,8 @@ private fun LibrarySourcesList(
     onAddGoogleDrive: (folderId: String) -> Unit,
     onToggleStartup: (Boolean) -> Unit,
     onOpenMyLibrary: () -> Unit,
+    onConnectByQr: (() -> Unit)?,
+    onShareLibrary: ((LibrarySourceUiModel) -> Unit)?,
 ) {
     Column(
         modifier =
@@ -175,7 +195,11 @@ private fun LibrarySourcesList(
         } else {
             state.libraries.forEach { lib ->
                 LibraryRowSurface {
-                    LibraryRow(model = lib, onDisconnect = { onDisconnect(lib.id) })
+                    LibraryRow(
+                        model = lib,
+                        onDisconnect = { onDisconnect(lib.id) },
+                        onShare = onShareLibrary?.let { share -> { share(lib) } },
+                    )
                 }
             }
         }
@@ -189,6 +213,7 @@ private fun LibrarySourcesList(
             onAddGitHub = onAddGitHub,
             googleDriveSupported = googleDriveSupported,
             onAddGoogleDrive = onAddGoogleDrive,
+            onConnectByQr = onConnectByQr,
         )
 
         SectionHeader("Настройки")
@@ -240,6 +265,7 @@ private fun LibrarySettingsSection(
 private fun LibraryRow(
     model: LibrarySourceUiModel,
     onDisconnect: () -> Unit,
+    onShare: (() -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -269,6 +295,12 @@ private fun LibraryRow(
             enabled = false,
             label = { Text(roleLabel(model.role)) },
         )
+        // A local library can be shared over LAN by QR (desktop host only — `onShare` is null elsewhere).
+        if (onShare != null && model.kind == LibraryBackendKind.Local) {
+            IconButton(onClick = onShare) {
+                Icon(Icons.Default.QrCode2, contentDescription = "Поделиться по QR")
+            }
+        }
         IconButton(onClick = onDisconnect) {
             Icon(Icons.Default.Delete, contentDescription = "Отключить")
         }
@@ -307,6 +339,7 @@ private fun AddLibraryRow(
     onAddGitHub: (repo: String, token: String) -> Unit,
     googleDriveSupported: Boolean,
     onAddGoogleDrive: (folderId: String) -> Unit,
+    onConnectByQr: (() -> Unit)?,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     var gitHubDialogVisible by remember { mutableStateOf(false) }
@@ -341,6 +374,13 @@ private fun AddLibraryRow(
                     menuExpanded = false
                     googleDriveDialogVisible = true
                 },
+                onConnectByQr =
+                    onConnectByQr?.let { connect ->
+                        {
+                            menuExpanded = false
+                            connect()
+                        }
+                    },
             )
         }
     }
@@ -375,8 +415,16 @@ private fun AddLibraryMenu(
     onAddLocal: () -> Unit,
     onAddGitHub: () -> Unit,
     onAddGoogleDrive: () -> Unit,
+    onConnectByQr: (() -> Unit)?,
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        if (onConnectByQr != null) {
+            DropdownMenuItem(
+                text = { Text("Подключить по QR…") },
+                leadingIcon = { Icon(Icons.Default.QrCodeScanner, contentDescription = null) },
+                onClick = onConnectByQr,
+            )
+        }
         if (localFolderSupported) {
             DropdownMenuItem(
                 text = { Text("Локальная папка…") },

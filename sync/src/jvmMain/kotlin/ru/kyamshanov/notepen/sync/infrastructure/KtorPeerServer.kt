@@ -85,28 +85,40 @@ class KtorPeerServer(
     private var engine: EmbeddedServer<*, *>? = null
     private val serverScope = CoroutineScope(ioDispatcher + Job())
 
+    // Serialises start() so concurrent callers (the QR-pairing panel + per-library "Share via QR")
+    // can't both bind, and so a second start() while running is a safe no-op (see start()).
+    private val startMutex = Mutex()
+
     override suspend fun start(): Result<ServerLifecycleState.Running> =
-        runCatching {
-            val code = pairing.generateCode()
-            val host = pickLanIpv4Address() ?: InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
-            val port = findFreePort()
+        startMutex.withLock {
+            // Idempotent: a second start() while already running — e.g. the QR-pairing panel opening
+            // after a per-library "Share via QR" already started the server (or vice-versa) — must NOT
+            // rebind. Rebinding would mint a new code/port, orphan the old Ktor engine, and invalidate
+            // the QR already on screen. Return the existing Running state instead. The mutex also closes
+            // the concurrent-double-start race (the two entry points share one server instance).
+            (_lifecycle.value as? ServerLifecycleState.Running)?.let { return@withLock Result.success(it) }
+            runCatching {
+                val code = pairing.generateCode()
+                val host = pickLanIpv4Address() ?: InetAddress.getLocalHost().hostAddress ?: "127.0.0.1"
+                val port = findFreePort()
 
-            engine =
-                embeddedServer(CIO, port = port) {
-                    install(ContentNegotiation) { json(json) }
-                    install(WebSockets) {
-                        pingPeriod = 30.seconds
-                        contentConverter = KotlinxWebsocketSerializationConverter(json)
-                    }
-                    routing {
-                        webSocket("/ws") { handleSession(this) }
-                    }
-                }.also { it.start(wait = false) }
+                engine =
+                    embeddedServer(CIO, port = port) {
+                        install(ContentNegotiation) { json(json) }
+                        install(WebSockets) {
+                            pingPeriod = 30.seconds
+                            contentConverter = KotlinxWebsocketSerializationConverter(json)
+                        }
+                        routing {
+                            webSocket("/ws") { handleSession(this) }
+                        }
+                    }.also { it.start(wait = false) }
 
-            val running = ServerLifecycleState.Running(host = host, port = port, code = code)
-            _lifecycle.value = running
-            logger.info { "PeerServer started on $host:$port (code=$code)" }
-            running
+                val running = ServerLifecycleState.Running(host = host, port = port, code = code)
+                _lifecycle.value = running
+                logger.info { "PeerServer started on $host:$port (code=$code)" }
+                running
+            }
         }
 
     private fun findFreePort(): Int = java.net.ServerSocket(0).use { it.localPort }

@@ -152,7 +152,8 @@ class PeerLanLibraryTest {
         displayName: String,
         fileSize: Long? = null,
         lastOpenedAt: Long = 0L,
-    ) = RemoteEntry(documentId, displayName, fileSize, lastOpenedAt)
+        libraryId: String = "",
+    ) = RemoteEntry(documentId, displayName, fileSize, lastOpenedAt, libraryId)
 
     /** Real opener exercising only the offline cache-hit branch (no live transport needed). */
     private fun cacheHitOpener(catalogs: StateFlow<Map<DeviceInfo, RemoteCatalog>>): RemoteDocumentOpener =
@@ -206,6 +207,66 @@ class PeerLanLibraryTest {
 
             val ids = library.books.value.map { it.libraryBookId.value }
             assertEquals(listOf("doc-a#aa", "doc-b#bb"), ids, "only this peer's catalog is surfaced")
+            scope.cancel()
+        }
+
+    @Test
+    fun books_scopedToNamedLibrary_filterByLibraryId() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val catalogs =
+                MutableStateFlow(
+                    mapOf(
+                        peer to
+                            catalog(
+                                entry("doc-a#aa", "math.pdf", libraryId = "local:/Math"),
+                                entry("doc-b#bb", "phys.pdf", libraryId = "local:/Physics"),
+                            ),
+                    ),
+                )
+            val backend = PeerLanLibraryBackend(catalogs = catalogs, documentOpenerProvider = { null })
+
+            val mathLib =
+                backend
+                    .connect(
+                        LibraryConnection.PeerLan(peerId = peerId, libraryId = "local:/Math", libraryName = "Math"),
+                        scope,
+                    ).getOrThrow()
+
+            assertEquals(
+                listOf("doc-a#aa"),
+                mathLib.books.value.map { it.libraryBookId.value },
+                "a named-library connection projects only its own tagged entries",
+            )
+            assertEquals("peerlan:$peerId:local:/Math", mathLib.descriptor.id.value, "library id namespaces by (peer, library)")
+            assertEquals("Math", mathLib.descriptor.displayName, "display name comes from the scanned QR / spec")
+            scope.cancel()
+        }
+
+    @Test
+    fun books_wholeShelf_whenLibraryIdBlank_projectsEveryEntry() =
+        runTest {
+            val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
+            val catalogs =
+                MutableStateFlow(
+                    mapOf(
+                        peer to
+                            catalog(
+                                entry("doc-a#aa", "math.pdf", libraryId = "local:/Math"),
+                                entry("doc-b#bb", "phys.pdf", libraryId = "local:/Physics"),
+                            ),
+                    ),
+                )
+            val backend = PeerLanLibraryBackend(catalogs = catalogs, documentOpenerProvider = { null })
+
+            val whole = backend.connect(LibraryConnection.PeerLan(peerId), scope).getOrThrow()
+
+            assertEquals(
+                listOf("doc-a#aa", "doc-b#bb"),
+                whole.books.value.map { it.libraryBookId.value },
+                "a blank library scope (mDNS / legacy) projects the peer's whole shelf",
+            )
+            assertEquals("peerlan:$peerId", whole.descriptor.id.value, "blank scope keeps the legacy whole-shelf id")
             scope.cancel()
         }
 

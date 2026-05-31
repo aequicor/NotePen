@@ -36,13 +36,13 @@ import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogHostCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
+import ru.kyamshanov.notepen.sync.domain.SharedLibrarySource
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.domain.port.CatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.domain.port.LibrarianGrantStore
-import ru.kyamshanov.notepen.sync.domain.port.LibraryManifestProvider
 import ru.kyamshanov.notepen.sync.domain.port.LibraryMutationTarget
 import ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry
 import ru.kyamshanov.notepen.sync.domain.port.OpenDocumentRegistry
@@ -96,7 +96,10 @@ class SyncRuntime(
     private val parentScope: CoroutineScope,
     private val receivedDir: String,
     private val syncDatabasePath: String,
-    private val libraryManifestProvider: LibraryManifestProvider,
+    // The named libraries this host shares over LAN, evaluated per catalog request so the set can
+    // change at runtime as the user shares/unshares libraries (M2). The served catalog is the union
+    // of all of them, each book tagged with its library id.
+    private val sharedLibrariesProvider: suspend () -> List<SharedLibrarySource>,
     private val folderRepository: FolderRepository,
     private val catalogChangeNotifier: CatalogChangeNotifier,
     private val remoteCatalogCache: InMemoryRemoteCatalogCache,
@@ -274,7 +277,7 @@ class SyncRuntime(
         val provider =
             RemoteCatalogProvider(
                 hostName = selfName,
-                manifestProvider = libraryManifestProvider,
+                sharedLibrariesProvider = sharedLibrariesProvider,
                 folderRepository = folderRepository,
                 grantStore = librarianGrantStore,
                 openDocumentsProvider = openDocumentsProvider,

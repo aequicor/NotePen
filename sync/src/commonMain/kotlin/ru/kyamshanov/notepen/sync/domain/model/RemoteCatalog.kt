@@ -47,6 +47,14 @@ enum class RemoteLibraryRole {
  * @property grantedRole the access level the host has granted the receiving peer
  *   (M5b). Defaults to [RemoteLibraryRole.Reader] so older hosts (which never
  *   populate it) keep wire compatibility — the peer is treated as a reader.
+ * @property libraries the named libraries this host is sharing, each
+ *   identified by a stable [RemoteLibraryInfo.libraryId]. Every [RemoteEntry] in
+ *   [recent] is tagged with the [RemoteEntry.libraryId] it belongs to, so one
+ *   catalog carries the union of several named libraries and a client connected
+ *   to a specific library projects only its subset. Defaults to empty for wire
+ *   compatibility: an older host that shares a single anonymous shelf populates
+ *   neither this list nor the per-entry tag, and the peer treats the whole
+ *   catalog as one library (the pre-feature behaviour).
  */
 @Serializable
 data class RemoteCatalog(
@@ -56,6 +64,25 @@ data class RemoteCatalog(
     val folderLinks: List<RemoteFolderLink>,
     val openDocuments: List<RemoteEntry> = emptyList(),
     val grantedRole: RemoteLibraryRole = RemoteLibraryRole.Reader,
+    val libraries: List<RemoteLibraryInfo> = emptyList(),
+)
+
+/**
+ * Identity of a single named library a host shares over LAN.
+ *
+ * Advertised in [RemoteCatalog.libraries] and referenced by [RemoteEntry.libraryId].
+ * Lets a client that scanned a per-library QR resolve the authoritative display
+ * name and confirm the library it targeted is still being shared.
+ *
+ * @property libraryId stable, opaque id of the shared library on the host
+ *   (e.g. the host's `local:<rootPath>` library id). Matches the `l` field of a
+ *   pairing QR and [RemoteEntry.libraryId].
+ * @property displayName human-readable library name shown on the client's shelf.
+ */
+@Serializable
+data class RemoteLibraryInfo(
+    val libraryId: String,
+    val displayName: String,
 )
 
 /**
@@ -65,6 +92,10 @@ data class RemoteCatalog(
  * @property displayName File name as shown on the host.
  * @property fileSize Size in bytes, or null when unknown on the host.
  * @property lastOpenedAt Epoch millis of the most recent open on the host.
+ * @property libraryId Id of the named host library this book belongs to (see
+ *   [RemoteLibraryInfo]); blank for a host that shares a single anonymous shelf.
+ *   A client connected to a specific library keeps only the entries whose
+ *   [libraryId] matches; a client with no library scope (blank) keeps them all.
  */
 @Serializable
 data class RemoteEntry(
@@ -72,6 +103,7 @@ data class RemoteEntry(
     val displayName: String,
     val fileSize: Long? = null,
     val lastOpenedAt: Long,
+    val libraryId: String = "",
 )
 
 /**

@@ -37,14 +37,34 @@ public sealed interface LibraryConnection {
     /**
      * A library shared by a peer over the local network.
      *
+     * When connected via a QR code (see `ru.kyamshanov.notepen.qrconnect.domain.PairingUri`), the
+     * spec captures everything needed to re-dial the host directly on the next launch — host, port
+     * and the pairing code — so reconnection bypasses mDNS entirely (the discovery path that fails
+     * under VPN / AP isolation). When discovered via mDNS instead, [port]/[pairingCode] are null and
+     * [libraryId] is blank, reproducing the pre-QR behaviour.
+     *
      * @property peerId stable identifier of the peer that hosts the library.
      * @property host last-known network host/address of the peer, or `null` to rediscover via mDNS.
+     * @property port last-known port of the peer's sync server, or `null` when only mDNS rediscovery
+     *   is possible. Together with [host] and [pairingCode] this enables a direct reconnect.
+     * @property libraryId id of the specific named library on the host this connection targets, or
+     *   blank to project the host's whole shared shelf (the mDNS / pre-feature behaviour). Matches
+     *   `RemoteEntry.libraryId`; the library backend filters the peer's catalog to this id.
+     * @property libraryName human-readable name of the targeted library, captured from the QR so the
+     *   shelf tile is labelled correctly before the host's catalog arrives. Blank when [libraryId] is.
+     * @property pairingCode the host pairing code captured from the QR, used to re-authenticate a
+     *   direct reconnect without re-scanning. `null` for mDNS-discovered connections. Persisted in
+     *   plaintext alongside the spec (same posture as the GitHub token above).
      */
     @Serializable
     @SerialName("peer_lan")
     public data class PeerLan(
         public val peerId: String,
         public val host: String? = null,
+        public val port: Int? = null,
+        public val libraryId: String = "",
+        public val libraryName: String = "",
+        public val pairingCode: String? = null,
     ) : LibraryConnection
 
     /**

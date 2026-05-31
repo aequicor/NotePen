@@ -25,6 +25,12 @@ import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
  *   `null` hides the "local folder" add option (Android — client-only, no local backend).
  * @param googleDriveAuthorizer drives the Google device-flow sign-in for a Drive library; `null`
  *   hides the "Google Drive" add option when no OAuth client is configured.
+ * @param connectLibraryByQr connects a LAN library from a pasted `notepen://pair?…` QR payload —
+ *   self-contained (enables sync, dials the host directly, registers the [PeerLan][
+ *   ru.kyamshanov.notepen.library.api.LibraryConnection.PeerLan] library), returning the connected
+ *   library's name. Bypasses mDNS, so it works under VPN / AP isolation. `null` hides the action.
+ * @param shareLibraryByQr builds a per-library share QR for a local library this host serves (the
+ *   desktop host only); `null` hides the per-row "Share via QR" action (e.g. Android, client-only).
  * @param onBack navigation back to the main screen.
  */
 @Suppress("LongParameterList")
@@ -37,6 +43,8 @@ class LibrarySourcesComponentImpl(
     onServeOverLan: (() -> Unit)?,
     val onPickLocalFolder: (suspend () -> String?)?,
     googleDriveAuthorizer: GoogleDriveAuthorizer? = null,
+    val connectLibraryByQr: (suspend (payload: String) -> Result<String>)? = null,
+    val shareLibraryByQr: (suspend (libraryId: String, libraryName: String) -> SharedLibraryQr?)? = null,
     val onBack: () -> Unit,
 ) : LibrarySourcesComponent,
     ComponentContext by componentContext {
