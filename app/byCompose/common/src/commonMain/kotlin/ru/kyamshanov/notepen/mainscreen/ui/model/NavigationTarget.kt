@@ -39,10 +39,12 @@ sealed class NavigationTarget {
     ) : NavigationTarget()
 
     /**
-     * Открыть sub-экран содержимого общей папки «Библиотека» — единственный
-     * экземпляр на устройство (источник [ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder]).
-     * Отдельная нав-цель: книги хранятся в файловой системе, а не как
-     * FolderRepository-папка с FolderFileLink-ссылками.
+     * Открыть sub-экран содержимого конкретной библиотеки (drill-down).
+     *
+     * @property libraryId Идентификатор библиотеки ([ru.kyamshanov.notepen.library.api.LibraryId] value),
+     *   содержимое которой показать.
      */
-    object LibraryFolder : NavigationTarget()
+    data class LibraryFolder(
+        val libraryId: String,
+    ) : NavigationTarget()
 }

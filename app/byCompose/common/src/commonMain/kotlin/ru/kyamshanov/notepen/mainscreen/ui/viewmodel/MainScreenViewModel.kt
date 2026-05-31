@@ -11,15 +11,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
+import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryBookId
 import ru.kyamshanov.notepen.library.api.LibraryRegistry
-import ru.kyamshanov.notepen.library.api.MergedLibraryEntry
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileDuplicateInFolderException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileNotInHistoryException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderLimitExceededException
@@ -43,7 +44,7 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.DeleteFolderDialogState
 import ru.kyamshanov.notepen.mainscreen.ui.model.DragState
 import ru.kyamshanov.notepen.mainscreen.ui.model.ErrorEvent
 import ru.kyamshanov.notepen.mainscreen.ui.model.FolderUiModel
-import ru.kyamshanov.notepen.mainscreen.ui.model.LibraryShelfUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.LibraryCardUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.MainScreenUiState
 import ru.kyamshanov.notepen.mainscreen.ui.model.NavigationTarget
 import ru.kyamshanov.notepen.mainscreen.ui.model.PeerSummaryUiModel
@@ -115,10 +116,13 @@ class MainScreenViewModel(
 
     init {
         libraryRegistry?.let { registry ->
+            // One card per connected library: combine each library's book count into a row,
+            // re-subscribing whenever the library *set* changes. Mirrors LibrarySourcesViewModel.
+            @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
             scope.launch {
-                registry.mergedBooks.collect { merged ->
-                    _state.update { it.copy(library = merged.map(MergedLibraryEntry::toUiModel)) }
-                }
+                registry.libraries
+                    .flatMapLatest { libs -> libraryCardRows(libs) }
+                    .collect { rows -> _state.update { it.copy(libraries = rows) } }
             }
         }
         remoteCatalogsFlow?.let { catalogsFlow ->
@@ -196,18 +200,18 @@ class MainScreenViewModel(
             is MainScreenIntent.OpenPeer -> openPeer(intent.peerId, intent.displayName)
             is MainScreenIntent.OpenFolder -> openFolder(intent.folderId, intent.folderName)
             is MainScreenIntent.RestoreSession -> restoreSession(intent.seedUri)
-            is MainScreenIntent.AddToLibrary -> addToLibrary(intent.sourceUri)
+            is MainScreenIntent.AddToLibrary -> addToLibrary(intent.libraryId, intent.sourceUri)
             is MainScreenIntent.OpenLibraryItem -> openLibraryItem(intent.itemId)
             is MainScreenIntent.DeleteRecentFile -> deleteRecentFile(intent.id)
-            is MainScreenIntent.OpenLibraryFolder -> openLibraryFolder()
+            is MainScreenIntent.OpenLibraryFolder -> openLibraryFolder(intent.libraryId)
         }
     }
 
-    private fun openLibraryFolder() {
+    private fun openLibraryFolder(libraryId: String) {
         if (isNavigating) return
         if (libraryRegistry == null) return
         isNavigating = true
-        _state.update { it.copy(navigationTarget = NavigationTarget.LibraryFolder) }
+        _state.update { it.copy(navigationTarget = NavigationTarget.LibraryFolder(libraryId)) }
     }
 
     private suspend fun deleteRecentFile(id: String) {
@@ -225,16 +229,20 @@ class MainScreenViewModel(
         }
     }
 
-    /**
-     * Локальная библиотека-получатель добавляемых книг — первая, чья роль
-     * позволяет добавлять (`capabilities.canAdd`). В M1 это единственная
-     * локальная папка пользователя на desktop; на Android реестр пуст.
-     */
-    private fun librarianLibrary() = libraryRegistry?.libraries?.value?.firstOrNull { it.capabilities.canAdd }
-
-    private suspend fun addToLibrary(sourceUri: String) {
-        val library = librarianLibrary() ?: return
+    private suspend fun addToLibrary(
+        libraryId: String,
+        sourceUri: String,
+    ) {
         if (_state.value.isLoading) return
+        // Resolve the target library by id and re-check the capability defensively: a Reader-role
+        // library refuses adds (the card should not have offered a drop, but never trust the UI).
+        val library =
+            libraryRegistry
+                ?.libraries
+                ?.value
+                ?.firstOrNull { it.descriptor.id.value == libraryId }
+                ?.takeIf { it.capabilities.canAdd }
+                ?: return
         // Если drag-операция была активна — сбросим её, как делает [handleDropOnFolder].
         _state.update { it.copy(dragState = DragState.None) }
         library.addBook(sourceUri).fold(
@@ -247,6 +255,27 @@ class MainScreenViewModel(
             },
         )
     }
+
+    /**
+     * Combines each library's book count into a [LibraryCardUiModel] row, so the «Папки» section
+     * shows one live card per connected library. An empty library set yields an empty list.
+     */
+    private fun libraryCardRows(libraries: List<Library>): Flow<List<LibraryCardUiModel>> =
+        if (libraries.isEmpty()) {
+            flowOf(emptyList())
+        } else {
+            combine(libraries.map { it.books }) { perLibraryBooks ->
+                libraries.mapIndexed { index, lib ->
+                    LibraryCardUiModel(
+                        id = lib.descriptor.id.value,
+                        displayName = lib.descriptor.displayName,
+                        kind = lib.descriptor.kind,
+                        bookCount = perLibraryBooks[index].size,
+                        canAdd = lib.capabilities.canAdd,
+                    )
+                }
+            }
+        }
 
     /**
      * Открывает книгу полки в редакторе. Абсолютный путь к файлу не хранится в
@@ -868,25 +897,6 @@ private fun Folder.toUiModel(fileCount: Int) =
         fileCount = fileCount,
         createdAt = createdAt,
         lastFileOpenedAt = null,
-    )
-
-/**
- * Maps a merged library entry to the shelf UI model.
- *
- * The main-screen library card only renders the item *count* (and the section's visibility),
- * so this mapping is intentionally a one-to-one carry-over of the prior `LibraryFolderItem`
- * fields. `uri` is the per-library locator (relative path for a local folder); the absolute path
- * for opening is resolved on demand via `Library.open`, so it is not carried here — the shelf card
- * never reads it. `modifiedAt` defaults to 0 only if the backend omits it (local folders always
- * report it), preserving the previous ordering.
- */
-private fun MergedLibraryEntry.toUiModel() =
-    LibraryShelfUiModel(
-        id = entry.libraryBookId.value,
-        uri = entry.libraryBookId.value,
-        displayName = entry.displayName,
-        sizeBytes = entry.sizeBytes,
-        modifiedAt = entry.modifiedAt ?: 0L,
     )
 
 /** Platform-provided current time in milliseconds since Unix epoch. */

@@ -4,9 +4,24 @@ import com.arkivanov.essenty.lifecycle.LifecycleRegistry
 import com.arkivanov.essenty.lifecycle.resume
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
+import ru.kyamshanov.notepen.library.api.Library
+import ru.kyamshanov.notepen.library.api.LibraryBackendKind
+import ru.kyamshanov.notepen.library.api.LibraryBookId
+import ru.kyamshanov.notepen.library.api.LibraryCapabilities
+import ru.kyamshanov.notepen.library.api.LibraryConnection
+import ru.kyamshanov.notepen.library.api.LibraryConnectionState
+import ru.kyamshanov.notepen.library.api.LibraryDescriptor
+import ru.kyamshanov.notepen.library.api.LibraryEntry
+import ru.kyamshanov.notepen.library.api.LibraryId
+import ru.kyamshanov.notepen.library.api.LibraryRegistry
+import ru.kyamshanov.notepen.library.api.LibraryRole
+import ru.kyamshanov.notepen.library.api.MergedLibraryEntry
+import ru.kyamshanov.notepen.library.api.OpenableDocument
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileDuplicateInFolderException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FileNotInHistoryException
 import ru.kyamshanov.notepen.mainscreen.domain.exception.FolderLimitExceededException
@@ -1087,6 +1102,94 @@ class MainScreenViewModelTest {
             "successful external drop on a folder must produce FileAddedToFolder",
         )
     }
+
+    // --- Multi-library card path (Stage B) ---
+
+    private fun viewModelWith(registry: LibraryRegistry): MainScreenViewModel =
+        MainScreenViewModel(
+            lifecycle = lifecycle,
+            historyRepository = fakeHistoryRepo,
+            folderRepository = fakeFolderRepo,
+            addToHistory = AddToHistoryUseCase(fakeHistoryRepo),
+            checkAvailability = CheckAvailabilityUseCase(fakeAvailabilityChecker, fakeHistoryRepo),
+            openRecentFile = OpenRecentFileUseCase(checker = fakeAvailabilityChecker, ioDispatcher = testDispatcher),
+            thumbnailRepository = fakeThumbnailRepo,
+            thumbnailGenerator = fakeThumbnailGen,
+            libraryRegistry = registry,
+            nowMillis = { 1_000_000L },
+        )
+
+    private fun librarianLib(
+        id: String,
+        name: String,
+        books: List<LibraryEntry> = emptyList(),
+    ) = FakeLibrary(
+        LibraryDescriptor(LibraryId(id), name, LibraryBackendKind.Local, LibraryRole.Librarian),
+        books,
+    )
+
+    private fun readerLib(
+        id: String,
+        name: String,
+    ) = FakeLibrary(
+        LibraryDescriptor(LibraryId(id), name, LibraryBackendKind.PeerLan, LibraryRole.Reader),
+    )
+
+    // Stage B: one card per connected library, with name/bookCount/canAdd projected from the registry.
+    @Test
+    fun registryWithTwoLibraries_rendersOneCardEach() {
+        val local = librarianLib("local:/a", "Моя", books = listOf(LibraryEntry(LibraryBookId("b1"), "b1.pdf")))
+        val peer = readerLib("peerlan:42", "Сосед")
+        val vm = viewModelWith(FakeLibraryRegistry(listOf(local, peer)))
+
+        val cards = vm.state.value.libraries
+        assertNotNull(cards, "libraries must be non-null when a registry is wired")
+        assertEquals(2, cards.size, "one card per connected library")
+        val localCard = cards.first { it.id == "local:/a" }
+        assertEquals("Моя", localCard.displayName)
+        assertEquals(1, localCard.bookCount)
+        assertTrue(localCard.canAdd, "Librarian library is addable")
+        assertFalse(cards.first { it.id == "peerlan:42" }.canAdd, "Reader library is not addable")
+    }
+
+    // Stage B: AddToLibrary routes to the library identified by id and calls its addBook.
+    @Test
+    fun addToLibrary_librarianTarget_callsAddBook() {
+        val local = librarianLib("local:/a", "Моя")
+        val vm = viewModelWith(FakeLibraryRegistry(listOf(local)))
+        vm.onIntent(MainScreenIntent.ScreenVisible)
+
+        vm.onIntent(MainScreenIntent.AddToLibrary(libraryId = "local:/a", sourceUri = "file:///x.pdf"))
+
+        assertTrue(local.addedSources.contains("file:///x.pdf"), "addBook must be called on the target library")
+        assertIs<SuccessEvent.FileAddedToLibrary>(vm.state.value.successEvent)
+    }
+
+    // Stage B: AddToLibrary on a Reader-role library is a no-op (the canAdd gate rejects it).
+    @Test
+    fun addToLibrary_readerTarget_isNoOp() {
+        val reader = readerLib("peerlan:42", "Сосед")
+        val vm = viewModelWith(FakeLibraryRegistry(listOf(reader)))
+        vm.onIntent(MainScreenIntent.ScreenVisible)
+
+        vm.onIntent(MainScreenIntent.AddToLibrary(libraryId = "peerlan:42", sourceUri = "file:///x.pdf"))
+
+        assertTrue(reader.addedSources.isEmpty(), "Reader-role library must not receive addBook")
+        assertNull(vm.state.value.successEvent, "no success event when the add is gated out")
+    }
+
+    // Stage B: OpenLibraryFolder carries the library id into the navigation target.
+    @Test
+    fun openLibraryFolder_setsLibraryNavTargetWithId() {
+        val local = librarianLib("local:/a", "Моя")
+        val vm = viewModelWith(FakeLibraryRegistry(listOf(local)))
+
+        vm.onIntent(MainScreenIntent.OpenLibraryFolder(libraryId = "local:/a"))
+
+        val target = vm.state.value.navigationTarget
+        assertIs<NavigationTarget.LibraryFolder>(target)
+        assertEquals("local:/a", target.libraryId)
+    }
 }
 
 // --- Controllable FileAvailabilityChecker ---
@@ -1220,4 +1323,43 @@ private class FakePdfThumbnailGenerator : PdfThumbnailGenerator {
         widthPx: Int,
         heightPx: Int,
     ): Result<ByteArray> = results[uri] ?: Result.success(byteArrayOf())
+}
+
+// --- Library fakes (Stage B) ---
+
+private class FakeLibrary(
+    override val descriptor: LibraryDescriptor,
+    booksValue: List<LibraryEntry> = emptyList(),
+) : Library {
+    override val capabilities: LibraryCapabilities = LibraryCapabilities.fromRole(descriptor.role)
+    override val books: MutableStateFlow<List<LibraryEntry>> = MutableStateFlow(booksValue)
+    override val connectionState: StateFlow<LibraryConnectionState> =
+        MutableStateFlow(LibraryConnectionState.Connected)
+
+    /** Records sources passed to [addBook] so tests can assert routing / the canAdd gate. */
+    val addedSources: MutableList<String> = mutableListOf()
+
+    override suspend fun refresh() = Unit
+
+    override suspend fun open(id: LibraryBookId): Result<OpenableDocument> =
+        Result.success(OpenableDocument(localPath = "/opened/${id.value}", identity = null, readOnly = false))
+
+    override suspend fun addBook(src: String): Result<LibraryEntry> {
+        addedSources.add(src)
+        return Result.success(LibraryEntry(LibraryBookId(src), src))
+    }
+}
+
+private class FakeLibraryRegistry(
+    initialLibraries: List<Library>,
+) : LibraryRegistry {
+    override val libraries: MutableStateFlow<List<Library>> = MutableStateFlow(initialLibraries)
+    override val mergedBooks: StateFlow<List<MergedLibraryEntry>> = MutableStateFlow(emptyList())
+
+    override suspend fun connect(spec: LibraryConnection): Result<Library> =
+        Result.failure(UnsupportedOperationException("not used in tests"))
+
+    override suspend fun disconnect(id: LibraryId) = Unit
+
+    override suspend fun savedConnections(): List<LibraryConnection> = emptyList()
 }

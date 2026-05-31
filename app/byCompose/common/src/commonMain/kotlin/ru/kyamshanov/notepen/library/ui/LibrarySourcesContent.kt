@@ -79,6 +79,8 @@ fun LibrarySourcesContent(
     val state by component.viewModel.state.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    // The folder picked for a new local library, awaiting a required name (null = no dialog open).
+    var pendingLocalFolder by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(state.errorMessage) {
         val msg = state.errorMessage ?: return@LaunchedEffect
@@ -106,7 +108,8 @@ fun LibrarySourcesContent(
                 onAddLocal = {
                     val pick = component.onPickLocalFolder ?: return@LibrarySourcesList
                     coroutineScope.launch {
-                        pick()?.let { component.viewModel.addLocalLibrary(it) }
+                        // Pick the folder first; the required name is collected in a follow-up dialog.
+                        pick()?.let { path -> pendingLocalFolder = path }
                     }
                 },
                 localFolderSupported = component.onPickLocalFolder != null,
@@ -116,12 +119,12 @@ fun LibrarySourcesContent(
                 onToggleStartup = component.viewModel::setOpenLibraryAtStartup,
                 onOpenMyLibrary = component.viewModel::openMyLibrary,
             )
-            state.googleDevicePrompt?.let { prompt ->
-                GoogleDeviceCodeDialog(
-                    prompt = prompt,
-                    onCancel = component.viewModel::cancelGoogleSignIn,
-                )
-            }
+            LibrarySourcesDialogs(
+                googleDevicePrompt = state.googleDevicePrompt,
+                pendingLocalFolder = pendingLocalFolder,
+                viewModel = component.viewModel,
+                onPendingLocalConsumed = { pendingLocalFolder = null },
+            )
             LibrarySourcesTopBar(
                 modifier = Modifier.align(Alignment.TopCenter),
                 onBack = component::onBack,
@@ -517,46 +520,6 @@ private fun GoogleDriveLibraryDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }
-        },
-    )
-}
-
-/**
- * Shows the active Google device-flow prompt: the user code to type and the verification URL to
- * open. Stays up (non-dismissable except via «Отмена») while the ViewModel polls for authorization.
- */
-@Composable
-private fun GoogleDeviceCodeDialog(
-    prompt: GoogleDeviceCodeUiModel,
-    onCancel: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onCancel,
-        title = { Text("Вход через Google") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    text = "Откройте в браузере:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(prompt.verificationUri, style = MaterialTheme.typography.titleMedium)
-                Text(
-                    text = "и введите код:",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(prompt.userCode, style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    text = "Ожидание подтверждения…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onCancel) { Text("Отмена") }
         },
     )
 }

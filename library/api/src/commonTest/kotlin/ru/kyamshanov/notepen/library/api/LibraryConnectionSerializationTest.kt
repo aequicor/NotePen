@@ -24,7 +24,7 @@ class LibraryConnectionSerializationTest {
     fun roundTrip_allVariants() {
         val connections =
             listOf(
-                LibraryConnection.Local(rootPath = "/tmp/lib"),
+                LibraryConnection.Local(rootPath = "/tmp/lib", displayName = "My Lib"),
                 LibraryConnection.PeerLan(peerId = "peer-1", host = "10.0.0.5"),
                 LibraryConnection.PeerLan(peerId = "peer-2", host = null),
                 LibraryConnection.GitHub(repo = "owner/name", token = "tok"),
@@ -63,6 +63,11 @@ class LibraryConnectionSerializationTest {
             ),
             decoded,
             "omitted optional fields fall back to defaults (backward compat)",
+        )
+        assertEquals(
+            "",
+            decoded.filterIsInstance<LibraryConnection.Local>().single().displayName,
+            "a legacy local spec with no displayName key decodes to the empty default",
         )
     }
 }

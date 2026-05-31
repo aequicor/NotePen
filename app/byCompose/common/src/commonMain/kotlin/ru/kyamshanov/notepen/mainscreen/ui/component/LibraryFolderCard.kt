@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import io.github.oshai.kotlinlogging.KotlinLogging
 import ru.kyamshanov.notepen.LiquidGlassCard
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
+import ru.kyamshanov.notepen.mainscreen.ui.model.LibraryCardUiModel
 
 private val logger = KotlinLogging.logger {}
 
@@ -39,20 +40,21 @@ private val logger = KotlinLogging.logger {}
 private val MENU_BUTTON_SLOT = 48.dp
 
 /**
- * Карточка общей папки «Библиотека» на главном экране. Визуально
- * совпадает с [FolderCard] — отличается особой иконкой (MenuBook) в
- * акцентном primaryContainer-бэйдже и фиксированным заголовком
- * «Библиотека». Кнопка-меню (удаление) намеренно отсутствует:
- * библиотека — единый системный объект, удалить его нельзя.
+ * Карточка одной подключённой библиотеки в секции «Папки» на главном экране: имя библиотеки,
+ * число книг и (для роли Читатель) пометка «Только чтение».
  *
- * @param itemCount Количество книг внутри (для подписи `«N книг»`).
- * @param onClick Открыть sub-экран библиотеки.
- * @param onDropInternalUri Внутренний drop карточки/файла из истории — кладём в библиотеку.
- * @param onDropExternalFiles Внешний drop из ОС — копируем файлы в библиотеку.
+ * Drop принимается ТОЛЬКО если [LibraryCardUiModel.canAdd] (роль Библиотекарь): у Reader-карточки
+ * цель перетаскивания не навешивается вовсе. Кнопки-меню (удаление) нет — библиотеки
+ * добавляются/отключаются на экране «Источники библиотек».
+ *
+ * @param model UI-модель библиотеки (имя, тип, число книг, право на добавление).
+ * @param onClick Открыть sub-экран содержимого этой библиотеки.
+ * @param onDropInternalUri Внутренний drop карточки/файла из истории — добавить в библиотеку.
+ * @param onDropExternalFiles Внешний drop из ОС — добавить файлы в библиотеку.
  */
 @Composable
 fun LibraryFolderCard(
-    itemCount: Int,
+    model: LibraryCardUiModel,
     onClick: () -> Unit,
     onDropInternalUri: (sourceUri: String) -> Unit = {},
     onDropExternalFiles: (uris: List<String>) -> Unit = {},
@@ -67,13 +69,15 @@ fun LibraryFolderCard(
                 onDropExternalFiles = onDropExternalFiles,
             )
         }
+    // Reader-карточка не принимает drop: цель навешиваем только при canAdd.
+    val acceptsDrop = isDragAndDropSupported && model.canAdd
     LiquidGlassCard(
         onClick = onClick,
         modifier =
             modifier
                 .fillMaxWidth()
                 .then(
-                    if (isDragAndDropSupported) {
+                    if (acceptsDrop) {
                         Modifier.dragAndDropTarget(
                             shouldStartDragAndDrop = { event ->
                                 shouldAcceptDragEvent(event.dragEventMimeTypes()) ||
@@ -86,13 +90,13 @@ fun LibraryFolderCard(
                     },
                 ),
     ) {
-        LibraryFolderCardContent(itemCount = itemCount, isHovered = isHovered)
+        LibraryFolderCardContent(model = model, isHovered = isHovered)
     }
 }
 
 @Composable
 private fun LibraryFolderCardContent(
-    itemCount: Int,
+    model: LibraryCardUiModel,
     isHovered: Boolean,
 ) {
     Row(
@@ -107,28 +111,33 @@ private fun LibraryFolderCardContent(
     ) {
         LibraryBadge()
         Spacer(Modifier.width(12.dp))
-        // weight(1f) вместо fillMaxWidth — иначе Column клеймит всю
-        // ширину Row'а и съедает место под трейлинг-спейсер ниже.
+        // weight(1f) вместо fillMaxWidth — иначе Column клеймит всю ширину Row'а
+        // и съедает место под трейлинг-спейсер ниже.
         Column(Modifier.weight(1f)) {
-            Text("Библиотека", style = MaterialTheme.typography.bodyLarge)
+            Text(model.displayName, style = MaterialTheme.typography.bodyLarge)
             Text(
-                text = "$itemCount книг",
+                text = "${model.bookCount} книг",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
+            if (!model.canAdd) {
+                Text(
+                    text = "Только чтение",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+            }
         }
-        // Высоту строки в FolderCard'е задаёт его трейлинг-IconButton
-        // (48dp). У библиотеки кнопки-меню нет — но чтобы карточка
-        // ровно совпадала по высоте с обычными папками в одном гриде,
-        // оставляем пустой блок того же размера.
+        // Высоту строки задаёт у FolderCard его трейлинг-IconButton (48dp). У библиотеки
+        // кнопки-меню нет — пустой блок того же размера выравнивает высоту карточек в гриде.
         Spacer(Modifier.size(MENU_BUTTON_SLOT))
     }
 }
 
 @Composable
 private fun LibraryBadge() {
-    // Акцентный бэйдж с иконкой книги отделяет «Библиотеку» от обычных
-    // папок, у которых на этом месте стандартная серая Folder-иконка.
+    // Акцентный бэйдж с иконкой книги отделяет библиотеку от обычных папок,
+    // у которых на этом месте стандартная серая Folder-иконка.
     Box(
         modifier =
             Modifier

@@ -44,7 +44,7 @@ class JvmLibraryConnectionStoreTest {
                     LibraryConnection.PeerLan(peerId = "peer-2"),
                     LibraryConnection.GitHub(repo = "owner/name", token = "tok"),
                     LibraryConnection.Cloud(providerId = "drive", accountId = "acc"),
-                    LibraryConnection.Local(rootPath = "/tmp/lib"),
+                    LibraryConnection.Local(rootPath = "/tmp/lib", displayName = "My Lib"),
                 )
             store.save(connections)
             assertEquals(connections, store().load(), "a fresh store reads back the same list from disk")

@@ -58,7 +58,7 @@ public class JvmLibraryConnectionStore(
     override suspend fun add(connection: LibraryConnection): List<LibraryConnection> =
         withContext(ioDispatcher) {
             mutex.withLock {
-                val updated = readUnsafe().filterNot { it == connection } + connection
+                val updated = readUnsafe().filterNot { sameConnection(it, connection) } + connection
                 writeUnsafe(updated)
                 updated
             }
@@ -67,10 +67,27 @@ public class JvmLibraryConnectionStore(
     override suspend fun remove(connection: LibraryConnection): List<LibraryConnection> =
         withContext(ioDispatcher) {
             mutex.withLock {
-                val updated = readUnsafe().filterNot { it == connection }
+                val updated = readUnsafe().filterNot { sameConnection(it, connection) }
                 writeUnsafe(updated)
                 updated
             }
+        }
+
+    /**
+     * Whether [a] and [b] denote the SAME saved library for de-dup. Two [LibraryConnection.Local] specs
+     * are the same iff they share a [LibraryConnection.Local.rootPath] — the folder is the identity, the
+     * display name is not — so re-adding a folder under a new name replaces rather than duplicates it
+     * (and a disconnect removes it regardless of the name it was saved under). All other kinds compare by
+     * full value equality.
+     */
+    private fun sameConnection(
+        a: LibraryConnection,
+        b: LibraryConnection,
+    ): Boolean =
+        if (a is LibraryConnection.Local && b is LibraryConnection.Local) {
+            a.rootPath == b.rootPath
+        } else {
+            a == b
         }
 
     private fun readUnsafe(): List<LibraryConnection> {

@@ -191,11 +191,18 @@ class LibrarySourcesViewModel(
         _state.update { it.copy(googleDevicePrompt = null) }
     }
 
-    /** Connects a local-folder library rooted at [rootPath] (desktop only). */
-    fun addLocalLibrary(rootPath: String) {
-        if (rootPath.isBlank()) return
+    /**
+     * Connects a local-folder library rooted at [rootPath] with the user-given [displayName]
+     * (desktop only). Both must be non-blank — the UI enforces a non-blank name, so this guard is a
+     * defensive backstop.
+     */
+    fun addLocalLibrary(
+        rootPath: String,
+        displayName: String,
+    ) {
+        if (rootPath.isBlank() || displayName.isBlank()) return
         scope.launch {
-            registry.connect(LibraryConnection.Local(rootPath = rootPath))
+            registry.connect(LibraryConnection.Local(rootPath = rootPath, displayName = displayName.trim()))
                 .onFailure { e ->
                     logger.warn(e) { "addLocalLibrary failed: ${e::class.simpleName}" }
                     _state.update { it.copy(errorMessage = "Не удалось открыть папку") }

@@ -62,6 +62,7 @@ import ru.kyamshanov.notepen.mainscreen.infrastructure.PdfThumbnailGeneratorAndr
 import ru.kyamshanov.notepen.mainscreen.infrastructure.ThumbnailRepositoryAndroid
 import ru.kyamshanov.notepen.mainscreen.platform.FilePicker
 import ru.kyamshanov.notepen.mainscreen.ui.folder.FolderContentsComponentImpl
+import ru.kyamshanov.notepen.mainscreen.ui.library.LibraryFolderContentsComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.peer.PeerCatalogComponentImpl
 import ru.kyamshanov.notepen.mainscreen.ui.screen.MainScreenComponent
 import ru.kyamshanov.notepen.pdf.infrastructure.AndroidDocumentLoader
@@ -494,13 +495,12 @@ class MainActivity : ComponentActivity() {
                     onOpenEditor,
                     onOpenPeerCatalog,
                     onOpenFolder,
-                    _,
+                    onOpenLibraryFolder,
                     onOpenSettings,
                     onOpenLibrarySources,
                     ->
-                    // libraryFolder=null на Android → onOpenLibraryFolder тоже не нужен;
-                    // компонент не показывает карточку «Библиотека», навигация туда
-                    // никогда не инициируется.
+                    // Android — только клиент: локальной папки нет, но в реестре могут быть
+                    // удалённые библиотеки (LAN/GitHub/Drive) — их карточки и drill-down работают.
                     MainScreenComponent(
                         componentContext = componentContext,
                         historyRepository = historyRepo,
@@ -516,6 +516,7 @@ class MainActivity : ComponentActivity() {
                         onOpenFolder = onOpenFolder,
                         onOpenSettings = onOpenSettings,
                         onOpenLibrarySources = onOpenLibrarySources,
+                        onOpenLibraryFolder = onOpenLibraryFolder,
                         remoteCatalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
                         libraryRegistry = libraryRegistry,
@@ -551,6 +552,15 @@ class MainActivity : ComponentActivity() {
                         onOpenFilePicker = { filePicker.pickDocument() },
                         onOpenEditor = onOpenEditor,
                         onOpenFolder = onOpenFolder,
+                    )
+                },
+                libraryFolderComponentFactory = { ctx, libraryId, onBack, onOpenEditor ->
+                    LibraryFolderContentsComponentImpl(
+                        componentContext = ctx,
+                        libraryId = libraryId,
+                        libraryRegistry = libraryRegistry,
+                        onBack = onBack,
+                        onOpenEditor = onOpenEditor,
                     )
                 },
                 settingsComponentFactory = { ctx, onBack ->

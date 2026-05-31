@@ -125,12 +125,10 @@ fun RootContent(
                             mainScreenComponent.onOpenFolder(target.folderId, target.folderName)
                             mainScreenComponent.viewModel.onNavigationHandled()
                         }
-                        NavigationTarget.LibraryFolder -> {
-                            // Колбэк может быть null на платформах, где общая
-                            // библиотечная папка не сконфигурирована — тогда
-                            // навигацию просто отменяем (карточка не должна
-                            // была показаться в UI вовсе).
-                            mainScreenComponent.onOpenLibraryFolder?.invoke()
+                        is NavigationTarget.LibraryFolder -> {
+                            // Колбэк может быть null, если drill-down не сконфигурирован —
+                            // тогда навигацию просто отменяем (тап по карточке — no-op).
+                            mainScreenComponent.onOpenLibraryFolder?.invoke(target.libraryId)
                             mainScreenComponent.viewModel.onNavigationHandled()
                         }
                         null -> {}

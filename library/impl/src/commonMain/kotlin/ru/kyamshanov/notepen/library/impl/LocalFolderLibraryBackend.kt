@@ -52,7 +52,7 @@ public class LocalFolderLibraryBackend(
             val local = spec.requireLocal()
             val folder = folderFactory.create(local.rootPath, scope)
             LocalFolderLibrary(
-                descriptor = localFolderDescriptor(local.rootPath),
+                descriptor = localFolderDescriptor(local.rootPath, local.displayName),
                 libraryFolder = folder,
                 identityProvider = identityProvider,
                 scope = scope,
@@ -60,7 +60,7 @@ public class LocalFolderLibraryBackend(
         }
 
     override suspend fun probe(spec: LibraryConnection): Result<LibraryDescriptor> =
-        runCatching { localFolderDescriptor(spec.requireLocal().rootPath) }
+        runCatching { spec.requireLocal().let { localFolderDescriptor(it.rootPath, it.displayName) } }
 
     private fun LibraryConnection.requireLocal(): LibraryConnection.Local =
         this as? LibraryConnection.Local

@@ -37,6 +37,7 @@ import ru.kyamshanov.notepen.LiquidGlassCard
 import ru.kyamshanov.notepen.LiquidGlassDropdownMenu
 import ru.kyamshanov.notepen.mainscreen.platform.isDragAndDropSupported
 import ru.kyamshanov.notepen.mainscreen.ui.model.FolderUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.LibraryCardUiModel
 import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
 
 /**
@@ -52,7 +53,9 @@ import ru.kyamshanov.notepen.mainscreen.ui.model.RecentFileUiModel
  * @param isBeingDragged true, когда карточка активно перетаскивается.
  * @param folders Список доступных папок для пункта «Переместить в папку…» в меню.
  * @param onAddToFolder Колбэк добавления файла в выбранную папку.
- * @param onAddToLibrary Колбэк копирования файла в общую Библиотеку. `null` — пункт скрыт.
+ * @param addableLibraries Библиотеки, в которые можно добавить файл (роль Библиотекарь). Пустой
+ *   список скрывает пункты «Переместить в библиотеку».
+ * @param onAddToLibrary Колбэк добавления файла в библиотеку по её id.
  * @param onDelete Колбэк удаления документа (убирает запись из истории; файл на диске остаётся).
  * @param modifier Модификатор компонента.
  */
@@ -65,7 +68,8 @@ fun RecentFileCard(
     isBeingDragged: Boolean = false,
     folders: List<FolderUiModel> = emptyList(),
     onAddToFolder: (folderId: String) -> Unit = {},
-    onAddToLibrary: (() -> Unit)? = null,
+    addableLibraries: List<LibraryCardUiModel> = emptyList(),
+    onAddToLibrary: (libraryId: String) -> Unit = {},
     onDelete: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
@@ -131,6 +135,7 @@ fun RecentFileCard(
                 DocumentMenuButton(
                     folders = folders,
                     onAddToFolder = onAddToFolder,
+                    addableLibraries = addableLibraries,
                     onAddToLibrary = onAddToLibrary,
                     onDelete = onDelete,
                 )
@@ -152,7 +157,8 @@ fun RecentFileCard(
 internal fun DocumentMenuButton(
     folders: List<FolderUiModel>,
     onAddToFolder: (folderId: String) -> Unit,
-    onAddToLibrary: (() -> Unit)?,
+    addableLibraries: List<LibraryCardUiModel>,
+    onAddToLibrary: (libraryId: String) -> Unit,
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -178,13 +184,11 @@ internal fun DocumentMenuButton(
                     menuExpanded = false
                     onAddToFolder(folderId)
                 },
-                onAddToLibrary =
-                    onAddToLibrary?.let { handler ->
-                        {
-                            menuExpanded = false
-                            handler()
-                        }
-                    },
+                addableLibraries = addableLibraries,
+                onAddToLibrary = { libraryId ->
+                    menuExpanded = false
+                    onAddToLibrary(libraryId)
+                },
                 onDelete = {
                     menuExpanded = false
                     onDelete()
@@ -198,13 +202,16 @@ internal fun DocumentMenuButton(
 private fun DocumentMenuContent(
     folders: List<FolderUiModel>,
     onAddToFolder: (folderId: String) -> Unit,
-    onAddToLibrary: (() -> Unit)?,
+    addableLibraries: List<LibraryCardUiModel>,
+    onAddToLibrary: (libraryId: String) -> Unit,
     onDelete: () -> Unit,
 ) {
-    val hasMoveSection = folders.isNotEmpty() || onAddToLibrary != null
+    val hasMoveSection = folders.isNotEmpty() || addableLibraries.isNotEmpty()
     if (hasMoveSection) {
         MoveSectionHeader()
-        onAddToLibrary?.let { MoveToLibraryItem(onClick = it) }
+        addableLibraries.forEach { library ->
+            MoveToLibraryItem(name = library.displayName) { onAddToLibrary(library.id) }
+        }
         folders.forEach { folder ->
             MoveToFolderItem(folder) { onAddToFolder(folder.id) }
         }
@@ -231,12 +238,15 @@ private fun MoveSectionHeader() {
 }
 
 @Composable
-private fun MoveToLibraryItem(onClick: () -> Unit) {
+private fun MoveToLibraryItem(
+    name: String,
+    onClick: () -> Unit,
+) {
     DropdownMenuItem(
         leadingIcon = {
             Icon(imageVector = Icons.AutoMirrored.Filled.MenuBook, contentDescription = null)
         },
-        text = { Text("Библиотека") },
+        text = { Text(name) },
         onClick = onClick,
     )
 }

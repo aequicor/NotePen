@@ -2,19 +2,21 @@ package ru.kyamshanov.notepen.mainscreen.ui.library
 
 import com.arkivanov.decompose.ComponentContext
 import ru.kyamshanov.notepen.LibraryFolderComponent
-import ru.kyamshanov.notepen.mainscreen.domain.port.LibraryFolder
+import ru.kyamshanov.notepen.library.api.LibraryRegistry
 
 /**
- * Decompose-компонент sub-экрана общей папки «Библиотека».
+ * Decompose-компонент sub-экрана содержимого конкретной библиотеки.
  *
  * @param componentContext Контекст Decompose.
- * @param libraryFolder Источник списка книг.
+ * @param libraryId Идентификатор библиотеки, чьё содержимое показать.
+ * @param libraryRegistry Реестр библиотек — источник книг и операция открытия ([LibraryRegistry]).
  * @param onBack Возврат на главный экран.
  * @param onOpenEditor Колбэк перехода в редактор для выбранной книги.
  */
 class LibraryFolderContentsComponentImpl(
     componentContext: ComponentContext,
-    libraryFolder: LibraryFolder,
+    libraryId: String,
+    libraryRegistry: LibraryRegistry,
     val onBack: () -> Unit,
     onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
 ) : LibraryFolderComponent,
@@ -22,7 +24,8 @@ class LibraryFolderContentsComponentImpl(
     val viewModel =
         LibraryFolderContentsViewModel(
             lifecycle = lifecycle,
-            libraryFolder = libraryFolder,
+            libraryId = libraryId,
+            libraryRegistry = libraryRegistry,
             onOpenEditor = onOpenEditor,
         )
 }

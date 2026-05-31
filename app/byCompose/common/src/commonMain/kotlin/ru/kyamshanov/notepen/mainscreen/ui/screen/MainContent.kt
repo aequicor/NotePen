@@ -266,7 +266,7 @@ fun MainContent(
                     state.recentFiles.isEmpty() &&
                         state.folders.isEmpty() &&
                         state.peers.isEmpty() &&
-                        state.library == null ->
+                        state.libraries.isNullOrEmpty() ->
                         EmptyState(
                             onOpenFile = { onIntent(MainScreenIntent.OpenFilePicker) },
                             modifier = Modifier.fillMaxSize().padding(top = topBarTotal),
@@ -492,26 +492,22 @@ private fun RecentFilesAndFoldersList(
                     RecentFilesRow(state, onIntent)
                 }
             }
-            // «Библиотека» закреплена первой плиткой в секции «Папки»
-            // — общая папка, расшариваемая пирам, визуально живёт рядом
-            // с обычными папками, но отдельным горизонтальным шельфом.
-            val hasLibrary = state.library != null
-            if (hasLibrary || state.folders.isNotEmpty()) {
+            // Библиотеки закреплены первыми плитками в секции «Папки» — по карточке
+            // на каждую подключённую библиотеку, рядом с обычными папками пользователя.
+            val libraries = state.libraries.orEmpty()
+            if (libraries.isNotEmpty() || state.folders.isNotEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) { SectionHeader("Папки") }
-                state.library?.let { libraryItems ->
-                    // Без GridItemSpan(maxLineSpan): карточка библиотеки
-                    // встаёт в обычную ячейку Adaptive-грида рядом с
-                    // другими папками — а не растягивается на всю строку.
-                    item(key = "library_folder_card") {
-                        LibraryFolderCard(
-                            itemCount = libraryItems.size,
-                            onClick = { onIntent(MainScreenIntent.OpenLibraryFolder) },
-                            onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(uri)) },
-                            onDropExternalFiles = { uris ->
-                                uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(it)) }
-                            },
-                        )
-                    }
+                // Без GridItemSpan(maxLineSpan): карточки библиотек встают в обычные
+                // ячейки Adaptive-грида рядом с папками, а не растягиваются на всю строку.
+                items(libraries, key = { "library_${it.id}" }) { library ->
+                    LibraryFolderCard(
+                        model = library,
+                        onClick = { onIntent(MainScreenIntent.OpenLibraryFolder(library.id)) },
+                        onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(library.id, uri)) },
+                        onDropExternalFiles = { uris ->
+                            uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(library.id, it)) }
+                        },
+                    )
                 }
                 items(state.folders, key = { "folder_${it.id}" }) { folder ->
                     FolderCard(
@@ -557,27 +553,25 @@ private fun RecentFilesAndFoldersList(
                 item { SectionHeader("Недавние файлы") }
                 item { RecentFilesRow(state, onIntent) }
             }
-            // «Библиотека» закреплена первой плиткой в секции «Папки» —
+            // Библиотеки — первыми плитками в секции «Папки» (по карточке на каждую);
             // см. развёрнутую логику выше в широком layout'е.
-            val hasLibrary = state.library != null
-            if (hasLibrary || state.folders.isNotEmpty()) {
+            val libraries = state.libraries.orEmpty()
+            if (libraries.isNotEmpty() || state.folders.isNotEmpty()) {
                 item { Spacer(Modifier.height(24.dp)) }
                 item { SectionHeader("Папки") }
-                state.library?.let { libraryItems ->
-                    item {
-                        LibraryFolderCard(
-                            itemCount = libraryItems.size,
-                            onClick = { onIntent(MainScreenIntent.OpenLibraryFolder) },
-                            onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(uri)) },
-                            onDropExternalFiles = { uris ->
-                                uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(it)) }
-                            },
-                            modifier =
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 4.dp),
-                        )
-                    }
+                items(libraries, key = { "library_${it.id}" }) { library ->
+                    LibraryFolderCard(
+                        model = library,
+                        onClick = { onIntent(MainScreenIntent.OpenLibraryFolder(library.id)) },
+                        onDropInternalUri = { uri -> onIntent(MainScreenIntent.AddToLibrary(library.id, uri)) },
+                        onDropExternalFiles = { uris ->
+                            uris.distinct().forEach { onIntent(MainScreenIntent.AddToLibrary(library.id, it)) }
+                        },
+                        modifier =
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
+                    )
                 }
                 items(state.folders, key = { "folder_${it.id}" }) { folder ->
                     FolderCard(
@@ -657,12 +651,8 @@ private fun RecentFilesRow(
                         onAddToFolder = { folderId ->
                             onIntent(MainScreenIntent.AddFileToFolder(folderId, file.uri))
                         },
-                        onAddToLibrary =
-                            if (state.library != null) {
-                                { onIntent(MainScreenIntent.AddToLibrary(file.uri)) }
-                            } else {
-                                null
-                            },
+                        addableLibraries = state.libraries.orEmpty().filter { it.canAdd },
+                        onAddToLibrary = { libraryId -> onIntent(MainScreenIntent.AddToLibrary(libraryId, file.uri)) },
                         onDelete = { onIntent(MainScreenIntent.DeleteRecentFile(file.id)) },
                         modifier =
                             Modifier
