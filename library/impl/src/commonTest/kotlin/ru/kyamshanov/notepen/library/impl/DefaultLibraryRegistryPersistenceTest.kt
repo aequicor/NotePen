@@ -87,15 +87,19 @@ class DefaultLibraryRegistryPersistenceTest {
         }
 
     @Test
-    fun connectingLocal_isNotPersisted() =
+    fun connectingLocal_isPersisted_andDisconnectRemoves() =
         runTest {
             val store = FakeConnectionStore()
             val scope = CoroutineScope(UnconfinedTestDispatcher(testScheduler))
             val registry = localRegistry(scope, UnconfinedTestDispatcher(testScheduler), store)
 
-            registry.connect(LibraryConnection.Local("/tmp/lib")).getOrThrow()
+            // Local libraries are now user-created (named) and persisted like every other kind.
+            val spec = LibraryConnection.Local("/tmp/lib", "My Lib")
+            val library = registry.connect(spec).getOrThrow()
+            assertEquals(listOf(spec), store.load(), "a user-created local library is persisted")
 
-            assertEquals(emptyList<LibraryConnection>(), store.load(), "the always-on local library is not persisted")
+            registry.disconnect(library.descriptor.id)
+            assertEquals(emptyList<LibraryConnection>(), store.load(), "disconnect removes the persisted spec")
             scope.cancel()
         }
 

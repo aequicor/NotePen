@@ -34,12 +34,11 @@ import ru.kyamshanov.notepen.library.api.MergedLibraryEntry
  * every [LibraryId] that holds it (M6 dedup). Entries without an identity stay distinct — the
  * absence of an id is never treated as "same book", so two un-hashed books can never falsely merge.
  *
- * ## Persistence (M2b)
+ * ## Persistence
  * Successfully connected specs accepted by [shouldPersist] are written to the [connectionStore] so
- * they can be auto-reconnected at startup. By default the **always-on local** library is *not*
- * persisted — it is wired explicitly by the DI layer with a platform-specific root and re-added on
- * every launch, so storing it would be redundant and could pin a stale root. User-added PeerLan /
- * GitHub / Cloud libraries are persisted. [disconnect] removes the matching spec from the store.
+ * they can be auto-reconnected at startup. By default **every** kind is persisted — including
+ * [LibraryConnection.Local], now that local libraries are user-created (each its own folder + name)
+ * rather than a single always-on default. [disconnect] removes the matching spec from the store.
  *
  * @param backends the available backends, one per [LibraryBackendKind].
  * @param scope long-lived scope keeping [libraries] / [mergedBooks] hot and owning each connected
@@ -48,14 +47,14 @@ import ru.kyamshanov.notepen.library.api.MergedLibraryEntry
  * @param connectionStore durable store of saved connections; `null` disables persistence
  *   (e.g. in tests), so [savedConnections] returns empty and connects are not recorded.
  * @param shouldPersist predicate deciding which successfully-connected specs are saved; defaults to
- *   persisting everything except [LibraryConnection.Local].
+ *   persisting every connection.
  */
 public class DefaultLibraryRegistry(
     backends: List<LibraryBackend>,
     private val scope: CoroutineScope,
     private val ioDispatcher: CoroutineDispatcher,
     private val connectionStore: LibraryConnectionStore? = null,
-    private val shouldPersist: (LibraryConnection) -> Boolean = { it !is LibraryConnection.Local },
+    private val shouldPersist: (LibraryConnection) -> Boolean = { true },
 ) : LibraryRegistry {
     private val backendsByKind = backends.associateBy { it.kind }
     private val connectMutex = Mutex()

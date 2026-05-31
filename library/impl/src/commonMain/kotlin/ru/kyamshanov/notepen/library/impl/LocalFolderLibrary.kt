@@ -157,11 +157,19 @@ private fun LibraryFolderItem.toLibraryEntry(): LibraryEntry =
         identity = null,
     )
 
-/** Builds the [LibraryDescriptor] for a local folder library rooted at [rootPath]. */
-internal fun localFolderDescriptor(rootPath: String): LibraryDescriptor =
+/**
+ * Builds the [LibraryDescriptor] for a local folder library rooted at [rootPath].
+ *
+ * [displayName] is the user-chosen library name; when blank it falls back to the folder's basename,
+ * preserving the pre-naming behaviour.
+ */
+internal fun localFolderDescriptor(
+    rootPath: String,
+    displayName: String = "",
+): LibraryDescriptor =
     LibraryDescriptor(
         id = LocalFolderLibrary.idForRoot(rootPath),
-        displayName = rootPath.substringAfterLast('/').substringAfterLast('\\').ifBlank { rootPath },
+        displayName = displayName.ifBlank { rootPath.substringAfterLast('/').substringAfterLast('\\').ifBlank { rootPath } },
         kind = LibraryBackendKind.Local,
         // The user owns and fully controls their local folder.
         role = LibraryRole.Librarian,

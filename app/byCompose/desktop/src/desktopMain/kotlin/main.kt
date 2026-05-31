@@ -395,9 +395,10 @@ fun main(args: Array<String>) {
     // is disabled; flips to the live host+client union once enable() lands.
     val onlinePeerIdsFlow = syncRuntime.onlinePeerIds()
 
-    // The library shelf is sourced through the :library abstraction. Three backends are registered:
-    //  - Local: the one local-folder library (`~/NotePen Library`); the factory reuses the existing
-    //    [libraryFolder] for that root so the registry and the "Library" drill-down share one scan.
+    // The library shelf is sourced through the :library abstraction. Backends registered:
+    //  - Local: user-created named local-folder libraries (no always-on default anymore); the factory
+    //    reuses the existing [libraryFolder] when a library is rooted at libraryRoot (so the LAN-served
+    //    folder and the registry share one scan), and builds a fresh FileSystemLibraryFolder otherwise.
     //  - PeerLan (M2a): projects a connected peer's shared catalog as a read-only library. It reuses
     //    the existing sync infra — the client-side catalog cache for listing and the (lazily built)
     //    RemoteDocumentOpener for streaming. No peer is connected here; that happens via LibrarySources
@@ -405,8 +406,8 @@ fun main(args: Array<String>) {
     //  - GitHub (M3): reads a repo's `books/` folder via the existing GitHubContentsCloudProvider
     //    (no new networking). A dedicated lightweight CIO client is built lazily on first connect so
     //    startup stays cheap; the Librarian role is granted when a write token is present.
-    // Saved user-added libraries (PeerLan/GitHub) persist to library_connections.json under the app
-    // data dir; the always-on local library below is wired explicitly and NOT persisted there.
+    // All saved libraries (local + PeerLan/GitHub/Cloud) persist to library_connections.json under the
+    // app data dir and reconnect at startup (locals unconditionally; remote ones gated by the toggle).
     val libraryConnectionStore = JvmLibraryConnectionStore()
     // One lazily-built CIO engine shared by every cloud client (GitHub + Google Drive), so startup
     // stays cheap until the first cloud library is connected.
@@ -496,14 +497,19 @@ fun main(args: Array<String>) {
     // a remote librarian's request against the host's connected libraries.
     libraryRegistryHolder.set(libraryRegistry)
     appScope.launch {
-        // The always-connected local library (M1) stays wired explicitly every launch.
-        libraryRegistry.connect(LibraryConnection.Local(libraryRoot.canonicalPath))
-            .onFailure { e -> mainLogger.warn(e) { "Failed to connect local library at startup" } }
-        // M2b: when "open library at startup" is on, auto-reconnect the user's saved (PeerLan/GitHub)
-        // libraries. Non-blocking — the local library is already up; saved ones connect in the
-        // background as their backends become reachable.
+        // No always-on default library anymore: the user creates named local libraries in
+        // LibrarySources. Saved LOCAL libraries are the user's own folders — always reachable and
+        // cheap to scan — so they reconnect every launch regardless of the startup toggle. Saved
+        // REMOTE libraries (PeerLan/GitHub/Cloud) are network-dependent, so they reconnect only when
+        // "open library at startup" is on.
+        val (localSpecs, remoteSpecs) =
+            libraryRegistry.savedConnections().partition { it is LibraryConnection.Local }
+        localSpecs.forEach { spec ->
+            libraryRegistry.connect(spec)
+                .onFailure { e -> mainLogger.warn(e) { "Failed to reconnect local library at startup" } }
+        }
         if (defaultAppSettingsRepository().load().openLibraryAtStartup) {
-            libraryRegistry.savedConnections().forEach { spec ->
+            remoteSpecs.forEach { spec ->
                 libraryRegistry.connect(spec)
                     .onFailure { e -> mainLogger.warn(e) { "Failed to auto-connect saved library $spec" } }
             }
@@ -577,10 +583,11 @@ fun main(args: Array<String>) {
                         onOpenFolder = onOpenFolder,
                     )
                 },
-                libraryFolderComponentFactory = { ctx, onBack, onOpenEditor ->
+                libraryFolderComponentFactory = { ctx, libraryId, onBack, onOpenEditor ->
                     LibraryFolderContentsComponentImpl(
                         componentContext = ctx,
-                        libraryFolder = libraryFolder,
+                        libraryId = libraryId,
+                        libraryRegistry = libraryRegistry,
                         onBack = onBack,
                         onOpenEditor = onOpenEditor,
                     )
@@ -593,10 +600,11 @@ fun main(args: Array<String>) {
                     )
                 },
                 // M2c: the LibrarySources screen drives the same registry/store/settings as the shelf.
-                // - onServeOverLan enables the heavy sync stack (Ktor server + mDNS), which IS
-                //   serving-over-LAN: peers can then discover + read this desktop's catalog.
-                // - onPickLocalFolder shows a native directory chooser so the user can add another
-                //   local-folder library (the always-on one is wired separately at startup).
+                // - onServeOverLan enables the heavy sync stack (Ktor server + mDNS) AND registers the
+                //   served root (libraryRoot) as a writable local library, so an inbound remote-librarian
+                //   upload (resolved through the registry) has a local target.
+                // - onPickLocalFolder shows a native directory chooser so the user can add a named
+                //   local-folder library (there is no always-on default library anymore).
                 librarySourcesComponentFactory = { ctx, onBack ->
                     LibrarySourcesComponentImpl(
                         componentContext = ctx,
@@ -604,7 +612,23 @@ fun main(args: Array<String>) {
                         settingsRepository = defaultAppSettingsRepository(),
                         catalogsFlow = remoteCatalogCache.catalogs,
                         onlinePeerIdsFlow = onlinePeerIdsFlow,
-                        onServeOverLan = { appScope.launch { syncRuntime.enable() } },
+                        onServeOverLan = {
+                            appScope.launch {
+                                syncRuntime.enable()
+                                // Sharing your library over LAN makes its served root (libraryRoot, what
+                                // FileSystemLibraryManifestProvider walks) a real, writable library: register
+                                // it so remote-librarian uploads have a local target. Idempotent — reconnect
+                                // by id replaces in place.
+                                libraryRegistry.connect(
+                                    LibraryConnection.Local(
+                                        rootPath = libraryRoot.canonicalPath,
+                                        displayName = libraryRoot.name,
+                                    ),
+                                ).onFailure { e ->
+                                    mainLogger.warn(e) { "Failed to register served library: ${e::class.simpleName}" }
+                                }
+                            }
+                        },
                         onPickLocalFolder = { pickLibraryFolder() },
                         // Google sign-in is offered only when an OAuth client is configured; the
                         // authorizer runs the device flow with the read-only scope (Reader role).

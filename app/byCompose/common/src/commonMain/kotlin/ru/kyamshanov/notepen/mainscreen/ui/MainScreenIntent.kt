@@ -223,13 +223,15 @@ sealed class MainScreenIntent {
     ) : MainScreenIntent()
 
     /**
-     * Скопировать файл в общую папку «Библиотека» (раздаётся подключённым
-     * устройствам). Источник может быть как карточкой из «Недавних» / папки
-     * (drag-and-drop), так и внешним файлом из ОС.
+     * Добавить файл в конкретную библиотеку (доступно, только если у библиотеки роль
+     * Библиотекарь — `canAdd`). Источник — карточка из «Недавних» / папки (drag-and-drop)
+     * или внешний файл из ОС.
      *
+     * @property libraryId Идентификатор библиотеки-получателя.
      * @property sourceUri Канонический путь / URI файла-источника.
      */
     data class AddToLibrary(
+        val libraryId: String,
         val sourceUri: String,
     ) : MainScreenIntent()
 
@@ -252,6 +254,12 @@ sealed class MainScreenIntent {
         val id: String,
     ) : MainScreenIntent()
 
-    /** Открыть sub-экран общей папки «Библиотека». */
-    object OpenLibraryFolder : MainScreenIntent()
+    /**
+     * Открыть sub-экран содержимого конкретной библиотеки.
+     *
+     * @property libraryId Идентификатор библиотеки.
+     */
+    data class OpenLibraryFolder(
+        val libraryId: String,
+    ) : MainScreenIntent()
 }

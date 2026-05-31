@@ -20,12 +20,18 @@ public sealed interface LibraryConnection {
     /**
      * A library rooted in a local filesystem folder.
      *
-     * @property rootPath absolute path to the library root folder.
+     * @property rootPath absolute path to the library root folder; also the library's stable identity
+     *   (`local:<rootPath>`). The display name is NOT part of identity, so a folder can be renamed in
+     *   place.
+     * @property displayName user-chosen library name shown in the UI. Defaults to `""` so connection
+     *   files written by older app versions (which stored only [rootPath]) still deserialize; a blank
+     *   value falls back to the folder's basename when the library descriptor is built.
      */
     @Serializable
     @SerialName("local")
     public data class Local(
         public val rootPath: String,
+        public val displayName: String = "",
     ) : LibraryConnection
 
     /**

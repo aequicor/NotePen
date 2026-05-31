@@ -15,10 +15,9 @@ package ru.kyamshanov.notepen.mainscreen.ui.model
  * @property successEvent Одноразовое событие успеха; null — нет активного события.
  * @property peers Подключённые пиры (хосты/клиенты); по тапу — drill-down в каталог пира.
  *           Пустой список означает «нет активных подключений».
- * @property library Книги в общей папке «Библиотека», расшариваемой пирам.
- *           `null` означает, что фича на этой платформе не поддерживается и
- *           секция скрывается (например, на Android). Пустой список — секция
- *           видна и показывает подсказку «перетащите книги сюда».
+ * @property libraries Подключённые библиотеки — по карточке на каждую (в секции «Папки»).
+ *           `null` означает, что реестр библиотек не сконфигурирован (секция со стороны
+ *           библиотек скрыта). Пустой список — реестр есть, но подключённых библиотек нет.
  */
 data class MainScreenUiState(
     val recentFiles: List<RecentFileUiModel> = emptyList(),
@@ -32,5 +31,5 @@ data class MainScreenUiState(
     val dragState: DragState = DragState.None,
     val successEvent: SuccessEvent? = null,
     val peers: List<PeerSummaryUiModel> = emptyList(),
-    val library: List<LibraryShelfUiModel>? = null,
+    val libraries: List<LibraryCardUiModel>? = null,
 )

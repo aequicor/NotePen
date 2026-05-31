@@ -41,7 +41,7 @@ class DefaultRootComponent(
         onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
         onOpenPeerCatalog: (peerId: String, displayName: String) -> Unit,
         onOpenFolder: (folderId: String, folderName: String) -> Unit,
-        onOpenLibraryFolder: () -> Unit,
+        onOpenLibraryFolder: (libraryId: String) -> Unit,
         onOpenSettings: () -> Unit,
         onOpenLibrarySources: () -> Unit,
     ) -> MainComponent,
@@ -68,6 +68,7 @@ class DefaultRootComponent(
     private val libraryFolderComponentFactory: (
         (
             componentContext: ComponentContext,
+            libraryId: String,
             onBack: () -> Unit,
             onOpenEditor: (uri: String, lastPageIndex: Int) -> Unit,
         ) -> LibraryFolderComponent
@@ -167,7 +168,7 @@ class DefaultRootComponent(
             is Config.PeerCatalog -> PeerCatalogChild(peerCatalogComponent(ctx, config))
             is Config.FolderContents -> FolderContentsChild(folderContentsComponent(ctx, config))
             is Config.LibraryFolderContents ->
-                LibraryFolderContentsChild(libraryFolderContentsComponent(ctx))
+                LibraryFolderContentsChild(libraryFolderContentsComponent(ctx, config))
             is Config.Settings -> SettingsChild(settingsComponent(ctx))
             is Config.LibrarySources -> LibrarySourcesChild(librarySourcesComponent(ctx))
         }
@@ -179,7 +180,7 @@ class DefaultRootComponent(
             { uri, lastPageIndex -> navigation.push(Config.Details(uri, lastPageIndex, nextInstanceId())) },
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
-            { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
+            { libraryId -> navigation.push(Config.LibraryFolderContents(libraryId, nextInstanceId())) },
             { navigation.push(Config.Settings(nextInstanceId())) },
             { navigation.push(Config.LibrarySources(nextInstanceId())) },
         )
@@ -195,7 +196,7 @@ class DefaultRootComponent(
             { uri, lastPageIndex -> openEditorOrAddTab(uri, lastPageIndex) },
             { peerId, displayName -> navigation.push(Config.PeerCatalog(peerId, displayName, nextInstanceId())) },
             { folderId, folderName -> navigation.push(Config.FolderContents(folderId, folderName, nextInstanceId())) },
-            { navigation.push(Config.LibraryFolderContents(nextInstanceId())) },
+            { libraryId -> navigation.push(Config.LibraryFolderContents(libraryId, nextInstanceId())) },
             { navigation.push(Config.Settings(nextInstanceId())) },
             { navigation.push(Config.LibrarySources(nextInstanceId())) },
         )
@@ -250,15 +251,19 @@ class DefaultRootComponent(
      * сконфигурирована.
      */
     @OptIn(DelicateDecomposeApi::class)
-    private fun libraryFolderContentsComponent(ctx: ComponentContext): LibraryFolderComponent {
+    private fun libraryFolderContentsComponent(
+        ctx: ComponentContext,
+        config: Config.LibraryFolderContents,
+    ): LibraryFolderComponent {
         val factory =
             libraryFolderComponentFactory
                 ?: error(
                     "Config.LibraryFolderContents reached child(), but libraryFolderComponentFactory is null. " +
-                        "Wire MainScreenComponent.onOpenLibraryFolder only on platforms with a LibraryFolder.",
+                        "Wire MainScreenComponent.onOpenLibraryFolder only on platforms with a library drill-down.",
                 )
         return factory(
             ctx,
+            config.libraryId,
             navigation::pop,
         ) { uri, lastPageIndex -> openEditorOrAddTab(uri, lastPageIndex) }
     }
@@ -321,12 +326,14 @@ class DefaultRootComponent(
         ) : Config
 
         /**
-         * Sub-экран общей папки «Библиотека». Единственный экземпляр на устройство,
-         * но конфиг помечен [instanceId] для уникальности при множественном push'е
-         * (например, открыта поверх детали).
+         * Sub-экран содержимого конкретной библиотеки ([libraryId]). [instanceId] обеспечивает
+         * уникальность конфига при множественном push'е (например, открыт поверх детали).
+         * [libraryId] по умолчанию пустой — старый сериализованный back-stack (до параметризации)
+         * десериализуется без ошибки; ViewModel трактует неразрешимый id как «закрыть».
          */
         @Serializable
         data class LibraryFolderContents(
+            val libraryId: String = "",
             val instanceId: Long = 0L,
         ) : Config
 

@@ -38,7 +38,7 @@ import ru.kyamshanov.notepen.LiquidGlassTopBar
 import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.liquidGlassHero
-import ru.kyamshanov.notepen.mainscreen.ui.model.LibraryShelfUiModel
+import ru.kyamshanov.notepen.mainscreen.ui.model.LibraryContentItemUiModel
 import ru.kyamshanov.notepen.titlebar.LocalTitleBarInteraction
 
 private val BOOK_CARD_HEIGHT = 132.dp
@@ -70,7 +70,7 @@ fun LibraryFolderContent(
             )
             LiquidGlassTopBar(
                 modifier = Modifier.align(Alignment.TopCenter),
-                title = { Text("Библиотека") },
+                title = { Text(state.title) },
                 navigationIcon = {
                     IconButton(
                         onClick = component.onBack,
@@ -113,7 +113,7 @@ private fun LibraryFolderBody(
 
 @Composable
 private fun LibraryGrid(
-    items: List<LibraryShelfUiModel>,
+    items: List<LibraryContentItemUiModel>,
     topBarTotal: androidx.compose.ui.unit.Dp,
     onOpenItem: (String) -> Unit,
 ) {
@@ -156,7 +156,7 @@ private fun EmptyLibraryHint(modifier: Modifier = Modifier) {
 
 @Composable
 private fun LibraryBookCard(
-    model: LibraryShelfUiModel,
+    model: LibraryContentItemUiModel,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {

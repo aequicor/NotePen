@@ -53,10 +53,10 @@ class MainScreenComponent(
     /** Колбэк навигации на экран «Источники библиотек» (управление подключениями). */
     val onOpenLibrarySources: () -> Unit,
     /**
-     * Колбэк навигации на sub-экран общей папки «Библиотека». `null` —
-     * фича не подключена (Android), карточка «Библиотека» в этом случае не показывается.
+     * Колбэк навигации на sub-экран содержимого конкретной библиотеки (по её id).
+     * `null` — drill-down не подключён на платформе; тап по карточке тогда no-op.
      */
-    val onOpenLibraryFolder: (() -> Unit)? = null,
+    val onOpenLibraryFolder: ((libraryId: String) -> Unit)? = null,
     private val remoteCatalogsFlow: Flow<Map<DeviceInfo, RemoteCatalog>>? = null,
     /** Поток `peerId`-ов, считающихся «в сети» — см. [MainScreenViewModel.onlinePeerIdsFlow]. */
     private val onlinePeerIdsFlow: Flow<Set<String>>? = null,
