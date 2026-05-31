@@ -181,6 +181,47 @@ img { max-width: 100%; }
   font-size: 1.05rem;
 }
 
+/* ---------- Download ---------- */
+.download-version {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: .95rem;
+  margin: -28px 0 36px;
+}
+.download-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 22px;
+}
+.download-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 26px 24px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.download-os {
+  font-weight: 700;
+  font-size: 1.15rem;
+  color: var(--ink);
+}
+.download-sub {
+  color: var(--ink-soft);
+  font-size: .92rem;
+}
+.download-btn {
+  margin-top: 16px;
+}
+.download-note {
+  text-align: center;
+  margin: 32px 0 0;
+  font-size: .95rem;
+}
+
 /* ---------- Features ---------- */
 .features-grid {
   display: grid;
@@ -307,6 +348,7 @@ img { max-width: 100%; }
   color: var(--ink);
 }
 .run-list span { color: var(--ink-soft); font-size: .92rem; }
+.run-note { margin: 0; }
 
 /* ---------- Footer ---------- */
 .site-footer {
@@ -343,12 +385,14 @@ img { max-width: 100%; }
   .usage-step.reverse .usage-text { order: 1; }
   .usage-step.reverse .usage-shot { order: 2; }
   .features-grid { grid-template-columns: repeat(2, 1fr); }
+  .download-grid { grid-template-columns: repeat(2, 1fr); }
   .sync-copy .section-title { text-align: center; }
 }
 
 @media (max-width: 620px) {
   .main-nav { display: none; }
   .features-grid { grid-template-columns: 1fr; }
+  .download-grid { grid-template-columns: 1fr; }
   .hero { padding: 44px 0 40px; }
   .section { padding: 52px 0; }
   .footer-inner { flex-direction: column; align-items: flex-start; }

@@ -214,9 +214,64 @@ jobs:
           path: app/byCompose/desktop/build/portable/*.zip
           if-no-files-found: error
 
+  build-linux:
+    name: Build Linux DEB
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Extract version from tag
+        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      # jpackage собирает .deb через fakeroot + dpkg-deb (binutils даёт objcopy/ar);
+      # на ubuntu-latest обычно уже есть, ставим защитно, чтобы сборка не падала.
+      - name: Install jpackage deb dependencies
+        run: sudo apt-get update && sudo apt-get install -y fakeroot binutils
+
+      # См. комментарий в job build-macos: тот же jbrsdk-тулчейн нужен и здесь,
+      # иначе резолв vendor=JETBRAINS упадёт (на раннере только Temurin).
+      - name: Provision JetBrains Runtime SDK 25 (desktop toolchain)
+        run: |
+          set -euo pipefail
+          url="https://cache-redirector.jetbrains.com/intellij-jbr/jbrsdk-25.0.3-linux-x64-b480.61.tar.gz"
+          echo "Downloading $url"
+          curl -fSL --retry 3 "$url" -o "$RUNNER_TEMP/jbrsdk.tar.gz"
+          mkdir -p "$RUNNER_TEMP/jbrsdk"
+          tar -xzf "$RUNNER_TEMP/jbrsdk.tar.gz" -C "$RUNNER_TEMP/jbrsdk" --strip-components=1
+          home=$(dirname "$(dirname "$(find "$RUNNER_TEMP/jbrsdk" -type f -path '*/bin/jpackage' | head -n1)")")
+          test -x "$home/bin/javac"
+          printf '\norg.gradle.java.installations.paths=%s\n' "$home" >> gradle.properties
+          echo "JBR toolchain home: $home"
+          "$home/bin/java" -version
+
+      - name: Build Linux DEB
+        run: ./gradlew :app:byCompose:desktop:packageReleaseDeb -Papp.version=${{ env.APP_VERSION }}
+
+      # jpackage именует .deb по-дебиановски (lowercase notepen_<ver>_amd64.deb).
+      # Переименовываем в чистое имя ассета релиза.
+      - name: Rename DEB to NotePen-<version>-linux-x64.deb
+        run: |
+          src=$(find app/byCompose/desktop/build/compose/binaries/main-release/deb -name '*.deb' | head -n1)
+          mv "$src" "app/byCompose/desktop/build/compose/binaries/main-release/deb/NotePen-${APP_VERSION}-linux-x64.deb"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: app/byCompose/desktop/build/compose/binaries/main-release/deb/NotePen-*.deb
+          if-no-files-found: error
+
   publish-release:
     name: Publish GitHub Release
-    needs: [build-android, build-macos, build-windows]
+    needs: [build-android, build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -235,3 +290,4 @@ jobs:
             artifacts/macos-dmg/*.dmg
             artifacts/windows-exe/*.exe
             artifacts/windows-portable/*.zip
+            artifacts/linux-deb/*.deb

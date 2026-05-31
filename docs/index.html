@@ -13,6 +13,7 @@
     <div class="container header-inner">
       <a class="logo" href="#top">NotePen</a>
       <nav class="main-nav" aria-label="Main">
+        <a href="#download" data-i18n="navDownload">Скачать</a>
         <a href="#features" data-i18n="navFeatures">Возможности</a>
         <a href="#usage" data-i18n="navUsage">Как пользоваться</a>
         <a href="#sync" data-i18n="navSync">Синхронизация</a>
@@ -35,8 +36,8 @@
             NotePen открывает PDF и документы и даёт писать прямо по странице пером. Вокруг страницы есть бесконечный холст, так что заметки и схемы не упираются в поля. Работает на Android и на компьютере.
           </p>
           <div class="hero-actions">
-            <a class="btn btn-primary" href="https://github.com/aequicor/NotePen" data-i18n="heroCta">Открыть на GitHub</a>
-            <a class="btn btn-ghost" href="#usage" data-i18n="heroCta2">Как это работает</a>
+            <a class="btn btn-primary" href="#download" data-i18n="heroCta">Скачать</a>
+            <a class="btn btn-ghost" href="https://github.com/aequicor/NotePen" data-i18n="heroCta2">GitHub</a>
           </div>
         </div>
         <div class="hero-shot">
@@ -47,6 +48,71 @@
                  alt="Перо и маркер поверх страницы PDF: обведённое слово, подчёркивание и жёлтая подсветка." />
           </figure>
         </div>
+      </div>
+    </section>
+
+    <!-- DOWNLOAD -->
+    <section id="download" class="section section-alt">
+      <div class="container">
+        <h2 class="section-title" data-i18n="downloadTitle">Скачать NotePen</h2>
+        <p class="section-lead" data-i18n="downloadLead">Готовые сборки для десктопа и Android. Установка не нужна для портативной версии Windows.</p>
+        <p class="download-version" id="download-version" data-i18n="downloadVersionUnknown">Последняя версия с GitHub</p>
+        <div class="download-grid">
+
+          <article class="download-card">
+            <div class="download-os" data-i18n="dlWinInstallerLabel">Windows</div>
+            <div class="download-sub" data-i18n="dlWinInstallerSub">Установщик (.exe)</div>
+            <a class="btn btn-primary download-btn" id="dl-win-installer"
+               href="https://github.com/aequicor/NotePen/releases/latest"
+               data-i18n="downloadBtn"
+               data-i18n-aria="dlWinInstallerAria"
+               aria-label="Скачать установщик NotePen для Windows">Скачать</a>
+          </article>
+
+          <article class="download-card">
+            <div class="download-os" data-i18n="dlWinPortableLabel">Windows</div>
+            <div class="download-sub" data-i18n="dlWinPortableSub">Портативная, без установки (.zip)</div>
+            <a class="btn btn-primary download-btn" id="dl-win-portable"
+               href="https://github.com/aequicor/NotePen/releases/latest"
+               data-i18n="downloadBtn"
+               data-i18n-aria="dlWinPortableAria"
+               aria-label="Скачать портативную версию NotePen для Windows">Скачать</a>
+          </article>
+
+          <article class="download-card">
+            <div class="download-os" data-i18n="dlMacLabel">macOS</div>
+            <div class="download-sub" data-i18n="dlMacSub">Образ диска (.dmg)</div>
+            <a class="btn btn-primary download-btn" id="dl-mac"
+               href="https://github.com/aequicor/NotePen/releases/latest"
+               data-i18n="downloadBtn"
+               data-i18n-aria="dlMacAria"
+               aria-label="Скачать NotePen для macOS">Скачать</a>
+          </article>
+
+          <article class="download-card">
+            <div class="download-os" data-i18n="dlLinuxLabel">Linux</div>
+            <div class="download-sub" data-i18n="dlLinuxSub">Debian / Ubuntu (.deb)</div>
+            <a class="btn btn-primary download-btn" id="dl-linux"
+               href="https://github.com/aequicor/NotePen/releases/latest"
+               data-i18n="downloadBtn"
+               data-i18n-aria="dlLinuxAria"
+               aria-label="Скачать NotePen для Linux">Скачать</a>
+          </article>
+
+          <article class="download-card">
+            <div class="download-os" data-i18n="dlAndroidLabel">Android</div>
+            <div class="download-sub" data-i18n="dlAndroidSub">APK (.apk)</div>
+            <a class="btn btn-primary download-btn" id="dl-android"
+               href="https://github.com/aequicor/NotePen/releases/latest"
+               data-i18n="downloadBtn"
+               data-i18n-aria="dlAndroidAria"
+               aria-label="Скачать NotePen для Android">Скачать</a>
+          </article>
+
+        </div>
+        <p class="download-note">
+          <a href="https://github.com/aequicor/NotePen/releases/latest" data-i18n="downloadAllReleases">Все сборки на странице релизов</a>
+        </p>
       </div>
     </section>
 
@@ -221,12 +287,11 @@
           <li data-i18n="plat4">Linux</li>
         </ul>
         <div class="run-box">
-          <h3 data-i18n="runTitle">Запуск из исходников</h3>
-          <p data-i18n="runDesc">Соберите проект Gradle и запустите. На десктопе нужна JetBrains Runtime (JBR) 25.</p>
-          <ul class="run-list">
-            <li><code>./gradlew runDesktop</code> <span data-i18n="runDesktop">запуск десктопной версии</span></li>
-            <li><code>./gradlew :app:byCompose:android:installDebug</code> <span data-i18n="runAndroid">установка debug-сборки на Android</span></li>
-          </ul>
+          <h3 data-i18n="contribTitle">Сборка из исходников</h3>
+          <p data-i18n="contribDesc">Это для тех, кто хочет участвовать в разработке. Если вам нужно просто пользоваться приложением, берите готовую сборку выше.</p>
+          <p class="run-note">
+            <a href="https://github.com/aequicor/NotePen#contributing" data-i18n="contribLink">Как собрать и внести вклад</a>
+          </p>
         </div>
       </div>
     </section>
