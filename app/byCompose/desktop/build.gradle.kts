@@ -252,6 +252,7 @@ compose.desktop {
             jvmArgs += "-splash:app/resources/splash_logo.png"
         }
         buildTypes.release.proguard {
+            version.set("7.8.0")
             obfuscate.set(true)
             isEnabled.set(true)
             configurationFiles.from("proguard-rules.pro")
