@@ -124,6 +124,63 @@ class MagnifierGeometryTest {
         assertEquals(2, resolvePageForDocSpace(layout, docX = 150f, docY = row2Top + 10f))
     }
 
+    @Test
+    fun `loupe selection on right spread page uses right page local x`() {
+        val layout =
+            PdfPagesLayout.build(
+                listOf(page(0), page(1)),
+                basePageWidthPx = 100f,
+                spreadMode = SpreadMode.SPREAD,
+            )
+
+        val segments =
+            buildLoupeSegmentsForDocRect(
+                layout = layout,
+                // Right column starts at 116, so this selects x=0.20..0.40 on page 1.
+                docRect = Rect(136f, 10f, 156f, 40f),
+            )
+
+        assertEquals(1, segments?.size)
+        val segment = segments!!.single()
+        assertEquals(1, segment.pageIndex)
+        assertNear(0.2f, segment.targetOnPage.left)
+        assertNear(0.4f, segment.targetOnPage.right)
+        assertNear(0.1f, segment.targetOnPage.top)
+        assertNear(0.4f, segment.targetOnPage.bottom)
+    }
+
+    @Test
+    fun `loupe selection spanning spread pair assigns separate panel x ranges`() {
+        val layout =
+            PdfPagesLayout.build(
+                listOf(page(0), page(1)),
+                basePageWidthPx = 100f,
+                spreadMode = SpreadMode.SPREAD,
+            )
+
+        val segments =
+            buildLoupeSegmentsForDocRect(
+                layout = layout,
+                // 80..100 is the left page tail, 100..116 is gutter,
+                // 116..136 is the right page head.
+                docRect = Rect(80f, 10f, 136f, 40f),
+            )!!
+
+        assertEquals(2, segments.size)
+        val left = segments[0]
+        val right = segments[1]
+        assertEquals(0, left.pageIndex)
+        assertEquals(1, right.pageIndex)
+        assertNear(0f, left.panelLeftFrac)
+        assertNear(20f / 56f, left.panelRightFrac)
+        assertNear(36f / 56f, right.panelLeftFrac)
+        assertNear(1f, right.panelRightFrac)
+        assertNear(0.8f, left.targetOnPage.left)
+        assertNear(1f, left.targetOnPage.right)
+        assertNear(0f, right.targetOnPage.left)
+        assertNear(0.2f, right.targetOnPage.right)
+    }
+
     private fun page(index: Int): PdfPageInfo = PdfPageInfo(pageIndex = index, widthPt = 100f, heightPt = 100f)
 
     private fun assertNear(

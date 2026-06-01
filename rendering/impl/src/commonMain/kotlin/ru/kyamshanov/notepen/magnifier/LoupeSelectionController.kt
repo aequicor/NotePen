@@ -101,55 +101,18 @@ class LoupeSelectionController(
      */
     private fun buildSegments(vpRect: Rect): List<MagnifierPageSegment>? {
         val layout: PdfPagesLayout = viewerState.layout
-        val n = layout.pageHeightsPx.size
         val zoom = viewerState.zoom
-        val basePageW = layout.basePageWidthPx
-        if (n == 0 || basePageW <= 0f || zoom <= 0f) return null
+        if (layout.pageHeightsPx.isEmpty() || layout.basePageWidthPx <= 0f || zoom <= 0f) return null
 
-        // X-составляющая в page-normalized одна и та же для всех страниц,
-        // т.к. ширина страниц общая (basePageWidthPx).
         val pan = viewerState.pan
         val docLeft = (vpRect.left - pan.x) / zoom
         val docRight = (vpRect.right - pan.x) / zoom
-        val nxLeft = (docLeft / basePageW).coerceIn(0f, 1f)
-        val nxRight = (docRight / basePageW).coerceIn(0f, 1f)
-        if (nxRight - nxLeft < MIN_TARGET_DIM) return null
-
         val docTop = (vpRect.top - pan.y) / zoom
         val docBottom = (vpRect.bottom - pan.y) / zoom
-        // Полная высота выделения в doc-space; пригодится для расчёта
-        // panelTopFrac/panelBottomFrac каждого сегмента (по реальной
-        // высоте, которую занимает страница в выделении).
-        val totalDocH = (docBottom - docTop).coerceAtLeast(1f)
-
-        val out = mutableListOf<MagnifierPageSegment>()
-        for (pageIndex in 0 until n) {
-            val pageTop = layout.pageTopsPx[pageIndex]
-            val pdfH = layout.pdfHeightsPx[pageIndex]
-            val pageBottom = pageTop + pdfH
-
-            // Пересечение [docTop..docBottom] с [pageTop..pageBottom].
-            val interTop = max(docTop, pageTop)
-            val interBottom = min(docBottom, pageBottom)
-            if (interBottom - interTop < MIN_TARGET_DIM * pdfH) continue
-
-            val nyTop = ((interTop - pageTop) / pdfH).coerceIn(0f, 1f)
-            val nyBottom = ((interBottom - pageTop) / pdfH).coerceIn(0f, 1f)
-            if (nyBottom - nyTop < MIN_TARGET_DIM) continue
-
-            // Доля высоты выделения, попадающая на эту страницу.
-            val panelTopFrac = ((interTop - docTop) / totalDocH).coerceIn(0f, 1f)
-            val panelBottomFrac = ((interBottom - docTop) / totalDocH).coerceIn(0f, 1f)
-
-            out +=
-                MagnifierPageSegment(
-                    pageIndex = pageIndex,
-                    targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
-                    panelTopFrac = panelTopFrac,
-                    panelBottomFrac = panelBottomFrac,
-                )
-        }
-        return out.takeIf { it.isNotEmpty() }
+        return buildLoupeSegmentsForDocRect(
+            layout = layout,
+            docRect = Rect(docLeft, docTop, docRight, docBottom),
+        )
     }
 
     /**
@@ -161,12 +124,21 @@ class LoupeSelectionController(
         val layout = viewerState.layout
         val zoom = viewerState.zoom
         val basePageW = layout.basePageWidthPx
-        val first = segments.first()
-        val widthPx = first.targetOnPage.width * basePageW * zoom
-        var heightPx = 0f
+        var docLeft = Float.POSITIVE_INFINITY
+        var docRight = Float.NEGATIVE_INFINITY
+        var docTop = Float.POSITIVE_INFINITY
+        var docBottom = Float.NEGATIVE_INFINITY
         for (s in segments) {
-            heightPx += s.targetOnPage.height * layout.pdfHeightsPx[s.pageIndex] * zoom
+            val pageLeft = layout.pageLeftsPx[s.pageIndex]
+            val pageTop = layout.pageTopsPx[s.pageIndex]
+            val pdfH = layout.pdfHeightsPx[s.pageIndex]
+            docLeft = min(docLeft, pageLeft + s.targetOnPage.left * basePageW)
+            docRight = max(docRight, pageLeft + s.targetOnPage.right * basePageW)
+            docTop = min(docTop, pageTop + s.targetOnPage.top * pdfH)
+            docBottom = max(docBottom, pageTop + s.targetOnPage.bottom * pdfH)
         }
+        val widthPx = (docRight - docLeft) * zoom
+        val heightPx = (docBottom - docTop) * zoom
         return Size(widthPx.coerceAtLeast(1f), heightPx.coerceAtLeast(1f))
     }
 
@@ -181,4 +153,62 @@ class LoupeSelectionController(
         /** Минимальная диагональ в viewport-пикселях, ниже которой выделение игнорируется. */
         const val MIN_SELECTION_PX: Float = 12f
     }
+}
+
+/**
+ * Разбивает document-space прямоугольник выделения на page-normalized сегменты.
+ *
+ * В [ru.kyamshanov.notepen.pdfviewer.SpreadMode.SPREAD] правая страница пары
+ * имеет ненулевой [PdfPagesLayout.pageLeftsPx]. Поэтому X нужно считать от
+ * левого края конкретной страницы, а не от `0`: иначе выделение на правой
+ * колонке превращается в `x > 1` и все штрихи из лупы сохраняются за пределами
+ * PDF-страницы.
+ */
+internal fun buildLoupeSegmentsForDocRect(
+    layout: PdfPagesLayout,
+    docRect: Rect,
+): List<MagnifierPageSegment>? {
+    val n = layout.pageHeightsPx.size
+    val basePageW = layout.basePageWidthPx
+    if (n == 0 || basePageW <= 0f) return null
+
+    val docLeft = min(docRect.left, docRect.right)
+    val docRight = max(docRect.left, docRect.right)
+    val docTop = min(docRect.top, docRect.bottom)
+    val docBottom = max(docRect.top, docRect.bottom)
+    val totalDocW = (docRight - docLeft).coerceAtLeast(1f)
+    val totalDocH = (docBottom - docTop).coerceAtLeast(1f)
+
+    val out = mutableListOf<MagnifierPageSegment>()
+    for (pageIndex in 0 until n) {
+        val pageLeft = layout.pageLeftsPx[pageIndex]
+        val pageRight = pageLeft + basePageW
+        val interLeft = max(docLeft, pageLeft)
+        val interRight = min(docRight, pageRight)
+        if (interRight - interLeft < MIN_TARGET_DIM * basePageW) continue
+
+        val pageTop = layout.pageTopsPx[pageIndex]
+        val pdfH = layout.pdfHeightsPx[pageIndex]
+        val pageBottom = pageTop + pdfH
+        val interTop = max(docTop, pageTop)
+        val interBottom = min(docBottom, pageBottom)
+        if (interBottom - interTop < MIN_TARGET_DIM * pdfH) continue
+
+        val nxLeft = ((interLeft - pageLeft) / basePageW).coerceIn(0f, 1f)
+        val nxRight = ((interRight - pageLeft) / basePageW).coerceIn(0f, 1f)
+        val nyTop = ((interTop - pageTop) / pdfH).coerceIn(0f, 1f)
+        val nyBottom = ((interBottom - pageTop) / pdfH).coerceIn(0f, 1f)
+        if (nxRight - nxLeft < MIN_TARGET_DIM || nyBottom - nyTop < MIN_TARGET_DIM) continue
+
+        out +=
+            MagnifierPageSegment(
+                pageIndex = pageIndex,
+                targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
+                panelLeftFrac = ((interLeft - docLeft) / totalDocW).coerceIn(0f, 1f),
+                panelRightFrac = ((interRight - docLeft) / totalDocW).coerceIn(0f, 1f),
+                panelTopFrac = ((interTop - docTop) / totalDocH).coerceIn(0f, 1f),
+                panelBottomFrac = ((interBottom - docTop) / totalDocH).coerceIn(0f, 1f),
+            )
+    }
+    return out.takeIf { it.isNotEmpty() }
 }
