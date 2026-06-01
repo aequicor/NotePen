@@ -20,10 +20,27 @@
       heroCta2: "GitHub",
 
       downloadTitle: "Скачать NotePen",
-      downloadLead: "Готовые сборки для десктопа и Android. Установка не нужна для портативной версии Windows.",
+      downloadLead: "Сайт автоматически выбирает подходящую сборку для вашего устройства.",
       downloadVersionUnknown: "Последняя версия с GitHub",
       downloadVersionPrefix: "Последняя версия:",
       downloadBtn: "Скачать",
+      downloadRecommendedEyebrow: "Подходит для вашего устройства",
+      downloadRecommendedFallbackTitle: "Выберите сборку",
+      downloadRecommendedFallbackSub: "Не удалось точно определить платформу. Ниже доступны все варианты.",
+      downloadRecommendedFallbackBtn: "Все сборки",
+      downloadRecommendedFallbackAria: "Открыть страницу релизов NotePen",
+      downloadRecommendedWindowsTitle: "Скачать для Windows",
+      downloadRecommendedWindowsSub: "Рекомендуем установщик .exe. Портативная .zip тоже доступна ниже.",
+      downloadRecommendedWindowsBtn: "Скачать для Windows",
+      downloadRecommendedMacTitle: "Скачать для macOS",
+      downloadRecommendedMacSub: "Рекомендуем образ диска .dmg для установки на Mac.",
+      downloadRecommendedMacBtn: "Скачать для macOS",
+      downloadRecommendedLinuxTitle: "Скачать для Linux",
+      downloadRecommendedLinuxSub: "Рекомендуем пакет .deb для Debian и Ubuntu.",
+      downloadRecommendedLinuxBtn: "Скачать для Linux",
+      downloadRecommendedAndroidTitle: "Скачать для Android",
+      downloadRecommendedAndroidSub: "Рекомендуем APK-файл для установки на Android.",
+      downloadRecommendedAndroidBtn: "Скачать APK",
       downloadAllReleases: "Все сборки на странице релизов",
       dlWinInstallerLabel: "Windows",
       dlWinInstallerSub: "Установщик (.exe)",
@@ -122,10 +139,27 @@
       heroCta2: "GitHub",
 
       downloadTitle: "Download NotePen",
-      downloadLead: "Ready builds for desktop and Android. The Windows portable build needs no install.",
+      downloadLead: "The site automatically selects the right build for your device.",
       downloadVersionUnknown: "Latest release from GitHub",
       downloadVersionPrefix: "Latest version:",
       downloadBtn: "Download",
+      downloadRecommendedEyebrow: "Best match for your device",
+      downloadRecommendedFallbackTitle: "Choose a build",
+      downloadRecommendedFallbackSub: "The platform could not be detected precisely. All builds are available below.",
+      downloadRecommendedFallbackBtn: "All builds",
+      downloadRecommendedFallbackAria: "Open the NotePen releases page",
+      downloadRecommendedWindowsTitle: "Download for Windows",
+      downloadRecommendedWindowsSub: "The .exe installer is recommended. The portable .zip is also available below.",
+      downloadRecommendedWindowsBtn: "Download for Windows",
+      downloadRecommendedMacTitle: "Download for macOS",
+      downloadRecommendedMacSub: "The .dmg disk image is recommended for installing on Mac.",
+      downloadRecommendedMacBtn: "Download for macOS",
+      downloadRecommendedLinuxTitle: "Download for Linux",
+      downloadRecommendedLinuxSub: "The .deb package is recommended for Debian and Ubuntu.",
+      downloadRecommendedLinuxBtn: "Download for Linux",
+      downloadRecommendedAndroidTitle: "Download for Android",
+      downloadRecommendedAndroidSub: "The APK file is recommended for installing on Android.",
+      downloadRecommendedAndroidBtn: "Download APK",
       downloadAllReleases: "All builds on the releases page",
       dlWinInstallerLabel: "Windows",
       dlWinInstallerSub: "Installer (.exe)",
@@ -220,12 +254,120 @@
 
   // How each download button is matched against a release asset's file name.
   var DOWNLOAD_TARGETS = [
-    { id: "dl-win-installer", match: function (n) { return /\.exe$/.test(n); } },
+    {
+      id: "dl-win-installer",
+      device: "windows",
+      titleKey: "downloadRecommendedWindowsTitle",
+      subKey: "downloadRecommendedWindowsSub",
+      btnKey: "downloadRecommendedWindowsBtn",
+      ariaKey: "dlWinInstallerAria",
+      match: function (n) { return /\.exe$/.test(n); }
+    },
     { id: "dl-win-portable", match: function (n) { return /portable.*\.zip$/.test(n); } },
-    { id: "dl-mac", match: function (n) { return /\.dmg$/.test(n); } },
-    { id: "dl-linux", match: function (n) { return /\.deb$/.test(n); } },
-    { id: "dl-android", match: function (n) { return /\.apk$/.test(n); } }
+    {
+      id: "dl-mac",
+      device: "macos",
+      titleKey: "downloadRecommendedMacTitle",
+      subKey: "downloadRecommendedMacSub",
+      btnKey: "downloadRecommendedMacBtn",
+      ariaKey: "dlMacAria",
+      match: function (n) { return /\.dmg$/.test(n); }
+    },
+    {
+      id: "dl-linux",
+      device: "linux",
+      titleKey: "downloadRecommendedLinuxTitle",
+      subKey: "downloadRecommendedLinuxSub",
+      btnKey: "downloadRecommendedLinuxBtn",
+      ariaKey: "dlLinuxAria",
+      match: function (n) { return /\.deb$/.test(n); }
+    },
+    {
+      id: "dl-android",
+      device: "android",
+      titleKey: "downloadRecommendedAndroidTitle",
+      subKey: "downloadRecommendedAndroidSub",
+      btnKey: "downloadRecommendedAndroidBtn",
+      ariaKey: "dlAndroidAria",
+      match: function (n) { return /\.apk$/.test(n); }
+    }
   ];
+
+  function findTargetById(id) {
+    for (var i = 0; i < DOWNLOAD_TARGETS.length; i++) {
+      if (DOWNLOAD_TARGETS[i].id === id) { return DOWNLOAD_TARGETS[i]; }
+    }
+    return null;
+  }
+
+  function detectDownloadTarget() {
+    var nav = window.navigator || {};
+    var uaDataPlatform = nav.userAgentData && nav.userAgentData.platform ? nav.userAgentData.platform : "";
+    var platform = String(uaDataPlatform || nav.platform || "").toLowerCase();
+    var ua = String(nav.userAgent || "").toLowerCase();
+
+    if (ua.indexOf("android") !== -1) { return findTargetById("dl-android"); }
+    if (platform.indexOf("win") !== -1 || ua.indexOf("windows") !== -1) { return findTargetById("dl-win-installer"); }
+    if (platform.indexOf("mac") !== -1 || ua.indexOf("mac os x") !== -1) { return findTargetById("dl-mac"); }
+    if (platform.indexOf("linux") !== -1 || platform.indexOf("x11") !== -1 || ua.indexOf("linux") !== -1) {
+      return findTargetById("dl-linux");
+    }
+    return null;
+  }
+
+  function closestDownloadCard(btn) {
+    if (!btn) { return null; }
+    if (btn.closest) { return btn.closest(".download-card"); }
+    var el = btn.parentNode;
+    while (el && el !== document) {
+      if ((" " + el.className + " ").indexOf(" download-card ") !== -1) { return el; }
+      el = el.parentNode;
+    }
+    return null;
+  }
+
+  function clearDetectedCards() {
+    var cards = document.querySelectorAll(".download-card.is-detected");
+    for (var i = 0; i < cards.length; i++) {
+      cards[i].classList.remove("is-detected");
+    }
+  }
+
+  function updateRecommendedDownload() {
+    var dict = i18n[currentLang] || i18n.ru;
+    var card = document.getElementById("download-recommended");
+    var title = document.getElementById("recommended-title");
+    var subtitle = document.getElementById("recommended-subtitle");
+    var link = document.getElementById("recommended-download");
+    var note = document.getElementById("download-note");
+    if (!card || !title || !subtitle || !link) { return; }
+
+    clearDetectedCards();
+
+    var target = detectDownloadTarget();
+    if (!target) {
+      card.setAttribute("data-device", "unknown");
+      title.textContent = dict.downloadRecommendedFallbackTitle;
+      subtitle.textContent = dict.downloadRecommendedFallbackSub;
+      link.textContent = dict.downloadRecommendedFallbackBtn;
+      link.setAttribute("aria-label", dict.downloadRecommendedFallbackAria);
+      link.setAttribute("href", RELEASES_PAGE);
+      if (note) { note.hidden = false; }
+      return;
+    }
+
+    var platformBtn = document.getElementById(target.id);
+    var platformCard = closestDownloadCard(platformBtn);
+    if (platformCard) { platformCard.classList.add("is-detected"); }
+
+    card.setAttribute("data-device", target.device);
+    title.textContent = dict[target.titleKey];
+    subtitle.textContent = dict[target.subKey];
+    link.textContent = dict[target.btnKey];
+    link.setAttribute("aria-label", dict[target.ariaKey]);
+    link.setAttribute("href", platformBtn ? platformBtn.getAttribute("href") || RELEASES_PAGE : RELEASES_PAGE);
+    if (note) { note.hidden = true; }
+  }
 
   function renderVersionLine(dict) {
     var line = document.getElementById("download-version");
@@ -255,6 +397,7 @@
       }
       btn.setAttribute("href", url);
     }
+    updateRecommendedDownload();
   }
 
   function useReleaseData(data) {
@@ -315,6 +458,7 @@
     if (dict.pageTitle) { document.title = dict.pageTitle; }
 
     renderVersionLine(dict);
+    updateRecommendedDownload();
 
     var buttons = document.querySelectorAll(".lang-btn");
     for (var j = 0; j < buttons.length; j++) {
