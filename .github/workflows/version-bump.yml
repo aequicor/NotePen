@@ -6,6 +6,7 @@ on:
     branches: [master]
 
 permissions:
+  actions: write
   contents: write
   pull-requests: read
 
@@ -87,3 +88,4 @@ jobs:
           git add gradle.properties
           git commit -m "Bump app version to $next_version"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          gh workflow run ci.yml --ref "${{ github.event.pull_request.head.ref }}"

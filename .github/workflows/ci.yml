@@ -21,6 +21,7 @@ on:
   push:
     branches: [master]
   pull_request:
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref (latest push/PR update wins).
 concurrency:
