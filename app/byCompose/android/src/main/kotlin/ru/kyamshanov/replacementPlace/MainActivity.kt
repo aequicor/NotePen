@@ -55,6 +55,7 @@ import ru.kyamshanov.notepen.library.infrastructure.AndroidLibraryConnectionStor
 import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorization
 import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorizer
 import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
+import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -137,6 +138,7 @@ private fun recoverRootInput(view: android.view.View) {
 
 class MainActivity : ComponentActivity() {
     private lateinit var rootComponent: DefaultRootComponent
+    private var recordExternalOpenInHistory: (String) -> Unit = {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -198,6 +200,12 @@ class MainActivity : ComponentActivity() {
             )
 
         val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        val addExternalOpenToHistory = AddToHistoryUseCase(historyRepo)
+        recordExternalOpenInHistory = { uri ->
+            appScope.launch(Dispatchers.IO) {
+                addExternallyOpenedFileToHistory(uri, addExternalOpenToHistory)
+            }
+        }
 
         val prefs = context.getSharedPreferences("notepen", android.content.Context.MODE_PRIVATE)
         val selfId: String =
@@ -749,7 +757,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Открывает документ, пришедший извне: «Открыть с помощью» ([Intent.ACTION_VIEW])
-     * или «Поделиться» ([Intent.ACTION_SEND]). URI прокидывается в общий
+     * или «Поделиться» ([Intent.ACTION_SEND]/[Intent.ACTION_SEND_MULTIPLE]). URI прокидывается в общий
      * [RootComponent.openDetailsExternally]; для чтения байт достаточно временного
      * гранта чтения из самого интента.
      */
@@ -760,6 +768,7 @@ class MainActivity : ComponentActivity() {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         }
+        recordExternalOpenInHistory(uri.toString())
         rootComponent.openDetailsExternally(uri.toString())
     }
 
@@ -767,8 +776,38 @@ class MainActivity : ComponentActivity() {
         when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            Intent.ACTION_SEND_MULTIPLE ->
+                IntentCompat
+                    .getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                    ?.firstOrNull()
             else -> null
         }
+
+    private suspend fun addExternallyOpenedFileToHistory(
+        uri: String,
+        addToHistory: AddToHistoryUseCase,
+    ) {
+        val displayName = resolveDocumentDisplayName(uri) ?: uri.substringAfterLast('/').ifBlank { uri }
+        val result =
+            addToHistory.execute(
+                uri = uri,
+                displayName = displayName,
+                fileSize = resolveDocumentSize(uri),
+                openedAt = System.currentTimeMillis(),
+                lastPageIndex = 0,
+            )
+        result.getOrNull()
+            ?.takeIf { it is AddHistoryResult.SafFuzzyMatchDetected }
+            ?: return
+
+        addToHistory.execute(
+            uri = uri,
+            displayName = displayName,
+            fileSize = null,
+            openedAt = System.currentTimeMillis(),
+            lastPageIndex = 0,
+        )
+    }
 
     /**
      * Cheap `size-lastModified` fingerprint for a content URI, used to guard the

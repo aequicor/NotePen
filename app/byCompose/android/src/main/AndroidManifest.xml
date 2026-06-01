@@ -43,9 +43,44 @@
                 <data android:mimeType="image/png" />
                 <data android:mimeType="image/jpeg" />
                 <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/epub" />
                 <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/fb2+zip" />
                 <data android:mimeType="application/vnd.comicbook+zip" />
                 <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+
+            <!-- Некоторые файловые менеджеры отправляют даже один файл через SEND_MULTIPLE. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+
+                <data android:mimeType="application/pdf" />
+                <data android:mimeType="image/png" />
+                <data android:mimeType="image/jpeg" />
+                <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/epub" />
+                <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/fb2+zip" />
+                <data android:mimeType="application/vnd.comicbook+zip" />
+                <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
             <!-- «Открыть с помощью → NotePen» по MIME-типу. -->
@@ -61,9 +96,19 @@
                 <data android:mimeType="image/png" />
                 <data android:mimeType="image/jpeg" />
                 <data android:mimeType="application/epub+zip" />
+                <data android:mimeType="application/epub" />
                 <data android:mimeType="application/x-fictionbook+xml" />
+                <data android:mimeType="application/x-fictionbook" />
+                <data android:mimeType="application/fb2+zip" />
                 <data android:mimeType="application/vnd.comicbook+zip" />
                 <data android:mimeType="application/vnd.comicbook-rar" />
+                <data android:mimeType="application/x-cbz" />
+                <data android:mimeType="application/x-cbr" />
+                <data android:mimeType="application/zip" />
+                <data android:mimeType="application/x-zip-compressed" />
+                <data android:mimeType="application/vnd.rar" />
+                <data android:mimeType="application/x-rar-compressed" />
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
 
             <!-- Открытие книг/комиксов по расширению, когда источник отдаёт
