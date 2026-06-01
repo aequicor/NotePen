@@ -11,16 +11,16 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.findViewTreeLifecycleOwner
+import androidx.lifecycle.LifecycleOwner
 
 @Composable
 actual fun ImmersiveEditorMode() {
     val view = LocalView.current
     val activity = LocalContext.current as? Activity
-    val lifecycleOwner = view.findViewTreeLifecycleOwner()
+    val lifecycleOwner = activity as? LifecycleOwner
     DisposableEffect(activity, view, lifecycleOwner) {
         val window = activity?.window
-        if (window == null) {
+        if (window == null || lifecycleOwner == null) {
             onDispose { }
         } else {
             val controller = WindowCompat.getInsetsController(window, view)
@@ -65,11 +65,11 @@ actual fun ImmersiveEditorMode() {
                         scheduleResumeRecovery()
                     }
                 }
-            lifecycleOwner?.lifecycle?.addObserver(lifecycleObserver)
+            lifecycleOwner.lifecycle.addObserver(lifecycleObserver)
             onDispose {
                 view.viewTreeObserver.takeIf { it.isAlive }
                     ?.removeOnWindowFocusChangeListener(focusListener)
-                lifecycleOwner?.lifecycle?.removeObserver(lifecycleObserver)
+                lifecycleOwner.lifecycle.removeObserver(lifecycleObserver)
                 controller.show(WindowInsetsCompat.Type.systemBars())
                 controller.systemBarsBehavior = previousBehavior
             }

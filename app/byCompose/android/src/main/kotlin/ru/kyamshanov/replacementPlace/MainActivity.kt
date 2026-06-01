@@ -16,6 +16,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalView
 import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
@@ -126,6 +127,13 @@ private class HeavyDeps(
     val remoteDocumentOpener: RemoteDocumentOpener,
     val resyncRequester: AnnotationResyncRequester,
 )
+
+private const val INPUT_RECOVERY_DELAY_MS = 150L
+
+private fun recoverRootInput(view: android.view.View) {
+    view.isFocusableInTouchMode = true
+    view.requestFocus()
+}
 
 class MainActivity : ComponentActivity() {
     private lateinit var rootComponent: DefaultRootComponent
@@ -656,6 +664,28 @@ class MainActivity : ComponentActivity() {
             // Remove when https://issuetracker.google.com/issues/364713509 is fixed
             LaunchedEffect(isSystemInDarkTheme()) {
                 enableEdgeToEdge()
+            }
+            val rootView = LocalView.current
+            DisposableEffect(rootView) {
+                fun scheduleInputRecovery() {
+                    rootView.post { recoverRootInput(rootView) }
+                    rootView.postDelayed({ recoverRootInput(rootView) }, INPUT_RECOVERY_DELAY_MS)
+                }
+                val observer =
+                    LifecycleEventObserver { _, event ->
+                        when (event) {
+                            Lifecycle.Event.ON_PAUSE,
+                            Lifecycle.Event.ON_STOP,
+                            -> rootView.cancelPendingInputEvents()
+                            Lifecycle.Event.ON_START,
+                            Lifecycle.Event.ON_RESUME,
+                            -> scheduleInputRecovery()
+                            else -> Unit
+                        }
+                    }
+                lifecycle.addObserver(observer)
+                scheduleInputRecovery()
+                onDispose { lifecycle.removeObserver(observer) }
             }
             // Side-channel for stylus state (barrel button, eraser tip, tilt,
             // hover) that Compose's commonMain pointer pipeline doesn't expose.
