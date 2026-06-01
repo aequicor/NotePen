@@ -9,12 +9,16 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.findViewTreeLifecycleOwner
 
 @Composable
 actual fun ImmersiveEditorMode() {
     val view = LocalView.current
     val activity = LocalContext.current as? Activity
-    DisposableEffect(activity, view) {
+    val lifecycleOwner = view.findViewTreeLifecycleOwner()
+    DisposableEffect(activity, view, lifecycleOwner) {
         val window = activity?.window
         if (window == null) {
             onDispose { }
@@ -30,6 +34,18 @@ actual fun ImmersiveEditorMode() {
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
                 controller.hide(WindowInsetsCompat.Type.systemBars())
             }
+
+            fun recoverInputAfterResume() {
+                view.isFocusableInTouchMode = true
+                view.requestFocus()
+                enterImmersive()
+            }
+
+            fun scheduleResumeRecovery() {
+                view.post { recoverInputAfterResume() }
+                view.postDelayed({ recoverInputAfterResume() }, RESUME_RECOVERY_DELAY_MS)
+            }
+
             enterImmersive()
             // Backgrounding the app (or pulling the notification shade) makes the
             // system reveal the bars as a transient layer; on some devices that
@@ -39,15 +55,26 @@ actual fun ImmersiveEditorMode() {
             // immersive on each focus gain tears that stale touch layer down.
             val focusListener =
                 ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
-                    if (hasFocus) enterImmersive()
+                    if (hasFocus) scheduleResumeRecovery()
                 }
             view.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
+
+            val lifecycleObserver =
+                LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        scheduleResumeRecovery()
+                    }
+                }
+            lifecycleOwner?.lifecycle?.addObserver(lifecycleObserver)
             onDispose {
                 view.viewTreeObserver.takeIf { it.isAlive }
                     ?.removeOnWindowFocusChangeListener(focusListener)
+                lifecycleOwner?.lifecycle?.removeObserver(lifecycleObserver)
                 controller.show(WindowInsetsCompat.Type.systemBars())
                 controller.systemBarsBehavior = previousBehavior
             }
         }
     }
 }
+
+private const val RESUME_RECOVERY_DELAY_MS = 150L

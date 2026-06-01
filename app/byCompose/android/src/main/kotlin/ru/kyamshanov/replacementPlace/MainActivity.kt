@@ -11,12 +11,15 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.arkivanov.decompose.defaultComponentContext
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -658,6 +661,18 @@ class MainActivity : ComponentActivity() {
             // hover) that Compose's commonMain pointer pipeline doesn't expose.
             // Fed via `Modifier.stylusEventSink` attached inside DrawablePdfPage.
             val tabletController = remember { AndroidTabletInputController() }
+            DisposableEffect(tabletController) {
+                val observer =
+                    LifecycleEventObserver { _, event ->
+                        when (event) {
+                            Lifecycle.Event.ON_PAUSE -> tabletController.resetTransientState(clearStylusSeen = true)
+                            Lifecycle.Event.ON_RESUME -> tabletController.resetTransientState(clearStylusSeen = false)
+                            else -> Unit
+                        }
+                    }
+                lifecycle.addObserver(observer)
+                onDispose { lifecycle.removeObserver(observer) }
+            }
             // Heavy deps swap in once the background wiring coroutine finishes;
             // the App composable handles null gracefully for all sync params.
             val heavyDeps by heavyDepsFlow.collectAsState()

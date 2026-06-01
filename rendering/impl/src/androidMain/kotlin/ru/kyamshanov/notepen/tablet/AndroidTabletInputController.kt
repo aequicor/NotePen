@@ -41,6 +41,25 @@ class AndroidTabletInputController : TabletInputController {
     override val stylusEverSeen: StateFlow<Boolean> = stylusSeenFlow.asStateFlow()
 
     /**
+     * Clears contact-only state when Android cancels the current input stream
+     * outside Compose's pointer pipeline (activity pause, screen off, task
+     * switch). Without this, stale barrel/eraser/hover flags can survive the
+     * resume and keep the editor in a gesture mode the user is no longer
+     * performing.
+     */
+    fun resetTransientState(clearStylusSeen: Boolean = false) {
+        pressureFlow.value = 1f
+        barrelFlow.value = false
+        eraserFlow.value = false
+        tiltFlow.value = 0f
+        hoverFlow.value = null
+        lastStylusEventAtMs = 0L
+        if (clearStylusSeen) {
+            stylusSeenFlow.value = false
+        }
+    }
+
+    /**
      * Parse a single [event] and update the state-flows. `viewWidth` and
      * `viewHeight` are needed to normalise hover coordinates into the same
      * `[0..1]` space the drawing surface uses.
