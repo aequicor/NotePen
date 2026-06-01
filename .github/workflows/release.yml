@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version without v prefix, for example 1.0.14'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -25,7 +31,12 @@ jobs:
           distribution: 'temurin'
 
       - name: Extract version from tag
-        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Decode keystore
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
@@ -65,7 +76,12 @@ jobs:
           distribution: 'temurin'
 
       - name: Extract version from tag
-        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
 
       # Desktop-сборка пинит тулчейн на JBR (vendor=JETBRAINS) ради WindowDecorations
       # API кастомного тайтлбара. foojay не умеет провижинить JetBrains-вендор, а на
@@ -159,7 +175,12 @@ jobs:
 
       - name: Extract version from tag
         shell: bash
-        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
 
       # См. комментарий в job build-macos: тот же jbrsdk-тулчейн нужен и здесь,
       # иначе резолв vendor=JETBRAINS упадёт (на раннере только Temurin).
@@ -230,7 +251,12 @@ jobs:
           distribution: 'temurin'
 
       - name: Extract version from tag
-        run: echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
 
       # jpackage собирает .deb через fakeroot + dpkg-deb (binutils даёт objcopy/ar);
       # на ubuntu-latest обычно уже есть, ставим защитно, чтобы сборка не падала.
@@ -274,6 +300,14 @@ jobs:
     needs: [build-android, build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve release version
+        run: |
+          version="${{ inputs.version }}"
+          if [ -z "$version" ]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "APP_VERSION=$version" >> "$GITHUB_ENV"
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -283,6 +317,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ env.APP_VERSION }}
           draft: false
           generate_release_notes: true
           files: |
