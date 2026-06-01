@@ -179,36 +179,68 @@ internal fun buildLoupeSegmentsForDocRect(
     val totalDocW = (docRight - docLeft).coerceAtLeast(1f)
     val totalDocH = (docBottom - docTop).coerceAtLeast(1f)
 
-    val out = mutableListOf<MagnifierPageSegment>()
-    for (pageIndex in 0 until n) {
-        val pageLeft = layout.pageLeftsPx[pageIndex]
-        val pageRight = pageLeft + basePageW
-        val interLeft = max(docLeft, pageLeft)
-        val interRight = min(docRight, pageRight)
-        if (interRight - interLeft < MIN_TARGET_DIM * basePageW) continue
-
-        val pageTop = layout.pageTopsPx[pageIndex]
-        val pdfH = layout.pdfHeightsPx[pageIndex]
-        val pageBottom = pageTop + pdfH
-        val interTop = max(docTop, pageTop)
-        val interBottom = min(docBottom, pageBottom)
-        if (interBottom - interTop < MIN_TARGET_DIM * pdfH) continue
-
-        val nxLeft = ((interLeft - pageLeft) / basePageW).coerceIn(0f, 1f)
-        val nxRight = ((interRight - pageLeft) / basePageW).coerceIn(0f, 1f)
-        val nyTop = ((interTop - pageTop) / pdfH).coerceIn(0f, 1f)
-        val nyBottom = ((interBottom - pageTop) / pdfH).coerceIn(0f, 1f)
-        if (nxRight - nxLeft < MIN_TARGET_DIM || nyBottom - nyTop < MIN_TARGET_DIM) continue
-
-        out +=
-            MagnifierPageSegment(
+    return (0 until n)
+        .mapNotNull { pageIndex ->
+            buildLoupeSegmentForPage(
+                layout = layout,
                 pageIndex = pageIndex,
-                targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
-                panelLeftFrac = ((interLeft - docLeft) / totalDocW).coerceIn(0f, 1f),
-                panelRightFrac = ((interRight - docLeft) / totalDocW).coerceIn(0f, 1f),
-                panelTopFrac = ((interTop - docTop) / totalDocH).coerceIn(0f, 1f),
-                panelBottomFrac = ((interBottom - docTop) / totalDocH).coerceIn(0f, 1f),
+                basePageW = basePageW,
+                docLeft = docLeft,
+                docRight = docRight,
+                docTop = docTop,
+                docBottom = docBottom,
+                totalDocW = totalDocW,
+                totalDocH = totalDocH,
             )
-    }
-    return out.takeIf { it.isNotEmpty() }
+        }.takeIf { it.isNotEmpty() }
+}
+
+private fun buildLoupeSegmentForPage(
+    layout: PdfPagesLayout,
+    pageIndex: Int,
+    basePageW: Float,
+    docLeft: Float,
+    docRight: Float,
+    docTop: Float,
+    docBottom: Float,
+    totalDocW: Float,
+    totalDocH: Float,
+): MagnifierPageSegment? {
+    val pageLeft = layout.pageLeftsPx[pageIndex]
+    val pageRight = pageLeft + basePageW
+    val interLeft = max(docLeft, pageLeft)
+    val interRight = min(docRight, pageRight)
+
+    val pageTop = layout.pageTopsPx[pageIndex]
+    val pdfH = layout.pdfHeightsPx[pageIndex]
+    val pageBottom = pageTop + pdfH
+    val interTop = max(docTop, pageTop)
+    val interBottom = min(docBottom, pageBottom)
+
+    val hasWidth = interRight - interLeft >= MIN_TARGET_DIM * basePageW
+    val hasHeight = interBottom - interTop >= MIN_TARGET_DIM * pdfH
+    val segment =
+        if (hasWidth && hasHeight) {
+            val nxLeft = ((interLeft - pageLeft) / basePageW).coerceIn(0f, 1f)
+            val nxRight = ((interRight - pageLeft) / basePageW).coerceIn(0f, 1f)
+            val nyTop = ((interTop - pageTop) / pdfH).coerceIn(0f, 1f)
+            val nyBottom = ((interBottom - pageTop) / pdfH).coerceIn(0f, 1f)
+            val hasNormalizedSize = nxRight - nxLeft >= MIN_TARGET_DIM && nyBottom - nyTop >= MIN_TARGET_DIM
+            if (hasNormalizedSize) {
+                MagnifierPageSegment(
+                    pageIndex = pageIndex,
+                    targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
+                    panelLeftFrac = ((interLeft - docLeft) / totalDocW).coerceIn(0f, 1f),
+                    panelRightFrac = ((interRight - docLeft) / totalDocW).coerceIn(0f, 1f),
+                    panelTopFrac = ((interTop - docTop) / totalDocH).coerceIn(0f, 1f),
+                    panelBottomFrac = ((interBottom - docTop) / totalDocH).coerceIn(0f, 1f),
+                )
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+
+    return segment
 }
