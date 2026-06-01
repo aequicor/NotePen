@@ -34,8 +34,8 @@ class MagnifierTargetGestureController(
     private var startViewport: Offset = Offset.Zero
     private var startPanX: Float = 0f
     private var startPanY: Float = 0f
+    private var startLeftXDoc: Float = 0f
     private var startTopYDoc: Float = 0f
-    private var startLeftXNorm: Float = 0f
     private var startWidthNorm: Float = 0f
     private var startHeightNorm: Float = 0f
 
@@ -63,15 +63,17 @@ class MagnifierTargetGestureController(
         }
         val seg = state.segments[0]
         val layout = viewerState.layout
+        val basePageW = layout.basePageWidthPx
         val pdfH = layout.pdfHeightsPx[seg.pageIndex]
+        val pageLeft = layout.pageLeftsPx[seg.pageIndex]
         val pageTop = layout.pageTopsPx[seg.pageIndex]
         val r = seg.targetOnPage
         mode = m
         startViewport = viewportPos
         startPanX = viewerState.pan.x
         startPanY = viewerState.pan.y
+        startLeftXDoc = pageLeft + r.left * basePageW
         startTopYDoc = pageTop + r.top * pdfH
-        startLeftXNorm = r.left
         startWidthNorm = r.right - r.left
         startHeightNorm = r.bottom - r.top
         return true
@@ -127,18 +129,23 @@ class MagnifierTargetGestureController(
 
         val width = startWidthNorm
         val height = startHeightNorm
+        val targetWidthDoc = width * basePageW
+        val intendedLeftXDoc = startLeftXDoc + totalDragDocX
+        val intendedCenterXDoc = intendedLeftXDoc + targetWidthDoc / 2f
         val intendedTopYDoc = startTopYDoc + totalDragDocY
-        val intendedLeftNorm =
-            (startLeftXNorm + totalDragDocX / basePageW)
-                .coerceIn(0f, (1f - width).coerceAtLeast(0f))
 
-        // Какая страница содержит intendedTopYDoc?
+        // In spread mode both pages in a pair share the same Y row, so selecting
+        // by Y alone always lands on one side of the spread. Use document-X to
+        // choose the left/right column, then normalize inside that page.
         val tops = layout.pageTopsPx
         val newPageIdx =
-            resolvePageForDocY(tops, intendedTopYDoc)
+            resolvePageForDocSpace(layout, intendedCenterXDoc, intendedTopYDoc)
                 .coerceAtMost(pageCount - 1)
         val newPdfH = layout.pdfHeightsPx[newPageIdx]
         val newPageTop = tops[newPageIdx]
+        val newPageLeft = layout.pageLeftsPx[newPageIdx]
+        val rawNewLeftNorm = (intendedLeftXDoc - newPageLeft) / basePageW
+        val newLeftNorm = rawNewLeftNorm.coerceIn(0f, (1f - width).coerceAtLeast(0f))
         val rawNewTopNorm = (intendedTopYDoc - newPageTop) / newPdfH
         val newTopNorm = rawNewTopNorm.coerceIn(0f, (1f - height).coerceAtLeast(0f))
 
@@ -146,9 +153,9 @@ class MagnifierTargetGestureController(
             pageIndex = newPageIdx,
             targetOnPage =
                 Rect(
-                    intendedLeftNorm,
+                    newLeftNorm,
                     newTopNorm,
-                    intendedLeftNorm + width,
+                    newLeftNorm + width,
                     newTopNorm + height,
                 ),
         )
