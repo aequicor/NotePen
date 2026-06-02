@@ -297,8 +297,12 @@ compose.desktop {
 // --enable-native-access flag has to be applied here too. Otherwise IDE runs still emit
 // the JDK 25 restricted-method warnings from Skiko/JNA native loaders.
 tasks.withType<JavaExec>().configureEach {
-    if (name == "desktopRun") {
-        jvmArgs("--enable-native-access=ALL-UNNAMED")
+    if (name == "run" || name == "desktopRun") {
+        jvmArgs("--enable-native-access=ALL-UNNAMED", "-Dnotepen.eapIcon=true")
+        val hostOs = System.getProperty("os.name").lowercase()
+        if (hostOs.contains("mac") || hostOs.contains("darwin")) {
+            jvmArgs("-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon_eap.icns").asFile.absolutePath}")
+        }
     }
 }
 

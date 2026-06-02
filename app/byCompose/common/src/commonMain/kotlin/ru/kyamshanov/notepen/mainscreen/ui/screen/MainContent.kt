@@ -1,6 +1,6 @@
 package ru.kyamshanov.notepen.mainscreen.ui.screen
 
-import androidx.compose.foundation.background
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
 import androidx.compose.foundation.draganddrop.dragAndDropTarget
 import androidx.compose.foundation.layout.Arrangement
@@ -28,7 +28,6 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
@@ -58,14 +57,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draganddrop.DragAndDropEvent
 import androidx.compose.ui.draganddrop.DragAndDropTarget
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.LIQUID_GLASS_TOP_BAR_HEIGHT
 import ru.kyamshanov.notepen.LiquidGlassTopBar
-import ru.kyamshanov.notepen.NotePenIcons
 import ru.kyamshanov.notepen.RailOrientation
 import ru.kyamshanov.notepen.SessionsMenu
 import ru.kyamshanov.notepen.WheelScrollButtons
@@ -279,26 +282,7 @@ fun MainContent(
                 modifier = Modifier.align(Alignment.TopCenter),
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        // NotePen brand mark: project's pen-brush glyph on a tinted
-                        // primaryContainer chip — a lightweight stand-in until a
-                        // dedicated logo vector ships in composeResources.
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier =
-                                Modifier
-                                    .size(22.dp)
-                                    .background(
-                                        color = MaterialTheme.colorScheme.primary,
-                                        shape = RoundedCornerShape(6.dp),
-                                    ),
-                        ) {
-                            Icon(
-                                imageVector = NotePenIcons.Brush,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(14.dp),
-                            )
-                        }
+                        NotePenBrandMark(Modifier.size(22.dp))
                         Spacer(Modifier.width(8.dp))
                         Text("NotePen")
                     }
@@ -449,6 +433,46 @@ fun MainContent(
                 )
             },
         )
+    }
+}
+
+@Composable
+private fun NotePenBrandMark(modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val iconColor = Color(0xFFD15224)
+        val width = size.width
+        val height = size.height
+        drawRoundRect(
+            color = iconColor,
+            cornerRadius = CornerRadius(width * 0.22f, height * 0.22f),
+        )
+        rotate(degrees = -45f, pivot = center) {
+            val pencilTop = height * 0.43f
+            val pencilHeight = height * 0.18f
+            val bodyX = width * 0.24f
+            val bodyWidth = width * 0.52f
+            val tipPath =
+                Path().apply {
+                    moveTo(bodyX + width * 0.02f, pencilTop)
+                    lineTo(bodyX + width * 0.02f, pencilTop + pencilHeight)
+                    lineTo(width * 0.08f, pencilTop + pencilHeight * 0.72f)
+                    lineTo(width * 0.08f, pencilTop + pencilHeight * 0.28f)
+                    close()
+                }
+            drawPath(tipPath, Color.White)
+            drawRoundRect(
+                color = Color.White,
+                topLeft = Offset(bodyX, pencilTop),
+                size = Size(bodyWidth, pencilHeight),
+                cornerRadius = CornerRadius(pencilHeight * 0.42f, pencilHeight * 0.42f),
+            )
+            drawRoundRect(
+                color = Color.White,
+                topLeft = Offset(width * 0.79f, pencilTop),
+                size = Size(width * 0.15f, pencilHeight),
+                cornerRadius = CornerRadius(pencilHeight * 0.45f, pencilHeight * 0.45f),
+            )
+        }
     }
 }
 
