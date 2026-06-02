@@ -18,6 +18,9 @@ import ru.kyamshanov.notepen.annotation.domain.shape.ShapeRecognizer
 import ru.kyamshanov.notepen.annotation.domain.shape.ShapeResampler
 
 private const val EXTENT_GROW_PAD: Float = 0.4f
+private const val MIN_LIVE_POINT_DISTANCE_NORM: Float = 0.00035f
+private const val MIN_LIVE_POINT_DISTANCE_NORM_SQ: Float =
+    MIN_LIVE_POINT_DISTANCE_NORM * MIN_LIVE_POINT_DISTANCE_NORM
 
 /**
  * Состояние рисования одной страницы PDF.
@@ -129,6 +132,12 @@ public class PdfDrawingState {
         tilt: Float = 0f,
     ) {
         if (isDrawing.value && !gestureSnapped) {
+            val last = livePoints.lastOrNull()
+            if (last != null) {
+                val dx = x - last.x
+                val dy = y - last.y
+                if (dx * dx + dy * dy < MIN_LIVE_POINT_DISTANCE_NORM_SQ) return
+            }
             livePoints.add(DrawingPoint(x, y, pressure = pressure, tilt = tilt))
             growExtentToInclude(x, y)
         }

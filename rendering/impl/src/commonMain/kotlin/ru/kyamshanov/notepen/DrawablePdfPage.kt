@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -67,6 +68,7 @@ import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.effectivePressure
 import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
+import kotlin.math.sqrt
 import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
@@ -92,6 +94,10 @@ private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
 
 /** Множитель «расширения» штриха при сильном наклоне пера (0..1 → ×(1..1+gain)). */
 private const val TILT_WIDTH_GAIN = 0.5f
+private const val LIVE_EXACT_TAIL_SEGMENTS = 32
+private const val LIVE_TAIL_PREDICTION_GAIN = 0.45f
+private const val LIVE_TAIL_PREDICTION_MAX_PX = 18f
+private const val LIVE_TAIL_PREDICTION_MIN_PX = 2f
 
 /**
  * Floor for any rendered stroke segment in pixels. Below 1px Skia's stroking
@@ -170,6 +176,18 @@ private data class CachedInk(
     val strokeCount: Int,
     val bitmap: ImageBitmap,
 )
+
+private fun cappedLowLatencyOverlaySize(pageSize: IntSize): IntSize {
+    val w = pageSize.width
+    val h = pageSize.height
+    if (w <= 0 || h <= 0) return IntSize.Zero
+    val longest = maxOf(w, h)
+    if (longest <= LOW_LATENCY_OVERLAY_MAX_DIM_PX) return pageSize
+    return IntSize(
+        width = (w.toLong() * LOW_LATENCY_OVERLAY_MAX_DIM_PX / longest).toInt().coerceAtLeast(1),
+        height = (h.toLong() * LOW_LATENCY_OVERLAY_MAX_DIM_PX / longest).toInt().coerceAtLeast(1),
+    )
+}
 
 /**
  * Растеризует все [paths] в off-screen [ImageBitmap] размера [bw]×[bh].
@@ -310,11 +328,14 @@ fun DrawablePdfPage(
     // render thread, producing the lag observed both in the panel and on the
     // page. Falling back to Compose's frame-bound live-stroke render here is
     // imperceptible because the user looks at the panel.
+    val lowLatencyOverlaySize by remember {
+        derivedStateOf { cappedLowLatencyOverlaySize(canvasSize.value) }
+    }
     val lowLatencyOverlayActive by remember(lowLatencyOverlaySupported, magnifierState) {
         derivedStateOf {
             lowLatencyOverlaySupported &&
                 magnifierState == null &&
-                maxOf(canvasSize.value.width, canvasSize.value.height) <= LOW_LATENCY_OVERLAY_MAX_DIM_PX
+                lowLatencyOverlaySize != IntSize.Zero
         }
     }
 
@@ -677,9 +698,31 @@ fun DrawablePdfPage(
         // platforms where it is a no-op, the Compose Canvas above still
         // renders the live stroke itself (`drawLiveStroke` above).
         if (lowLatencyOverlayActive) {
+            val overlayWidthDp = with(density) { lowLatencyOverlaySize.width.toDp() }
+            val overlayHeightDp = with(density) { lowLatencyOverlaySize.height.toDp() }
+            val pageW = canvasSize.value.width
+            val pageH = canvasSize.value.height
             LowLatencyStrokeOverlay(
                 drawingState = pdfDrawingState,
-                modifier = Modifier.fillMaxSize().graphicsLayer { alpha = if (isZooming()) 0f else 1f },
+                modifier =
+                    Modifier
+                        .size(width = overlayWidthDp, height = overlayHeightDp)
+                        .graphicsLayer {
+                            scaleX =
+                                if (lowLatencyOverlaySize.width > 0) {
+                                    pageW.toFloat() / lowLatencyOverlaySize.width
+                                } else {
+                                    1f
+                                }
+                            scaleY =
+                                if (lowLatencyOverlaySize.height > 0) {
+                                    pageH.toFloat() / lowLatencyOverlaySize.height
+                                } else {
+                                    1f
+                                }
+                            transformOrigin = TransformOrigin(0f, 0f)
+                            alpha = if (isZooming()) 0f else 1f
+                        },
             )
         }
 
@@ -860,6 +903,74 @@ fun DrawScope.drawLiveStroke(
                         join = StrokeJoin.Round,
                     ),
             )
+            drawPredictedLiveTail(points, colorArgb, normalizedStrokeWidth, pdfWidth, pdfHeight, extent, scratch)
+            return
+        }
+
+        if (points.size > LIVE_EXACT_TAIL_SEGMENTS + 2) {
+            val tailStart = (points.size - 1 - LIVE_EXACT_TAIL_SEGMENTS).coerceAtLeast(1)
+            var pressureSum = 0f
+            var tiltSum = 0f
+            for (i in 0..tailStart) {
+                pressureSum += points[i].pressure
+                tiltSum += points[i].tilt
+            }
+            val prefixCount = tailStart + 1
+            val avgPressure = pressureSum / prefixCount
+            val avgTilt = tiltSum / prefixCount
+
+            scratch.reset()
+            points.subList(0, prefixCount).appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
+            drawPath(
+                path = scratch,
+                color = color,
+                style =
+                    Stroke(
+                        width =
+                            (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
+                                .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                        cap = StrokeCap.Round,
+                        join = StrokeJoin.Round,
+                    ),
+            )
+
+            for (i in tailStart until segTo) {
+                val p0 = if (i > 0) points[i - 1] else points[0]
+                val p1 = points[i]
+                val p2 = points[i + 1]
+                val p3 = if (i + 2 < points.size) points[i + 2] else points[i + 1]
+
+                val x1 = (p1.x + offX) * pdfWidth
+                val y1 = (p1.y + offY) * pdfHeight
+                val x2 = (p2.x + offX) * pdfWidth
+                val y2 = (p2.y + offY) * pdfHeight
+
+                scratch.reset()
+                scratch.moveTo(x1, y1)
+                scratch.cubicTo(
+                    x1 + (p2.x - p0.x) * pdfWidth / 6f,
+                    y1 + (p2.y - p0.y) * pdfHeight / 6f,
+                    x2 - (p3.x - p1.x) * pdfWidth / 6f,
+                    y2 - (p3.y - p1.y) * pdfHeight / 6f,
+                    x2,
+                    y2,
+                )
+                val tailPressure = (p1.pressure + p2.pressure) * 0.5f
+                val tailTilt = (p1.tilt + p2.tilt) * 0.5f
+                drawPath(
+                    path = scratch,
+                    color = color,
+                    style =
+                        Stroke(
+                            width =
+                                (baseWidth * tailPressure * (1f + TILT_WIDTH_GAIN * tailTilt))
+                                    .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round,
+                        ),
+                )
+            }
+            drawPredictedLiveTail(points, colorArgb, normalizedStrokeWidth, pdfWidth, pdfHeight, extent, scratch)
             return
         }
     }
@@ -900,6 +1011,52 @@ fun DrawScope.drawLiveStroke(
                 ),
         )
     }
+    if (segFrom == 0 && segTo == points.size - 1) {
+        drawPredictedLiveTail(points, colorArgb, normalizedStrokeWidth, pdfWidth, pdfHeight, extent, scratch)
+    }
+}
+
+private fun DrawScope.drawPredictedLiveTail(
+    points: List<DrawingPoint>,
+    colorArgb: Long,
+    normalizedStrokeWidth: Float,
+    pdfWidth: Float,
+    pdfHeight: Float,
+    extent: PageExtent,
+    scratch: Path,
+) {
+    if (points.size < 3) return
+    val last = points.last()
+    if (last.isNewPath) return
+    val prev = points[points.lastIndex - 1]
+    val dx = (last.x - prev.x) * pdfWidth
+    val dy = (last.y - prev.y) * pdfHeight
+    val distance = sqrt(dx * dx + dy * dy)
+    if (distance < LIVE_TAIL_PREDICTION_MIN_PX) return
+
+    val predictionGain = minOf(LIVE_TAIL_PREDICTION_GAIN, LIVE_TAIL_PREDICTION_MAX_PX / distance)
+    val offX = -extent.left
+    val offY = -extent.top
+    val x1 = (last.x + offX) * pdfWidth
+    val y1 = (last.y + offY) * pdfHeight
+    val x2 = x1 + dx * predictionGain
+    val y2 = y1 + dy * predictionGain
+
+    scratch.reset()
+    scratch.moveTo(x1, y1)
+    scratch.lineTo(x2, y2)
+    drawPath(
+        path = scratch,
+        color = Color(colorArgb.toInt()),
+        style =
+            Stroke(
+                width =
+                    (normalizedStrokeWidth * pdfWidth * last.pressure * (1f + TILT_WIDTH_GAIN * last.tilt))
+                        .coerceAtLeast(MIN_RENDERED_STROKE_PX),
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round,
+            ),
+    )
 }
 
 /**

@@ -32,7 +32,7 @@ public object StrokeSimplifier {
      * приходит от удаления плотных near-duplicate сэмплов пера и от
      * субпиксельной агрегации, а не от агрессивного сглаживания формы.
      */
-    public const val DEFAULT_EPSILON: Float = 0.0003f
+    public const val DEFAULT_EPSILON: Float = 0.0001f
 
     /**
      * Порог отклонения pressure/tilt по умолчанию (оба в `[0..1]`). Точка с

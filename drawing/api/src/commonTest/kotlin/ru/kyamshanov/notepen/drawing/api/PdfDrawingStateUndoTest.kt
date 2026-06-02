@@ -9,6 +9,19 @@ import kotlin.test.assertTrue
 class PdfDrawingStateUndoTest {
     private fun path(id: Float) = DrawingPath(points = listOf(DrawingPoint(id, id, true), DrawingPoint(id + 1f, id + 1f)))
 
+    @Test
+    fun `addPoint skips subpixel live samples`() {
+        val state = PdfDrawingState()
+
+        state.startDrawing(x = 0.1f, y = 0.1f)
+        state.addPoint(x = 0.1001f, y = 0.1001f)
+        state.addPoint(x = 0.101f, y = 0.101f)
+
+        assertEquals(2, state.livePoints.size)
+        assertEquals(0.101f, state.livePoints.last().x)
+        assertEquals(0.101f, state.livePoints.last().y)
+    }
+
     // -- restoreSnapshot --
 
     @Test
