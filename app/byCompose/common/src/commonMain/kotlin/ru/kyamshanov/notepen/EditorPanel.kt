@@ -608,7 +608,8 @@ fun EditorPanel(
         if (!magnifierState.enabled) return@LaunchedEffect
         val doc = pdfDocument ?: return@LaunchedEffect
         for (pageIndex in magnifierPageIndices) {
-            val pageInfo = doc.info.pages.getOrNull(pageIndex) ?: continue
+            val pageInfo = pages.getOrNull(pageIndex) ?: continue
+            val src = pageSourceOf(pageIndex)
             val aspect = pageInfo.aspectRatio.takeIf { it > 0f } ?: 1f
             val widthCapped = PANEL_HIGH_RES_DIM_PX
             val heightFromWidth = (widthCapped / aspect).toInt().coerceAtLeast(1)
@@ -622,7 +623,18 @@ fun EditorPanel(
                 }
             launch {
                 runCatching {
-                    val data = renderer.renderPage(doc, pageIndex, w, h)
+                    val data =
+                        renderer.renderPage(
+                            document = doc,
+                            pageIndex = src.sourceIndex,
+                            widthPx = w,
+                            heightPx = h,
+                            rotationQuarters = userRotationOf(pageIndex),
+                            cropLeftN = src.cropLeftN,
+                            cropTopN = src.cropTopN,
+                            cropRightN = src.cropRightN,
+                            cropBottomN = src.cropBottomN,
+                        )
                     magnifierState.updateHighResBitmap(pageIndex, data.toImageBitmap())
                 }.onFailure { e ->
                     panelLogger.warn { "Magnifier high-res render failed for page $pageIndex: ${e::class.simpleName}" }
@@ -1360,29 +1372,23 @@ fun EditorPanel(
             val viewportH = panelSizePx.height.toFloat()
             val viewportCenterDocY = ((viewportH / 2f) - pan.y) / zoom
             val viewportCenterDocX = ((viewportW / 2f) - pan.x) / zoom
-            val tops = layout.pageTopsPx
             val pageIdx =
-                when {
-                    tops.isEmpty() -> firstVisiblePage
-                    viewportCenterDocY <= tops[0] -> 0
-                    else -> {
-                        var lo = 0
-                        var hi = tops.size - 1
-                        while (lo < hi) {
-                            val mid = (lo + hi + 1) ushr 1
-                            if (tops[mid] <= viewportCenterDocY) lo = mid else hi = mid - 1
-                        }
-                        lo
-                    }
+                if (layout.pageTopsPx.isEmpty()) {
+                    firstVisiblePage
+                } else {
+                    ru.kyamshanov.notepen.magnifier
+                        .resolvePageForDocSpace(layout, viewportCenterDocX, viewportCenterDocY)
+                        .coerceIn(0, layout.pageTopsPx.size - 1)
                 }
             val pdfH = if (pageIdx in 0 until layout.pageHeightsPx.size) layout.pdfHeightsPx[pageIdx] else 1f
-            val pageTop = if (pageIdx in tops.indices) tops[pageIdx] else 0f
+            val pageTop = if (pageIdx in layout.pageTopsPx.indices) layout.pageTopsPx[pageIdx] else 0f
+            val pageLeft = if (pageIdx in layout.pageLeftsPx.indices) layout.pageLeftsPx[pageIdx] else 0f
             if (basePageW > 0f && zoom > 0f) {
                 magnifierState.updatePageCanvasPx(widthPx = basePageW * zoom, heightPx = pdfH * zoom)
             }
             val centerN =
                 Offset(
-                    x = (viewportCenterDocX / basePageW.coerceAtLeast(1f)).coerceIn(0f, 1f),
+                    x = ((viewportCenterDocX - pageLeft) / basePageW.coerceAtLeast(1f)).coerceIn(0f, 1f),
                     y = ((viewportCenterDocY - pageTop) / pdfH.coerceAtLeast(1f)).coerceIn(0f, 1f),
                 )
             magnifierState.enable(

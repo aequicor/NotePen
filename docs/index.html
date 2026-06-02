@@ -54,8 +54,20 @@
     <section id="download" class="section section-alt">
       <div class="container">
         <h2 class="section-title" data-i18n="downloadTitle">Скачать NotePen</h2>
-        <p class="section-lead" data-i18n="downloadLead">Готовые сборки для десктопа и Android. Установка не нужна для портативной версии Windows.</p>
+        <p class="section-lead" data-i18n="downloadLead">Сайт автоматически выбирает подходящую сборку для вашего устройства.</p>
         <p class="download-version" id="download-version" data-i18n="downloadVersionUnknown">Последняя версия с GitHub</p>
+        <article class="download-recommended" id="download-recommended" data-device="unknown">
+          <div>
+            <p class="download-eyebrow" data-i18n="downloadRecommendedEyebrow">Подходит для вашего устройства</p>
+            <h3 id="recommended-title" data-i18n="downloadRecommendedFallbackTitle">Выберите сборку</h3>
+            <p id="recommended-subtitle" data-i18n="downloadRecommendedFallbackSub">Не удалось точно определить платформу. Ниже доступны все варианты.</p>
+          </div>
+          <a class="btn btn-primary download-btn" id="recommended-download"
+             href="https://github.com/aequicor/NotePen/releases/latest"
+             data-i18n="downloadRecommendedFallbackBtn"
+             data-i18n-aria="downloadRecommendedFallbackAria"
+             aria-label="Открыть страницу релизов NotePen">Все сборки</a>
+        </article>
         <div class="download-grid">
 
           <article class="download-card">
@@ -109,7 +121,7 @@
           </article>
 
         </div>
-        <p class="download-note">
+        <p class="download-note" id="download-note">
           <a href="https://github.com/aequicor/NotePen/releases/latest" data-i18n="downloadAllReleases">Все сборки на странице релизов</a>
         </p>
       </div>

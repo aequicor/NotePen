@@ -11,12 +11,16 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalView
 import androidx.core.content.IntentCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.arkivanov.decompose.defaultComponentContext
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
@@ -51,6 +55,7 @@ import ru.kyamshanov.notepen.library.infrastructure.AndroidLibraryConnectionStor
 import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorization
 import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorizer
 import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
+import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -124,8 +129,16 @@ private class HeavyDeps(
     val resyncRequester: AnnotationResyncRequester,
 )
 
+private const val INPUT_RECOVERY_DELAY_MS = 150L
+
+private fun recoverRootInput(view: android.view.View) {
+    view.isFocusableInTouchMode = true
+    view.requestFocus()
+}
+
 class MainActivity : ComponentActivity() {
     private lateinit var rootComponent: DefaultRootComponent
+    private var recordExternalOpenInHistory: (String) -> Unit = {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -187,6 +200,12 @@ class MainActivity : ComponentActivity() {
             )
 
         val appScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+        val addExternalOpenToHistory = AddToHistoryUseCase(historyRepo)
+        recordExternalOpenInHistory = { uri ->
+            appScope.launch(Dispatchers.IO) {
+                addExternallyOpenedFileToHistory(uri, addExternalOpenToHistory)
+            }
+        }
 
         val prefs = context.getSharedPreferences("notepen", android.content.Context.MODE_PRIVATE)
         val selfId: String =
@@ -654,10 +673,44 @@ class MainActivity : ComponentActivity() {
             LaunchedEffect(isSystemInDarkTheme()) {
                 enableEdgeToEdge()
             }
+            val rootView = LocalView.current
+            DisposableEffect(rootView) {
+                fun scheduleInputRecovery() {
+                    rootView.post { recoverRootInput(rootView) }
+                    rootView.postDelayed({ recoverRootInput(rootView) }, INPUT_RECOVERY_DELAY_MS)
+                }
+                val observer =
+                    LifecycleEventObserver { _, event ->
+                        when (event) {
+                            Lifecycle.Event.ON_PAUSE,
+                            Lifecycle.Event.ON_STOP,
+                            -> rootView.cancelPendingInputEvents()
+                            Lifecycle.Event.ON_START,
+                            Lifecycle.Event.ON_RESUME,
+                            -> scheduleInputRecovery()
+                            else -> Unit
+                        }
+                    }
+                lifecycle.addObserver(observer)
+                scheduleInputRecovery()
+                onDispose { lifecycle.removeObserver(observer) }
+            }
             // Side-channel for stylus state (barrel button, eraser tip, tilt,
             // hover) that Compose's commonMain pointer pipeline doesn't expose.
             // Fed via `Modifier.stylusEventSink` attached inside DrawablePdfPage.
             val tabletController = remember { AndroidTabletInputController() }
+            DisposableEffect(tabletController) {
+                val observer =
+                    LifecycleEventObserver { _, event ->
+                        when (event) {
+                            Lifecycle.Event.ON_PAUSE -> tabletController.resetTransientState(clearStylusSeen = true)
+                            Lifecycle.Event.ON_RESUME -> tabletController.resetTransientState(clearStylusSeen = false)
+                            else -> Unit
+                        }
+                    }
+                lifecycle.addObserver(observer)
+                onDispose { lifecycle.removeObserver(observer) }
+            }
             // Heavy deps swap in once the background wiring coroutine finishes;
             // the App composable handles null gracefully for all sync params.
             val heavyDeps by heavyDepsFlow.collectAsState()
@@ -704,7 +757,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * Открывает документ, пришедший извне: «Открыть с помощью» ([Intent.ACTION_VIEW])
-     * или «Поделиться» ([Intent.ACTION_SEND]). URI прокидывается в общий
+     * или «Поделиться» ([Intent.ACTION_SEND]/[Intent.ACTION_SEND_MULTIPLE]). URI прокидывается в общий
      * [RootComponent.openDetailsExternally]; для чтения байт достаточно временного
      * гранта чтения из самого интента.
      */
@@ -715,6 +768,7 @@ class MainActivity : ComponentActivity() {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
         }
+        recordExternalOpenInHistory(uri.toString())
         rootComponent.openDetailsExternally(uri.toString())
     }
 
@@ -722,8 +776,38 @@ class MainActivity : ComponentActivity() {
         when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+            Intent.ACTION_SEND_MULTIPLE ->
+                IntentCompat
+                    .getParcelableArrayListExtra(intent, Intent.EXTRA_STREAM, Uri::class.java)
+                    ?.firstOrNull()
             else -> null
         }
+
+    private suspend fun addExternallyOpenedFileToHistory(
+        uri: String,
+        addToHistory: AddToHistoryUseCase,
+    ) {
+        val displayName = resolveDocumentDisplayName(uri) ?: uri.substringAfterLast('/').ifBlank { uri }
+        val result =
+            addToHistory.execute(
+                uri = uri,
+                displayName = displayName,
+                fileSize = resolveDocumentSize(uri),
+                openedAt = System.currentTimeMillis(),
+                lastPageIndex = 0,
+            )
+        result.getOrNull()
+            ?.takeIf { it is AddHistoryResult.SafFuzzyMatchDetected }
+            ?: return
+
+        addToHistory.execute(
+            uri = uri,
+            displayName = displayName,
+            fileSize = null,
+            openedAt = System.currentTimeMillis(),
+            lastPageIndex = 0,
+        )
+    }
 
     /**
      * Cheap `size-lastModified` fingerprint for a content URI, used to guard the

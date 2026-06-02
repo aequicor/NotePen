@@ -1,0 +1,91 @@
+name: Version bump
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+    branches: [master]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: version-bump-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Bump app.version in PR
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version from master
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          git fetch origin master
+
+          base_version=$(
+            git show origin/master:gradle.properties \
+              | sed -n 's/^app\.version=//p' \
+              | head -n1
+          )
+
+          if ! [[ "$base_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Unsupported app.version on master: $base_version"
+            exit 1
+          fi
+
+          labels=$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')
+          part=patch
+          if grep -qx 'release: major' <<< "$labels"; then
+            part=major
+          elif grep -qx 'release: minor' <<< "$labels"; then
+            part=minor
+          elif grep -qx 'release: patch' <<< "$labels"; then
+            part=patch
+          fi
+
+          IFS=. read -r major minor patch <<< "$base_version"
+          case "$part" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+          esac
+          next_version="$major.$minor.$patch"
+
+          sed -i "s/^app\.version=.*/app.version=$next_version/" gradle.properties
+
+          if git diff --quiet -- gradle.properties; then
+            echo "app.version is already $next_version"
+            exit 0
+          fi
+
+          git add gradle.properties
+          git commit -m "Bump app version to $next_version"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          gh workflow run ci.yml --ref "${{ github.event.pull_request.head.ref }}"

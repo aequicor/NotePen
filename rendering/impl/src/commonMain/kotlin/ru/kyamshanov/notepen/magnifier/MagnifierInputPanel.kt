@@ -39,9 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
@@ -52,18 +50,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
-import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.detectStylusAwareDrag
@@ -75,7 +69,6 @@ import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
 import kotlin.math.roundToInt
-import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 
 private const val FRAME_FILL_ALPHA = 0.10f
 
@@ -416,10 +409,13 @@ private fun MagnifierContent(
         //  - PDF-тайл из соответствующего битмапа;
         //  - завершённые и live штрихи этой страницы.
         segments.forEach { seg ->
+            val segLeft = seg.panelLeftFrac * panelW
+            val segRight = seg.panelRightFrac * panelW
+            val segW = (segRight - segLeft).coerceAtLeast(0f)
             val segTop = seg.panelTopFrac * panelH
             val segBottom = seg.panelBottomFrac * panelH
             val segH = (segBottom - segTop).coerceAtLeast(0f)
-            if (segH <= 0f) return@forEach
+            if (segW <= 0f || segH <= 0f) return@forEach
             val target = seg.targetOnPage
             val tw = target.right - target.left
             val th = target.bottom - target.top
@@ -439,8 +435,8 @@ private fun MagnifierContent(
                     image = bmp,
                     srcOffset = IntOffset(srcOffsetX, srcOffsetY),
                     srcSize = IntSize(srcW, srcH),
-                    dstOffset = IntOffset(0, segTop.toInt()),
-                    dstSize = IntSize(panelW.toInt(), segH.toInt()),
+                    dstOffset = IntOffset(segLeft.toInt(), segTop.toInt()),
+                    dstSize = IntSize(segW.toInt(), segH.toInt()),
                 )
             }
 
@@ -448,7 +444,7 @@ private fun MagnifierContent(
             val pageExtent = pdfDrawingState.extent.value
             // virtW/virtH — маппинг нормализованных PDF-координат в panel-пиксели
             // полосы сегмента (используется и anti-flicker'ом, и live-tail'ом).
-            val virtW = panelW / tw
+            val virtW = segW / tw
             val virtH = segH / th
 
             // Завершенные штрихи рисуем напрямую тем же transform'ом, что и
@@ -457,9 +453,9 @@ private fun MagnifierContent(
             val completedPaths = pdfDrawingState.currentPaths
             if (completedPaths.isNotEmpty()) {
                 withTransform({
-                    clipRect(left = 0f, top = segTop, right = panelW, bottom = segBottom)
+                    clipRect(left = segLeft, top = segTop, right = segRight, bottom = segBottom)
                     translate(
-                        left = (pageExtent.left - target.left) * virtW,
+                        left = segLeft + (pageExtent.left - target.left) * virtW,
                         top = segTop + (pageExtent.top - target.top) * virtH,
                     )
                 }) {
@@ -481,9 +477,9 @@ private fun MagnifierContent(
             // с текущим page/target-space.
             if (pdfDrawingState.isDrawing.value && pdfDrawingState.livePoints.size > 1) {
                 withTransform({
-                    clipRect(left = 0f, top = segTop, right = panelW, bottom = segBottom)
+                    clipRect(left = segLeft, top = segTop, right = segRight, bottom = segBottom)
                     translate(
-                        left = (pageExtent.left - target.left) * virtW,
+                        left = segLeft + (pageExtent.left - target.left) * virtW,
                         top = segTop + (pageExtent.top - target.top) * virtH,
                     )
                 }) {
@@ -523,11 +519,14 @@ private fun MagnifierContent(
             val target = seg.targetOnPage
             val tw = target.right - target.left
             if (tw > 0f) {
+                val segLeft = seg.panelLeftFrac * panelW
+                val segRight = seg.panelRightFrac * panelW
+                val segW = (segRight - segLeft).coerceAtLeast(0f)
                 val segTop = seg.panelTopFrac * panelH
                 val segH = (seg.panelBottomFrac - seg.panelTopFrac) * panelH
-                val px = (ePos.x - target.left) / tw * panelW
+                val px = segLeft + (ePos.x - target.left) / tw * segW
                 val py = segTop + (ePos.y - target.top) / (target.bottom - target.top) * segH
-                val sizePx = eraserSettings.sizeNormalized * panelW / tw
+                val sizePx = eraserSettings.sizeNormalized * segW / tw
                 val halfPx = sizePx / 2f
                 when (eraserSettings.shape) {
                     EraserShape.CIRCLE -> {

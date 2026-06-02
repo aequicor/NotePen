@@ -25,9 +25,9 @@ private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
  * Управление вводом внутри плавающего окна лупы — теперь с поддержкой
  * мульти-страничного выделения.
  *
- * Координата по Y в окне определяет, в какой [MagnifierPageSegment]
- * попал курсор; затем panel-local точка переводится в page-normalized
- * для соответствующей страницы.
+ * Координаты X/Y в окне определяют, в какой [MagnifierPageSegment] попал
+ * курсор; затем panel-local точка переводится в page-normalized для
+ * соответствующей страницы.
  */
 class MagnifierInputController(
     private val geometry: MagnifierGeometry,
@@ -83,7 +83,7 @@ class MagnifierInputController(
     ) {
         val pageCanvasW = geometry.pageCanvasWidthPx
         if (pageCanvasW <= 0f || panelSize.width <= 0f || panelSize.height <= 0f) return
-        val segment = segmentForPanelY(panelLocal.y, panelSize.height) ?: return
+        val segment = segmentForPanelPoint(panelLocal, panelSize) ?: return
         val page = panelLocalToPage(panelLocal, panelSize, segment)
         val effectiveTool = if (eraserOverride()) ToolMode.ERASER else toolMode()
         val pdfDrawingState = pdfDrawingStateProvider(segment.pageIndex)
@@ -246,17 +246,25 @@ class MagnifierInputController(
     }
 
     /**
-     * Находит сегмент, в чей panel-y диапазон попадает [panelY].
+     * Находит сегмент, в чей panel-rect попадает [panelLocal].
      */
-    internal fun segmentForPanelY(
-        panelY: Float,
-        panelHeight: Float,
+    internal fun segmentForPanelPoint(
+        panelLocal: Offset,
+        panelSize: Size,
     ): MagnifierPageSegment? {
-        if (panelHeight <= 0f) return null
-        val frac = (panelY / panelHeight).coerceIn(0f, 1f)
-        // Берём первый сегмент, у которого frac < panelBottomFrac. Граничный
-        // случай (frac == 0): возвращаем самый верхний.
-        return geometry.segments.firstOrNull { frac < it.panelBottomFrac || it === geometry.segments.last() }
+        if (panelSize.width <= 0f || panelSize.height <= 0f) return null
+        val fx = (panelLocal.x / panelSize.width).coerceIn(0f, 1f)
+        val fy = (panelLocal.y / panelSize.height).coerceIn(0f, 1f)
+        return geometry.segments.firstOrNull { segment ->
+            val containsX = fx >= segment.panelLeftFrac && fx < segment.panelRightFrac
+            val containsY = fy >= segment.panelTopFrac && fy < segment.panelBottomFrac
+            containsX && containsY
+        } ?: geometry.segments.lastOrNull { segment ->
+            fx >= segment.panelLeftFrac &&
+                fx <= segment.panelRightFrac &&
+                fy >= segment.panelTopFrac &&
+                fy <= segment.panelBottomFrac
+        }
     }
 
     /**

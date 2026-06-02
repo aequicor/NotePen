@@ -423,19 +423,29 @@ class MultiPageDrawingController(
                     lo
                 }
             }
-        // Книжный разворот (FEATURE #5): пара страниц делит один Y-ряд, бинпоиск
-        // по docY попадает на ЛЕВУЮ страницу пары. Если docX лёг в правую колонку
-        // (за её левым краем pageLeftPx) и в паре есть правая страница (тот же
-        // pageTopPx) — переключаемся на неё, чтобы перо рисовало на правой
-        // странице. Иначе остаёмся на левой.
+        // Книжный разворот (FEATURE #5): пара страниц делит один Y-ряд. Бинарный
+        // поиск выше возвращает последнюю страницу с pageTop <= docY, поэтому
+        // при одинаковых tops он может попасть сразу на ПРАВУЮ страницу пары.
+        // Нормализуемся к левой странице ряда и только потом выбираем колонку
+        // по docX. Без этого штрих на левой странице записывался в правую с
+        // отрицательным nx и потом выглядел как "за пределами PDF".
         if (geometry.isSpread) {
-            val sibling = pageIndex + 1
-            if (sibling < n &&
-                geometry.pageTopPx(sibling) == geometry.pageTopPx(pageIndex) &&
-                docX >= geometry.pageLeftPx(sibling)
-            ) {
-                pageIndex = sibling
-            }
+            val leftPage =
+                if (pageIndex > 0 && geometry.pageTopPx(pageIndex - 1) == geometry.pageTopPx(pageIndex)) {
+                    pageIndex - 1
+                } else {
+                    pageIndex
+                }
+            val rightPage = leftPage + 1
+            pageIndex =
+                if (rightPage < n &&
+                    geometry.pageTopPx(rightPage) == geometry.pageTopPx(leftPage) &&
+                    docX >= geometry.pageLeftPx(rightPage)
+                ) {
+                    rightPage
+                } else {
+                    leftPage
+                }
         }
         val pdfH = geometry.pdfHeightPx(pageIndex)
         // nx считаем относительно ЛЕВОГО края колонки этой страницы (в развороте
