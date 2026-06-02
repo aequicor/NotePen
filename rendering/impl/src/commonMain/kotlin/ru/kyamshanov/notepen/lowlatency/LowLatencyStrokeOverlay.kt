@@ -23,8 +23,14 @@ internal val LocalLowLatencyOverlayBounds =
  * back-buffered compositor. End-to-end pen latency drops from ~30 ms (two
  * compose frames + one composite) to ~5–10 ms (one front-buffer render).
  *
- * On JVM / desktop and on Android API < 29 this is a no-op composable —
- * Compose's own live-stroke rendering (in `DrawablePdfPage`) handles display.
+ * On JVM / desktop this is a Compose `Canvas` overlay inside the same page
+ * tree. It does not create a separate native window, so live-stroke coordinates
+ * stay synchronous with Compose layout and `graphicsLayer` transforms. Latency
+ * is frame-bound on desktop, but the overlay still owns live-stroke rendering
+ * so `DrawablePdfPage` does not draw the same in-flight stroke twice.
+ *
+ * On Android API < 29 this is a no-op composable — Compose's own live-stroke
+ * rendering (in `DrawablePdfPage`) handles display.
  *
  * The composable must be placed **inside** the same Box that hosts the
  * Compose `Canvas` and pointer-input modifiers, sized to match (e.g.
@@ -37,6 +43,7 @@ expect fun LowLatencyStrokeOverlay(
     modifier: Modifier = Modifier,
     viewportScale: Float = 1f,
     windowBounds: Rect? = null,
+    completedStrokeCount: Int = 0,
 )
 
 /**

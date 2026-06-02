@@ -506,10 +506,6 @@ actual fun PdfPagesViewer(
             val primarySet = primaryPages.toSet()
             val visibleSet = visibleOrder.toSet()
             val hadMissingVisible = visibleOrder.any { cache.get(it) == null }
-            val hadLowScaleVisible =
-                visibleOrder.any { pageIndex ->
-                    cache.entries[pageIndex]?.renderedAtScalePercent?.let { it < snap.scalePercent } == true
-                }
 
             fun switchToLatestIfChanged(): Boolean {
                 val latest = latestSnapshot(snap)
@@ -662,16 +658,20 @@ actual fun PdfPagesViewer(
                 renderOne(i, fullQuality = false)
                 if (switchToLatestIfChanged()) continue@renderLoop
             }
-            for (i in primaryPages) {
-                renderOne(i, fullQuality = true)
-                if (switchToLatestIfChanged()) continue@renderLoop
-            }
             for (i in visibleOrder) {
                 if (i !in primarySet) renderOne(i, fullQuality = false)
                 if (switchToLatestIfChanged()) continue@renderLoop
             }
-            if (!hadMissingVisible && !hadLowScaleVisible && cache.entries.isNotEmpty()) {
+            // When visible pages already have any bitmap, keep showing it through
+            // the zoom burst and wait for idle before starting CPU-heavy high-res
+            // PDFBox/Java2D work. Missing visible pages still render immediately so
+            // first paint never stays blank.
+            if (!hadMissingVisible && cache.entries.isNotEmpty()) {
                 delay(RENDER_DEBOUNCE_MS)
+                if (switchToLatestIfChanged()) continue@renderLoop
+            }
+            for (i in primaryPages) {
+                renderOne(i, fullQuality = true)
                 if (switchToLatestIfChanged()) continue@renderLoop
             }
             for (i in visibleOrder) {

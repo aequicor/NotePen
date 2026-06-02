@@ -42,6 +42,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -155,6 +156,7 @@ private const val PANEL_HIGH_RES_DIM_PX = 4000
 private const val FIGURE_PAGE_RENDER_WIDTH_PX = 1600
 private const val PANEL_SIDEBAR_ANIM_MS = 220
 private const val REFLOW_PROBE_DELAY_AFTER_OPEN_MS = 750L
+private const val NATIVE_PEN_FALLBACK_SUPPRESS_MS = 500L
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
@@ -1318,11 +1320,21 @@ fun EditorPanel(
         gestureRoute.value = PanelGestureRoute.NONE
     }
 
+    val nativePenFallbackSuppressed = remember { mutableStateOf(false) }
+    val nativePenFallbackReleaseJob = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
+
     // Native pen-stream → drawing pipeline (only for the focused panel, so a
     // pen event isn't routed into every panel at once).
     LaunchedEffect(drawingController, loupeSelectionController, tabletController, isFocused) {
         if (!isFocused) return@LaunchedEffect
         tabletController.penPointerEvents.collect { ev ->
+            nativePenFallbackSuppressed.value = true
+            nativePenFallbackReleaseJob[0]?.cancel()
+            nativePenFallbackReleaseJob[0] =
+                launch {
+                    delay(NATIVE_PEN_FALLBACK_SUPPRESS_MS)
+                    nativePenFallbackSuppressed.value = false
+                }
             when (ev.type) {
                 // Нативные pen-координаты приходят в координатах окна; приводим
                 // их в локальную viewport-систему gesture-узла (как у мыши).
@@ -1330,7 +1342,15 @@ fun EditorPanel(
                     routedOnDown(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
                 PenPointerEventType.UPDATE ->
                     routedOnMove(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
-                PenPointerEventType.UP -> routedOnUp()
+                PenPointerEventType.UP -> {
+                    val routeBeforeUp = gestureRoute.value
+                    routedOnMove(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
+                    if (routeBeforeUp == PanelGestureRoute.DRAWING || routeBeforeUp == PanelGestureRoute.MAGNIFIER) {
+                        withFrameNanos { }
+                        withFrameNanos { }
+                    }
+                    routedOnUp()
+                }
                 PenPointerEventType.CANCEL -> routedOnCancel()
             }
         }
@@ -1628,6 +1648,9 @@ fun EditorPanel(
                         key = drawingController,
                         tablet = tabletController,
                         palmRejectionActive = palmRejectionActive,
+                        nativePositionOffset = { viewerOriginInWindow.value },
+                        nativePenInputEnabled = false,
+                        fallbackDrawingPointerEnabled = { !nativePenFallbackSuppressed.value },
                         captureGesture = { pos ->
                             quickLoupeArmed.value ||
                                 openTriggerProvider.value ||

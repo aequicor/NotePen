@@ -31,6 +31,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -39,18 +41,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.translate
-import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.PointerType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.style.TextAlign
@@ -59,23 +62,31 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import ru.kyamshanov.notepen.COMPLETED_INK_REBUILD_IDLE_DELAY_MS
+import ru.kyamshanov.notepen.CompletedInk
+import ru.kyamshanov.notepen.InkRenderSpec
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
-import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
+import ru.kyamshanov.notepen.buildCompletedInk
+import ru.kyamshanov.notepen.completedInkCacheKey
 import ru.kyamshanov.notepen.detectStylusAwareDrag
+import ru.kyamshanov.notepen.drawCompletedMarkers
+import ru.kyamshanov.notepen.drawCompletedPenInk
 import ru.kyamshanov.notepen.drawLiveStroke
-import ru.kyamshanov.notepen.drawStrokeWithPressure
 import ru.kyamshanov.notepen.drawing.api.EraseGesture
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
 import kotlin.math.roundToInt
-import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 
 private const val FRAME_FILL_ALPHA = 0.10f
 
@@ -120,6 +131,7 @@ fun MagnifierInputPanel(
      * с мышью/touch'ем через свой собственный `pointerInput`.
      */
     externalInputController: MagnifierInputController? = null,
+    rasterDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     if (!state.enabled) return
 
@@ -228,6 +240,7 @@ fun MagnifierInputPanel(
                     onEraseFinished = onEraseFinished,
                     tablet = tablet,
                     externalInputController = externalInputController,
+                    rasterDispatcher = rasterDispatcher,
                     modifier =
                         Modifier
                             .fillMaxWidth()
@@ -341,15 +354,41 @@ private fun MagnifierContent(
     onEraseFinished: (Int, List<DrawingPath>, List<DrawingPath>) -> Unit,
     tablet: ru.kyamshanov.notepen.tablet.TabletInputController,
     externalInputController: MagnifierInputController?,
+    rasterDispatcher: CoroutineDispatcher,
     modifier: Modifier = Modifier,
 ) {
-    val livePath = remember { Path() }
     val frameColor = MaterialTheme.colorScheme.primary
+    val density = LocalDensity.current
+    val layoutDirection = LocalLayoutDirection.current
+    val contentSize = remember { mutableStateOf(IntSize.Zero) }
+    val renderSegments = ArrayList<MagnifierRenderSegment>(state.segments.size)
+    for (segment in state.segments) {
+        val drawingState = pdfDrawingStateProvider(segment.pageIndex)
+        val drawSpec = magnifierSegmentInkSpec(contentSize.value, segment, drawingState.extent.value) ?: continue
+        key(segment.pageIndex, segment.panelTopFrac, segment.panelBottomFrac, segment.targetOnPage) {
+            val completedInk =
+                rememberMagnifierCompletedInk(
+                    drawingState = drawingState,
+                    cacheSpec = drawSpec,
+                    density = density,
+                    layoutDirection = layoutDirection,
+                    rasterDispatcher = rasterDispatcher,
+                )
+            renderSegments +=
+                MagnifierRenderSegment(
+                    segment = segment,
+                    drawingState = drawingState,
+                    drawSpec = drawSpec,
+                    completedInk = completedInk,
+                )
+        }
+    }
 
-    Canvas(
+    Box(
         modifier =
             modifier
                 .background(MaterialTheme.colorScheme.surfaceVariant)
+                .onSizeChanged { contentSize.value = it }
                 .onGloballyPositioned { coords ->
                     state.updateContentBounds(coords.boundsInWindow())
                 }
@@ -407,153 +446,184 @@ private fun MagnifierContent(
                     )
                 },
     ) {
-        val segments = state.segments
-        if (segments.isEmpty()) return@Canvas
+        MagnifierBaseLayer(
+            state = state,
+            renderSegments = renderSegments,
+            toolMode = toolMode,
+            eraserSettings = eraserSettings,
+            eraserPos = eraserPos,
+            frameColor = frameColor,
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { },
+        )
+        MagnifierLiveLayer(
+            renderSegments = renderSegments,
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+}
 
+private data class MagnifierRenderSegment(
+    val segment: MagnifierPageSegment,
+    val drawingState: PdfDrawingState,
+    val drawSpec: InkRenderSpec,
+    val completedInk: State<CompletedInk?>,
+)
+
+@Composable
+private fun rememberMagnifierCompletedInk(
+    drawingState: PdfDrawingState,
+    cacheSpec: InkRenderSpec,
+    density: Density,
+    layoutDirection: LayoutDirection,
+    rasterDispatcher: CoroutineDispatcher,
+): State<CompletedInk?> {
+    val completedInk = remember { mutableStateOf<CompletedInk?>(null) }
+    val previousSpec = remember { mutableStateOf<InkRenderSpec?>(null) }
+    val cacheKey = completedInkCacheKey(cacheSpec, drawingState.historyVersion.value)
+    val isDrawingForInkCache = drawingState.isDrawing.value
+    LaunchedEffect(cacheKey, isDrawingForInkCache) {
+        if (isDrawingForInkCache) return@LaunchedEffect
+        val cacheSize = cacheSpec.surfaceSize
+        if (previousSpec.value != cacheSpec) {
+            completedInk.value = null
+            previousSpec.value = cacheSpec
+        }
+        if (cacheSize.width <= 0 || cacheSize.height <= 0 || drawingState.currentPaths.isEmpty()) {
+            completedInk.value = null
+            return@LaunchedEffect
+        }
+        delay(COMPLETED_INK_REBUILD_IDLE_DELAY_MS)
+        if (drawingState.isDrawing.value) return@LaunchedEffect
+        val paths = drawingState.currentPaths.toList()
+        if (paths.isEmpty()) {
+            completedInk.value = null
+            return@LaunchedEffect
+        }
+        val bitmap =
+            withContext(rasterDispatcher) {
+                buildCompletedInk(cacheSpec, paths, density, layoutDirection)
+            }
+        completedInk.value = CompletedInk(paths.size, bitmap)
+    }
+    return completedInk
+}
+
+private fun magnifierSegmentInkSpec(
+    panelSize: IntSize,
+    segment: MagnifierPageSegment,
+    extent: ru.kyamshanov.notepen.annotation.domain.model.PageExtent,
+): InkRenderSpec? {
+    if (panelSize.width <= 0 || panelSize.height <= 0) return null
+    val target = segment.targetOnPage
+    if (target.width <= 0f || target.height <= 0f) return null
+    val segmentHeight = ((segment.panelBottomFrac - segment.panelTopFrac) * panelSize.height).roundToInt()
+    if (segmentHeight <= 0) return null
+    return InkRenderSpec(
+        surfaceSize = IntSize(panelSize.width, segmentHeight),
+        extent = extent,
+        targetOnPage = target,
+    )
+}
+
+@Composable
+private fun MagnifierBaseLayer(
+    state: MagnifierState,
+    renderSegments: List<MagnifierRenderSegment>,
+    toolMode: ToolMode,
+    eraserSettings: EraserSettings,
+    eraserPos: androidx.compose.runtime.MutableState<ru.kyamshanov.notepen.drawing.api.EraserPosition?>,
+    frameColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val scratch = remember { Path() }
+    Canvas(modifier = modifier) {
         val panelW = size.width
         val panelH = size.height
-        // Рендерим каждый сегмент в свою «полосу» панели:
-        //  - PDF-тайл из соответствующего битмапа;
-        //  - завершённые и live штрихи этой страницы.
-        segments.forEach { seg ->
-            val segTop = seg.panelTopFrac * panelH
-            val segBottom = seg.panelBottomFrac * panelH
-            val segH = (segBottom - segTop).coerceAtLeast(0f)
-            if (segH <= 0f) return@forEach
-            val target = seg.targetOnPage
-            val tw = target.right - target.left
-            val th = target.bottom - target.top
-            if (tw <= 0f || th <= 0f) return@forEach
-
-            val bmp = state.pageBitmap(seg.pageIndex)
-            if (bmp != null) {
-                val srcOffsetX = (target.left * bmp.width).toInt().coerceAtLeast(0)
-                val srcOffsetY = (target.top * bmp.height).toInt().coerceAtLeast(0)
-                val srcW =
-                    (tw * bmp.width).toInt()
-                        .coerceAtLeast(1).coerceAtMost(bmp.width - srcOffsetX)
-                val srcH =
-                    (th * bmp.height).toInt()
-                        .coerceAtLeast(1).coerceAtMost(bmp.height - srcOffsetY)
-                drawImage(
-                    image = bmp,
-                    srcOffset = IntOffset(srcOffsetX, srcOffsetY),
-                    srcSize = IntSize(srcW, srcH),
-                    dstOffset = IntOffset(0, segTop.toInt()),
-                    dstSize = IntSize(panelW.toInt(), segH.toInt()),
-                )
-            }
-
-            val pdfDrawingState = pdfDrawingStateProvider(seg.pageIndex)
-            val pageExtent = pdfDrawingState.extent.value
-            // virtW/virtH — маппинг нормализованных PDF-координат в panel-пиксели
-            // полосы сегмента (используется и anti-flicker'ом, и live-tail'ом).
-            val virtW = panelW / tw
-            val virtH = segH / th
-
-            // Завершенные штрихи рисуем напрямую тем же transform'ом, что и
-            // live-tail. Так панель лупы не зависит от готовности кэша страницы
-            // после переноса target между страницами разворота.
-            val completedPaths = pdfDrawingState.currentPaths
-            if (completedPaths.isNotEmpty()) {
-                withTransform({
-                    clipRect(left = 0f, top = segTop, right = panelW, bottom = segBottom)
-                    translate(
-                        left = (pageExtent.left - target.left) * virtW,
-                        top = segTop + (pageExtent.top - target.top) * virtH,
-                    )
-                }) {
-                    completedPaths.forEach { path ->
-                        drawStrokeWithPressure(
-                            stroke = path,
-                            pdfWidth = virtW,
-                            pdfHeight = virtH,
-                            extent = pageExtent,
-                            scratch = livePath,
-                        )
-                    }
-                }
-            }
-
-            // Live-штрих рисуем целиком напрямую тем же transform'ом. Это
-            // важнее небольшого incremental-cache выигрыша: при переносе лупы
-            // между страницами разворота bitmap-кэш легко рассинхронизировать
-            // с текущим page/target-space.
-            if (pdfDrawingState.isDrawing.value && pdfDrawingState.livePoints.size > 1) {
-                withTransform({
-                    clipRect(left = 0f, top = segTop, right = panelW, bottom = segBottom)
-                    translate(
-                        left = (pageExtent.left - target.left) * virtW,
-                        top = segTop + (pageExtent.top - target.top) * virtH,
-                    )
-                }) {
-                    if (pdfDrawingState.liveToolKind.value == ToolKind.MARKER) {
-                        drawMarkerStroke(
-                            points = pdfDrawingState.livePoints,
-                            colorArgb = pdfDrawingState.liveColorArgb.value,
-                            normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                            pdfWidth = virtW,
-                            pdfHeight = virtH,
-                            extent = pageExtent,
-                            scratch = livePath,
-                        )
-                    } else {
-                        val totalSegments = pdfDrawingState.livePoints.size - 1
-                        drawLiveStroke(
-                            points = pdfDrawingState.livePoints,
-                            colorArgb = pdfDrawingState.liveColorArgb.value,
-                            normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                            pdfWidth = virtW,
-                            pdfHeight = virtH,
-                            extent = pageExtent,
-                            scratch = livePath,
-                            fromSegmentIndex = 0,
-                            toSegmentIndexExclusive = totalSegments,
+        renderSegments.forEach { renderSegment ->
+            val segment = renderSegment.segment
+            val segmentTop = segment.panelTopFrac * panelH
+            val segmentBottom = segment.panelBottomFrac * panelH
+            val segmentH = (segmentBottom - segmentTop).coerceAtLeast(0f)
+            if (segmentH <= 0f) return@forEach
+            drawMagnifierPdfSegment(
+                bitmap = state.pageBitmap(segment.pageIndex),
+                segment = segment,
+                segmentTop = segmentTop,
+                segmentHeight = segmentH,
+                panelWidth = panelW,
+            )
+            val paths = renderSegment.drawingState.currentPaths
+            if (paths.isNotEmpty()) {
+                clipRect(left = 0f, top = segmentTop, right = panelW, bottom = segmentBottom) {
+                    translate(top = segmentTop) {
+                        drawCompletedMarkers(paths, renderSegment.drawSpec, scratch)
+                        drawCompletedPenInk(
+                            paths = paths,
+                            cached = renderSegment.completedInk.value,
+                            spec = renderSegment.drawSpec,
+                            scratch = scratch,
+                            vectorWhenUpscaled = false,
                         )
                     }
                 }
             }
         }
+        drawMagnifierEraserIndicator(
+            renderSegments = renderSegments,
+            toolMode = toolMode,
+            eraserSettings = eraserSettings,
+            eraserPos = eraserPos.value,
+            frameColor = frameColor,
+            panelWidth = panelW,
+            panelHeight = panelH,
+        )
+    }
+}
 
-        // Индикатор ластика — рисуем по первому сегменту (multi-page eraser
-        // hover-индикация — отдельный кейс, не критичный для v1).
-        val ePos = eraserPos.value
-        if (toolMode == ToolMode.ERASER && ePos != null && segments.isNotEmpty()) {
-            val seg = segments.first()
-            val target = seg.targetOnPage
-            val tw = target.right - target.left
-            if (tw > 0f) {
-                val segTop = seg.panelTopFrac * panelH
-                val segH = (seg.panelBottomFrac - seg.panelTopFrac) * panelH
-                val px = (ePos.x - target.left) / tw * panelW
-                val py = segTop + (ePos.y - target.top) / (target.bottom - target.top) * segH
-                val sizePx = eraserSettings.sizeNormalized * panelW / tw
-                val halfPx = sizePx / 2f
-                when (eraserSettings.shape) {
-                    EraserShape.CIRCLE -> {
-                        drawCircle(
-                            color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
-                            radius = halfPx,
-                            center = Offset(px, py),
-                        )
-                        drawCircle(
-                            color = frameColor,
-                            radius = halfPx,
-                            center = Offset(px, py),
-                            style = Stroke(width = 2f),
+@Composable
+private fun MagnifierLiveLayer(
+    renderSegments: List<MagnifierRenderSegment>,
+    modifier: Modifier = Modifier,
+) {
+    val scratch = remember { Path() }
+    Canvas(modifier = modifier) {
+        val panelW = size.width
+        val panelH = size.height
+        renderSegments.forEach { renderSegment ->
+            val drawingState = renderSegment.drawingState
+            if (!drawingState.isDrawing.value || drawingState.livePoints.isEmpty()) return@forEach
+            val segment = renderSegment.segment
+            val segmentTop = segment.panelTopFrac * panelH
+            val segmentBottom = segment.panelBottomFrac * panelH
+            if (segmentBottom <= segmentTop) return@forEach
+            clipRect(left = 0f, top = segmentTop, right = panelW, bottom = segmentBottom) {
+                if (drawingState.liveToolKind.value == ToolKind.MARKER) {
+                    val translation = renderSegment.drawSpec.translation
+                    translate(left = translation.x, top = segmentTop + translation.y) {
+                        drawMarkerStroke(
+                            points = drawingState.livePoints,
+                            colorArgb = drawingState.liveColorArgb.value,
+                            normalizedStrokeWidth = drawingState.liveStrokeWidth.value,
+                            pdfWidth = renderSegment.drawSpec.pdfWidthPx,
+                            pdfHeight = renderSegment.drawSpec.pdfHeightPx,
+                            extent = renderSegment.drawSpec.extent,
+                            scratch = scratch,
                         )
                     }
-                    EraserShape.SQUARE -> {
-                        drawRect(
-                            color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
-                            topLeft = Offset(px - halfPx, py - halfPx),
-                            size = Size(sizePx, sizePx),
-                        )
-                        drawRect(
-                            color = frameColor,
-                            topLeft = Offset(px - halfPx, py - halfPx),
-                            size = Size(sizePx, sizePx),
-                            style = Stroke(width = 2f),
+                } else {
+                    val translation = renderSegment.drawSpec.translation
+                    translate(left = translation.x, top = segmentTop + translation.y) {
+                        drawLiveStroke(
+                            points = drawingState.livePoints,
+                            colorArgb = drawingState.liveColorArgb.value,
+                            normalizedStrokeWidth = drawingState.liveStrokeWidth.value,
+                            pdfWidth = renderSegment.drawSpec.pdfWidthPx,
+                            pdfHeight = renderSegment.drawSpec.pdfHeightPx,
+                            extent = renderSegment.drawSpec.extent,
+                            scratch = scratch,
                         )
                     }
                 }
@@ -562,12 +632,80 @@ private fun MagnifierContent(
     }
 }
 
-/**
- * Если перо ушло за эту долю ширины панели — после lift-off сдвигаем
- * рамку (Scribble-like). 75% даёт комфортное «упреждение», когда
- * пользователь ещё не упёрся в край.
- */
-private const val AUTO_SCROLL_TRIGGER_FRAC = 0.75f
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagnifierPdfSegment(
+    bitmap: ImageBitmap?,
+    segment: MagnifierPageSegment,
+    segmentTop: Float,
+    segmentHeight: Float,
+    panelWidth: Float,
+) {
+    val target = segment.targetOnPage
+    val tw = target.width
+    val th = target.height
+    if (bitmap == null || tw <= 0f || th <= 0f) return
+    val srcOffsetX = (target.left * bitmap.width).toInt().coerceAtLeast(0)
+    val srcOffsetY = (target.top * bitmap.height).toInt().coerceAtLeast(0)
+    val srcW = (tw * bitmap.width).toInt().coerceAtLeast(1).coerceAtMost(bitmap.width - srcOffsetX)
+    val srcH = (th * bitmap.height).toInt().coerceAtLeast(1).coerceAtMost(bitmap.height - srcOffsetY)
+    drawImage(
+        image = bitmap,
+        srcOffset = IntOffset(srcOffsetX, srcOffsetY),
+        srcSize = IntSize(srcW, srcH),
+        dstOffset = IntOffset(0, segmentTop.toInt()),
+        dstSize = IntSize(panelWidth.toInt(), segmentHeight.toInt().coerceAtLeast(1)),
+    )
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagnifierEraserIndicator(
+    renderSegments: List<MagnifierRenderSegment>,
+    toolMode: ToolMode,
+    eraserSettings: EraserSettings,
+    eraserPos: ru.kyamshanov.notepen.drawing.api.EraserPosition?,
+    frameColor: Color,
+    panelWidth: Float,
+    panelHeight: Float,
+) {
+    if (toolMode != ToolMode.ERASER || eraserPos == null || renderSegments.isEmpty()) return
+    val segment = renderSegments.first().segment
+    val target = segment.targetOnPage
+    val tw = target.width
+    val th = target.height
+    if (tw <= 0f || th <= 0f) return
+    val segmentTop = segment.panelTopFrac * panelHeight
+    val segmentH = (segment.panelBottomFrac - segment.panelTopFrac) * panelHeight
+    val px = (eraserPos.x - target.left) / tw * panelWidth
+    val py = segmentTop + (eraserPos.y - target.top) / th * segmentH
+    val sizePx = eraserSettings.sizeNormalized * panelWidth / tw
+    val halfPx = sizePx / 2f
+    when (eraserSettings.shape) {
+        EraserShape.CIRCLE -> {
+            drawCircle(
+                color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
+                radius = halfPx,
+                center = Offset(px, py),
+            )
+            drawCircle(
+                color = frameColor,
+                radius = halfPx,
+                center = Offset(px, py),
+                style = Stroke(width = 2f),
+            )
+        }
+        EraserShape.SQUARE -> {
+            drawRect(
+                color = frameColor.copy(alpha = FRAME_FILL_ALPHA),
+                topLeft = Offset(px - halfPx, py - halfPx),
+                size = Size(sizePx, sizePx),
+            )
+            drawRect(
+                color = frameColor,
+                topLeft = Offset(px - halfPx, py - halfPx),
+                size = Size(sizePx, sizePx),
+                style = Stroke(width = 2f),
+            )
+        }
+    }
+}
 
 /**
  * Pinch/pan жест внутри content-области панели лупы.

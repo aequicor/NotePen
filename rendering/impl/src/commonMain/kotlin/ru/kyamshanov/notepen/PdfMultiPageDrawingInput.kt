@@ -19,12 +19,18 @@ fun Modifier.pdfMultiPageDrawingInput(
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
     captureGesture: (Offset) -> Boolean = { false },
+    nativePositionOffset: () -> Offset = { Offset.Zero },
+    nativePenInputEnabled: Boolean = true,
+    fallbackDrawingPointerEnabled: () -> Boolean = { true },
 ): Modifier =
     pdfMultiPageDrawingInput(
         key = controller,
         tablet = tablet,
         palmRejectionActive = palmRejectionActive,
         captureGesture = captureGesture,
+        nativePositionOffset = nativePositionOffset,
+        nativePenInputEnabled = nativePenInputEnabled,
+        fallbackDrawingPointerEnabled = fallbackDrawingPointerEnabled,
         onDown = controller::onDown,
         onMove = controller::onMove,
         onUp = controller::onUp,
@@ -42,19 +48,40 @@ fun Modifier.pdfMultiPageDrawingInput(
     tablet: TabletInputController,
     palmRejectionActive: () -> Boolean,
     captureGesture: (Offset) -> Boolean = { false },
+    nativePositionOffset: () -> Offset = { Offset.Zero },
+    nativePenInputEnabled: Boolean = true,
+    fallbackDrawingPointerEnabled: () -> Boolean = { true },
     onDown: (Offset, Float, Float) -> Unit,
     onMove: (Offset, Float, Float) -> Unit,
     onUp: () -> Unit,
     onCancel: () -> Unit,
 ): Modifier =
-    this.pointerInput(key) {
-        detectStylusAwareDrag(
-            tablet = tablet,
-            isPalmRejectionActive = palmRejectionActive,
-            captureGesture = captureGesture,
-            onDown = onDown,
-            onMove = onMove,
-            onUp = onUp,
-            onCancel = onCancel,
+    this
+        .then(
+            if (nativePenInputEnabled) {
+                Modifier.pointerInput(key, tablet) {
+                    detectNativePenDrag(
+                        tablet = tablet,
+                        positionOffset = nativePositionOffset,
+                        onDown = onDown,
+                        onMove = onMove,
+                        onUp = onUp,
+                        onCancel = onCancel,
+                    )
+                }
+            } else {
+                Modifier
+            },
         )
-    }
+        .pointerInput(key) {
+            detectStylusAwareDrag(
+                tablet = tablet,
+                isPalmRejectionActive = palmRejectionActive,
+                captureGesture = captureGesture,
+                acceptDrawingPointer = fallbackDrawingPointerEnabled,
+                onDown = onDown,
+                onMove = onMove,
+                onUp = onUp,
+                onCancel = onCancel,
+            )
+        }

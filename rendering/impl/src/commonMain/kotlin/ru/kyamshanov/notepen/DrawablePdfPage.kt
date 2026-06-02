@@ -27,11 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerInputScope
@@ -40,16 +36,14 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
-import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
@@ -67,11 +61,10 @@ import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayMaxDimensionPx
 import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.magnifier.MagnifierTargetOverlay
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
+import ru.kyamshanov.notepen.tablet.PenPointerEventType
 import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.effectivePressure
 import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
-import kotlin.math.sqrt
-import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
@@ -94,61 +87,6 @@ private const val HOVER_INDICATOR_ALPHA = 0.5f
 /** Минимальный радиус hover-индикатора в пикселях канваса. */
 private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
 
-/** Множитель «расширения» штриха при сильном наклоне пера (0..1 → ×(1..1+gain)). */
-private const val TILT_WIDTH_GAIN = 0.5f
-private const val LIVE_EXACT_TAIL_SEGMENTS = 32
-private const val LIVE_TAIL_PREDICTION_GAIN = 0.45f
-private const val LIVE_TAIL_PREDICTION_MAX_PX = 18f
-private const val LIVE_TAIL_PREDICTION_MIN_PX = 2f
-
-/**
- * Floor for any rendered stroke segment in pixels. Below 1px Skia's stroking
- * pipeline produces broken or invisible lines (especially on low-DPI screens
- * and at low pressure on thin pens); clamping here guarantees the user never
- * draws a line that disappears at zoom-1, even at the thinnest slider position
- * with minimum pressure.
- */
-private const val MIN_RENDERED_STROKE_PX = 1f
-
-/**
- * Hard ceiling on either dimension of the off-screen ink-cache bitmap.
- *
- * The completed-strokes layer is rasterised at `canvasSize`; at 4–8× zoom the
- * page Box can grow past 5000 px, which on Android trips
- * `RecordingCanvas.throwIfCannotDraw` (≈ 100 MB per bitmap). Strokes are
- * normalised, so we rasterise at a capped resolution and let
- * `drawImage(dstSize = canvas)` upscale — visually indistinguishable from a
- * native-resolution cache once the user is already looking at a stretched
- * PDF page bitmap underneath.
- */
-private const val INK_CACHE_MAX_DIMENSION_PX = 3072
-
-/**
- * Bucket size for the ink-cache key. Without bucketing, every pixel of
- * `canvasSize` change during a continuous pinch zoom invalidates the cache
- * key and re-rasterises ALL strokes into a freshly allocated big bitmap —
- * at 60 fps this dominates the main thread and trashes the GC.
- *
- * Strokes are normalised; the rasterised bitmap is upscaled by `drawImage`
- * at draw time, so quantising the cache size by ±256 px is visually
- * indistinguishable but cuts rebuild frequency by ~100× during pinch.
- */
-private const val INK_CACHE_DIM_BUCKET_PX = 256
-
-/**
- * Максимум ещё-не-кэшированных штрихов, дорисовываемых на main-потоке поверх
- * битмапа каждый кадр (anti-flicker хвост).
- *
- * Хвост рассчитан на «текущее слово» — несколько штрихов с последней паузы. Но
- * при ХОЛОДНОМ кэше (первый рендер страницы) `cachedCount = 0`, и без лимита
- * fallback перерисовывал ВСЕ штрихи страницы каждый кадр на main-потоке, пока
- * фоновый [buildCompletedInk] не догонит — отсюда долгий лаг при открытии
- * исписанной страницы. Ограничиваем хвост последними N штрихами: основную массу
- * показывает одноразовый фоновый билд (через ~сотню мс), а per-frame стоимость
- * остаётся ограниченной.
- */
-private const val MAX_UNCACHED_TAIL_STROKES = 48
-
 /**
  * Hard ceiling on either dimension of the page Box at which the Android
  * low-latency `SurfaceView` overlay is allowed to mount. Above this, the
@@ -167,18 +105,6 @@ private const val MAX_UNCACHED_TAIL_STROKES = 48
  */
 private const val LOW_LATENCY_OVERLAY_MAX_DIM_PX = 2400
 
-/**
- * Растеризованный кэш завершённых штрихов вместе с количеством штрихов
- * ([strokeCount]), вошедших в него. Счётчик нужен, чтобы понять, какие штрихи
- * ещё не попали в кэш (хвост `currentPaths`), и дорисовать их поверх, пока идёт
- * асинхронный rebuild — иначе только что завершённый штрих «пропадал» на время
- * растеризации (см. anti-flicker в [DrawablePdfPage]).
- */
-private data class CachedInk(
-    val strokeCount: Int,
-    val bitmap: ImageBitmap,
-)
-
 private fun cappedLowLatencyOverlaySize(
     pageSize: IntSize,
     maxDimensionPx: Int,
@@ -192,45 +118,6 @@ private fun cappedLowLatencyOverlaySize(
         width = (w.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
         height = (h.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
     )
-}
-
-/**
- * Растеризует все [paths] в off-screen [ImageBitmap] размера [bw]×[bh].
- * Чистая функция без захвата composable-состояния — безопасно вызывать вне
- * main-потока. Битмап покрывает PDF + extent-поля; PDF-пиксель = `bw/ext.width`,
- * штрихи нормализованы в PDF-page координатах (см. `drawStrokeWithPressure`).
- */
-private fun buildCompletedInk(
-    bw: Int,
-    bh: Int,
-    paths: List<DrawingPath>,
-    ext: PageExtent,
-    density: Density,
-    layoutDirection: LayoutDirection,
-): ImageBitmap {
-    val pdfBw = bw.toFloat() / ext.width
-    val pdfBh = bh.toFloat() / ext.height
-    val bmp = ImageBitmap(bw, bh)
-    val gCanvas = GraphicsCanvas(bmp)
-    val scope = CanvasDrawScope()
-    val scratch = Path()
-    scope.draw(
-        density = density,
-        layoutDirection = layoutDirection,
-        canvas = gCanvas,
-        size = Size(bw.toFloat(), bh.toFloat()),
-    ) {
-        // Marker strokes are NOT baked here: they must be composited against the
-        // PDF with BlendMode.Multiply (so text stays readable), which only works
-        // when drawn directly onto the canvas that already holds the PDF — see the
-        // marker pass in DrawablePdfPage. This bitmap is pen ink only.
-        paths.forEach { path ->
-            if (path.toolType != ToolKind.MARKER) {
-                drawStrokeWithPressure(path, pdfBw, pdfBh, ext, scratch)
-            }
-        }
-    }
-    return bmp
 }
 
 @Composable
@@ -346,33 +233,18 @@ fun DrawablePdfPage(
         }
     }
 
+    val inkCacheMaxDimensionPx = completedInkCacheMaxDimensionPx()
+    val vectorCompletedInkWhenUpscaled = vectorCompletedInkWhenCacheUpscaled()
+
     // Bucketed cache dimensions: drops the lowest bits of canvasSize so
     // sub-bucket zoom changes don't invalidate the ink cache. Above the
-    // INK_CACHE_MAX_DIMENSION_PX cap the bucket is irrelevant (cap wins),
+    // platform cap the bucket is irrelevant (cap wins),
     // which means at high zoom the key naturally stays constant.
     // derivedStateOf — чтобы рекомпозиция триггерилась только при
     // пересечении границы бакета, а не на каждый пиксельный delta.
     val inkCacheDim: IntSize by remember {
         derivedStateOf {
-            val (w, h) = canvasSize.value
-            if (w <= 0 || h <= 0) {
-                IntSize.Zero
-            } else {
-                val longest = maxOf(w, h)
-                if (longest > INK_CACHE_MAX_DIMENSION_PX) {
-                    val scaleNum = INK_CACHE_MAX_DIMENSION_PX
-                    IntSize(
-                        width = (w.toLong() * scaleNum / longest).toInt().coerceAtLeast(1),
-                        height = (h.toLong() * scaleNum / longest).toInt().coerceAtLeast(1),
-                    )
-                } else {
-                    val b = INK_CACHE_DIM_BUCKET_PX
-                    IntSize(
-                        width = ((w + b - 1) / b * b).coerceAtLeast(b),
-                        height = ((h + b - 1) / b * b).coerceAtLeast(b),
-                    )
-                }
-            }
+            bucketedInkCacheSize(canvasSize.value, inkCacheMaxDimensionPx)
         }
     }
 
@@ -388,26 +260,46 @@ fun DrawablePdfPage(
     // сотнями штрихов синхронный rebuild при коммите зума (смена бакета
     // [inkCacheDim]) занимал сотни мс и ронял кадры. Пока строится новый
     // битмап, на экране остаётся прежний (GPU-масштабируется тем же
-    // graphicsLayer'ом) — без пустого кадра. Счётчик [CachedInk.strokeCount]
+    // graphicsLayer'ом) — без пустого кадра. Счётчик [CompletedInk.strokeCount]
     // позволяет дорисовать ещё не вошедшие в кэш штрихи, пока он не догнал
     // (см. anti-flicker ниже).
-    val completedInk = remember { mutableStateOf<CachedInk?>(null) }
-    LaunchedEffect(inkCacheDim, pdfDrawingState.historyVersion.value) {
+    val completedInk = remember { mutableStateOf<CompletedInk?>(null) }
+    val isDrawingForInkCache = pdfDrawingState.isDrawing.value
+    LaunchedEffect(inkCacheDim, pdfDrawingState.historyVersion.value, isDrawingForInkCache) {
+        if (isDrawingForInkCache) return@LaunchedEffect
         val bw = inkCacheDim.width
         val bh = inkCacheDim.height
         if (bw <= 0 || bh <= 0 || pdfDrawingState.currentPaths.isEmpty()) {
             completedInk.value = null
             return@LaunchedEffect
         }
+        delay(COMPLETED_INK_REBUILD_IDLE_DELAY_MS)
+        if (pdfDrawingState.isDrawing.value) return@LaunchedEffect
         // Снимок состояния делаем на composition-потоке — нельзя итерировать
         // SnapshotStateList из фонового диспетчера (конкурентная мутация вводом).
         val paths = pdfDrawingState.currentPaths.toList()
+        if (paths.isEmpty()) {
+            completedInk.value = null
+            return@LaunchedEffect
+        }
         val ext = pdfDrawingState.extent.value
+        val spec = InkRenderSpec(surfaceSize = inkCacheDim, extent = ext)
         val bmp =
             withContext(rasterDispatcher) {
-                buildCompletedInk(bw, bh, paths, ext, density, layoutDirection)
+                buildCompletedInk(spec, paths, density, layoutDirection)
             }
-        completedInk.value = CachedInk(paths.size, bmp)
+        completedInk.value = CompletedInk(paths.size, bmp)
+    }
+    val completedInkCoverageCount by remember {
+        derivedStateOf {
+            val cached = completedInk.value
+            val size = canvasSize.value
+            if (vectorCompletedInkWhenUpscaled && cached?.isUpscaledTo(size) == true) {
+                pdfDrawingState.currentPaths.size
+            } else {
+                cached?.strokeCount ?: 0
+            }
+        }
     }
 
     // Ввод рисования поднят на уровень PdfPagesViewer'а (см.
@@ -513,70 +405,26 @@ fun DrawablePdfPage(
             }
 
             val paths = pdfDrawingState.currentPaths
+            val canvasWidth = size.width.toInt()
+            val canvasHeight = size.height.toInt()
+            val inkSpec = InkRenderSpec(surfaceSize = IntSize(canvasWidth, canvasHeight), extent = ext)
 
-            // Completed MARKER strokes — drawn here, directly over the PDF, with
-            // multiply blend (inside drawMarkerStroke) so highlighted text stays
-            // readable and the highlight sits visually behind the pen ink below.
-            // Not cached: highlights are few and each is a single fill path.
-            for (i in 0 until paths.size) {
-                val p = paths[i]
-                if (p.toolType == ToolKind.MARKER) {
-                    drawMarkerStroke(
-                        points = p.points,
-                        colorArgb = p.colorArgb,
-                        normalizedStrokeWidth = p.strokeWidth,
-                        pdfWidth = pdfW,
-                        pdfHeight = pdfH,
-                        extent = ext,
-                        scratch = livePath,
-                    )
-                }
-            }
+            // Completed markers stay in the main canvas so their Multiply blend
+            // sees the PDF pixels. Completed pen ink uses the shared bitmap cache
+            // plus an anti-flicker tail while the async rebuild catches up.
+            drawCompletedMarkers(paths, inkSpec, livePath)
+            drawCompletedPenInk(
+                paths = paths,
+                cached = completedInk.value,
+                spec = inkSpec,
+                scratch = livePath,
+                vectorWhenUpscaled = vectorCompletedInkWhenUpscaled,
+            )
 
-            // Completed PEN ink — single bitmap blit. Cache may be rasterised at
-            // a lower resolution than the canvas (see INK_CACHE_MAX_DIMENSION_PX),
-            // so stretch via dstSize. Pen ink sits on top of the marker pass.
-            val cached = completedInk.value
-            cached?.let { c ->
-                drawImage(
-                    image = c.bitmap,
-                    srcOffset = IntOffset.Zero,
-                    srcSize = IntSize(c.bitmap.width, c.bitmap.height),
-                    dstOffset = IntOffset.Zero,
-                    dstSize = IntSize(size.width.toInt(), size.height.toInt()),
-                )
-            }
-
-            // Anti-flicker: асинхронный кэш мог ещё не вобрать недавно
-            // завершённые штрихи. При прерывистом письме (буквы) каждый новый
-            // штрих перезапускает async-ребилд, поэтому кэш не догоняет, пока не
-            // сделаешь паузу. Чтобы уже завершённые буквы не «пропадали» (а они
-            // пропадали, пока мы рисуем следующую — overlay показывает только
-            // текущий штрих), дорисовываем поверх битмапа весь хвост
-            // `currentPaths`, ещё не вошедший в кэш (`strokeCount`) — в т.ч. во
-            // время активного рисования. Это дёшево: кэш держит всё до последней
-            // паузы, так что в хвосте лишь несколько штрихов текущего слова.
-            // Маркеры здесь пропускаются — они уже отрисованы в marker-проходе
-            // выше. Живой (ещё не завершённый) штрих сюда не попадает — он в
-            // `livePoints`, не в `currentPaths`, поэтому двойного рендера нет.
-            val cachedCount = cached?.strokeCount ?: 0
-            if (paths.size > cachedCount) {
-                // Лимитируем хвост: при холодном кэше (cachedCount = 0 на первом
-                // рендере) иначе перерисовывали бы всю страницу каждый кадр на
-                // main-потоке. Основную массу покрывает фоновый билд; здесь —
-                // лишь последние штрихи, чтобы только что написанное не «пропадало».
-                val tailStart = maxOf(cachedCount, paths.size - MAX_UNCACHED_TAIL_STROKES)
-                for (i in tailStart until paths.size) {
-                    val p = paths[i]
-                    if (p.toolType != ToolKind.MARKER) {
-                        drawStrokeWithPressure(p, pdfW, pdfH, ext, livePath)
-                    }
-                }
-            }
-
-            if (!lowLatencyOverlayActive &&
+            if (magnifierState == null &&
+                !lowLatencyOverlayActive &&
                 pdfDrawingState.isDrawing.value &&
-                pdfDrawingState.livePoints.size > 1
+                pdfDrawingState.livePoints.isNotEmpty()
             ) {
                 if (pdfDrawingState.liveToolKind.value == ToolKind.MARKER) {
                     drawMarkerStroke(
@@ -700,10 +548,10 @@ fun DrawablePdfPage(
             }
         }
 
-        // Low-latency front-buffered overlay for the live stroke on platforms
-        // that support it (Android API 29+). Sits above the Compose Canvas; on
-        // platforms where it is a no-op, the Compose Canvas above still
-        // renders the live stroke itself (`drawLiveStroke` above).
+        // Overlay for the live stroke on platforms that support a separate
+        // layer: Android uses a front-buffered SurfaceView, JVM/Desktop uses a
+        // Compose Canvas in the same page tree. Where the overlay is unavailable,
+        // the Compose Canvas above renders the live stroke itself.
         if (lowLatencyOverlayActive) {
             val overlayBounds = LocalLowLatencyOverlayBounds.current
             val overlayWidthDp = with(density) { lowLatencyOverlaySize.width.toDp() }
@@ -714,6 +562,7 @@ fun DrawablePdfPage(
                 drawingState = pdfDrawingState,
                 viewportScale = lowLatencyViewportScale,
                 windowBounds = overlayBounds?.windowRect,
+                completedStrokeCount = completedInkCoverageCount,
                 modifier =
                     Modifier
                         .size(width = overlayWidthDp, height = overlayHeightDp)
@@ -764,6 +613,43 @@ fun DrawablePdfPage(
     }
 }
 
+suspend fun detectNativePenDrag(
+    tablet: TabletInputController,
+    positionOffset: () -> Offset,
+    onDown: (position: Offset, pressure: Float, tilt: Float) -> Unit,
+    onMove: (position: Offset, pressure: Float, tilt: Float) -> Unit,
+    onUp: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    var active = false
+    tablet.penPointerEvents.collect { event ->
+        val localPosition = event.position - positionOffset()
+        when (event.type) {
+            PenPointerEventType.DOWN -> {
+                if (active) onCancel()
+                onDown(localPosition, event.pressure, event.tilt)
+                active = true
+            }
+            PenPointerEventType.UPDATE -> {
+                if (active) onMove(localPosition, event.pressure, event.tilt)
+            }
+            PenPointerEventType.UP -> {
+                if (active) {
+                    onMove(localPosition, event.pressure, event.tilt)
+                    onUp()
+                    active = false
+                }
+            }
+            PenPointerEventType.CANCEL -> {
+                if (active) {
+                    onCancel()
+                    active = false
+                }
+            }
+        }
+    }
+}
+
 /**
  * Stylus-aware drag gesture used by all three drawing tools. See KDoc on
  * earlier revisions for the full rationale; key invariants:
@@ -778,6 +664,7 @@ suspend fun PointerInputScope.detectStylusAwareDrag(
     tablet: TabletInputController,
     isPalmRejectionActive: () -> Boolean,
     captureGesture: (position: Offset) -> Boolean = { false },
+    acceptDrawingPointer: () -> Boolean = { true },
     onDown: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onMove: (position: Offset, pressure: Float, tilt: Float) -> Unit,
     onUp: () -> Unit,
@@ -799,6 +686,9 @@ suspend fun PointerInputScope.detectStylusAwareDrag(
             down.type == PointerType.Stylus ||
                 down.type == PointerType.Eraser ||
                 down.type == PointerType.Mouse
+        if (isDrawingPointer && !acceptDrawingPointer()) {
+            return@awaitEachGesture
+        }
         if (!isDrawingPointer && !captureGesture(down.position)) {
             return@awaitEachGesture
         }
@@ -838,388 +728,6 @@ suspend fun PointerInputScope.detectStylusAwareDrag(
             }
         } finally {
             if (!ended) onCancel()
-        }
-    }
-}
-
-/**
- * Renderer for the in-flight live stroke. Mirrors the per-segment width
- * modulation used by [drawStrokeWithPressure] when baking finished strokes —
- * without this, varying pressure during the gesture would repaint the *whole*
- * stroke at a single averaged width every frame, so pressing harder made the
- * already-drawn part visually thicken until lift-off.
- *
- * Fast path: when every point shares the same pressure and tilt (mouse /
- * marker without pressure data) the stroke is painted as a single
- * Catmull-Rom-smoothed path — identical cost to the previous renderer.
- *
- * [points] is the receiver's `livePoints` list and is guaranteed to contain
- * a single sub-path (only the first point has `isNewPath = true`), so no
- * sub-path splitting is needed here.
- *
- * [fromSegmentIndex] / [toSegmentIndexExclusive] let callers render only a
- * range of segments — used by the magnifier's incremental-bake live layer
- * to (a) bake stable older segments once into an off-screen bitmap and
- * (b) draw only the unbaked tail each frame. Default range covers the
- * whole stroke for the main-page renderer.
- */
-fun DrawScope.drawLiveStroke(
-    points: List<DrawingPoint>,
-    colorArgb: Long,
-    normalizedStrokeWidth: Float,
-    pdfWidth: Float,
-    pdfHeight: Float,
-    extent: PageExtent,
-    scratch: Path,
-    fromSegmentIndex: Int = 0,
-    toSegmentIndexExclusive: Int = points.size - 1,
-) {
-    if (points.size < 2) return
-    val segFrom = fromSegmentIndex.coerceAtLeast(0)
-    val segTo = toSegmentIndexExclusive.coerceAtMost(points.size - 1)
-    if (segFrom >= segTo) return
-
-    val color = Color(colorArgb.toInt())
-    val baseWidth = normalizedStrokeWidth * pdfWidth
-    val offX = -extent.left
-    val offY = -extent.top
-
-    // Fast path applies only when rendering the full stroke; partial-range
-    // renders bypass it (cost is dominated by GPU drawPath calls, not the
-    // few-point scan, so this is fine).
-    if (segFrom == 0 && segTo == points.size - 1) {
-        val uniformPressure = points.first().pressure
-        val uniformTilt = points.first().tilt
-        var pressureVaries = false
-        var tiltVaries = false
-        for (p in points) {
-            if (!pressureVaries && p.pressure != uniformPressure) pressureVaries = true
-            if (!tiltVaries && p.tilt != uniformTilt) tiltVaries = true
-            if (pressureVaries && tiltVaries) break
-        }
-
-        if (!pressureVaries && !tiltVaries) {
-            scratch.reset()
-            points.appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
-            drawPath(
-                path = scratch,
-                color = color,
-                style =
-                    Stroke(
-                        width =
-                            (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
-                                .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                    ),
-            )
-            drawPredictedLiveTail(points, colorArgb, normalizedStrokeWidth, pdfWidth, pdfHeight, extent, scratch)
-            return
-        }
-
-        if (points.size > LIVE_EXACT_TAIL_SEGMENTS + 2) {
-            val tailStart = (points.size - 1 - LIVE_EXACT_TAIL_SEGMENTS).coerceAtLeast(1)
-            var pressureSum = 0f
-            var tiltSum = 0f
-            for (i in 0..tailStart) {
-                pressureSum += points[i].pressure
-                tiltSum += points[i].tilt
-            }
-            val prefixCount = tailStart + 1
-            val avgPressure = pressureSum / prefixCount
-            val avgTilt = tiltSum / prefixCount
-
-            scratch.reset()
-            points.subList(0, prefixCount).appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
-            drawPath(
-                path = scratch,
-                color = color,
-                style =
-                    Stroke(
-                        width =
-                            (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
-                                .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                    ),
-            )
-
-            for (i in tailStart until segTo) {
-                val p0 = if (i > 0) points[i - 1] else points[0]
-                val p1 = points[i]
-                val p2 = points[i + 1]
-                val p3 = if (i + 2 < points.size) points[i + 2] else points[i + 1]
-
-                val x1 = (p1.x + offX) * pdfWidth
-                val y1 = (p1.y + offY) * pdfHeight
-                val x2 = (p2.x + offX) * pdfWidth
-                val y2 = (p2.y + offY) * pdfHeight
-
-                scratch.reset()
-                scratch.moveTo(x1, y1)
-                scratch.cubicTo(
-                    x1 + (p2.x - p0.x) * pdfWidth / 6f,
-                    y1 + (p2.y - p0.y) * pdfHeight / 6f,
-                    x2 - (p3.x - p1.x) * pdfWidth / 6f,
-                    y2 - (p3.y - p1.y) * pdfHeight / 6f,
-                    x2,
-                    y2,
-                )
-                val tailPressure = (p1.pressure + p2.pressure) * 0.5f
-                val tailTilt = (p1.tilt + p2.tilt) * 0.5f
-                drawPath(
-                    path = scratch,
-                    color = color,
-                    style =
-                        Stroke(
-                            width =
-                                (baseWidth * tailPressure * (1f + TILT_WIDTH_GAIN * tailTilt))
-                                    .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                            cap = StrokeCap.Round,
-                            join = StrokeJoin.Round,
-                        ),
-                )
-            }
-            drawPredictedLiveTail(points, colorArgb, normalizedStrokeWidth, pdfWidth, pdfHeight, extent, scratch)
-            return
-        }
-    }
-
-    for (i in segFrom until segTo) {
-        val p0 = if (i > 0) points[i - 1] else points[0]
-        val p1 = points[i]
-        val p2 = points[i + 1]
-        val p3 = if (i + 2 < points.size) points[i + 2] else points[i + 1]
-
-        val x1 = (p1.x + offX) * pdfWidth
-        val y1 = (p1.y + offY) * pdfHeight
-        val x2 = (p2.x + offX) * pdfWidth
-        val y2 = (p2.y + offY) * pdfHeight
-
-        scratch.reset()
-        scratch.moveTo(x1, y1)
-        scratch.cubicTo(
-            x1 + (p2.x - p0.x) * pdfWidth / 6f,
-            y1 + (p2.y - p0.y) * pdfHeight / 6f,
-            x2 - (p3.x - p1.x) * pdfWidth / 6f,
-            y2 - (p3.y - p1.y) * pdfHeight / 6f,
-            x2,
-            y2,
-        )
-        val avgPressure = (p1.pressure + p2.pressure) * 0.5f
-        val avgTilt = (p1.tilt + p2.tilt) * 0.5f
-        drawPath(
-            path = scratch,
-            color = color,
-            style =
-                Stroke(
-                    width =
-                        (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
-                            .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round,
-                ),
-        )
-    }
-    if (segFrom == 0 && segTo == points.size - 1) {
-        drawPredictedLiveTail(points, colorArgb, normalizedStrokeWidth, pdfWidth, pdfHeight, extent, scratch)
-    }
-}
-
-private fun DrawScope.drawPredictedLiveTail(
-    points: List<DrawingPoint>,
-    colorArgb: Long,
-    normalizedStrokeWidth: Float,
-    pdfWidth: Float,
-    pdfHeight: Float,
-    extent: PageExtent,
-    scratch: Path,
-) {
-    if (points.size < 3) return
-    val last = points.last()
-    if (last.isNewPath) return
-    val prev = points[points.lastIndex - 1]
-    val dx = (last.x - prev.x) * pdfWidth
-    val dy = (last.y - prev.y) * pdfHeight
-    val distance = sqrt(dx * dx + dy * dy)
-    if (distance < LIVE_TAIL_PREDICTION_MIN_PX) return
-
-    val predictionGain = minOf(LIVE_TAIL_PREDICTION_GAIN, LIVE_TAIL_PREDICTION_MAX_PX / distance)
-    val offX = -extent.left
-    val offY = -extent.top
-    val x1 = (last.x + offX) * pdfWidth
-    val y1 = (last.y + offY) * pdfHeight
-    val x2 = x1 + dx * predictionGain
-    val y2 = y1 + dy * predictionGain
-
-    scratch.reset()
-    scratch.moveTo(x1, y1)
-    scratch.lineTo(x2, y2)
-    drawPath(
-        path = scratch,
-        color = Color(colorArgb.toInt()),
-        style =
-            Stroke(
-                width =
-                    (normalizedStrokeWidth * pdfWidth * last.pressure * (1f + TILT_WIDTH_GAIN * last.tilt))
-                        .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                cap = StrokeCap.Round,
-                join = StrokeJoin.Round,
-            ),
-    )
-}
-
-/**
- * Renders [stroke] with per-segment width modulated by [DrawingPoint.pressure]
- * and [DrawingPoint.tilt]. Used to bake completed strokes into the off-screen
- * cache bitmap.
- *
- * When every point has the same pressure **and** tilt (typical mouse / marker
- * stroke), the whole stroke is painted as a single Catmull-Rom-smoothed path —
- * cheap and visually identical to the legacy renderer. When pressure or tilt
- * varies (tablet), each segment is painted as its own short cubic with width
- * derived from the average pressure × tilt-boost of its two endpoints.
- *
- * Segments are joined with [StrokeCap.Round] so the width steps are invisible.
- */
-fun DrawScope.drawStrokeWithPressure(
-    stroke: DrawingPath,
-    pdfWidth: Float,
-    pdfHeight: Float,
-    extent: PageExtent,
-    scratch: Path,
-) {
-    val points = stroke.points
-    if (points.size < 2) return
-
-    val color = Color(stroke.colorArgb.toInt())
-    val baseWidth = stroke.strokeWidth * pdfWidth
-    val offX = -extent.left
-    val offY = -extent.top
-
-    val uniformPressure = points.first().pressure
-    val uniformTilt = points.first().tilt
-    val pressureVaries = points.any { it.pressure != uniformPressure }
-    val tiltVaries = points.any { it.tilt != uniformTilt }
-
-    if (!pressureVaries && !tiltVaries) {
-        scratch.reset()
-        points.appendCatmullRomTo(scratch, pdfWidth, pdfHeight, offX, offY)
-        drawPath(
-            path = scratch,
-            color = color,
-            style =
-                Stroke(
-                    width =
-                        (baseWidth * uniformPressure * (1f + TILT_WIDTH_GAIN * uniformTilt))
-                            .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                    cap = StrokeCap.Round,
-                    join = StrokeJoin.Round,
-                ),
-        )
-        return
-    }
-
-    // Per-segment render: split on sub-paths first so erased gaps stay gaps.
-    val starts = points.indices.filter { i -> i == 0 || points[i].isNewPath }
-    starts.forEachIndexed { si, start ->
-        val end = if (si + 1 < starts.size) starts[si + 1] else points.size
-        val seg = points.subList(start, end)
-        if (seg.size < 2) return@forEachIndexed
-
-        for (i in 0 until seg.size - 1) {
-            val p0 = if (i > 0) seg[i - 1] else seg[0]
-            val p1 = seg[i]
-            val p2 = seg[i + 1]
-            val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
-
-            val x1 = (p1.x + offX) * pdfWidth
-            val y1 = (p1.y + offY) * pdfHeight
-            val x2 = (p2.x + offX) * pdfWidth
-            val y2 = (p2.y + offY) * pdfHeight
-
-            scratch.reset()
-            scratch.moveTo(x1, y1)
-            scratch.cubicTo(
-                x1 + (p2.x - p0.x) * pdfWidth / 6f,
-                y1 + (p2.y - p0.y) * pdfHeight / 6f,
-                x2 - (p3.x - p1.x) * pdfWidth / 6f,
-                y2 - (p3.y - p1.y) * pdfHeight / 6f,
-                x2,
-                y2,
-            )
-            val avgPressure = (p1.pressure + p2.pressure) * 0.5f
-            val avgTilt = (p1.tilt + p2.tilt) * 0.5f
-            drawPath(
-                path = scratch,
-                color = color,
-                style =
-                    Stroke(
-                        width =
-                            (baseWidth * avgPressure * (1f + TILT_WIDTH_GAIN * avgTilt))
-                                .coerceAtLeast(MIN_RENDERED_STROKE_PX),
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round,
-                    ),
-            )
-        }
-    }
-}
-
-/**
- * Appends a smooth Catmull-Rom → cubic-Bézier approximation of the receiver's
- * points to [target]. Caller is responsible for [Path.reset]ting [target] first
- * if a fresh path is wanted — passing an existing Path lets callers reuse one
- * scratch instance across many strokes instead of allocating per frame.
- *
- * Sub-strokes (points with [DrawingPoint.isNewPath] == true) are appended as
- * independent smooth curves. Segments shorter than 3 points fall back to
- * straight lines so every recorded point is still included.
- */
-
-private fun List<DrawingPoint>.appendCatmullRomTo(
-    target: Path,
-    pdfW: Float,
-    pdfH: Float,
-    offX: Float = 0f,
-    offY: Float = 0f,
-) {
-    if (isEmpty()) return
-
-    // Collect segment start indices (index 0 is always a start).
-    val starts = indices.filter { i -> i == 0 || get(i).isNewPath }
-
-    starts.forEachIndexed { si, start ->
-        val end = if (si + 1 < starts.size) starts[si + 1] else size
-        val seg = subList(start, end)
-
-        target.moveTo((seg[0].x + offX) * pdfW, (seg[0].y + offY) * pdfH)
-        if (seg.size < 2) return@forEachIndexed
-        if (seg.size == 2) {
-            target.lineTo((seg[1].x + offX) * pdfW, (seg[1].y + offY) * pdfH)
-            return@forEachIndexed
-        }
-
-        // Catmull-Rom: for segment i→i+1 use ghost endpoints at the boundaries.
-        for (i in 0 until seg.size - 1) {
-            val p0 = if (i > 0) seg[i - 1] else seg[0]
-            val p1 = seg[i]
-            val p2 = seg[i + 1]
-            val p3 = if (i + 2 < seg.size) seg[i + 2] else seg[i + 1]
-
-            val x1 = (p1.x + offX) * pdfW
-            val y1 = (p1.y + offY) * pdfH
-            val x2 = (p2.x + offX) * pdfW
-            val y2 = (p2.y + offY) * pdfH
-
-            target.cubicTo(
-                x1 + (p2.x - p0.x) * pdfW / 6f,
-                y1 + (p2.y - p0.y) * pdfH / 6f,
-                x2 - (p3.x - p1.x) * pdfW / 6f,
-                y2 - (p3.y - p1.y) * pdfH / 6f,
-                x2,
-                y2,
-            )
         }
     }
 }
