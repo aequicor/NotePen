@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\kruz18\\IdeaProjects\\NotePen2\\tools\\uitest\\related-cases-hook.ps1\"",
+            "timeout": 15,
+            "statusMessage": "Resolving related test cases"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\kruz18\\IdeaProjects\\NotePen2\\tools\\uitest\\ai-vision-hook.ps1\"",
+            "timeout": 15,
+            "statusMessage": "Checking for ai-vision trigger"
+          }
+        ]
+      }
+    ]
+  }
+}

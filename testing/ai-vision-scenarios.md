@@ -1,6 +1,6 @@
 # NotePen — Tier-2 AI-vision scenario catalog
 
-Versioned catalog of the **Tier-2 AI-vision** scenarios Claude Code runs by driving the **live** app on **real renderers**. See [`/TESTING.md`](../TESTING.md) for the three-tier model. This file is the Tier-2 entry referenced there.
+Versioned catalog of the **Tier-2 AI-vision** scenarios Codex runs by driving the **live** app on **real renderers**. See [`/TESTING.md`](../TESTING.md) for the three-tier model. This file is the Tier-2 entry referenced there.
 
 ## Purpose
 
@@ -13,7 +13,7 @@ These scenarios cover only what the deterministic Tier-1 gate (`./gradlew check`
 ## Harness reference (scenario verbs)
 
 The harness is [`tools/uitest/`](../tools/uitest/) on this **Windows** machine — desktop via
-**computer-use**, Android via **`adb`**, animations via the pure-PowerShell GIF/filmstrip encoders.
+**`Drive-Desktop.ps1`**, Android via **`adb`**, animations via the pure-PowerShell GIF/filmstrip encoders.
 (The former `notepen-desktop` MCP and `.claude/tools/bin/notepen-android` helper were removed — do
 not reference them.) Field shape for every scenario block is governed by
 [`TEST-CASE-STANDARD.md`](TEST-CASE-STANDARD.md). Read [`tools/uitest/README.md`](../tools/uitest/README.md)
