@@ -12,24 +12,31 @@ import com.sun.jna.platform.win32.Ole32
 import com.sun.jna.platform.win32.W32Errors
 import com.sun.jna.platform.win32.WinNT
 import com.sun.jna.ptr.PointerByReference
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.awt.EventQueue
 import java.awt.FileDialog
 import java.awt.Frame
 import java.io.File
+import java.util.concurrent.CountDownLatch
 
 actual class FilePicker {
     actual suspend fun pickDocument(): String? =
         withContext(Dispatchers.IO) {
             if (isWindows()) {
-                runCatching { WindowsFileOpenDialog.pickDocument() }
-                    .getOrElse { pickDocumentWithAwtDialog() }
+                runCatching { WindowsFileOpenDialog.pickDocumentOnStaThread() }
+                    .getOrElse { error ->
+                        logger.warn(error) { "Windows native file dialog failed, falling back to AWT FileDialog" }
+                        pickDocumentWithAwtDialog()
+                    }
             } else {
                 pickDocumentWithAwtDialog()
             }
         }
 }
+
+private val logger = KotlinLogging.logger {}
 
 private fun isWindows(): Boolean = System.getProperty("os.name").startsWith("Windows", ignoreCase = true)
 
@@ -53,17 +60,35 @@ private object WindowsFileOpenDialog {
     private const val COINIT_DISABLE_OLE1DDE = 0x4
     private const val ERROR_CANCELLED_HRESULT = -2147023673
     private const val SIGDN_FILESYSPATH = -2147123200
+    private val nullPointerResult = WinNT.HRESULT(W32Errors.E_POINTER)
 
     private val fileOpenDialogClassId = CLSID("{DC1C5A9C-E88A-4DDE-A5A1-60F82A20AEF7}")
     private val fileOpenDialogInterfaceId = IID("{D57C7288-D4AD-4768-BE02-9D969532D960}")
 
-    fun pickDocument(): String? {
+    fun pickDocumentOnStaThread(): String? {
+        val finished = CountDownLatch(1)
+        var result: Result<String?>? = null
+        val thread =
+            Thread {
+                result = runCatching { pickDocument() }
+                finished.countDown()
+            }.apply {
+                name = "NotePen-WindowsFileOpenDialog"
+                isDaemon = true
+            }
+
+        thread.start()
+        finished.await()
+        return checkNotNull(result).getOrThrow()
+    }
+
+    private fun pickDocument(): String? {
         val initResult =
             Ole32.INSTANCE.CoInitializeEx(
                 Pointer.NULL,
                 COINIT_APARTMENTTHREADED or COINIT_DISABLE_OLE1DDE,
             )
-        val shouldUninitialize = W32Errors.SUCCEEDED(initResult)
+        checkResult(initResult)
 
         return try {
             val dialogRef = PointerByReference()
@@ -77,8 +102,9 @@ private object WindowsFileOpenDialog {
                 ),
             )
 
-            val dialog = FileOpenDialog(dialogRef.value)
+            val dialog = FileOpenDialog(nonNullPointer(dialogRef.value))
             try {
+                dialog.setTitle("Open document")
                 dialog.setFileTypes(documentFilters())
                 dialog.setDefaultExtension("pdf")
 
@@ -98,9 +124,7 @@ private object WindowsFileOpenDialog {
                 dialog.Release()
             }
         } finally {
-            if (shouldUninitialize) {
-                Ole32.INSTANCE.CoUninitialize()
-            }
+            Ole32.INSTANCE.CoUninitialize()
         }
     }
 
@@ -121,7 +145,7 @@ private object WindowsFileOpenDialog {
     private class FileOpenDialog(
         pointer: Pointer,
     ) : Unknown(pointer) {
-        fun show(owner: Pointer): WinNT.HRESULT =
+        fun show(owner: Pointer?): WinNT.HRESULT =
             _invokeNativeObject(3, arrayOf(pointer, owner), WinNT.HRESULT::class.java) as WinNT.HRESULT
 
         fun setFileTypes(filters: Array<FilterSpec>) {
@@ -151,6 +175,17 @@ private object WindowsFileOpenDialog {
             )
         }
 
+        fun setTitle(title: String) {
+            val value = wideString(title)
+            checkResult(
+                _invokeNativeObject(
+                    17,
+                    arrayOf(pointer, value),
+                    WinNT.HRESULT::class.java,
+                ) as WinNT.HRESULT,
+            )
+        }
+
         fun getResult(): ShellItem {
             val itemRef = PointerByReference()
             checkResult(
@@ -160,7 +195,7 @@ private object WindowsFileOpenDialog {
                     WinNT.HRESULT::class.java,
                 ) as WinNT.HRESULT,
             )
-            return ShellItem(itemRef.value)
+            return ShellItem(nonNullPointer(itemRef.value))
         }
     }
 
@@ -176,7 +211,7 @@ private object WindowsFileOpenDialog {
                     WinNT.HRESULT::class.java,
                 ) as WinNT.HRESULT,
             )
-            val pathPointer = pathRef.value
+            val pathPointer = nonNullPointer(pathRef.value)
             return try {
                 pathPointer.getWideString(0)
             } finally {
@@ -185,13 +220,13 @@ private object WindowsFileOpenDialog {
         }
     }
 
-    private data class FilterSpec(
+    data class FilterSpec(
         val name: String,
         val pattern: String,
     )
 
     @Suppress("MemberVisibilityCanBePrivate")
-    private class NativeFilterSpec : Structure() {
+    class NativeFilterSpec : Structure() {
         @JvmField
         var pszName: Pointer? = null
 
@@ -215,4 +250,7 @@ private object WindowsFileOpenDialog {
         Memory(((value.length + 1) * Native.WCHAR_SIZE).toLong()).apply {
             setWideString(0, value)
         }
+
+    private fun nonNullPointer(pointer: Pointer?): Pointer =
+        pointer ?: throw COMException("Windows file dialog returned NULL pointer", nullPointerResult)
 }
