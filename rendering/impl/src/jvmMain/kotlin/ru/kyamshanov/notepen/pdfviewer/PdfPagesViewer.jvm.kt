@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -24,6 +26,7 @@ import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -38,6 +41,8 @@ import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
@@ -54,6 +59,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
+import ru.kyamshanov.notepen.lowlatency.LocalLowLatencyOverlayBounds
+import ru.kyamshanov.notepen.lowlatency.LowLatencyOverlayBounds
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -699,6 +706,8 @@ actual fun PdfPagesViewer(
             }
     }
 
+    val viewerBoundsInWindow = remember { mutableStateOf(Rect.Zero) }
+
     // Outer Box measures viewport size and hosts scrollbars as siblings of the
     // pointer-capturing inner Box. Siblings receive hit-tested events directly,
     // bypassing the Initial-pass handler on the inner Box — so scrollbar thumb
@@ -715,6 +724,9 @@ actual fun PdfPagesViewer(
                         // window resized) re-centres the page in the new viewport.
                         if (hadWidth && size.width > 0) state.reCenterAfterResize()
                     }
+                }
+                .onGloballyPositioned { coords ->
+                    viewerBoundsInWindow.value = coords.boundsInWindow()
                 },
     ) {
         Box(
@@ -794,6 +806,19 @@ actual fun PdfPagesViewer(
                         with(density) {
                             (pdfH * lz).roundToInt().coerceAtLeast(1).toDp()
                         }
+                    val slotX =
+                        ((pan.x + (layout.pageLeftsPx[i] + ext.left * layout.basePageWidthPx) * zoom) / rs).roundToInt()
+                    val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
+                    val pageWindowRect =
+                        pageWindowRect(
+                            viewerBounds = viewerBoundsInWindow.value,
+                            placeableX = slotX,
+                            placeableY = slotY,
+                            placeableWidth = w,
+                            placeableHeight = h,
+                            layerScale = rs,
+                            layerTranslation = Offset.Zero,
+                        )
                     val pagePlaceables =
                         subcompose(i) {
                             val cached = cache.entries[i]?.bitmap
@@ -807,11 +832,12 @@ actual fun PdfPagesViewer(
                                     pdfHeight = pdfHeightDp,
                                     extent = ext,
                                 )
-                            with(scope) { pageContent() }
+                            CompositionLocalProvider(
+                                LocalLowLatencyOverlayBounds provides LowLatencyOverlayBounds(pageWindowRect),
+                            ) {
+                                with(scope) { pageContent() }
+                            }
                         }.map { it.measure(Constraints.fixed(w, h)) }
-                    val slotX =
-                        ((pan.x + (layout.pageLeftsPx[i] + ext.left * layout.basePageWidthPx) * zoom) / rs).roundToInt()
-                    val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
                     pagePlaceables.forEach { items.add(Item(slotX, slotY, it)) }
                 }
                 layout(constraints.maxWidth, constraints.maxHeight) {
@@ -880,6 +906,25 @@ private data class ImmutablePdfPageScope(
     override val pdfHeight: androidx.compose.ui.unit.Dp,
     override val extent: ru.kyamshanov.notepen.annotation.domain.model.PageExtent,
 ) : PdfPageScope
+
+private fun pageWindowRect(
+    viewerBounds: Rect,
+    placeableX: Int,
+    placeableY: Int,
+    placeableWidth: Int,
+    placeableHeight: Int,
+    layerScale: Float,
+    layerTranslation: Offset,
+): Rect {
+    val left = viewerBounds.left + placeableX * layerScale + layerTranslation.x
+    val top = viewerBounds.top + placeableY * layerScale + layerTranslation.y
+    return Rect(
+        left = left,
+        top = top,
+        right = left + placeableWidth * layerScale,
+        bottom = top + placeableHeight * layerScale,
+    )
+}
 
 /**
  * Pointer-input десктоп-вьювера: zoom вокруг курсора, скролл колесом,

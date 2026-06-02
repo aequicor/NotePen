@@ -1,8 +1,17 @@
 package ru.kyamshanov.notepen.lowlatency
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+
+internal data class LowLatencyOverlayBounds(
+    val windowRect: Rect,
+)
+
+internal val LocalLowLatencyOverlayBounds =
+    staticCompositionLocalOf<LowLatencyOverlayBounds?> { null }
 
 /**
  * Platform-specific low-latency overlay for the in-flight pen stroke.
@@ -26,6 +35,8 @@ import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 expect fun LowLatencyStrokeOverlay(
     drawingState: PdfDrawingState,
     modifier: Modifier = Modifier,
+    viewportScale: Float = 1f,
+    windowBounds: Rect? = null,
 )
 
 /**

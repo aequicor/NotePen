@@ -60,6 +60,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
+import ru.kyamshanov.notepen.lowlatency.LocalLowLatencyOverlayBounds
 import ru.kyamshanov.notepen.lowlatency.LowLatencyStrokeOverlay
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayMaxDimensionPx
@@ -285,6 +286,7 @@ fun DrawablePdfPage(
      * [MagnifierTargetOverlay]; на собственно жесты не влияет.
      */
     isMagnifierGrabbing: Boolean = false,
+    lowLatencyViewportScale: Float = 1f,
     /**
      * Лямбда, возвращающая `true` пока активен pinch-жест (zoom). Читается
      * в Draw-фазе через [graphicsLayer], поэтому скрытие чернил происходит
@@ -703,12 +705,15 @@ fun DrawablePdfPage(
         // platforms where it is a no-op, the Compose Canvas above still
         // renders the live stroke itself (`drawLiveStroke` above).
         if (lowLatencyOverlayActive) {
+            val overlayBounds = LocalLowLatencyOverlayBounds.current
             val overlayWidthDp = with(density) { lowLatencyOverlaySize.width.toDp() }
             val overlayHeightDp = with(density) { lowLatencyOverlaySize.height.toDp() }
             val pageW = canvasSize.value.width
             val pageH = canvasSize.value.height
             LowLatencyStrokeOverlay(
                 drawingState = pdfDrawingState,
+                viewportScale = lowLatencyViewportScale,
+                windowBounds = overlayBounds?.windowRect,
                 modifier =
                     Modifier
                         .size(width = overlayWidthDp, height = overlayHeightDp)

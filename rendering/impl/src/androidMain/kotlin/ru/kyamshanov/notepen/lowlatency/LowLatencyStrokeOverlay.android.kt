@@ -14,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import kotlinx.coroutines.delay
@@ -59,6 +60,8 @@ private data class StrokeSegment(
 actual fun LowLatencyStrokeOverlay(
     drawingState: PdfDrawingState,
     modifier: Modifier,
+    viewportScale: Float,
+    windowBounds: Rect?,
 ) {
     // CanvasFrontBufferedRenderer requires Android Q (API 29) — it relies on
     // HardwareBuffer + EGL extensions not available before. On older devices
