@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.pdf.infrastructure
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import org.apache.pdfbox.rendering.ImageType
 import org.apache.pdfbox.text.PDFTextStripper
 import org.apache.pdfbox.text.TextPosition
 import ru.kyamshanov.notepen.annotation.domain.model.PageRotation
@@ -65,7 +66,7 @@ class JvmPdfPageRenderer(
 
             val rendered: BufferedImage =
                 jvmDoc.useRenderer { renderer ->
-                    renderer.renderImageWithDPI(pageIndex, dpi)
+                    renderer.renderImageWithDPI(pageIndex, dpi, ImageType.RGB)
                 }
 
             // Порядок CROP → ROTATE: вырезку определяем в собственной (до

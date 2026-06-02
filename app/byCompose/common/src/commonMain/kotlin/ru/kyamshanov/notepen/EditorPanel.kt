@@ -63,6 +63,7 @@ import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -153,6 +154,7 @@ private const val PANEL_AUTOSAVE_DEBOUNCE = 2_000L
 private const val PANEL_HIGH_RES_DIM_PX = 4000
 private const val FIGURE_PAGE_RENDER_WIDTH_PX = 1600
 private const val PANEL_SIDEBAR_ANIM_MS = 220
+private const val REFLOW_PROBE_DELAY_AFTER_OPEN_MS = 750L
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
@@ -816,7 +818,11 @@ fun EditorPanel(
     // на инжектируемый диспетчер). На ошибке пробы (например, не-PDF картинка
     // вроде PNG) считаем недоступным — кнопку не показываем, иначе вход завис бы
     // на «Готовим режим чтения…».
-    LaunchedEffect(pdfState, filePath) {
+    LaunchedEffect(pdfState, filePath, pdfDocument) {
+        readingModeAvailable = false
+        if (pdfDocument == null) return@LaunchedEffect
+        delay(REFLOW_PROBE_DELAY_AFTER_OPEN_MS)
+        if (pdfState.pdfDocument !== pdfDocument) return@LaunchedEffect
         readingModeAvailable =
             runCatching { reflowExtractor.probe(filePath) != PdfContentKind.IMAGE_ONLY }
                 .onFailure { e -> panelLogger.warn { "Reflow probe failed: ${e::class.simpleName}" } }

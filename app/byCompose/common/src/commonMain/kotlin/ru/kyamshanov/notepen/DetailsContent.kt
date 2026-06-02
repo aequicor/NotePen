@@ -102,6 +102,8 @@ import androidx.compose.ui.window.Dialog
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -157,6 +159,8 @@ import ru.kyamshanov.notepen.tabs.toSnapshot
 import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
+
+private const val MARKER_WIDTH_SCAN_DELAY_AFTER_OPEN_MS = 1_500L
 
 internal const val BACK_CONTENT_DESCRIPTION = "Назад"
 
@@ -415,9 +419,11 @@ fun DetailsContent(
     LaunchedEffect(tabSession, markerWidthPinned) {
         if (markerWidthPinned) return@LaunchedEffect
         snapshotFlow { tabSession.focusedActiveState?.pdfDocument }
-            .collect { document ->
-                if (markerWidthPinned || document == null) return@collect
-                val lineHeight = renderer.documentTextLineHeight(document) ?: return@collect
+            .collectLatest { document ->
+                if (markerWidthPinned || document == null) return@collectLatest
+                delay(MARKER_WIDTH_SCAN_DELAY_AFTER_OPEN_MS)
+                if (markerWidthPinned || tabSession.focusedActiveState?.pdfDocument !== document) return@collectLatest
+                val lineHeight = renderer.documentTextLineHeight(document) ?: return@collectLatest
                 markerSettings = markerSettings.applyStrokeWidth(lineHeight)
             }
     }

@@ -54,6 +54,7 @@ class PdfBitmapCache(
     fun put(
         pageIndex: Int,
         rendered: RenderedPage,
+        protectedPageIndices: Set<Int> = setOf(pageIndex),
     ) {
         if (entries.containsKey(pageIndex)) {
             entries[pageIndex] = rendered
@@ -62,7 +63,7 @@ class PdfBitmapCache(
             entries[pageIndex] = rendered
             accessOrder.addLast(pageIndex)
         }
-        evictIfNeeded(protect = setOf(pageIndex))
+        evictIfNeeded(protect = protectedPageIndices + pageIndex)
     }
 
     /**
@@ -144,10 +145,17 @@ class PdfBitmapCache(
         scalePercent: Int,
         rotationQuarters: Int,
         cropSignature: Int,
+        targetWidthPx: Int,
+        targetHeightPx: Int,
+        maxOversizeRatio: Float,
     ): Boolean =
         rendered.renderedAtScalePercent >= scalePercent &&
             rendered.renderedAtRotationQuarters == rotationQuarters &&
-            rendered.renderedAtCropSignature == cropSignature
+            rendered.renderedAtCropSignature == cropSignature &&
+            rendered.bitmap.width >= targetWidthPx &&
+            rendered.bitmap.height >= targetHeightPx &&
+            rendered.bitmap.width <= targetWidthPx * maxOversizeRatio &&
+            rendered.bitmap.height <= targetHeightPx * maxOversizeRatio
 
     companion object {
         /** ≈256 МБ при 4 байт/пиксель — комфортный потолок для desktop. */
