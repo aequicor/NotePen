@@ -62,6 +62,7 @@ import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.lowlatency.LowLatencyStrokeOverlay
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
+import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayMaxDimensionPx
 import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.magnifier.MagnifierTargetOverlay
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
@@ -177,15 +178,18 @@ private data class CachedInk(
     val bitmap: ImageBitmap,
 )
 
-private fun cappedLowLatencyOverlaySize(pageSize: IntSize): IntSize {
+private fun cappedLowLatencyOverlaySize(
+    pageSize: IntSize,
+    maxDimensionPx: Int,
+): IntSize {
     val w = pageSize.width
     val h = pageSize.height
     if (w <= 0 || h <= 0) return IntSize.Zero
     val longest = maxOf(w, h)
-    if (longest <= LOW_LATENCY_OVERLAY_MAX_DIM_PX) return pageSize
+    if (longest <= maxDimensionPx) return pageSize
     return IntSize(
-        width = (w.toLong() * LOW_LATENCY_OVERLAY_MAX_DIM_PX / longest).toInt().coerceAtLeast(1),
-        height = (h.toLong() * LOW_LATENCY_OVERLAY_MAX_DIM_PX / longest).toInt().coerceAtLeast(1),
+        width = (w.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
+        height = (h.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
     )
 }
 
@@ -317,6 +321,7 @@ fun DrawablePdfPage(
     val density = LocalDensity.current
     val layoutDirection = LocalLayoutDirection.current
     val lowLatencyOverlaySupported = rememberLowLatencyOverlayAvailable()
+    val lowLatencyOverlayMaxDimensionPx = rememberLowLatencyOverlayMaxDimensionPx()
     // derivedStateOf — критически: иначе ЛЮБОЕ изменение canvasSize
     // (каждый pinch-тик) триггерит рекомпозицию всего DrawablePdfPage,
     // даже если порог не пересечён. С derivedStateOf рекомпозиция только
@@ -329,7 +334,7 @@ fun DrawablePdfPage(
     // page. Falling back to Compose's frame-bound live-stroke render here is
     // imperceptible because the user looks at the panel.
     val lowLatencyOverlaySize by remember {
-        derivedStateOf { cappedLowLatencyOverlaySize(canvasSize.value) }
+        derivedStateOf { cappedLowLatencyOverlaySize(canvasSize.value, lowLatencyOverlayMaxDimensionPx) }
     }
     val lowLatencyOverlayActive by remember(lowLatencyOverlaySupported, magnifierState) {
         derivedStateOf {

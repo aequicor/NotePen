@@ -22,6 +22,15 @@ private const val MIN_LIVE_POINT_DISTANCE_NORM: Float = 0.00035f
 private const val MIN_LIVE_POINT_DISTANCE_NORM_SQ: Float =
     MIN_LIVE_POINT_DISTANCE_NORM * MIN_LIVE_POINT_DISTANCE_NORM
 
+public data class LiveStrokeSample(
+    public val previous: DrawingPoint?,
+    public val current: DrawingPoint,
+    public val colorArgb: Long,
+    public val normalizedStrokeWidth: Float,
+    public val toolKind: ToolKind,
+    public val extent: PageExtent,
+)
+
 /**
  * Состояние рисования одной страницы PDF.
  *
@@ -77,6 +86,12 @@ public class PdfDrawingState {
         mutableStateOf(null)
 
     private var gestureSnapped: Boolean = false
+    private val liveStrokeListeners = mutableSetOf<(LiveStrokeSample) -> Unit>()
+
+    public fun addLiveStrokeListener(listener: (LiveStrokeSample) -> Unit): () -> Unit {
+        liveStrokeListeners.add(listener)
+        return { liveStrokeListeners.remove(listener) }
+    }
 
     /** Bump [historyVersion] to invalidate caches keyed on completed-stroke content. */
     public fun markHistoryChanged() {
@@ -120,8 +135,10 @@ public class PdfDrawingState {
         liveToolKind.value = strokeToolKind.value
         liveStrokeWidth.value = normalizedStrokeWidth
         livePoints.clear()
-        livePoints.add(DrawingPoint(x, y, isNewPath = true, pressure = pressure, tilt = tilt))
+        val point = DrawingPoint(x, y, isNewPath = true, pressure = pressure, tilt = tilt)
+        livePoints.add(point)
         growExtentToInclude(x, y)
+        notifyLiveStrokeSample(previous = null, current = point)
     }
 
     /** Добавить точку к текущему штриху. */
@@ -138,9 +155,28 @@ public class PdfDrawingState {
                 val dy = y - last.y
                 if (dx * dx + dy * dy < MIN_LIVE_POINT_DISTANCE_NORM_SQ) return
             }
-            livePoints.add(DrawingPoint(x, y, pressure = pressure, tilt = tilt))
+            val point = DrawingPoint(x, y, pressure = pressure, tilt = tilt)
+            livePoints.add(point)
             growExtentToInclude(x, y)
+            notifyLiveStrokeSample(previous = last, current = point)
         }
+    }
+
+    private fun notifyLiveStrokeSample(
+        previous: DrawingPoint?,
+        current: DrawingPoint,
+    ) {
+        if (liveStrokeListeners.isEmpty()) return
+        val sample =
+            LiveStrokeSample(
+                previous = previous,
+                current = current,
+                colorArgb = liveColorArgb.value,
+                normalizedStrokeWidth = liveStrokeWidth.value,
+                toolKind = liveToolKind.value,
+                extent = extent.value,
+            )
+        liveStrokeListeners.toList().forEach { listener -> listener(sample) }
     }
 
     /**

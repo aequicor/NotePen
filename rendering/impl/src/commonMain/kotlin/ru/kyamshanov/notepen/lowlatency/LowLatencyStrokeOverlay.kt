@@ -36,3 +36,6 @@ expect fun LowLatencyStrokeOverlay(
  */
 @Composable
 expect fun rememberLowLatencyOverlayAvailable(): Boolean
+
+@Composable
+expect fun rememberLowLatencyOverlayMaxDimensionPx(): Int

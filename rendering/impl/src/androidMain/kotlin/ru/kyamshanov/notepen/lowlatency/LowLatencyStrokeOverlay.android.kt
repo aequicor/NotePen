@@ -226,6 +226,9 @@ actual fun LowLatencyStrokeOverlay(
 @Composable
 actual fun rememberLowLatencyOverlayAvailable(): Boolean = remember { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q }
 
+@Composable
+actual fun rememberLowLatencyOverlayMaxDimensionPx(): Int = remember { 2400 }
+
 /** Angle of the marker's chisel nib, in radians (~45°); mirrors `drawMarkerStroke`. */
 private const val MARKER_NIB_ANGLE_RADIANS = 0.7853982f
 
