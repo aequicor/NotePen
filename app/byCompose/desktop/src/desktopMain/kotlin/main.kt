@@ -54,6 +54,7 @@ import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorization
 import ru.kyamshanov.notepen.library.ui.GoogleDriveAuthorizer
 import ru.kyamshanov.notepen.library.ui.LibrarySourcesComponentImpl
 import ru.kyamshanov.notepen.library.ui.SharedLibraryQr
+import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddHistoryResult
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.AddToHistoryUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.CheckAvailabilityUseCase
 import ru.kyamshanov.notepen.mainscreen.domain.usecase.OpenRecentFileUseCase
@@ -79,6 +80,8 @@ import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.qrconnect.infrastructure.ZxingQrEncoder
 import ru.kyamshanov.notepen.qrconnect.peerLanConnectionFor
+import ru.kyamshanov.notepen.resolveDocumentDisplayName
+import ru.kyamshanov.notepen.resolveDocumentSize
 import ru.kyamshanov.notepen.setupJbrTitleBar
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.domain.CacheEvictor
@@ -204,6 +207,30 @@ private fun loadOrCreateDesktopDeviceId(): String {
         file.writeText(fresh)
     }.onFailure { mainLogger.warn(it) { "Persisting device id failed; using a volatile id this run" } }
     return fresh
+}
+
+private suspend fun addExternallyOpenedFileToHistory(
+    path: String,
+    addToHistory: AddToHistoryUseCase,
+) {
+    val displayName = resolveDocumentDisplayName(path) ?: path.substringAfterLast(File.separator).ifBlank { path }
+    val result =
+        addToHistory.execute(
+            uri = path,
+            displayName = displayName,
+            fileSize = resolveDocumentSize(path),
+            openedAt = System.currentTimeMillis(),
+            lastPageIndex = 0,
+        )
+    if (result.getOrNull() is AddHistoryResult.SafFuzzyMatchDetected) {
+        addToHistory.execute(
+            uri = path,
+            displayName = displayName,
+            fileSize = null,
+            openedAt = System.currentTimeMillis(),
+            lastPageIndex = 0,
+        )
+    }
 }
 
 fun main(args: Array<String>) {
@@ -772,7 +799,13 @@ fun main(args: Array<String>) {
 
     // Корень готов: открываем отложенные PDF (запуск «открыть с помощью») и все
     // последующие запросы ОС. openDetailsExternally мутирует навигацию — только на UI-потоке.
-    OpenFileRouter.connect { path -> runOnUiThread { root.openDetailsExternally(path) } }
+    val addExternalOpenToHistory = AddToHistoryUseCase(historyRepo)
+    OpenFileRouter.connect { path ->
+        appScope.launch(Dispatchers.IO) {
+            addExternallyOpenedFileToHistory(path, addExternalOpenToHistory)
+        }
+        runOnUiThread { root.openDetailsExternally(path) }
+    }
 
     application {
         val windowState =

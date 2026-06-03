@@ -1,5 +1,7 @@
 package ru.kyamshanov.notepen.lowlatency
 
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.BlendMode
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -10,15 +12,20 @@ import android.view.SurfaceView
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -77,10 +84,27 @@ actual fun LowLatencyStrokeOverlay(
     val surfaceViewHolder = remember { mutableStateOf<SurfaceView?>(null) }
     val rendererHolder = remember { mutableStateOf<CanvasFrontBufferedRenderer<StrokeSegment>?>(null) }
     val completedStrokeCountState = rememberUpdatedState(completedStrokeCount)
+    val lifecycleOwnerHolder = remember { mutableStateOf<LifecycleOwner?>(null) }
+    var overlayMounted by remember { mutableStateOf(drawingState.isDrawing.value) }
+
+    LaunchedEffect(drawingState) {
+        snapshotFlow { drawingState.isDrawing.value }
+            .collect { drawing ->
+                if (drawing) {
+                    overlayMounted = true
+                } else {
+                    delay(HANDOFF_FALLBACK_MS)
+                    if (!drawingState.isDrawing.value) overlayMounted = false
+                }
+            }
+    }
+
+    if (!drawingState.isDrawing.value && !overlayMounted) return
 
     AndroidView(
         modifier = modifier,
         factory = { ctx ->
+            lifecycleOwnerHolder.value = ctx.findLifecycleOwner()
             SurfaceView(ctx).apply {
                 // Sit above the Compose-hosting window's surface so our
                 // transparent areas show the Compose render underneath.
@@ -88,6 +112,7 @@ actual fun LowLatencyStrokeOverlay(
                 holder.setFormat(PixelFormat.TRANSLUCENT)
                 isClickable = false
                 isFocusable = false
+                alpha = HIDDEN_ALPHA
             }.also { surfaceViewHolder.value = it }
         },
         update = { /* no-op: state changes drive the renderer via LaunchedEffect */ },
@@ -144,8 +169,44 @@ actual fun LowLatencyStrokeOverlay(
             val renderer = CanvasFrontBufferedRenderer(sv, callback)
             rendererHolder.value = renderer
             onDispose {
+                sv.alpha = HIDDEN_ALPHA
                 rendererHolder.value = null
                 renderer.release(false)
+            }
+        }
+    }
+
+    DisposableEffect(surfaceViewHolder.value, lifecycleOwnerHolder.value) {
+        val sv = surfaceViewHolder.value
+        val lifecycleOwner = lifecycleOwnerHolder.value
+        if (sv == null || lifecycleOwner == null) {
+            onDispose { }
+        } else {
+            fun hideAndClearSurface() {
+                sv.alpha = HIDDEN_ALPHA
+                runCatching { rendererHolder.value?.clear() }
+            }
+
+            hideAndClearSurface()
+            val observer =
+                LifecycleEventObserver { _, event ->
+                    when (event) {
+                        Lifecycle.Event.ON_PAUSE,
+                        Lifecycle.Event.ON_STOP,
+                        -> {
+                            hideAndClearSurface()
+                            overlayMounted = false
+                        }
+                        Lifecycle.Event.ON_START,
+                        Lifecycle.Event.ON_RESUME,
+                        -> sv.post { hideAndClearSurface() }
+                        else -> Unit
+                    }
+                }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+                hideAndClearSurface()
             }
         }
     }
@@ -176,6 +237,7 @@ actual fun LowLatencyStrokeOverlay(
             )
         }.collect { state ->
             val renderer = rendererHolder.value ?: return@collect
+            val surfaceView = surfaceViewHolder.value
             if (!state.drawing) {
                 if (lastIndex >= 0) {
                     renderer.commit()
@@ -200,13 +262,15 @@ actual fun LowLatencyStrokeOverlay(
                     clearAfterMainCanvasFrames(renderer)
                     if (handoffTargetPathCount == target) handoffTargetPathCount = null
                 }
+                surfaceView?.alpha = HIDDEN_ALPHA
                 return@collect
             }
             clearJob?.cancel()
             clearJob = null
             handoffTargetPathCount = null
+            surfaceView?.alpha = VISIBLE_ALPHA
             val ext = drawingState.extent.value
-            val slotW = surfaceViewHolder.value?.width ?: 0
+            val slotW = surfaceView?.width ?: 0
             // liveStrokeWidth нормализован относительно ширины PDF, не слота.
             // pdfW = slotW / extent.width, поэтому widthPx = liveW * pdfW.
             val widthPx =
@@ -260,6 +324,17 @@ actual fun rememberLowLatencyOverlayAvailable(): Boolean = remember { Build.VERS
 @Composable
 actual fun rememberLowLatencyOverlayMaxDimensionPx(): Int = remember { 2400 }
 
+private const val HIDDEN_ALPHA = 0f
+private const val VISIBLE_ALPHA = 1f
+
+private fun Context.findLifecycleOwner(): LifecycleOwner? {
+    var current: Context? = this
+    while (current is ContextWrapper) {
+        if (current is LifecycleOwner) return current
+        current = current.baseContext
+    }
+    return current as? LifecycleOwner
+}
 
 /** Angle of the marker's chisel nib, in radians (~45°); mirrors `drawMarkerStroke`. */
 private const val MARKER_NIB_ANGLE_RADIANS = 0.7853982f
