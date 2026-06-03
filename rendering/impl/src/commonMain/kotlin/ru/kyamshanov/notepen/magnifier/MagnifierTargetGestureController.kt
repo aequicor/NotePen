@@ -46,7 +46,7 @@ class MagnifierTargetGestureController(
         val rect = targetRectInViewport(seg) ?: return Mode.NONE
         if (!rect.contains(viewportPos)) return Mode.NONE
         val layout = viewerState.layout
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         val handlePx =
             (layout.basePageWidthPx * zoom * RESIZE_HANDLE_FRAC)
                 .coerceAtLeast(MIN_HANDLE_PX)
@@ -70,8 +70,8 @@ class MagnifierTargetGestureController(
         val r = seg.targetOnPage
         mode = m
         startViewport = viewportPos
-        startPanX = viewerState.pan.x
-        startPanY = viewerState.pan.y
+        startPanX = viewerState.effectivePan.x
+        startPanY = viewerState.effectivePan.y
         startLeftXDoc = pageLeft + r.left * basePageW
         startTopYDoc = pageTop + r.top * pdfH
         startWidthNorm = r.right - r.left
@@ -113,7 +113,7 @@ class MagnifierTargetGestureController(
     private fun applyMove(viewportPos: Offset) {
         val layout = viewerState.layout
         val basePageW = layout.basePageWidthPx
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         val pageCount = layout.pageHeightsPx.size
         if (basePageW <= 0f || zoom <= 0f || pageCount == 0) return
 
@@ -121,7 +121,7 @@ class MagnifierTargetGestureController(
         // во время удержания: если viewer проскроллил, тот же viewport-Y
         // соответствует другой document-Y. Без поправки рамка «отставала»
         // бы от пера на величину скролла.
-        val pan = viewerState.pan
+        val pan = viewerState.effectivePan
         val effDragVpX = (viewportPos.x - startViewport.x) - (pan.x - startPanX)
         val effDragVpY = (viewportPos.y - startViewport.y) - (pan.y - startPanY)
         val totalDragDocX = effDragVpX / zoom
@@ -165,12 +165,12 @@ class MagnifierTargetGestureController(
         val layout = viewerState.layout
         val pi = state.segments[0].pageIndex
         if (pi !in 0 until layout.pageHeightsPx.size) return
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         val basePageW = layout.basePageWidthPx
         val pdfH = layout.pdfHeightsPx[pi]
         if (zoom <= 0f || basePageW <= 0f || pdfH <= 0f) return
 
-        val pan = viewerState.pan
+        val pan = viewerState.effectivePan
         val effDragVpX = (viewportPos.x - startViewport.x) - (pan.x - startPanX)
         val effDragVpY = (viewportPos.y - startViewport.y) - (pan.y - startPanY)
         val totalDragXNorm = effDragVpX / (basePageW * zoom)
@@ -186,7 +186,7 @@ class MagnifierTargetGestureController(
         val layout = viewerState.layout
         val pi = seg.pageIndex
         if (pi !in 0 until layout.pageHeightsPx.size) return null
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         if (zoom <= 0f) return null
         val basePageW = layout.basePageWidthPx
         val pdfH = layout.pdfHeightsPx[pi]
@@ -196,7 +196,7 @@ class MagnifierTargetGestureController(
         // половины считался бы на месте левой → жест письма по левой странице
         // ловил бы hit-test рамки, которая на другой стороне листа.
         val pageLeft = layout.pageLeftsPx[pi]
-        val pan = viewerState.pan
+        val pan = viewerState.effectivePan
         val t = seg.targetOnPage
         val left = pan.x + (pageLeft + t.left * basePageW) * zoom
         val right = pan.x + (pageLeft + t.right * basePageW) * zoom

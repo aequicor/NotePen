@@ -1734,7 +1734,7 @@ fun EditorPanel(
                             pageIndex = pageIndex,
                             isMagnifierGrabbing = isMagnifierPage && magnifierTargetGestureController.isActive,
                             lowLatencyViewportScale = pdfViewerState.residualScale,
-                            isZooming = { pdfViewerState.gestureScale != 1f },
+                            isZooming = { pdfViewerState.isVisualTransformActive },
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {

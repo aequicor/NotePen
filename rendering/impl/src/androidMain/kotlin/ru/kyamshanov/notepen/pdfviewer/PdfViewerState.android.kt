@@ -84,6 +84,20 @@ actual class PdfViewerState internal constructor(
     var gestureTranslation: Offset by mutableStateOf(Offset.Zero)
         internal set
 
+    actual val effectivePan: Offset
+        get() =
+            PdfViewerMath.effectivePan(
+                pan = pan,
+                gestureScale = gestureScale,
+                gestureTranslation = gestureTranslation,
+            )
+
+    actual val effectiveZoom: Float
+        get() = PdfViewerMath.effectiveZoom(zoom, gestureScale)
+
+    actual val isVisualTransformActive: Boolean
+        get() = gestureScale != 1f || gestureTranslation != Offset.Zero
+
     actual val basePageWidthPx: Float
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 

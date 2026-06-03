@@ -102,13 +102,13 @@ class LoupeSelectionController(
     private fun buildSegments(vpRect: Rect): List<MagnifierPageSegment>? {
         val layout: PdfPagesLayout = viewerState.layout
         val n = layout.pageHeightsPx.size
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         val basePageW = layout.basePageWidthPx
         if (n == 0 || basePageW <= 0f || zoom <= 0f) return null
 
         // X-составляющая в page-normalized одна и та же для всех страниц,
         // т.к. ширина страниц общая (basePageWidthPx).
-        val pan = viewerState.pan
+        val pan = viewerState.effectivePan
         val docLeft = (vpRect.left - pan.x) / zoom
         val docRight = (vpRect.right - pan.x) / zoom
         val nxLeft = (docLeft / basePageW).coerceIn(0f, 1f)
@@ -159,7 +159,7 @@ class LoupeSelectionController(
      */
     private fun computeSelectionSizePx(segments: List<MagnifierPageSegment>): Size {
         val layout = viewerState.layout
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         val basePageW = layout.basePageWidthPx
         val first = segments.first()
         val widthPx = first.targetOnPage.width * basePageW * zoom
@@ -174,7 +174,7 @@ class LoupeSelectionController(
         val layout = viewerState.layout
         return layout.pageHeightsPx.isNotEmpty() &&
             layout.basePageWidthPx > 0f &&
-            viewerState.zoom > 0f
+            viewerState.effectiveZoom > 0f
     }
 
     private companion object {

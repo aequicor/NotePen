@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
@@ -188,13 +189,75 @@ internal suspend fun buildCompletedInk(
     return bmp
 }
 
-internal fun DrawScope.drawCompletedMarkers(
+/**
+ * Rasterises completed marker strokes into an off-screen image. The bitmap is
+ * filled with opaque white first and marker strokes are multiplied into it;
+ * drawing that image back over the PDF with [BlendMode.Multiply] leaves white
+ * pixels as no-ops while preserving marker darkening without replaying every
+ * marker segment on every frame.
+ */
+internal suspend fun buildCompletedMarkerInk(
+    spec: InkRenderSpec,
     paths: List<DrawingPath>,
+    density: Density,
+    layoutDirection: LayoutDirection,
+): ImageBitmap {
+    val renderContext = currentCoroutineContext()
+    val bw = spec.surfaceSize.width
+    val bh = spec.surfaceSize.height
+    val bmp = ImageBitmap(bw, bh)
+    val gCanvas = GraphicsCanvas(bmp)
+    val scope = CanvasDrawScope()
+    val scratch = Path()
+    scope.draw(
+        density = density,
+        layoutDirection = layoutDirection,
+        canvas = gCanvas,
+        size = Size(bw.toFloat(), bh.toFloat()),
+    ) {
+        drawRect(Color.White)
+        withInkTransform(spec) {
+            paths.forEach { path ->
+                renderContext.ensureActive()
+                if (path.toolType == ToolKind.MARKER) {
+                    drawMarkerStroke(
+                        points = path.points,
+                        colorArgb = path.colorArgb,
+                        normalizedStrokeWidth = path.strokeWidth,
+                        pdfWidth = spec.pdfWidthPx,
+                        pdfHeight = spec.pdfHeightPx,
+                        extent = spec.extent,
+                        scratch = scratch,
+                    )
+                }
+            }
+        }
+    }
+    return bmp
+}
+
+internal fun DrawScope.drawCompletedMarkerInk(
+    paths: List<DrawingPath>,
+    cached: CompletedInk?,
     spec: InkRenderSpec,
     scratch: Path,
 ) {
+    cached?.let { completed ->
+        drawImage(
+            image = completed.bitmap,
+            srcOffset = IntOffset.Zero,
+            srcSize = IntSize(completed.bitmap.width, completed.bitmap.height),
+            dstOffset = IntOffset.Zero,
+            dstSize = spec.surfaceSize,
+            blendMode = BlendMode.Multiply,
+        )
+    }
+
+    val cachedCount = cached?.strokeCount ?: 0
+    val tailStart = completedInkTailStart(paths.size, cached?.strokeCount)
+    if (paths.size <= cachedCount && cached != null) return
     withInkTransform(spec) {
-        for (i in paths.indices) {
+        for (i in tailStart until paths.size) {
             val path = paths[i]
             if (path.toolType == ToolKind.MARKER) {
                 drawMarkerStroke(
@@ -209,6 +272,19 @@ internal fun DrawScope.drawCompletedMarkers(
             }
         }
     }
+}
+
+internal fun DrawScope.drawCompletedMarkers(
+    paths: List<DrawingPath>,
+    spec: InkRenderSpec,
+    scratch: Path,
+) {
+    drawCompletedMarkerInk(
+        paths = paths,
+        cached = null,
+        spec = spec,
+        scratch = scratch,
+    )
 }
 
 internal fun DrawScope.drawCompletedPenInk(

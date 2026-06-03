@@ -289,6 +289,28 @@ object PdfViewerMath {
     }
 
     /**
+     * Viewport pan after a transient root `graphicsLayer` transform is applied.
+     *
+     * The committed document mapping is `viewport = pan + doc * zoom`. During an
+     * active GPU-only gesture the whole page tree is then transformed as
+     * `visualViewport = viewport * gestureScale + gestureTranslation`, so the
+     * effective mapping is:
+     *
+     *     visualViewport = (pan * gestureScale + gestureTranslation) + doc * (zoom * gestureScale)
+     */
+    fun effectivePan(
+        pan: Offset,
+        gestureScale: Float,
+        gestureTranslation: Offset,
+    ): Offset = pan * gestureScale + gestureTranslation
+
+    /** Effective viewport zoom after the transient root `graphicsLayer` scale. */
+    fun effectiveZoom(
+        zoom: Float,
+        gestureScale: Float,
+    ): Float = zoom * gestureScale
+
+    /**
      * Cursor-anchored zoom. Возвращает новый `(pan, zoom)` такой, что
      * пиксель документа под [focus] остаётся под [focus] после смены
      * масштаба с [zoomOld] на `zoomNew`. [zoomNew] клампится в

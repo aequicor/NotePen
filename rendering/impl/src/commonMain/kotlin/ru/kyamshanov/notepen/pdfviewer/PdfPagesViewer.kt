@@ -231,6 +231,23 @@ expect class PdfViewerState {
     var gestureScale: Float
         internal set
 
+    /**
+     * Viewport pan including the transient root `graphicsLayer` transform used
+     * during active pinch / wheel zoom. Hit-testing and drawing geometry should
+     * use this value so input follows the pixels currently shown on screen.
+     */
+    val effectivePan: Offset
+
+    /**
+     * Zoom including the transient root `graphicsLayer` scale. Layout and
+     * rasterization keep using [zoom]; pointer-to-document conversion should use
+     * this value while a gesture is visually active.
+     */
+    val effectiveZoom: Float
+
+    /** True while the viewer content is visually transformed but not committed to [zoom] / [pan]. */
+    val isVisualTransformActive: Boolean
+
     /** PDF-ширина колонки страниц при `zoom = 1`. */
     val basePageWidthPx: Float
 

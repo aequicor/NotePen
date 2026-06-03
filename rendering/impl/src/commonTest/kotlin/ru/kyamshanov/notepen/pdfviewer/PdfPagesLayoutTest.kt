@@ -436,6 +436,24 @@ class PdfPagesLayoutTest {
         }
     }
 
+    @Test
+    fun `effective transform matches root graphics layer mapping`() {
+        val pan = Offset(40f, -20f)
+        val zoom = 1.25f
+        val gestureScale = 1.6f
+        val gestureTranslation = Offset(12f, -7f)
+        val doc = Offset(200f, 80f)
+
+        val committedViewport = pan + doc * zoom
+        val layerViewport = committedViewport * gestureScale + gestureTranslation
+        val effectiveViewport =
+            PdfViewerMath.effectivePan(pan, gestureScale, gestureTranslation) +
+                doc * PdfViewerMath.effectiveZoom(zoom, gestureScale)
+
+        assertTrue(abs(layerViewport.x - effectiveViewport.x) < 1e-4f)
+        assertTrue(abs(layerViewport.y - effectiveViewport.y) < 1e-4f)
+    }
+
     // ── FEATURE #5: книжный разворот (SpreadMode.SPREAD) ────────────────────────
 
     @Test

@@ -248,13 +248,14 @@ fun DrawablePdfPage(
         }
     }
 
-    // Cache of all completed strokes rasterised to an off-screen ImageBitmap.
+    // Caches of completed strokes rasterised to off-screen ImageBitmaps.
     // Rebuilt only when bucketed cache dim changes or `historyVersion` is
     // bumped (finishDrawing, undo / redo, eraser, sync). Without this cache,
     // every frame iterated `currentPaths.forEach { drawStrokeWithPressure }` —
     // for varying-pressure strokes this is hundreds of `drawPath` calls per
-    // frame per stroke on screen, which dominates the input-to-pixel latency
-    // budget once the page has any ink on it.
+    // frame per stroke on screen. Marker strokes get a separate Multiply image
+    // cache for the same reason: at large zoom a medium number of highlights is
+    // enough to dominate scroll / zoom frames.
     //
     // Растеризация вынесена с main-потока ([rasterDispatcher]): на странице с
     // сотнями штрихов синхронный rebuild при коммите зума (смена бакета
@@ -264,6 +265,7 @@ fun DrawablePdfPage(
     // позволяет дорисовать ещё не вошедшие в кэш штрихи, пока он не догнал
     // (см. anti-flicker ниже).
     val completedInk = remember { mutableStateOf<CompletedInk?>(null) }
+    val completedMarkerInk = remember { mutableStateOf<CompletedInk?>(null) }
     val isDrawingForInkCache = pdfDrawingState.isDrawing.value
     LaunchedEffect(inkCacheDim, pdfDrawingState.historyVersion.value, isDrawingForInkCache) {
         if (isDrawingForInkCache) return@LaunchedEffect
@@ -271,6 +273,7 @@ fun DrawablePdfPage(
         val bh = inkCacheDim.height
         if (bw <= 0 || bh <= 0 || pdfDrawingState.currentPaths.isEmpty()) {
             completedInk.value = null
+            completedMarkerInk.value = null
             return@LaunchedEffect
         }
         delay(COMPLETED_INK_REBUILD_IDLE_DELAY_MS)
@@ -280,15 +283,31 @@ fun DrawablePdfPage(
         val paths = pdfDrawingState.currentPaths.toList()
         if (paths.isEmpty()) {
             completedInk.value = null
+            completedMarkerInk.value = null
             return@LaunchedEffect
         }
         val ext = pdfDrawingState.extent.value
         val spec = InkRenderSpec(surfaceSize = inkCacheDim, extent = ext)
-        val bmp =
-            withContext(rasterDispatcher) {
-                buildCompletedInk(spec, paths, density, layoutDirection)
+        val hasPenInk = paths.any { it.toolType != ToolKind.MARKER }
+        val hasMarkerInk = paths.any { it.toolType == ToolKind.MARKER }
+        val penBmp =
+            if (hasPenInk) {
+                withContext(rasterDispatcher) {
+                    buildCompletedInk(spec, paths, density, layoutDirection)
+                }
+            } else {
+                null
             }
-        completedInk.value = CompletedInk(paths.size, bmp)
+        val markerBmp =
+            if (hasMarkerInk) {
+                withContext(rasterDispatcher) {
+                    buildCompletedMarkerInk(spec, paths, density, layoutDirection)
+                }
+            } else {
+                null
+            }
+        completedInk.value = penBmp?.let { CompletedInk(paths.size, it) }
+        completedMarkerInk.value = markerBmp?.let { CompletedInk(paths.size, it) }
     }
     val completedInkCoverageCount by remember {
         derivedStateOf {
@@ -409,10 +428,9 @@ fun DrawablePdfPage(
             val canvasHeight = size.height.toInt()
             val inkSpec = InkRenderSpec(surfaceSize = IntSize(canvasWidth, canvasHeight), extent = ext)
 
-            // Completed markers stay in the main canvas so their Multiply blend
-            // sees the PDF pixels. Completed pen ink uses the shared bitmap cache
-            // plus an anti-flicker tail while the async rebuild catches up.
-            drawCompletedMarkers(paths, inkSpec, livePath)
+            // Completed markers and pen ink use bitmap caches plus anti-flicker
+            // tails while async rebuilds catch up.
+            drawCompletedMarkerInk(paths, completedMarkerInk.value, inkSpec, livePath)
             drawCompletedPenInk(
                 paths = paths,
                 cached = completedInk.value,
