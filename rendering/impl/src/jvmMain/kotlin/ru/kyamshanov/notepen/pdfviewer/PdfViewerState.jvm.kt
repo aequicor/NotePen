@@ -390,7 +390,7 @@ actual class PdfViewerState internal constructor(
     private var springVelY = 0f
 
     /** Начало drag-to-pan: фиксирует сырое положение пальца и режим удержания. */
-    fun beginPanGesture() {
+    actual fun beginPanGesture() {
         dragRawPan = pan
         overscrollHeld = true
     }
@@ -402,7 +402,7 @@ actual class PdfViewerState internal constructor(
      * прирост). На отпускании вызови [endPanGesture] — пружина стартует
      * мгновенно от текущего [overscrollOffset].
      */
-    fun panGestureBy(delta: Offset) {
+    actual fun panGestureBy(delta: Offset) {
         dragRawPan =
             Offset(
                 x = if (delta.x == 0f) dragRawPan.x else dragRawPan.x + delta.x,
@@ -429,7 +429,7 @@ actual class PdfViewerState internal constructor(
      * с нулевой начальной скоростью — критически демпфированная система вернётся
      * к нулю за ~0.4 с без перелёта.
      */
-    fun endPanGesture() {
+    actual fun endPanGesture() {
         overscrollHeld = false
         springVelX = 0f
         springVelY = 0f

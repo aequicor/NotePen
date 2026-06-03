@@ -585,26 +585,16 @@ class MainScreenViewModel(
     private fun openRecentFileById(id: String) {
         if (isNavigating) return
         val record = _state.value.recentFiles.firstOrNull { it.id == id } ?: return
-        when (record.availabilityStatus) {
-            AvailabilityStatus.NOT_FOUND -> {
-                _state.update { it.copy(errorEvent = ErrorEvent.FileNotFound) }
-                return
+        val blockingError = record.availabilityStatus.openBlockingErrorEvent()
+        if (blockingError != null) {
+            _state.update { it.copy(errorEvent = blockingError) }
+        } else {
+            isNavigating = true
+            val uri = record.uri
+            _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, record.lastPageIndex)) }
+            scope.launch {
+                refreshOpenedRecentFile(record)
             }
-            AvailabilityStatus.FILE_ERROR,
-            AvailabilityStatus.ARCHIVED_UNAVAILABLE,
-            -> {
-                _state.update { it.copy(errorEvent = ErrorEvent.FileError) }
-                return
-            }
-            AvailabilityStatus.AVAILABLE,
-            AvailabilityStatus.UNKNOWN,
-            -> Unit
-        }
-        isNavigating = true
-        val uri = record.uri
-        _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, record.lastPageIndex)) }
-        scope.launch {
-            refreshOpenedRecentFile(record)
         }
     }
 
@@ -904,6 +894,17 @@ private fun RecentFile.toUiModel() =
         thumbnailState = ThumbnailState.Loading,
         lastPageIndex = lastPageIndex,
     )
+
+private fun AvailabilityStatus.openBlockingErrorEvent(): ErrorEvent? =
+    when (this) {
+        AvailabilityStatus.NOT_FOUND -> ErrorEvent.FileNotFound
+        AvailabilityStatus.FILE_ERROR,
+        AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+        -> ErrorEvent.FileError
+        AvailabilityStatus.AVAILABLE,
+        AvailabilityStatus.UNKNOWN,
+        -> null
+    }
 
 private fun Folder.toUiModel(fileCount: Int) =
     FolderUiModel(

@@ -248,6 +248,15 @@ expect class PdfViewerState {
     /** True while the viewer content is visually transformed but not committed to [zoom] / [pan]. */
     val isVisualTransformActive: Boolean
 
+    /** Starts a drag-pan gesture; platforms may use it to hold overscroll state. */
+    fun beginPanGesture()
+
+    /** Applies a drag-pan delta in viewport pixels. */
+    fun panGestureBy(delta: Offset)
+
+    /** Ends a drag-pan gesture. */
+    fun endPanGesture()
+
     /** PDF-ширина колонки страниц при `zoom = 1`. */
     val basePageWidthPx: Float
 

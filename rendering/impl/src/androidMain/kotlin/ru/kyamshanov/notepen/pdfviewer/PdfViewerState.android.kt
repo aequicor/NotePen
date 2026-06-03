@@ -326,6 +326,18 @@ actual class PdfViewerState internal constructor(
             )
     }
 
+    actual fun beginPanGesture() {
+        // Android has no separate overscroll spring for pen-pan gestures.
+    }
+
+    actual fun panGestureBy(delta: Offset) {
+        panBy(delta)
+    }
+
+    actual fun endPanGesture() {
+        // Android has no separate overscroll spring for pen-pan gestures.
+    }
+
     actual fun scrollToPage(
         pageIndex: Int,
         offsetPx: Int,
