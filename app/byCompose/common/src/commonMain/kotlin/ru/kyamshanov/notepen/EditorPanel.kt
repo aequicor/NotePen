@@ -146,7 +146,7 @@ import kotlin.time.Duration.Companion.seconds
 private val panelLogger = KotlinLogging.logger {}
 
 /** Куда роутится текущий активный pointer-жест в [EditorPanel]. */
-private enum class PanelGestureRoute { NONE, DRAWING, LOUPE, MAGNIFIER, TARGET_RECT }
+private enum class PanelGestureRoute { NONE, DRAWING, LOUPE, MAGNIFIER, TARGET_RECT, PAN }
 
 private const val PANEL_TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val PANEL_TOOLBAR_ZOOM_STEP_OUT = 1f / PANEL_TOOLBAR_ZOOM_STEP_IN
@@ -1134,6 +1134,7 @@ fun EditorPanel(
     }
     val isOpenTriggerActive = bindingActive(shortcutsSettings.loupeOpen)
     val isCloseTriggerActive = bindingActive(shortcutsSettings.loupeClose)
+    val isPenPanTriggerActive = bindingActive(shortcutsSettings.penPan)
     val closeArmed = remember(pdfState) { mutableStateOf(false) }
     LaunchedEffect(pdfState, magnifierState.enabled) {
         closeArmed.value = magnifierState.enabled && !isCloseTriggerActive
@@ -1199,6 +1200,7 @@ fun EditorPanel(
             )
         }
     val gestureRoute = remember(pdfState) { mutableStateOf(PanelGestureRoute.NONE) }
+    val penPanLastPosition = remember(pdfState) { mutableStateOf<Offset?>(null) }
     // Окно-origin gesture-узла viewer'а (его левый-верхний угол в координатах
     // окна Compose). Нативный pen-stream (`WindowsPointerHook`) репортит позиции
     // в координатах окна, а Compose pointerInput viewer'а — локально к этому
@@ -1207,6 +1209,7 @@ fun EditorPanel(
     // и `pdfViewerState.pan/zoom`, — иначе перо и рамка лупы расходятся.
     val viewerOriginInWindow = remember { mutableStateOf(Offset.Zero) }
     val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
+    val penPanTriggerProvider = rememberUpdatedState(isPenPanTriggerActive)
     val magnifierInputControllerHolder =
         remember(pdfState) {
             mutableStateOf<ru.kyamshanov.notepen.magnifier.MagnifierInputController?>(null)
@@ -1217,6 +1220,12 @@ fun EditorPanel(
         pressure: Float,
         tilt: Float,
     ) {
+        if (penPanTriggerProvider.value) {
+            pdfViewerState.beginPanGesture()
+            penPanLastPosition.value = viewportPos
+            gestureRoute.value = PanelGestureRoute.PAN
+            return
+        }
         if (magnifierState.enabled) {
             // `contentBoundsInViewport` хранится в координатах окна Compose
             // (панель репортит `boundsInWindow()`), а `viewportPos` — локально к
@@ -1287,6 +1296,13 @@ fun EditorPanel(
                 }
             }
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onMove(viewportPos)
+            PanelGestureRoute.PAN -> {
+                val previous = penPanLastPosition.value
+                if (previous != null) {
+                    pdfViewerState.panGestureBy(viewportPos - previous)
+                }
+                penPanLastPosition.value = viewportPos
+            }
             PanelGestureRoute.NONE -> Unit
         }
     }
@@ -1301,8 +1317,10 @@ fun EditorPanel(
             PanelGestureRoute.MAGNIFIER ->
                 magnifierInputControllerHolder.value?.onUp(magnifierState.contentBoundsInViewport.size)
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onUp()
+            PanelGestureRoute.PAN -> pdfViewerState.endPanGesture()
             PanelGestureRoute.NONE -> Unit
         }
+        penPanLastPosition.value = null
         gestureRoute.value = PanelGestureRoute.NONE
     }
 
@@ -1315,8 +1333,10 @@ fun EditorPanel(
             PanelGestureRoute.DRAWING -> drawingController.onCancel()
             PanelGestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value?.onCancel()
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onCancel()
+            PanelGestureRoute.PAN -> pdfViewerState.endPanGesture()
             PanelGestureRoute.NONE -> Unit
         }
+        penPanLastPosition.value = null
         gestureRoute.value = PanelGestureRoute.NONE
     }
 
@@ -1634,14 +1654,18 @@ fun EditorPanel(
                     // десктопе pan-обработчик ловит Press на Initial-проходе раньше
                     // внутреннего drag-роутера, поэтому без этой проверки страница
                     // перетаскивалась вместо рамки.
-                    (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
-                        !quickLoupeArmed.value &&
-                        !openTriggerProvider.value &&
-                        !(
-                            magnifierState.enabled &&
-                                magnifierTargetGestureController.hitTest(pos) !=
-                                ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
-                        )
+                    if (penPanTriggerProvider.value) {
+                        true
+                    } else {
+                        (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
+                            !quickLoupeArmed.value &&
+                            !openTriggerProvider.value &&
+                            !(
+                                magnifierState.enabled &&
+                                    magnifierTargetGestureController.hitTest(pos) !=
+                                    ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
+                            )
+                    }
                 },
                 gestureModifier =
                     Modifier.pdfMultiPageDrawingInput(
@@ -1655,12 +1679,14 @@ fun EditorPanel(
                             quickLoupeArmed.value ||
                                 openTriggerProvider.value ||
                                 (
-                                    magnifierState.enabled &&
+                                    !penPanTriggerProvider.value &&
+                                        magnifierState.enabled &&
                                         magnifierTargetGestureController.hitTest(pos) !=
                                         ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
                                 ) ||
                                 (
-                                    !pencilModeProvider.value &&
+                                    !penPanTriggerProvider.value &&
+                                        !pencilModeProvider.value &&
                                         toolModeProvider.value != ToolMode.NONE &&
                                         drawingController.isInsidePdfPage(pos)
                                 )

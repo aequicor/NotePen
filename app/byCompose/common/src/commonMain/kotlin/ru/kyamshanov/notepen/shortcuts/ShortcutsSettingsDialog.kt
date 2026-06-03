@@ -42,7 +42,8 @@ import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutBinding
 import ru.kyamshanov.notepen.shortcuts.domain.model.ShortcutsSettings
 
 /**
- * Диалог настройки шорткатов. v1: два биндинга для лупы.
+ * Диалог настройки шорткатов. v1: биндинги для лупы и hold-режима
+ * перемещения PDF пером.
  *
  * Поле «Сочетание» — read-only TextField. Клик по «Записать» → следующая
  * нажатая комбинация (модификаторы + клавиша **или** кнопка пера)
@@ -98,6 +99,13 @@ fun ShortcutsSettingsDialog(
                     title = "Закрыть лупу",
                     binding = settings.loupeClose,
                     onChange = { onChange(settings.copy(loupeClose = it)) },
+                    penButtons = penButtons,
+                )
+                Spacer(Modifier.height(12.dp))
+                BindingField(
+                    title = "Перемещать PDF пером",
+                    binding = settings.penPan,
+                    onChange = { onChange(settings.copy(penPan = it)) },
                     penButtons = penButtons,
                 )
             }

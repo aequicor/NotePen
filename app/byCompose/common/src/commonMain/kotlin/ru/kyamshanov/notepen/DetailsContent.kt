@@ -435,9 +435,11 @@ fun DetailsContent(
     val penButtonsPressed by tabletController.penButtons.collectAsState()
     val shortcutsSettingsState = rememberShortcutsSettings()
     val shortcutsSettings = shortcutsSettingsState.value
-    val barrelBoundToLoupe =
-        1 in shortcutsSettings.loupeOpen.penButtons || 1 in shortcutsSettings.loupeClose.penButtons
-    val eraserOverride = (barrelPressed && !barrelBoundToLoupe) || eraserTipActive
+    val barrelBoundToShortcut =
+        1 in shortcutsSettings.loupeOpen.penButtons ||
+            1 in shortcutsSettings.loupeClose.penButtons ||
+            1 in shortcutsSettings.penPan.penButtons
+    val eraserOverride = (barrelPressed && !barrelBoundToShortcut) || eraserTipActive
 
     LaunchedEffect(stylusEverSeen, pencilModeManuallyTouched) {
         if (pencilModeManuallyTouched) return@LaunchedEffect
