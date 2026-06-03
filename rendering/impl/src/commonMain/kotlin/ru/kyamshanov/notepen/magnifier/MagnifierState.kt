@@ -355,10 +355,10 @@ class MagnifierState {
     ) {
         if (segments.size != 1) return
         val layout = viewerState.layout
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         val basePageW = layout.basePageWidthPx
         if (zoom <= 0f || basePageW <= 0f) return
-        val pan = viewerState.pan
+        val pan = viewerState.effectivePan
         val docLeft = (viewportRect.left - pan.x) / zoom
         val docTop = (viewportRect.top - pan.y) / zoom
         val docRight = (viewportRect.right - pan.x) / zoom
@@ -393,14 +393,14 @@ class MagnifierState {
         val layout = viewerState.layout
         val pi = seg.pageIndex
         if (pi !in 0 until layout.pageHeightsPx.size) return null
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         if (zoom <= 0f) return null
         val basePageW = layout.basePageWidthPx
         val pdfH = layout.pdfHeightsPx[pi]
         val pageTop = layout.pageTopsPx[pi]
         // X-смещение колонки страницы (0f в SINGLE, правый столбец в SPREAD).
         val pageLeft = layout.pageLeftsPx[pi]
-        val pan = viewerState.pan
+        val pan = viewerState.effectivePan
         val t = seg.targetOnPage
         return Rect(
             left = pan.x + (pageLeft + t.left * basePageW) * zoom,

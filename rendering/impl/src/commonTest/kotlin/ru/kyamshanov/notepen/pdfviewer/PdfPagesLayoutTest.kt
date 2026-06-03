@@ -436,6 +436,24 @@ class PdfPagesLayoutTest {
         }
     }
 
+    @Test
+    fun `effective transform matches root graphics layer mapping`() {
+        val pan = Offset(40f, -20f)
+        val zoom = 1.25f
+        val gestureScale = 1.6f
+        val gestureTranslation = Offset(12f, -7f)
+        val doc = Offset(200f, 80f)
+
+        val committedViewport = pan + doc * zoom
+        val layerViewport = committedViewport * gestureScale + gestureTranslation
+        val effectiveViewport =
+            PdfViewerMath.effectivePan(pan, gestureScale, gestureTranslation) +
+                doc * PdfViewerMath.effectiveZoom(zoom, gestureScale)
+
+        assertTrue(abs(layerViewport.x - effectiveViewport.x) < 1e-4f)
+        assertTrue(abs(layerViewport.y - effectiveViewport.y) < 1e-4f)
+    }
+
     // ── FEATURE #5: книжный разворот (SpreadMode.SPREAD) ────────────────────────
 
     @Test
@@ -532,10 +550,46 @@ class PdfPagesLayoutTest {
     fun `renderPriorityOrder puts visible pages before buffer pages`() {
         // окно 1..4, видимо 2..3 → сначала 2,3 затем буфер 1,4
         assertEquals(listOf(2, 3, 1, 4), PdfViewerMath.renderPriorityOrder(window = 1..4, visible = 2..3))
+        // большое окно → буфер рисуется симметрично: выше, ниже, выше, ниже
+        assertEquals(listOf(3, 4, 2, 5, 1, 6, 0, 7), PdfViewerMath.renderPriorityOrder(window = 0..7, visible = 3..4))
+        // primary visible page получает первый слот, даже если она не первая в visible range
+        assertEquals(
+            listOf(4, 3, 2, 5, 1, 6, 0, 7),
+            PdfViewerMath.renderPriorityOrder(window = 0..7, visible = 3..4, primaryVisible = 4),
+        )
+        // если видима только одна страница, она всё равно идёт до буфера
+        assertEquals(
+            listOf(2, 1, 3, 0, 4),
+            PdfViewerMath.renderPriorityOrder(window = 0..4, visible = 2..2, primaryVisible = 2),
+        )
         // окно == видимое → порядок без изменений
         assertEquals(listOf(2, 3), PdfViewerMath.renderPriorityOrder(window = 2..3, visible = 2..3))
         // пустое окно → пусто
         assertEquals(emptyList(), PdfViewerMath.renderPriorityOrder(window = IntRange.EMPTY, visible = 2..3))
+    }
+
+    @Test
+    fun `dominantVisiblePageIndex returns page occupying the largest viewport height`() {
+        val layout = PdfPagesLayout.build(pages(1f, 1f, 1f), basePageWidthPx = 100f)
+
+        assertEquals(
+            1,
+            PdfViewerMath.dominantVisiblePageIndex(
+                layout = layout,
+                panY = -80f,
+                zoom = 1f,
+                viewportHeight = 100f,
+            ),
+        )
+        assertEquals(
+            2,
+            PdfViewerMath.dominantVisiblePageIndex(
+                layout = layout,
+                panY = -170f,
+                zoom = 1f,
+                viewportHeight = 100f,
+            ),
+        )
     }
 
     @Test

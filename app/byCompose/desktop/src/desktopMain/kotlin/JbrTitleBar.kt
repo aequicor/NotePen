@@ -59,13 +59,14 @@ private class JbrTitleBarInteraction(
      * Registers this node as the window-drag zone.  Every pointer event reaching
      * the node calls [CustomTitleBar.forceHitTest] with `false`, telling the OS
      * "treat this as the title bar, allow dragging". Interactive children that
-     * use [interactive] override this per-event with `true`.
+     * use [interactive] override this later in the same event dispatch with
+     * `true`.
      */
     override fun dragArea(modifier: Modifier): Modifier =
         modifier.pointerInput(titleBar) {
             awaitPointerEventScope {
                 while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
                     event.changes.forEach { _ -> titleBar.forceHitTest(false) }
                 }
             }
@@ -76,7 +77,7 @@ private class JbrTitleBarInteraction(
      * reaching the node calls [CustomTitleBar.forceHitTest] with `true`,
      * preventing the OS from treating the press as a window-drag gesture.
      *
-     * Because `Main` pass dispatches from inner to outer nodes, this call fires
+     * Because this runs on [PointerEventPass.Final], this call fires
      * after [dragArea] for events landing on an interactive child — so `true`
      * wins and the click reaches the component normally.
      */
@@ -84,7 +85,7 @@ private class JbrTitleBarInteraction(
         modifier.pointerInput(titleBar) {
             awaitPointerEventScope {
                 while (true) {
-                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    val event = awaitPointerEvent(PointerEventPass.Final)
                     event.changes.forEach { _ -> titleBar.forceHitTest(true) }
                 }
             }

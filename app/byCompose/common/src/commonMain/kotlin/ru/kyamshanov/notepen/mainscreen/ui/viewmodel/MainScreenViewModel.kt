@@ -582,27 +582,34 @@ class MainScreenViewModel(
         )
     }
 
-    private suspend fun openRecentFileById(id: String) {
+    private fun openRecentFileById(id: String) {
         if (isNavigating) return
         val record = _state.value.recentFiles.firstOrNull { it.id == id } ?: return
-        isNavigating = true
-        val allFiles = historyRepository.getAll()
-        val domainRecord =
-            allFiles.firstOrNull { it.id == id } ?: run {
-                isNavigating = false
-                return
+        val blockingError = record.availabilityStatus.openBlockingErrorEvent()
+        if (blockingError != null) {
+            _state.update { it.copy(errorEvent = blockingError) }
+        } else {
+            isNavigating = true
+            val uri = record.uri
+            _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, record.lastPageIndex)) }
+            scope.launch {
+                refreshOpenedRecentFile(record)
             }
-        val uri = domainRecord.uri
+        }
+    }
+
+    private suspend fun refreshOpenedRecentFile(record: RecentFileUiModel) {
+        val uri = record.uri
         when (val result = openRecentFile.execute(uri)) {
             is OpenFileResult.Success -> {
                 try {
                     val upsertResult =
                         addToHistory.execute(
                             uri = uri,
-                            displayName = domainRecord.displayName,
-                            fileSize = domainRecord.fileSize,
+                            displayName = record.displayName,
+                            fileSize = record.fileSize,
                             openedAt = nowMillis(),
-                            lastPageIndex = domainRecord.lastPageIndex,
+                            lastPageIndex = record.lastPageIndex,
                         )
                     if (upsertResult.isFailure) {
                         _state.update { it.copy(errorEvent = ErrorEvent.HistoryFlushFailed) }
@@ -610,11 +617,8 @@ class MainScreenViewModel(
                 } catch (_: Exception) {
                     _state.update { it.copy(errorEvent = ErrorEvent.HistoryFlushFailed) }
                 }
-                val lastPage = record.lastPageIndex
-                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, lastPage)) }
             }
             is OpenFileResult.NotAvailable -> {
-                isNavigating = false
                 val errorEvent =
                     when (result.status) {
                         AvailabilityStatus.NOT_FOUND -> ErrorEvent.FileNotFound
@@ -624,7 +628,7 @@ class MainScreenViewModel(
                     s.copy(
                         recentFiles =
                             s.recentFiles.map { m ->
-                                if (m.id == id) {
+                                if (m.id == record.id) {
                                     // CC-23: preserve ARCHIVED_UNAVAILABLE — a live check cannot downgrade it
                                     val newStatus =
                                         if (m.availabilityStatus == AvailabilityStatus.ARCHIVED_UNAVAILABLE) {
@@ -884,11 +888,23 @@ private fun RecentFile.toUiModel() =
         id = id,
         uri = uri,
         displayName = displayName,
+        fileSize = fileSize,
         openedAt = openedAt,
         availabilityStatus = availabilityStatus,
         thumbnailState = ThumbnailState.Loading,
         lastPageIndex = lastPageIndex,
     )
+
+private fun AvailabilityStatus.openBlockingErrorEvent(): ErrorEvent? =
+    when (this) {
+        AvailabilityStatus.NOT_FOUND -> ErrorEvent.FileNotFound
+        AvailabilityStatus.FILE_ERROR,
+        AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+        -> ErrorEvent.FileError
+        AvailabilityStatus.AVAILABLE,
+        AvailabilityStatus.UNKNOWN,
+        -> null
+    }
 
 private fun Folder.toUiModel(fileCount: Int) =
     FolderUiModel(

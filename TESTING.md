@@ -75,7 +75,7 @@ Tier 1 is the merge gate, run on every push and PR by [`.github/workflows/ci.yml
 
 ## Tier 2 — AI-vision (advisory, not a merge gate)
 
-Claude Code drives the **live** app on **real renderers** and judges visual/behavioral correctness the headless tier cannot reach — composited strokes over PDF bitmaps, low-latency overlay, Android `PdfRenderer` path, magnifier, gestures/zoom, library/editor/toolbar/pen screens, QR/peer catalog, and on-screen LAN-sync propagation. Non-deterministic and token-costly, so it **informs, never blocks**.
+Codex drives the **live** app on **real renderers** and judges visual/behavioral correctness the headless tier cannot reach — composited strokes over PDF bitmaps, low-latency overlay, Android `PdfRenderer` path, magnifier, gestures/zoom, library/editor/toolbar/pen screens, QR/peer catalog, and on-screen LAN-sync propagation. Non-deterministic and token-costly, so it **informs, never blocks**.
 
 ### Why it exists (the Tier-1 gaps it covers)
 
@@ -91,7 +91,7 @@ The **only** deterministic rendered-pixel goldens in the repo are the 9 reflow s
 ### How to run it
 
 - **Trigger:** any prompt containing the keyword **`ai-vision`** (a `UserPromptSubmit` hook injects the standing instruction — see [`tools/uitest/ai-vision-hook.ps1`](tools/uitest/ai-vision-hook.ps1)).
-- **Desktop harness:** [`tools/uitest/Launch-Desktop.ps1`](tools/uitest/Launch-Desktop.ps1) to launch/locate the `NotePen` JBR window, then drive via **computer-use** (`screenshot` / `left_click` / `left_click_drag` / `type` / `key`) after granting **`java.exe`**.
+- **Desktop harness:** [`tools/uitest/Launch-Desktop.ps1`](tools/uitest/Launch-Desktop.ps1) to launch/locate the `NotePen` JBR window, then drive via [`tools/uitest/Drive-Desktop.ps1`](tools/uitest/Drive-Desktop.ps1) (`capture` / `click` / `doubleClick` / `drag` / `scroll` / `type` / `key` / `minimize` / `maximize` / `restore` / `hide` / `show`).
 - **Android harness:** [`tools/uitest/Start-AndroidTarget.ps1`](tools/uitest/Start-AndroidTarget.ps1) (boot AVD / pick device, install debug APK), then `adb -s <serial> shell input …` + `adb … exec-out screencap -p`.
 - **Animation capture:** [`Capture-DesktopAnim.ps1`](tools/uitest/Capture-DesktopAnim.ps1) / [`Capture-AndroidAnim.ps1`](tools/uitest/Capture-AndroidAnim.ps1) → looping **GIF + PNG filmstrip** (the diffable artifact); pure PowerShell, no ffmpeg.
 - **Live-driving tools** live at [`tools/uitest/`](tools/uitest/) (do not relocate). The former `notepen-desktop` MCP and `.claude/tools/bin/notepen-android` helper were **removed** — do not reference them.

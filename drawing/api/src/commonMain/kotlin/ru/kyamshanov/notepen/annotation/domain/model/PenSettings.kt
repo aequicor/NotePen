@@ -22,10 +22,9 @@ data class PenSettings(
     val strokeWidth: Float = DEFAULT_STROKE_WIDTH,
     val alpha: Float = 1f,
     /**
-     * Minimum line width as a fraction of [strokeWidth] when stylus pressure
-     * approaches zero. Final per-segment width is interpolated linearly:
-     * `width = strokeWidth * (minWidthFactor + pressure * (1 - minWidthFactor))`.
-     * `1f` disables pressure modulation entirely.
+     * Minimum line width as a fraction of [strokeWidth] for pressure-aware
+     * renderers. The default renderer applies a gamma pressure curve with a
+     * readable low-pressure floor.
      */
     val minWidthFactor: Float = DEFAULT_MIN_WIDTH_FACTOR,
 ) {

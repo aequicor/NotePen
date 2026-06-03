@@ -2,12 +2,14 @@ package ru.kyamshanov.notepen.pdf.infrastructure
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import org.apache.pdfbox.rendering.ImageType
 import org.apache.pdfbox.text.PDFTextStripper
 import org.apache.pdfbox.text.TextPosition
 import ru.kyamshanov.notepen.annotation.domain.model.PageRotation
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageData
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.pdf.presentation.withJvmBufferedImage
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
 
@@ -65,7 +67,7 @@ class JvmPdfPageRenderer(
 
             val rendered: BufferedImage =
                 jvmDoc.useRenderer { renderer ->
-                    renderer.renderImageWithDPI(pageIndex, dpi)
+                    renderer.renderImageWithDPI(pageIndex, dpi, ImageType.RGB)
                 }
 
             // Порядок CROP → ROTATE: вырезку определяем в собственной (до
@@ -76,8 +78,10 @@ class JvmPdfPageRenderer(
             // PageRotation.rotatePointCw.
             val cropped = cropToRect(rendered, cropLeftN, cropTopN, cropRightN, cropBottomN)
             val oriented = rotateCwQuarters(cropped, userQuarters)
-            val pixels = scaleToTarget(oriented, widthPx, heightPx)
+            val image = scaleToTarget(oriented, widthPx, heightPx)
+            val pixels = image.getRGB(0, 0, widthPx, heightPx, null, 0, widthPx)
             PdfPageData(widthPx = widthPx, heightPx = heightPx, pixels = pixels)
+                .withJvmBufferedImage(image)
         }
 
     override suspend fun documentTextLineHeight(document: PdfDocument): Float? =
@@ -205,9 +209,9 @@ class JvmPdfPageRenderer(
         source: BufferedImage,
         widthPx: Int,
         heightPx: Int,
-    ): IntArray {
+    ): BufferedImage {
         if (source.width == widthPx && source.height == heightPx) {
-            return source.getRGB(0, 0, widthPx, heightPx, null, 0, widthPx)
+            return source
         }
         val target = BufferedImage(widthPx, heightPx, BufferedImage.TYPE_INT_ARGB)
         val g = target.createGraphics()
@@ -216,7 +220,7 @@ class JvmPdfPageRenderer(
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
         g.drawImage(source, 0, 0, widthPx, heightPx, null)
         g.dispose()
-        return target.getRGB(0, 0, widthPx, heightPx, null, 0, widthPx)
+        return target
     }
 
     private companion object {

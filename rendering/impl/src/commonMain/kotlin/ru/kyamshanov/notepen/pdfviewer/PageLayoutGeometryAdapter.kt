@@ -15,8 +15,8 @@ fun PdfViewerState.asPageLayoutGeometry(): PageLayoutGeometry {
     return object : PageLayoutGeometry {
         override val pageCount: Int get() = viewerState.layout.pageHeightsPx.size
         override val basePageWidthPx: Float get() = viewerState.layout.basePageWidthPx
-        override val zoom: Float get() = viewerState.zoom
-        override val pan: Offset get() = viewerState.pan
+        override val zoom: Float get() = viewerState.effectiveZoom
+        override val pan: Offset get() = viewerState.effectivePan
 
         override fun pageTopPx(index: Int): Float = viewerState.layout.pageTopsPx[index]
 

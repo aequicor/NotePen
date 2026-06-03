@@ -394,6 +394,7 @@ private fun RecentFile.toUiModel() =
         id = id,
         uri = uri,
         displayName = displayName,
+        fileSize = fileSize,
         openedAt = openedAt,
         availabilityStatus = availabilityStatus,
         thumbnailState = ThumbnailState.Loading,

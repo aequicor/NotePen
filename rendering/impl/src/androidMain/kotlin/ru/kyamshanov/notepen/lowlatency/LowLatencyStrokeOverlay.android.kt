@@ -15,9 +15,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.graphics.lowlatency.CanvasFrontBufferedRenderer
 import androidx.lifecycle.Lifecycle
@@ -25,6 +28,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
@@ -39,13 +43,8 @@ import kotlin.math.sin
  */
 private const val TILT_WIDTH_GAIN = 0.5f
 
-/**
- * How long to keep the multi-buffered overlay visible after lift-off, giving
- * Compose enough time to recompose, rebuild the completed-strokes bitmap
- * cache and draw it underneath. ~3 frames at 60 Hz; chosen empirically as
- * the shortest interval that hides the handoff flash on mid-range tablets.
- */
-private const val HANDOFF_HOLD_MS = 50L
+private const val HANDOFF_FALLBACK_MS = 250L
+private const val HANDOFF_FRAME_DELAY = 2
 
 /**
  * Stroke segment fed to `CanvasFrontBufferedRenderer`. One per appended
@@ -62,10 +61,20 @@ private data class StrokeSegment(
     val toolKind: ToolKind,
 )
 
+private data class OverlayState(
+    val drawing: Boolean,
+    val livePointCount: Int,
+    val pathCount: Int,
+    val completedStrokeCount: Int,
+)
+
 @Composable
 actual fun LowLatencyStrokeOverlay(
     drawingState: PdfDrawingState,
     modifier: Modifier,
+    viewportScale: Float,
+    windowBounds: Rect?,
+    completedStrokeCount: Int,
 ) {
     // CanvasFrontBufferedRenderer requires Android Q (API 29) — it relies on
     // HardwareBuffer + EGL extensions not available before. On older devices
@@ -74,6 +83,7 @@ actual fun LowLatencyStrokeOverlay(
 
     val surfaceViewHolder = remember { mutableStateOf<SurfaceView?>(null) }
     val rendererHolder = remember { mutableStateOf<CanvasFrontBufferedRenderer<StrokeSegment>?>(null) }
+    val completedStrokeCountState = rememberUpdatedState(completedStrokeCount)
     val lifecycleOwnerHolder = remember { mutableStateOf<LifecycleOwner?>(null) }
     var overlayMounted by remember { mutableStateOf(drawingState.isDrawing.value) }
 
@@ -83,7 +93,7 @@ actual fun LowLatencyStrokeOverlay(
                 if (drawing) {
                     overlayMounted = true
                 } else {
-                    delay(HANDOFF_HOLD_MS)
+                    delay(HANDOFF_FALLBACK_MS)
                     if (!drawingState.isDrawing.value) overlayMounted = false
                 }
             }
@@ -204,38 +214,60 @@ actual fun LowLatencyStrokeOverlay(
     // Drive the renderer from `drawingState`. We track `lastIndex` so we only
     // submit each new sample once.
     //
-    // Lift-off handoff: when `isDrawing` flips to false we **commit** the
-    // accumulated samples to the multi-buffered (back) layer instead of
-    // calling `cancel()`. Cancel would hide the front buffer immediately,
-    // leaving SurfaceView fully transparent before Compose has had a chance
-    // to recompose and rebuild its `completedLayer` cache bitmap with the
-    // just-finished stroke — for one or two frames the stroke would vanish
-    // (the "flash" reported by users). Commit keeps the stroke visible via
-    // the multi-buffered layer; we then wait `HANDOFF_HOLD_MS` (long enough
-    // for Compose to redraw with the new cache) before calling `clear()` to
-    // reveal Compose's render underneath. The brief overlap between the two
-    // is visually identical because both render the same point set.
+    // Lift-off handoff: commit the front-buffer samples, then clear immediately.
+    // The committed path is already in `currentPaths`, so Compose renders it.
     LaunchedEffect(drawingState, rendererHolder.value) {
         var lastIndex = -1
+        var handoffTargetPathCount: Int? = null
+        var clearJob: kotlinx.coroutines.Job? = null
+
+        suspend fun clearAfterMainCanvasFrames(renderer: CanvasFrontBufferedRenderer<StrokeSegment>) {
+            repeat(HANDOFF_FRAME_DELAY) {
+                withFrameNanos { }
+            }
+            if (!drawingState.isDrawing.value) renderer.clear()
+        }
+
         snapshotFlow {
-            val drawing = drawingState.isDrawing.value
-            val size = drawingState.livePoints.size
-            Triple(drawing, size, drawingState.historyVersion.value)
-        }.collect { (drawing, size, _) ->
+            OverlayState(
+                drawing = drawingState.isDrawing.value,
+                livePointCount = drawingState.livePoints.size,
+                pathCount = drawingState.currentPaths.size,
+                completedStrokeCount = completedStrokeCountState.value,
+            )
+        }.collect { state ->
             val renderer = rendererHolder.value ?: return@collect
             val surfaceView = surfaceViewHolder.value
-            if (!drawing) {
+            if (!state.drawing) {
                 if (lastIndex >= 0) {
                     renderer.commit()
                     lastIndex = -1
-                    // Let Compose recompose + redraw `completedLayer` with
-                    // the new stroke before clearing the overlay.
-                    delay(HANDOFF_HOLD_MS)
-                    renderer.clear()
+                }
+                val target = state.pathCount.takeIf { it > 0 } ?: return@collect
+                if (handoffTargetPathCount != target) {
+                    handoffTargetPathCount = target
+                    clearJob?.cancel()
+                    clearJob =
+                        launch {
+                            delay(HANDOFF_FALLBACK_MS)
+                            if (!drawingState.isDrawing.value && handoffTargetPathCount == target) {
+                                renderer.clear()
+                                handoffTargetPathCount = null
+                            }
+                        }
+                }
+                if (state.completedStrokeCount >= target || handoffTargetPathCount == target) {
+                    clearJob?.cancel()
+                    clearJob = null
+                    clearAfterMainCanvasFrames(renderer)
+                    if (handoffTargetPathCount == target) handoffTargetPathCount = null
                 }
                 surfaceView?.alpha = HIDDEN_ALPHA
                 return@collect
             }
+            clearJob?.cancel()
+            clearJob = null
+            handoffTargetPathCount = null
             surfaceView?.alpha = VISIBLE_ALPHA
             val ext = drawingState.extent.value
             val slotW = surfaceView?.width ?: 0
@@ -250,20 +282,19 @@ actual fun LowLatencyStrokeOverlay(
             val colorArgb = drawingState.liveColorArgb.value.toInt()
             val toolKind = drawingState.liveToolKind.value
             // Detect a new stroke that started while the collector was busy
-            // (e.g. paused in `delay(HANDOFF_HOLD_MS)` after a previous commit,
-            // or because snapshotFlow conflated the `isDrawing=false` edge).
+            // (e.g. because snapshotFlow conflated the `isDrawing=false` edge).
             // `startDrawing()` calls `livePoints.clear()` so `size` drops back
             // to 1; without this reset, `lastIndex` would still point past the
             // new list end and the loop below would never run, leaving the
             // start of the new stroke unrendered — or, worse, a subsequent
             // append would render a segment between `livePoints[lastIndex]`
             // and the new point, producing a stray line across the page.
-            if (lastIndex >= size) {
+            if (lastIndex >= state.livePointCount) {
                 lastIndex = -1
             }
             // Submit every new sample since the previous tick. snapshotFlow
             // coalesces updates per frame, so a burst of 4 samples emits once.
-            while (lastIndex + 1 < size) {
+            while (lastIndex + 1 < state.livePointCount) {
                 lastIndex++
                 val curr = drawingState.livePoints[lastIndex]
                 val prev =
@@ -289,6 +320,9 @@ actual fun LowLatencyStrokeOverlay(
 
 @Composable
 actual fun rememberLowLatencyOverlayAvailable(): Boolean = remember { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q }
+
+@Composable
+actual fun rememberLowLatencyOverlayMaxDimensionPx(): Int = remember { 2400 }
 
 private const val HIDDEN_ALPHA = 0f
 private const val VISIBLE_ALPHA = 1f
@@ -325,14 +359,20 @@ private fun drawSegment(
     val y = (curr.y + offY) * pdfH
 
     if (segment.toolKind == ToolKind.MARKER) {
-        // Marker has no single-sample dot — its ribbon is the area swept by the
-        // chisel edge between two samples, so a lone start point renders nothing
-        // (same as `drawMarkerStroke`, which requires ≥2 points).
-        if (prev == null) return
         markerPaint.color = segment.colorArgb
         // Constant nib breadth, independent of pressure/tilt — like the renderer.
         val halfWidthPx = segment.widthPx * 0.5f
         if (halfWidthPx <= 0f) return
+        if (prev == null) {
+            canvas.drawOval(
+                x - halfWidthPx,
+                y - halfWidthPx,
+                x + halfWidthPx,
+                y + halfWidthPx,
+                markerPaint,
+            )
+            return
+        }
         val nibX = cos(MARKER_NIB_ANGLE_RADIANS) * halfWidthPx
         val nibY = sin(MARKER_NIB_ANGLE_RADIANS) * halfWidthPx
         val x1 = (prev.x + offX) * pdfW
@@ -351,9 +391,7 @@ private fun drawSegment(
     val tiltBoost = 1f + TILT_WIDTH_GAIN * curr.tilt
     penPaint.strokeWidth = (segment.widthPx * curr.pressure * tiltBoost).coerceAtLeast(1f)
     if (prev == null) {
-        // Single-sample "dot" at stroke start — draw a tiny line to itself so
-        // the round cap renders a visible point.
-        canvas.drawLine(x, y, x, y, penPaint)
+        canvas.drawCircle(x, y, penPaint.strokeWidth * 0.5f, penPaint)
     } else {
         canvas.drawLine((prev.x + offX) * pdfW, (prev.y + offY) * pdfH, x, y, penPaint)
     }

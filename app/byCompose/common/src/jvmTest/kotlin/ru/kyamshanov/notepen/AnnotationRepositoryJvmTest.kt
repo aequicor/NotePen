@@ -12,6 +12,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -72,7 +73,8 @@ class AnnotationRepositoryJvmTest {
     @Test
     fun save_nonExistentDirectory_returnsFailure() =
         runBlocking {
-            val result = repo.save("/nonexistent_dir_abc123/sample.pdf", emptyMap(), scale = 100)
+            val badRepo = repositoryWritingUnderFileParent()
+            val result = badRepo.save("sample.pdf", emptyMap(), scale = 100)
             assertTrue(result.isFailure, "save must return failure for bad path")
         }
 
@@ -160,9 +162,10 @@ class AnnotationRepositoryJvmTest {
     @Test
     fun save_ioException_returnsFailure() =
         runBlocking {
+            val badRepo = repositoryWritingUnderFileParent()
             val result =
-                repo.save(
-                    "/nonexistent_path_xyz_777/file.pdf",
+                badRepo.save(
+                    "file.pdf",
                     emptyMap(),
                     scale = 100,
                     pen = PenSettings(),
@@ -170,6 +173,12 @@ class AnnotationRepositoryJvmTest {
                 )
             assertTrue(result.isFailure)
         }
+
+    private fun repositoryWritingUnderFileParent(): AnnotationRepositoryJvmAndroid {
+        val parentFile = File.createTempFile("notepen_bad_annotation_parent", ".tmp")
+        val impossibleStoreFile = File(parentFile, "sidecar.json")
+        return AnnotationRepositoryJvmAndroid(storeFileFor = { impossibleStoreFile })
+    }
 
     // TC-30 (Step 7): full flow — save (annotations + scale + pen + eraser) then load
     @Test

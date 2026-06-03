@@ -42,6 +42,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -63,6 +64,7 @@ import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -144,7 +146,7 @@ import kotlin.time.Duration.Companion.seconds
 private val panelLogger = KotlinLogging.logger {}
 
 /** Куда роутится текущий активный pointer-жест в [EditorPanel]. */
-private enum class PanelGestureRoute { NONE, DRAWING, LOUPE, MAGNIFIER, TARGET_RECT }
+private enum class PanelGestureRoute { NONE, DRAWING, LOUPE, MAGNIFIER, TARGET_RECT, PAN }
 
 private const val PANEL_TOOLBAR_ZOOM_STEP_IN = 1.1f
 private const val PANEL_TOOLBAR_ZOOM_STEP_OUT = 1f / PANEL_TOOLBAR_ZOOM_STEP_IN
@@ -153,6 +155,8 @@ private const val PANEL_AUTOSAVE_DEBOUNCE = 2_000L
 private const val PANEL_HIGH_RES_DIM_PX = 4000
 private const val FIGURE_PAGE_RENDER_WIDTH_PX = 1600
 private const val PANEL_SIDEBAR_ANIM_MS = 220
+private const val REFLOW_PROBE_DELAY_AFTER_OPEN_MS = 750L
+private const val NATIVE_PEN_FALLBACK_SUPPRESS_MS = 500L
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
@@ -828,7 +832,11 @@ fun EditorPanel(
     // на инжектируемый диспетчер). На ошибке пробы (например, не-PDF картинка
     // вроде PNG) считаем недоступным — кнопку не показываем, иначе вход завис бы
     // на «Готовим режим чтения…».
-    LaunchedEffect(pdfState, filePath) {
+    LaunchedEffect(pdfState, filePath, pdfDocument) {
+        readingModeAvailable = false
+        if (pdfDocument == null) return@LaunchedEffect
+        delay(REFLOW_PROBE_DELAY_AFTER_OPEN_MS)
+        if (pdfState.pdfDocument !== pdfDocument) return@LaunchedEffect
         readingModeAvailable =
             runCatching { reflowExtractor.probe(filePath) != PdfContentKind.IMAGE_ONLY }
                 .onFailure { e -> panelLogger.warn { "Reflow probe failed: ${e::class.simpleName}" } }
@@ -1138,6 +1146,7 @@ fun EditorPanel(
     }
     val isOpenTriggerActive = bindingActive(shortcutsSettings.loupeOpen)
     val isCloseTriggerActive = bindingActive(shortcutsSettings.loupeClose)
+    val isPenPanTriggerActive = bindingActive(shortcutsSettings.penPan)
     val closeArmed = remember(pdfState) { mutableStateOf(false) }
     LaunchedEffect(pdfState, magnifierState.enabled) {
         closeArmed.value = magnifierState.enabled && !isCloseTriggerActive
@@ -1203,6 +1212,7 @@ fun EditorPanel(
             )
         }
     val gestureRoute = remember(pdfState) { mutableStateOf(PanelGestureRoute.NONE) }
+    val penPanLastPosition = remember(pdfState) { mutableStateOf<Offset?>(null) }
     // Окно-origin gesture-узла viewer'а (его левый-верхний угол в координатах
     // окна Compose). Нативный pen-stream (`WindowsPointerHook`) репортит позиции
     // в координатах окна, а Compose pointerInput viewer'а — локально к этому
@@ -1211,6 +1221,8 @@ fun EditorPanel(
     // и `pdfViewerState.pan/zoom`, — иначе перо и рамка лупы расходятся.
     val viewerOriginInWindow = remember { mutableStateOf(Offset.Zero) }
     val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
+    val penPanTriggerProvider = rememberUpdatedState(isPenPanTriggerActive)
+    val ctrlPanProvider = rememberUpdatedState(ctrlHeld)
     val magnifierInputControllerHolder =
         remember(pdfState) {
             mutableStateOf<ru.kyamshanov.notepen.magnifier.MagnifierInputController?>(null)
@@ -1221,6 +1233,12 @@ fun EditorPanel(
         pressure: Float,
         tilt: Float,
     ) {
+        if (penPanTriggerProvider.value) {
+            pdfViewerState.beginPanGesture()
+            penPanLastPosition.value = viewportPos
+            gestureRoute.value = PanelGestureRoute.PAN
+            return
+        }
         if (magnifierState.enabled) {
             // `contentBoundsInViewport` хранится в координатах окна Compose
             // (панель репортит `boundsInWindow()`), а `viewportPos` — локально к
@@ -1291,6 +1309,13 @@ fun EditorPanel(
                 }
             }
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onMove(viewportPos)
+            PanelGestureRoute.PAN -> {
+                val previous = penPanLastPosition.value
+                if (previous != null) {
+                    pdfViewerState.panGestureBy(viewportPos - previous)
+                }
+                penPanLastPosition.value = viewportPos
+            }
             PanelGestureRoute.NONE -> Unit
         }
     }
@@ -1305,8 +1330,10 @@ fun EditorPanel(
             PanelGestureRoute.MAGNIFIER ->
                 magnifierInputControllerHolder.value?.onUp(magnifierState.contentBoundsInViewport.size)
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onUp()
+            PanelGestureRoute.PAN -> pdfViewerState.endPanGesture()
             PanelGestureRoute.NONE -> Unit
         }
+        penPanLastPosition.value = null
         gestureRoute.value = PanelGestureRoute.NONE
     }
 
@@ -1319,16 +1346,28 @@ fun EditorPanel(
             PanelGestureRoute.DRAWING -> drawingController.onCancel()
             PanelGestureRoute.MAGNIFIER -> magnifierInputControllerHolder.value?.onCancel()
             PanelGestureRoute.TARGET_RECT -> magnifierTargetGestureController.onCancel()
+            PanelGestureRoute.PAN -> pdfViewerState.endPanGesture()
             PanelGestureRoute.NONE -> Unit
         }
+        penPanLastPosition.value = null
         gestureRoute.value = PanelGestureRoute.NONE
     }
+
+    val nativePenFallbackSuppressed = remember { mutableStateOf(false) }
+    val nativePenFallbackReleaseJob = remember { arrayOfNulls<kotlinx.coroutines.Job>(1) }
 
     // Native pen-stream → drawing pipeline (only for the focused panel, so a
     // pen event isn't routed into every panel at once).
     LaunchedEffect(drawingController, loupeSelectionController, tabletController, isFocused) {
         if (!isFocused) return@LaunchedEffect
         tabletController.penPointerEvents.collect { ev ->
+            nativePenFallbackSuppressed.value = true
+            nativePenFallbackReleaseJob[0]?.cancel()
+            nativePenFallbackReleaseJob[0] =
+                launch {
+                    delay(NATIVE_PEN_FALLBACK_SUPPRESS_MS)
+                    nativePenFallbackSuppressed.value = false
+                }
             when (ev.type) {
                 // Нативные pen-координаты приходят в координатах окна; приводим
                 // их в локальную viewport-систему gesture-узла (как у мыши).
@@ -1336,7 +1375,15 @@ fun EditorPanel(
                     routedOnDown(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
                 PenPointerEventType.UPDATE ->
                     routedOnMove(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
-                PenPointerEventType.UP -> routedOnUp()
+                PenPointerEventType.UP -> {
+                    val routeBeforeUp = gestureRoute.value
+                    routedOnMove(ev.position - viewerOriginInWindow.value, ev.pressure, ev.tilt)
+                    if (routeBeforeUp == PanelGestureRoute.DRAWING || routeBeforeUp == PanelGestureRoute.MAGNIFIER) {
+                        withFrameNanos { }
+                        withFrameNanos { }
+                    }
+                    routedOnUp()
+                }
                 PenPointerEventType.CANCEL -> routedOnCancel()
             }
         }
@@ -1614,30 +1661,45 @@ fun EditorPanel(
                     // десктопе pan-обработчик ловит Press на Initial-проходе раньше
                     // внутреннего drag-роутера, поэтому без этой проверки страница
                     // перетаскивалась вместо рамки.
-                    (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
-                        !quickLoupeArmed.value &&
-                        !openTriggerProvider.value &&
-                        !(
-                            magnifierState.enabled &&
-                                magnifierTargetGestureController.hitTest(pos) !=
-                                ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
-                        )
+                    if (penPanTriggerProvider.value || ctrlPanProvider.value) {
+                        true
+                    } else {
+                        (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
+                            !quickLoupeArmed.value &&
+                            !openTriggerProvider.value &&
+                            !(
+                                magnifierState.enabled &&
+                                    magnifierTargetGestureController.hitTest(pos) !=
+                                    ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
+                            )
+                    }
                 },
                 gestureModifier =
                     Modifier.pdfMultiPageDrawingInput(
                         key = drawingController,
                         tablet = tabletController,
                         palmRejectionActive = palmRejectionActive,
+                        nativePositionOffset = { viewerOriginInWindow.value },
+                        nativePenInputEnabled = false,
+                        fallbackDrawingPointerEnabled = {
+                            !nativePenFallbackSuppressed.value &&
+                                !penPanTriggerProvider.value &&
+                                !ctrlPanProvider.value
+                        },
                         captureGesture = { pos ->
                             quickLoupeArmed.value ||
                                 openTriggerProvider.value ||
                                 (
-                                    magnifierState.enabled &&
+                                    !penPanTriggerProvider.value &&
+                                        !ctrlPanProvider.value &&
+                                        magnifierState.enabled &&
                                         magnifierTargetGestureController.hitTest(pos) !=
                                         ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
                                 ) ||
                                 (
-                                    !pencilModeProvider.value &&
+                                    !penPanTriggerProvider.value &&
+                                        !ctrlPanProvider.value &&
+                                        !pencilModeProvider.value &&
                                         toolModeProvider.value != ToolMode.NONE &&
                                         drawingController.isInsidePdfPage(pos)
                                 )
@@ -1677,7 +1739,8 @@ fun EditorPanel(
                             magnifierState = if (isMagnifierPage) magnifierState else null,
                             pageIndex = pageIndex,
                             isMagnifierGrabbing = isMagnifierPage && magnifierTargetGestureController.isActive,
-                            isZooming = { pdfViewerState.gestureScale != 1f },
+                            lowLatencyViewportScale = pdfViewerState.residualScale,
+                            isZooming = { pdfViewerState.isVisualTransformActive },
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {

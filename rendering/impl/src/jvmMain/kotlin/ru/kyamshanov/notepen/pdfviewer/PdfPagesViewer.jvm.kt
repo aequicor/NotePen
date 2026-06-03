@@ -9,10 +9,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.v2.ScrollbarAdapter
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -24,6 +26,7 @@ import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -38,6 +41,8 @@ import androidx.compose.ui.input.pointer.isShiftPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Constraints
@@ -45,13 +50,17 @@ import androidx.compose.ui.unit.IntSize
 import com.sun.jna.Native
 import com.sun.jna.Platform
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
+import ru.kyamshanov.notepen.lowlatency.LocalLowLatencyOverlayBounds
+import ru.kyamshanov.notepen.lowlatency.LowLatencyOverlayBounds
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -154,8 +163,9 @@ private const val MAX_RENDER_DIM_PX = 4000
  * high-quality даунскейла на отрисовке. Сверху ограничено [MAX_RENDER_DIM_PX],
  * поэтому глубокий зум не затронут (тот же потолок 4000px).
  */
-private const val MIN_RENDER_SUPERSAMPLE = 2.0f
-private const val BUFFER_PAGES = 1
+private const val MIN_RENDER_SUPERSAMPLE = 1.5f
+private const val FIRST_PAINT_SUPERSAMPLE = 0.5f
+private const val BUFFER_PAGES = 2
 private const val ZOOM_BURST_RESET_PX = 8f
 
 /**
@@ -171,6 +181,7 @@ private const val GESTURE_COMMIT_IDLE_MS = 100L
  * "устаревшим" и выкидывается из кэша сразу же.
  */
 private const val STALE_SCALE_RATIO_THRESHOLD = 2f
+private const val MAX_CACHED_DIM_RATIO = 1.75f
 
 /**
  * Накопитель wheel-zoom тиков для применения раз в кадр. Один Ctrl+wheel
@@ -300,7 +311,7 @@ private object MacosPinchGestureRouter {
  * Все жесты обрабатываются на [PointerEventPass.Initial], чтобы вложенный
  * `DrawablePdfPage` (рисование пером) не перехватывал скролл/зум.
  */
-@OptIn(ExperimentalComposeUiApi::class, FlowPreview::class)
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 actual fun PdfPagesViewer(
     state: PdfViewerState,
@@ -389,117 +400,182 @@ actual fun PdfPagesViewer(
 
     LaunchedEffect(pdfDocument, state, renderer) {
         val doc = pdfDocument ?: return@LaunchedEffect
-        snapshotFlow {
-            val range =
-                PdfViewerMath.visiblePageRange(
-                    layout = state.layout,
-                    panY = state.pan.y,
-                    zoom = state.zoom,
-                    viewportHeight = state.viewportSize.height.toFloat(),
-                )
-            // Окно растеризации: видимое + буфер, выровненный по разворотам (#F4).
-            val window =
-                PdfViewerMath.bufferedRenderRange(
-                    layout = state.layout,
-                    visible = range,
-                    bufferPages = BUFFER_PAGES,
-                    pageCount = state.pages.size,
-                )
-            val first = if (window.isEmpty()) -1 else window.first
-            val last = if (window.isEmpty()) -1 else window.last
-            VisibleSnapshot(
-                first = first,
-                last = last,
-                visFirst = if (range.isEmpty()) -1 else range.first,
-                visLast = if (range.isEmpty()) -1 else range.last,
-                // Растеризуем до layoutCap; зум сверх него — GPU-апскейл.
-                scalePercent = state.renderScalePercent,
-                basePageWidthPx = state.basePageWidthPx,
-                viewportSize = state.viewportSize,
-                // Хэш поворотов видимых страниц: его смена дёргает ре-рендер.
-                rotationSignature =
-                    if (last >= first) {
-                        (first..last).sumOf { userRotationQuarters(it) * 31 + it }
-                    } else {
-                        0
-                    },
-                // Хэш вырезок видимых страниц (разделение разворотов): смена
-                // дёргает ре-рендер так же, как поворот.
-                cropSignature =
-                    if (last >= first) {
-                        (first..last).sumOf { cropSignatureOf(currentPageSource(it)) * 131 + it }
-                    } else {
-                        0
-                    },
-            )
-        }
-            .distinctUntilChanged()
-            .debounce(RENDER_DEBOUNCE_MS)
-            .collectLatest { snap ->
-                if (snap.viewportSize.width <= 0 || snap.first < 0 || snap.last < snap.first) {
-                    return@collectLatest
-                }
-                val basePageWidthPx = snap.basePageWidthPx
-                if (basePageWidthPx <= 0f) return@collectLatest
-                val window = (snap.first..snap.last).toSet()
-                cache.evictStaleScale(
-                    visibleIndices = window,
-                    currentScale = snap.scalePercent,
-                    maxScaleRatio = STALE_SCALE_RATIO_THRESHOLD,
-                )
-                // Видимые страницы — раньше буферных: под сериализованной
-                // растеризацией PDFBox обе страницы текущего разворота должны
-                // занять очередь раньше опережающего буфера (#F4).
-                val order =
-                    PdfViewerMath.renderPriorityOrder(
-                        window = snap.first..snap.last,
-                        visible = snap.visFirst..snap.visLast,
+        val snapshots = Channel<VisibleSnapshot>(Channel.CONFLATED)
+        launch {
+            snapshotFlow {
+                val range =
+                    PdfViewerMath.visiblePageRange(
+                        layout = state.layout,
+                        panY = state.pan.y,
+                        zoom = state.zoom,
+                        viewportHeight = state.viewportSize.height.toFloat(),
                     )
-                for (i in order) {
-                    val rotation = userRotationQuarters(i)
-                    val src = currentPageSource(i)
-                    // Защита от транзиентного рассинхрона при переключении #4:
-                    // если резолвер вернул исходный индекс вне диапазона документа
-                    // — пропускаем кадр для этой страницы вместо падения рендера
-                    // (исключение на корутине рендера убило бы окно редактора).
-                    if (src.sourceIndex !in 0 until doc.info.pageCount) continue
-                    val cropSig = cropSignatureOf(src)
-                    val cached = cache.get(i)
-                    if (cached != null && cache.isFresh(cached, snap.scalePercent, rotation, cropSig)) {
-                        continue
+                // Окно растеризации: видимое + буфер, выровненный по разворотам (#F4).
+                val window =
+                    PdfViewerMath.bufferedRenderRange(
+                        layout = state.layout,
+                        visible = range,
+                        bufferPages = BUFFER_PAGES,
+                        pageCount = state.pages.size,
+                    )
+                val first = if (window.isEmpty()) -1 else window.first
+                val last = if (window.isEmpty()) -1 else window.last
+                VisibleSnapshot(
+                    first = first,
+                    last = last,
+                    visFirst = if (range.isEmpty()) -1 else range.first,
+                    visLast = if (range.isEmpty()) -1 else range.last,
+                    // Растеризуем до layoutCap; зум сверх него — GPU-апскейл.
+                    primaryVisible =
+                        PdfViewerMath.dominantVisiblePageIndex(
+                            layout = state.layout,
+                            panY = state.pan.y,
+                            zoom = state.zoom,
+                            viewportHeight = state.viewportSize.height.toFloat(),
+                            visible = range,
+                        ),
+                    scalePercent = state.renderScalePercent,
+                    basePageWidthPx = state.basePageWidthPx,
+                    viewportSize = state.viewportSize,
+                    // Хэш поворотов видимых страниц: его смена дёргает ре-рендер.
+                    rotationSignature =
+                        if (last >= first) {
+                            (first..last).sumOf { userRotationQuarters(it) * 31 + it }
+                        } else {
+                            0
+                        },
+                    // Хэш вырезок видимых страниц (разделение разворотов): смена
+                    // дёргает ре-рендер так же, как поворот.
+                    cropSignature =
+                        if (last >= first) {
+                            (first..last).sumOf { cropSignatureOf(currentPageSource(it)) * 131 + it }
+                        } else {
+                            0
+                        },
+                )
+            }
+                .distinctUntilChanged()
+                .collect { snapshots.trySend(it) }
+        }
+
+        fun latestSnapshot(current: VisibleSnapshot): VisibleSnapshot {
+            var latest = current
+            while (true) {
+                latest = snapshots.tryReceive().getOrNull() ?: return latest
+            }
+        }
+
+        var pendingSnap = snapshots.receive()
+        renderLoop@ while (isActive) {
+            var snap = latestSnapshot(pendingSnap)
+            if (snap.viewportSize.width <= 0 || snap.first < 0 || snap.last < snap.first) {
+                pendingSnap = snapshots.receive()
+                continue@renderLoop
+            }
+            val basePageWidthPx = snap.basePageWidthPx
+            if (basePageWidthPx <= 0f) {
+                pendingSnap = snapshots.receive()
+                continue@renderLoop
+            }
+            val window = (snap.first..snap.last).toSet()
+            cache.evictStaleScale(
+                visibleIndices = window,
+                currentScale = snap.scalePercent,
+                maxScaleRatio = STALE_SCALE_RATIO_THRESHOLD,
+            )
+            // Видимые страницы — раньше буферных: под сериализованной
+            // растеризацией PDFBox обе страницы текущего разворота должны
+            // занять очередь раньше опережающего буфера (#F4).
+            val order =
+                PdfViewerMath.renderPriorityOrder(
+                    window = snap.first..snap.last,
+                    visible = snap.visFirst..snap.visLast,
+                    primaryVisible = snap.primaryVisible,
+                )
+            val visibleOrder = order.filter { it in snap.visFirst..snap.visLast }
+            val primaryVisible = snap.primaryVisible.takeIf { it in visibleOrder }
+            val primaryPages =
+                if (primaryVisible == null) {
+                    emptyList()
+                } else if (state.spreadMode == SpreadMode.SPREAD) {
+                    val left = if (primaryVisible % 2 == 1) primaryVisible - 1 else primaryVisible
+                    listOf(left, left + 1).filter { it in visibleOrder }
+                } else {
+                    listOf(primaryVisible)
+                }
+            val primarySet = primaryPages.toSet()
+            val visibleSet = visibleOrder.toSet()
+            val hadMissingVisible = visibleOrder.any { cache.get(it) == null }
+
+            fun switchToLatestIfChanged(): Boolean {
+                val latest = latestSnapshot(snap)
+                if (latest == snap) return false
+                pendingSnap = latest
+                return true
+            }
+
+            suspend fun renderOne(
+                i: Int,
+                fullQuality: Boolean,
+            ) {
+                yield()
+                val rotation = userRotationQuarters(i)
+                val src = currentPageSource(i)
+                // Защита от транзиентного рассинхрона при переключении #4:
+                // если резолвер вернул исходный индекс вне диапазона документа
+                // — пропускаем кадр для этой страницы вместо падения рендера
+                // (исключение на корутине рендера убило бы окно редактора).
+                if (src.sourceIndex !in 0 until doc.info.pageCount) return
+                val page = state.pages.getOrNull(i) ?: return
+                val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
+                val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
+                val desiredWidthPx =
+                    (basePageWidthPx * snap.scalePercent / 100f * supersample)
+                        .toInt()
+                        .coerceAtLeast(1)
+                // Clamp обе оси с сохранением aspect: если высота, рассчитанная
+                // от полной ширины, выходит за MAX_RENDER_DIM_PX, уменьшаем
+                // и ширину пропорционально. Иначе битмап получит aspect,
+                // отличный от page.aspectRatio, и лупа (которая использует
+                // `target × bmp.dims` без коррекции) покажет искажённое
+                // изображение. Обычный PDF-display этого не видит — он
+                // через FillBounds компенсирует distortion обратно.
+                val widthCapped = desiredWidthPx.coerceAtMost(MAX_RENDER_DIM_PX)
+                val heightFromWidth = (widthCapped / aspect).toInt().coerceAtLeast(1)
+                val (targetWidthPx, targetHeightPx) =
+                    if (heightFromWidth > MAX_RENDER_DIM_PX) {
+                        val cappedH = MAX_RENDER_DIM_PX
+                        val cappedW = (cappedH * aspect).toInt().coerceAtLeast(1)
+                        cappedW to cappedH
+                    } else {
+                        widthCapped to heightFromWidth
                     }
-                    val page = state.pages.getOrNull(i) ?: continue
-                    val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
-                    val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
-                    val desiredWidthPx =
-                        (basePageWidthPx * snap.scalePercent / 100f * supersample)
+                val cropSig = cropSignatureOf(src)
+                var cached = cache.get(i)
+                if (cached == null && i in snap.visFirst..snap.visLast) {
+                    val previewSupersample = maxOf(0.5f, density.density * FIRST_PAINT_SUPERSAMPLE)
+                    val previewDesiredWidthPx =
+                        (basePageWidthPx * snap.scalePercent / 100f * previewSupersample)
                             .toInt()
                             .coerceAtLeast(1)
-                    // Clamp обе оси с сохранением aspect: если высота, рассчитанная
-                    // от полной ширины, выходит за MAX_RENDER_DIM_PX, уменьшаем
-                    // и ширину пропорционально. Иначе битмап получит aspect,
-                    // отличный от page.aspectRatio, и лупа (которая использует
-                    // `target × bmp.dims` без коррекции) покажет искажённое
-                    // изображение. Обычный PDF-display этого не видит — он
-                    // через FillBounds компенсирует distortion обратно.
-                    val widthCapped = desiredWidthPx.coerceAtMost(MAX_RENDER_DIM_PX)
-                    val heightFromWidth = (widthCapped / aspect).toInt().coerceAtLeast(1)
-                    val (targetWidthPx, targetHeightPx) =
-                        if (heightFromWidth > MAX_RENDER_DIM_PX) {
-                            val cappedH = MAX_RENDER_DIM_PX
+                    val previewWidthCapped = previewDesiredWidthPx.coerceAtMost(targetWidthPx)
+                    val previewHeightFromWidth = (previewWidthCapped / aspect).toInt().coerceAtLeast(1)
+                    val (previewWidthPx, previewHeightPx) =
+                        if (previewHeightFromWidth > targetHeightPx) {
+                            val cappedH = targetHeightPx
                             val cappedW = (cappedH * aspect).toInt().coerceAtLeast(1)
                             cappedW to cappedH
                         } else {
-                            widthCapped to heightFromWidth
+                            previewWidthCapped to previewHeightFromWidth
                         }
-                    launch {
-                        val bitmap =
+                    if (previewWidthPx < targetWidthPx || previewHeightPx < targetHeightPx) {
+                        val previewBitmap =
                             withContext(renderDispatcher) {
                                 renderer.renderPage(
                                     doc,
                                     src.sourceIndex,
-                                    targetWidthPx,
-                                    targetHeightPx,
+                                    previewWidthPx,
+                                    previewHeightPx,
                                     rotation,
                                     src.cropLeftN,
                                     src.cropTopN,
@@ -507,18 +583,108 @@ actual fun PdfPagesViewer(
                                     src.cropBottomN,
                                 ).toImageBitmap()
                             }
-                        cache.put(
-                            i,
-                            RenderedPage(
-                                bitmap = bitmap,
-                                renderedAtScalePercent = snap.scalePercent,
-                                renderedAtRotationQuarters = rotation,
-                                renderedAtCropSignature = cropSig,
-                            ),
-                        )
+                        if (
+                            state.viewportSize == snap.viewportSize &&
+                            state.basePageWidthPx == snap.basePageWidthPx &&
+                            state.renderScalePercent == snap.scalePercent &&
+                            cache.get(i) == null
+                        ) {
+                            val previewScalePercent =
+                                (snap.scalePercent * previewWidthPx.toFloat() / targetWidthPx)
+                                    .roundToInt()
+                                    .coerceAtLeast(1)
+                            cache.put(
+                                i,
+                                RenderedPage(
+                                    bitmap = previewBitmap,
+                                    renderedAtScalePercent = previewScalePercent,
+                                    renderedAtRotationQuarters = rotation,
+                                    renderedAtCropSignature = cropSig,
+                                ),
+                                protectedPageIndices = visibleSet,
+                            )
+                            cached = cache.get(i)
+                        }
                     }
                 }
+                if (!fullQuality) return
+                if (
+                    cached != null &&
+                    cache.isFresh(
+                        rendered = cached,
+                        scalePercent = snap.scalePercent,
+                        rotationQuarters = rotation,
+                        cropSignature = cropSig,
+                        targetWidthPx = targetWidthPx,
+                        targetHeightPx = targetHeightPx,
+                        maxOversizeRatio = MAX_CACHED_DIM_RATIO,
+                    )
+                ) {
+                    return
+                }
+                val bitmap =
+                    withContext(renderDispatcher) {
+                        renderer.renderPage(
+                            doc,
+                            src.sourceIndex,
+                            targetWidthPx,
+                            targetHeightPx,
+                            rotation,
+                            src.cropLeftN,
+                            src.cropTopN,
+                            src.cropRightN,
+                            src.cropBottomN,
+                        ).toImageBitmap()
+                    }
+                if (
+                    state.viewportSize == snap.viewportSize &&
+                    state.basePageWidthPx == snap.basePageWidthPx &&
+                    state.renderScalePercent == snap.scalePercent
+                ) {
+                    cache.put(
+                        i,
+                        RenderedPage(
+                            bitmap = bitmap,
+                            renderedAtScalePercent = snap.scalePercent,
+                            renderedAtRotationQuarters = rotation,
+                            renderedAtCropSignature = cropSig,
+                        ),
+                        protectedPageIndices = visibleSet,
+                    )
+                }
             }
+
+            for (i in primaryPages) {
+                renderOne(i, fullQuality = false)
+                if (switchToLatestIfChanged()) continue@renderLoop
+            }
+            for (i in visibleOrder) {
+                if (i !in primarySet) renderOne(i, fullQuality = false)
+                if (switchToLatestIfChanged()) continue@renderLoop
+            }
+            // When visible pages already have any bitmap, keep showing it through
+            // the zoom burst and wait for idle before starting CPU-heavy high-res
+            // PDFBox/Java2D work. Missing visible pages still render immediately so
+            // first paint never stays blank.
+            if (!hadMissingVisible && cache.entries.isNotEmpty()) {
+                delay(RENDER_DEBOUNCE_MS)
+                if (switchToLatestIfChanged()) continue@renderLoop
+            }
+            for (i in primaryPages) {
+                renderOne(i, fullQuality = true)
+                if (switchToLatestIfChanged()) continue@renderLoop
+            }
+            for (i in visibleOrder) {
+                if (i !in primarySet) renderOne(i, fullQuality = true)
+                if (switchToLatestIfChanged()) continue@renderLoop
+            }
+            for (i in order) {
+                if (i in visibleSet) continue
+                renderOne(i, fullQuality = true)
+                if (switchToLatestIfChanged()) continue@renderLoop
+            }
+            pendingSnap = snapshots.receive()
+        }
     }
 
     // React when the layout mode flips (book-spread on/off). The row width changes
@@ -540,6 +706,8 @@ actual fun PdfPagesViewer(
             }
     }
 
+    val viewerBoundsInWindow = remember { mutableStateOf(Rect.Zero) }
+
     // Outer Box measures viewport size and hosts scrollbars as siblings of the
     // pointer-capturing inner Box. Siblings receive hit-tested events directly,
     // bypassing the Initial-pass handler on the inner Box — so scrollbar thumb
@@ -556,6 +724,9 @@ actual fun PdfPagesViewer(
                         // window resized) re-centres the page in the new viewport.
                         if (hadWidth && size.width > 0) state.reCenterAfterResize()
                     }
+                }
+                .onGloballyPositioned { coords ->
+                    viewerBoundsInWindow.value = coords.boundsInWindow()
                 },
     ) {
         Box(
@@ -635,6 +806,19 @@ actual fun PdfPagesViewer(
                         with(density) {
                             (pdfH * lz).roundToInt().coerceAtLeast(1).toDp()
                         }
+                    val slotX =
+                        ((pan.x + (layout.pageLeftsPx[i] + ext.left * layout.basePageWidthPx) * zoom) / rs).roundToInt()
+                    val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
+                    val pageWindowRect =
+                        pageWindowRect(
+                            viewerBounds = viewerBoundsInWindow.value,
+                            placeableX = slotX,
+                            placeableY = slotY,
+                            placeableWidth = w,
+                            placeableHeight = h,
+                            layerScale = rs,
+                            layerTranslation = Offset.Zero,
+                        )
                     val pagePlaceables =
                         subcompose(i) {
                             val cached = cache.entries[i]?.bitmap
@@ -648,11 +832,12 @@ actual fun PdfPagesViewer(
                                     pdfHeight = pdfHeightDp,
                                     extent = ext,
                                 )
-                            with(scope) { pageContent() }
+                            CompositionLocalProvider(
+                                LocalLowLatencyOverlayBounds provides LowLatencyOverlayBounds(pageWindowRect),
+                            ) {
+                                with(scope) { pageContent() }
+                            }
                         }.map { it.measure(Constraints.fixed(w, h)) }
-                    val slotX =
-                        ((pan.x + (layout.pageLeftsPx[i] + ext.left * layout.basePageWidthPx) * zoom) / rs).roundToInt()
-                    val slotY = ((pan.y + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom) / rs).roundToInt()
                     pagePlaceables.forEach { items.add(Item(slotX, slotY, it)) }
                 }
                 layout(constraints.maxWidth, constraints.maxHeight) {
@@ -704,6 +889,7 @@ private data class VisibleSnapshot(
     val last: Int,
     val visFirst: Int = first,
     val visLast: Int = last,
+    val primaryVisible: Int = visFirst,
     val scalePercent: Int,
     val basePageWidthPx: Float,
     val viewportSize: IntSize,
@@ -720,6 +906,25 @@ private data class ImmutablePdfPageScope(
     override val pdfHeight: androidx.compose.ui.unit.Dp,
     override val extent: ru.kyamshanov.notepen.annotation.domain.model.PageExtent,
 ) : PdfPageScope
+
+private fun pageWindowRect(
+    viewerBounds: Rect,
+    placeableX: Int,
+    placeableY: Int,
+    placeableWidth: Int,
+    placeableHeight: Int,
+    layerScale: Float,
+    layerTranslation: Offset,
+): Rect {
+    val left = viewerBounds.left + placeableX * layerScale + layerTranslation.x
+    val top = viewerBounds.top + placeableY * layerScale + layerTranslation.y
+    return Rect(
+        left = left,
+        top = top,
+        right = left + placeableWidth * layerScale,
+        bottom = top + placeableHeight * layerScale,
+    )
+}
 
 /**
  * Pointer-input десктоп-вьювера: zoom вокруг курсора, скролл колесом,

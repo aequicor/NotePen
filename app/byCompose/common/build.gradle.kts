@@ -94,6 +94,7 @@ kotlin {
             implementation(libs.kotlin.logging)
             implementation(libs.slf4j.api)
             implementation(libs.slf4j.simple)
+            implementation(libs.jna.platform)
             implementation(libs.apache.pdfbox)
             runtimeOnly(libs.apache.pdfbox.jbig2)
             implementation(libs.jmdns)

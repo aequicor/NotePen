@@ -5,21 +5,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import kotlinx.coroutines.CoroutineScope
-import ru.kyamshanov.notepen.HoldGestureTracker
+import ru.kyamshanov.notepen.DrawingGestureMode
+import ru.kyamshanov.notepen.DrawingGestureSession
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
-import ru.kyamshanov.notepen.drawing.api.EraseGesture
 import ru.kyamshanov.notepen.drawing.api.EraserPosition
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
-
-/** Длительность удержания pointer'а на месте для триггера shape-recognition (мс). */
-private const val SHAPE_SNAP_HOLD_MS: Long = 700L
-
-/** Терпимость к джиттеру при удержании — доля нормализованной ширины страницы. */
-private const val SHAPE_SNAP_TOLERANCE_NORM: Float = 0.005f
 
 /**
  * Управление вводом внутри плавающего окна лупы — теперь с поддержкой
@@ -54,26 +48,18 @@ class MagnifierInputController(
      */
     private val pageAspect: (pageIndex: Int) -> Float,
 ) {
-    private var activeErase: EraseGesture? = null
-    private var activeMode: Mode = Mode.NONE
-    private var activePageIndex: Int = -1
-    private var activeDrawingState: PdfDrawingState? = null
-
-    private val holdTracker =
-        HoldGestureTracker(
+    private val session =
+        DrawingGestureSession(
+            penSettings = penSettings,
+            markerSettings = markerSettings,
+            eraserSettings = eraserSettings,
+            eraserPosition = { eraserPos },
+            onGestureStart = onGestureStart,
+            onStrokeFinished = onStrokeFinished,
+            onEraseFinished = onEraseFinished,
+            pageAspect = pageAspect,
             scope = scope,
-            delayMs = SHAPE_SNAP_HOLD_MS,
-            toleranceNorm = SHAPE_SNAP_TOLERANCE_NORM,
-            onHold = ::triggerShapeSnap,
         )
-
-    private fun triggerShapeSnap() {
-        if (activeMode != Mode.DRAW) return
-        val pi = activePageIndex
-        if (pi < 0) return
-        val state = activeDrawingState ?: return
-        state.snapLiveStrokeToShape(pageAspect(pi))
-    }
 
     fun onDown(
         panelLocal: Offset,
@@ -87,55 +73,30 @@ class MagnifierInputController(
         val page = panelLocalToPage(panelLocal, panelSize, segment)
         val effectiveTool = if (eraserOverride()) ToolMode.ERASER else toolMode()
         val pdfDrawingState = pdfDrawingStateProvider(segment.pageIndex)
-        activeDrawingState = pdfDrawingState
-        activePageIndex = segment.pageIndex
         when (effectiveTool) {
             ToolMode.PEN, ToolMode.MARKER -> {
                 // strokeWidth is a fraction of page width. Inside the loupe the
                 // page is magnified by `mag`, so we divide by `mag` to keep the
                 // visual stroke thickness the same as outside the loupe.
-                val widthFrac =
-                    if (effectiveTool == ToolMode.PEN) {
-                        penSettings().strokeWidth
-                    } else {
-                        markerSettings().strokeWidth
-                    }
-                val colorArgb =
-                    if (effectiveTool == ToolMode.PEN) {
-                        penSettings().colorArgb
-                    } else {
-                        markerSettings().colorArgb
-                    }
-                onGestureStart(segment.pageIndex, pdfDrawingState.currentPaths.toList())
-                pdfDrawingState.strokeColorArgb.value = colorArgb
-                pdfDrawingState.strokeWidth.value = widthFrac
                 val mag = loupeMagnification(panelSize, segment)
-                val adaptedWidth = (widthFrac / mag).coerceAtLeast(MIN_NORMALIZED_STROKE)
-                pdfDrawingState.startDrawing(
-                    x = page.x,
-                    y = page.y,
-                    normalizedStrokeWidth = adaptedWidth,
+                session.startDraw(
+                    pageIndex = segment.pageIndex,
+                    state = pdfDrawingState,
+                    nx = page.x,
+                    ny = page.y,
                     pressure = pressure,
                     tilt = tilt,
+                    tool = effectiveTool,
+                    strokeWidthScale = 1f / mag,
+                    minNormalizedStroke = MIN_NORMALIZED_STROKE,
                 )
-                activeMode = Mode.DRAW
-                holdTracker.onDown(page.x, page.y, pageAspect(segment.pageIndex))
             }
             ToolMode.ERASER -> {
-                val pi = segment.pageIndex
-                activeErase =
-                    EraseGesture(
-                        pdfDrawingState = pdfDrawingState,
-                        eraserSettings = eraserSettings(),
-                        eraserPos = eraserPos,
-                        onGestureStart = { snapshot -> onGestureStart(pi, snapshot) },
-                        onEraseFinished = { b, a -> onEraseFinished(pi, b, a) },
-                    ).also { it.start(page.x, page.y) }
-                activeMode = Mode.ERASE
+                session.startErase(segment.pageIndex, pdfDrawingState, page.x, page.y)
             }
             // «Заметка» не рисует на полотне (создаётся из выделения текста в чтении),
             // поэтому в лупе ведёт себя как [NONE].
-            ToolMode.NONE, ToolMode.NOTE -> activeMode = Mode.NONE
+            ToolMode.NONE, ToolMode.NOTE -> session.cancel()
         }
     }
 
@@ -145,55 +106,35 @@ class MagnifierInputController(
         pressure: Float,
         tilt: Float,
     ) {
-        if (activeMode == Mode.NONE) return
+        if (session.activeMode == DrawingGestureMode.NONE) return
         if (panelSize.width <= 0f || panelSize.height <= 0f) return
 
-        val pi = activePageIndex
+        val pi = session.activePageIndex
         val segment = geometry.segments.firstOrNull { it.pageIndex == pi } ?: return
         val page = panelLocalToPage(panelLocal, panelSize, segment)
-        val pdfDrawingState = activeDrawingState ?: return
-        when (activeMode) {
-            Mode.DRAW ->
-                if (pdfDrawingState.isDrawing.value) {
-                    pdfDrawingState.addPoint(x = page.x, y = page.y, pressure = pressure, tilt = tilt)
-                    holdTracker.onMove(page.x, page.y)
-                }
-            Mode.ERASE -> activeErase?.move(page.x, page.y)
-            Mode.NONE -> Unit
+        val pdfDrawingState = pdfDrawingStateProvider(pi)
+        when (session.activeMode) {
+            DrawingGestureMode.DRAW -> session.addPoint(pi, pdfDrawingState, page.x, page.y, pressure, tilt)
+            DrawingGestureMode.ERASE -> session.moveErase(pi, pdfDrawingState, page.x, page.y)
+            DrawingGestureMode.NONE -> Unit
         }
     }
 
     fun onUp(panelSize: Size) {
-        holdTracker.cancel()
-        when (activeMode) {
-            Mode.DRAW -> finishDraw(panelSize)
-            Mode.ERASE -> finishErase()
-            Mode.NONE -> Unit
-        }
-        activeMode = Mode.NONE
-        activePageIndex = -1
-        activeDrawingState = null
+        val pageIndex = session.activePageIndex
+        val completed = session.finish()
+        if (completed != null) autoScrollAfterStroke(pageIndex, completed, panelSize)
     }
 
     fun onCancel() {
-        holdTracker.cancel()
-        when (activeMode) {
-            Mode.DRAW -> activeDrawingState?.finishDrawing()
-            Mode.ERASE -> activeErase?.cancel()
-            Mode.NONE -> Unit
-        }
-        activeErase = null
-        activeMode = Mode.NONE
-        activePageIndex = -1
-        activeDrawingState = null
+        session.cancel()
     }
 
-    private fun finishDraw(panelSize: Size) {
-        val pdfDrawingState = activeDrawingState ?: return
-        val pi = activePageIndex
-        val completed = pdfDrawingState.finishDrawing() ?: return
-        onStrokeFinished(pi, completed)
-
+    private fun autoScrollAfterStroke(
+        pi: Int,
+        completed: DrawingPath,
+        panelSize: Size,
+    ) {
         // Авто-прокрутка после отрыва пера. Если последняя точка штриха
         // была в одной из edge-зон панели, сдвигаем target-rect в эту
         // сторону на AUTO_SCROLL_LIFT_OFF_FRAC своего размера. Только для
@@ -240,11 +181,6 @@ class MagnifierInputController(
         )
     }
 
-    private fun finishErase() {
-        activeErase?.end()
-        activeErase = null
-    }
-
     /**
      * Находит сегмент, в чей panel-rect попадает [panelLocal].
      */
@@ -289,8 +225,6 @@ class MagnifierInputController(
         if (targetW <= 0f || pageCanvasW <= 0f || panelSize.width <= 0f) return 1f
         return (panelSize.width / (pageCanvasW * targetW)).coerceAtLeast(1f)
     }
-
-    private enum class Mode { NONE, DRAW, ERASE }
 
     private companion object {
         /** Edge-зона: 20% панели у каждой из 4 сторон — там штрих считается «у края». */

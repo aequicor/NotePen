@@ -2,13 +2,13 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>CyclomaticComplexMethod:MagnifierInputController.kt:MagnifierInputController$private fun finishDraw</ID>
+    <ID>ComplexCondition:DrawingGestureSession.kt:DrawingGestureSession$activeMode != DrawingGestureMode.DRAW || activePageIndex != pageIndex || activeDrawingState !== state || !state.isDrawing.value</ID>
+    <ID>CyclomaticComplexMethod:MagnifierInputController.kt:MagnifierInputController$private fun autoScrollAfterStroke</ID>
     <ID>MatchingDeclarationName:MagnifierGeometryContract.kt:MagnifierGeometry</ID>
+    <ID>ReturnCount:DrawingGestureSession.kt:DrawingGestureSession$fun startDraw: Boolean</ID>
+    <ID>ReturnCount:DrawingGestureSession.kt:DrawingGestureSession$private fun triggerShapeSnap</ID>
     <ID>ReturnCount:MagnifierInputController.kt:MagnifierInputController$fun onMove</ID>
-    <ID>ReturnCount:MagnifierInputController.kt:MagnifierInputController$private fun finishDraw</ID>
-    <ID>ReturnCount:MagnifierInputController.kt:MagnifierInputController$private fun triggerShapeSnap</ID>
+    <ID>ReturnCount:MagnifierInputController.kt:MagnifierInputController$private fun autoScrollAfterStroke</ID>
     <ID>ReturnCount:MultiPageDrawingController.kt:MultiPageDrawingController$fun onMove</ID>
-    <ID>ReturnCount:MultiPageDrawingController.kt:MultiPageDrawingController$private fun startDraw</ID>
-    <ID>TooManyFunctions:MultiPageDrawingController.kt:MultiPageDrawingController</ID>
   </CurrentIssues>
 </SmellBaseline>

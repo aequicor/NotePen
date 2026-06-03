@@ -101,10 +101,10 @@ class LoupeSelectionController(
      */
     private fun buildSegments(vpRect: Rect): List<MagnifierPageSegment>? {
         val layout: PdfPagesLayout = viewerState.layout
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         if (layout.pageHeightsPx.isEmpty() || layout.basePageWidthPx <= 0f || zoom <= 0f) return null
 
-        val pan = viewerState.pan
+        val pan = viewerState.effectivePan
         val docLeft = (vpRect.left - pan.x) / zoom
         val docRight = (vpRect.right - pan.x) / zoom
         val docTop = (vpRect.top - pan.y) / zoom
@@ -122,23 +122,14 @@ class LoupeSelectionController(
      */
     private fun computeSelectionSizePx(segments: List<MagnifierPageSegment>): Size {
         val layout = viewerState.layout
-        val zoom = viewerState.zoom
+        val zoom = viewerState.effectiveZoom
         val basePageW = layout.basePageWidthPx
-        var docLeft = Float.POSITIVE_INFINITY
-        var docRight = Float.NEGATIVE_INFINITY
-        var docTop = Float.POSITIVE_INFINITY
-        var docBottom = Float.NEGATIVE_INFINITY
+        val first = segments.first()
+        val widthPx = first.targetOnPage.width * basePageW * zoom
+        var heightPx = 0f
         for (s in segments) {
-            val pageLeft = layout.pageLeftsPx[s.pageIndex]
-            val pageTop = layout.pageTopsPx[s.pageIndex]
-            val pdfH = layout.pdfHeightsPx[s.pageIndex]
-            docLeft = min(docLeft, pageLeft + s.targetOnPage.left * basePageW)
-            docRight = max(docRight, pageLeft + s.targetOnPage.right * basePageW)
-            docTop = min(docTop, pageTop + s.targetOnPage.top * pdfH)
-            docBottom = max(docBottom, pageTop + s.targetOnPage.bottom * pdfH)
+            heightPx += s.targetOnPage.height * layout.pdfHeightsPx[s.pageIndex] * zoom
         }
-        val widthPx = (docRight - docLeft) * zoom
-        val heightPx = (docBottom - docTop) * zoom
         return Size(widthPx.coerceAtLeast(1f), heightPx.coerceAtLeast(1f))
     }
 
@@ -146,7 +137,7 @@ class LoupeSelectionController(
         val layout = viewerState.layout
         return layout.pageHeightsPx.isNotEmpty() &&
             layout.basePageWidthPx > 0f &&
-            viewerState.zoom > 0f
+            viewerState.effectiveZoom > 0f
     }
 
     private companion object {
@@ -219,28 +210,21 @@ private fun buildLoupeSegmentForPage(
 
     val hasWidth = interRight - interLeft >= MIN_TARGET_DIM * basePageW
     val hasHeight = interBottom - interTop >= MIN_TARGET_DIM * pdfH
-    val segment =
-        if (hasWidth && hasHeight) {
-            val nxLeft = ((interLeft - pageLeft) / basePageW).coerceIn(0f, 1f)
-            val nxRight = ((interRight - pageLeft) / basePageW).coerceIn(0f, 1f)
-            val nyTop = ((interTop - pageTop) / pdfH).coerceIn(0f, 1f)
-            val nyBottom = ((interBottom - pageTop) / pdfH).coerceIn(0f, 1f)
-            val hasNormalizedSize = nxRight - nxLeft >= MIN_TARGET_DIM && nyBottom - nyTop >= MIN_TARGET_DIM
-            if (hasNormalizedSize) {
-                MagnifierPageSegment(
-                    pageIndex = pageIndex,
-                    targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
-                    panelLeftFrac = ((interLeft - docLeft) / totalDocW).coerceIn(0f, 1f),
-                    panelRightFrac = ((interRight - docLeft) / totalDocW).coerceIn(0f, 1f),
-                    panelTopFrac = ((interTop - docTop) / totalDocH).coerceIn(0f, 1f),
-                    panelBottomFrac = ((interBottom - docTop) / totalDocH).coerceIn(0f, 1f),
-                )
-            } else {
-                null
-            }
-        } else {
-            null
-        }
+    if (!hasWidth || !hasHeight) return null
 
-    return segment
+    val nxLeft = ((interLeft - pageLeft) / basePageW).coerceIn(0f, 1f)
+    val nxRight = ((interRight - pageLeft) / basePageW).coerceIn(0f, 1f)
+    val nyTop = ((interTop - pageTop) / pdfH).coerceIn(0f, 1f)
+    val nyBottom = ((interBottom - pageTop) / pdfH).coerceIn(0f, 1f)
+    val hasNormalizedSize = nxRight - nxLeft >= MIN_TARGET_DIM && nyBottom - nyTop >= MIN_TARGET_DIM
+    if (!hasNormalizedSize) return null
+
+    return MagnifierPageSegment(
+        pageIndex = pageIndex,
+        targetOnPage = Rect(nxLeft, nyTop, nxRight, nyBottom),
+        panelLeftFrac = ((interLeft - docLeft) / totalDocW).coerceIn(0f, 1f),
+        panelRightFrac = ((interRight - docLeft) / totalDocW).coerceIn(0f, 1f),
+        panelTopFrac = ((interTop - docTop) / totalDocH).coerceIn(0f, 1f),
+        panelBottomFrac = ((interBottom - docTop) / totalDocH).coerceIn(0f, 1f),
+    )
 }

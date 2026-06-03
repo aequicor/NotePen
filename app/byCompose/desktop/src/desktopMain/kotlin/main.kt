@@ -25,6 +25,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import notepen.app.bycompose.desktop.generated.resources.Res
 import notepen.app.bycompose.desktop.generated.resources.app_icon
+import notepen.app.bycompose.desktop.generated.resources.app_icon_eap
 import org.jetbrains.compose.resources.painterResource
 import ru.kyamshanov.notepen.App
 import ru.kyamshanov.notepen.DefaultRootComponent
@@ -158,6 +159,7 @@ private object OpenFileRouter {
 }
 
 /** Расширения, которые NotePen умеет открыть из аргументов запуска (Windows/Linux). */
+private const val EAP_ICON_PROPERTY = "notepen.eapIcon"
 private val OPENABLE_EXTENSIONS = listOf("pdf", "png", "jpg", "jpeg", "epub", "fb2.zip", "fb2", "cbz", "cbr")
 
 private val mainLogger = KotlinLogging.logger {}
@@ -232,6 +234,8 @@ private suspend fun addExternallyOpenedFileToHistory(
 }
 
 fun main(args: Array<String>) {
+    val useEapIcon = System.getProperty(EAP_ICON_PROPERTY).toBoolean()
+
     // Windows/Linux: jpackage-лаунчер передаёт открываемый файл аргументом.
     // (macOS использует Apple Event "odoc", регистрируем OpenFileHandler ниже.)
     args
@@ -245,7 +249,8 @@ fun main(args: Array<String>) {
     if (Platform.isMac()) {
         System.setProperty("apple.awt.application.name", "NotePen")
         runCatching {
-            val resourcePath = "composeResources/notepen.app.bycompose.desktop.generated.resources/files/app_icon_dock.png"
+            val dockIconName = if (useEapIcon) "app_icon_dock_eap.png" else "app_icon_dock.png"
+            val resourcePath = "composeResources/notepen.app.bycompose.desktop.generated.resources/files/$dockIconName"
             Thread
                 .currentThread()
                 .contextClassLoader
@@ -820,7 +825,7 @@ fun main(args: Array<String>) {
             },
             state = windowState,
             title = "NotePen",
-            icon = painterResource(Res.drawable.app_icon),
+            icon = painterResource(if (useEapIcon) Res.drawable.app_icon_eap else Res.drawable.app_icon),
         ) {
             val tabletController: TabletInputController =
                 remember {

@@ -27,8 +27,8 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.sample
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
@@ -75,8 +75,9 @@ private const val MAX_RENDER_DIM_PX = 2400
  * лишней памяти при открытии не тратится. Сверху ограничено [MAX_RENDER_DIM_PX].
  */
 private const val MIN_RENDER_SUPERSAMPLE = 2.0f
-private const val BUFFER_PAGES = 1
+private const val BUFFER_PAGES = 2
 private const val STALE_SCALE_RATIO_THRESHOLD = 2f
+private const val MAX_CACHED_DIM_RATIO = 1.75f
 
 /**
  * Android-реализация [PdfPagesViewer].
@@ -176,6 +177,14 @@ actual fun PdfPagesViewer(
                 visLast = if (range.isEmpty()) -1 else range.last,
                 // Растеризуем PDF до layoutCap; зум сверх него — GPU-апскейл,
                 // поэтому коммит зума за cap не должен запускать ре-рендер.
+                primaryVisible =
+                    PdfViewerMath.dominantVisiblePageIndex(
+                        layout = state.layout,
+                        panY = state.pan.y,
+                        zoom = state.zoom,
+                        viewportHeight = state.viewportSize.height.toFloat(),
+                        visible = range,
+                    ),
                 scalePercent = state.renderScalePercent,
                 basePageWidthPx = state.basePageWidthPx,
                 viewportSize = state.viewportSize,
@@ -214,19 +223,17 @@ actual fun PdfPagesViewer(
                     PdfViewerMath.renderPriorityOrder(
                         window = snap.first..snap.last,
                         visible = snap.visFirst..snap.visLast,
+                        primaryVisible = snap.primaryVisible,
                     )
+                val visibleSet = order.filter { it in snap.visFirst..snap.visLast }.toSet()
                 for (i in order) {
+                    yield()
                     val rotation = userRotationQuarters(i)
                     val src = currentPageSource(i)
                     // Защита от транзиентного рассинхрона при переключении #4:
                     // исходный индекс вне диапазона документа — пропускаем кадр
                     // вместо падения рендера (исключение убило бы экран редактора).
                     if (src.sourceIndex !in 0 until doc.info.pageCount) continue
-                    val cropSig = cropSignatureOf(src)
-                    val cached = cache.get(i)
-                    if (cached != null && cache.isFresh(cached, snap.scalePercent, rotation, cropSig)) {
-                        continue
-                    }
                     val page = state.pages.getOrNull(i) ?: continue
                     val aspect = page.aspectRatio.takeIf { it > 0f } ?: 1f
                     val supersample = maxOf(density.density, MIN_RENDER_SUPERSAMPLE)
@@ -240,21 +247,41 @@ actual fun PdfPagesViewer(
                             .toInt()
                             .coerceAtLeast(1)
                             .coerceAtMost(MAX_RENDER_DIM_PX)
-                    launch {
-                        val bitmap =
-                            withContext(renderDispatcher) {
-                                renderer.renderPage(
-                                    doc,
-                                    src.sourceIndex,
-                                    targetWidthPx,
-                                    targetHeightPx,
-                                    rotation,
-                                    src.cropLeftN,
-                                    src.cropTopN,
-                                    src.cropRightN,
-                                    src.cropBottomN,
-                                ).toImageBitmap()
-                            }
+                    val cropSig = cropSignatureOf(src)
+                    val cached = cache.get(i)
+                    if (
+                        cached != null &&
+                        cache.isFresh(
+                            rendered = cached,
+                            scalePercent = snap.scalePercent,
+                            rotationQuarters = rotation,
+                            cropSignature = cropSig,
+                            targetWidthPx = targetWidthPx,
+                            targetHeightPx = targetHeightPx,
+                            maxOversizeRatio = MAX_CACHED_DIM_RATIO,
+                        )
+                    ) {
+                        continue
+                    }
+                    val bitmap =
+                        withContext(renderDispatcher) {
+                            renderer.renderPage(
+                                doc,
+                                src.sourceIndex,
+                                targetWidthPx,
+                                targetHeightPx,
+                                rotation,
+                                src.cropLeftN,
+                                src.cropTopN,
+                                src.cropRightN,
+                                src.cropBottomN,
+                            ).toImageBitmap()
+                        }
+                    if (
+                        state.viewportSize == snap.viewportSize &&
+                        state.basePageWidthPx == snap.basePageWidthPx &&
+                        state.renderScalePercent == snap.scalePercent
+                    ) {
                         cache.put(
                             i,
                             RenderedPage(
@@ -263,6 +290,7 @@ actual fun PdfPagesViewer(
                                 renderedAtRotationQuarters = rotation,
                                 renderedAtCropSignature = cropSig,
                             ),
+                            protectedPageIndices = visibleSet,
                         )
                     }
                 }
@@ -424,6 +452,7 @@ private data class VisibleSnapshot(
     val last: Int,
     val visFirst: Int = first,
     val visLast: Int = last,
+    val primaryVisible: Int = visFirst,
     val scalePercent: Int,
     val basePageWidthPx: Float,
     val viewportSize: IntSize,

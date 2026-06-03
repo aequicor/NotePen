@@ -84,6 +84,20 @@ actual class PdfViewerState internal constructor(
     var gestureTranslation: Offset by mutableStateOf(Offset.Zero)
         internal set
 
+    actual val effectivePan: Offset
+        get() =
+            PdfViewerMath.effectivePan(
+                pan = pan,
+                gestureScale = gestureScale,
+                gestureTranslation = gestureTranslation,
+            )
+
+    actual val effectiveZoom: Float
+        get() = PdfViewerMath.effectiveZoom(zoom, gestureScale)
+
+    actual val isVisualTransformActive: Boolean
+        get() = gestureScale != 1f || gestureTranslation != Offset.Zero
+
     actual val basePageWidthPx: Float
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 
@@ -310,6 +324,18 @@ actual class PdfViewerState internal constructor(
                 x = if (delta.x == 0f) pan.x else c.x,
                 y = if (delta.y == 0f) pan.y else c.y,
             )
+    }
+
+    actual fun beginPanGesture() {
+        // Android has no separate overscroll spring for pen-pan gestures.
+    }
+
+    actual fun panGestureBy(delta: Offset) {
+        panBy(delta)
+    }
+
+    actual fun endPanGesture() {
+        // Android has no separate overscroll spring for pen-pan gestures.
     }
 
     actual fun scrollToPage(

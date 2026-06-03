@@ -289,6 +289,28 @@ object PdfViewerMath {
     }
 
     /**
+     * Viewport pan after a transient root `graphicsLayer` transform is applied.
+     *
+     * The committed document mapping is `viewport = pan + doc * zoom`. During an
+     * active GPU-only gesture the whole page tree is then transformed as
+     * `visualViewport = viewport * gestureScale + gestureTranslation`, so the
+     * effective mapping is:
+     *
+     *     visualViewport = (pan * gestureScale + gestureTranslation) + doc * (zoom * gestureScale)
+     */
+    fun effectivePan(
+        pan: Offset,
+        gestureScale: Float,
+        gestureTranslation: Offset,
+    ): Offset = pan * gestureScale + gestureTranslation
+
+    /** Effective viewport zoom after the transient root `graphicsLayer` scale. */
+    fun effectiveZoom(
+        zoom: Float,
+        gestureScale: Float,
+    ): Float = zoom * gestureScale
+
+    /**
      * Cursor-anchored zoom. Возвращает новый `(pan, zoom)` такой, что
      * пиксель документа под [focus] остаётся под [focus] после смены
      * масштаба с [zoomOld] на `zoomNew`. [zoomNew] клампится в
@@ -404,11 +426,55 @@ object PdfViewerMath {
     fun renderPriorityOrder(
         window: IntRange,
         visible: IntRange,
+        primaryVisible: Int? = null,
     ): List<Int> {
         if (window.isEmpty()) return emptyList()
-        val vis = window.filter { it in visible }
-        val buf = window.filter { it !in visible }
-        return vis + buf
+        val primary = primaryVisible?.takeIf { it in window && it in visible }
+        val vis = window.filter { it in visible && it != primary }
+        if (primary == null && vis.isEmpty()) return window.toList()
+
+        val result = ArrayList<Int>(window.count())
+        if (primary != null) result += primary
+        result += vis
+
+        var above = visible.first - 1
+        var below = visible.last + 1
+        while (above >= window.first || below <= window.last) {
+            if (above >= window.first) {
+                result += above
+                above--
+            }
+            if (below <= window.last) {
+                result += below
+                below++
+            }
+        }
+        return result
+    }
+
+    fun dominantVisiblePageIndex(
+        layout: PdfPagesLayout,
+        panY: Float,
+        zoom: Float,
+        viewportHeight: Float,
+        visible: IntRange = visiblePageRange(layout, panY, zoom, viewportHeight),
+    ): Int {
+        if (visible.isEmpty() || zoom <= 0f) return -1
+        var bestIndex = -1
+        var bestVisibleHeight = 0f
+        for (i in visible) {
+            if (i !in layout.pageHeightsPx.indices) continue
+            val ext = layout.pageExtents[i]
+            val pdfH = layout.pdfHeightsPx[i]
+            val top = panY + (layout.pageTopsPx[i] + ext.top * pdfH) * zoom
+            val bottom = panY + (layout.pageTopsPx[i] + ext.bottom * pdfH) * zoom
+            val visibleHeight = minOf(bottom, viewportHeight) - maxOf(top, 0f)
+            if (visibleHeight > bestVisibleHeight) {
+                bestVisibleHeight = visibleHeight
+                bestIndex = i
+            }
+        }
+        return bestIndex
     }
 
     /**

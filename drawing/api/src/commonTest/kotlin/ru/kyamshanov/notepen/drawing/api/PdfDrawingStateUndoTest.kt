@@ -9,6 +9,73 @@ import kotlin.test.assertTrue
 class PdfDrawingStateUndoTest {
     private fun path(id: Float) = DrawingPath(points = listOf(DrawingPoint(id, id, true), DrawingPoint(id + 1f, id + 1f)))
 
+    @Test
+    fun `addPoint skips subpixel live samples`() {
+        val state = PdfDrawingState()
+
+        state.startDrawing(x = 0.1f, y = 0.1f)
+        state.addPoint(x = 0.1001f, y = 0.1001f)
+        state.addPoint(x = 0.101f, y = 0.101f)
+
+        assertEquals(2, state.livePoints.size)
+        assertEquals(0.101f, state.livePoints.last().x)
+        assertEquals(0.101f, state.livePoints.last().y)
+    }
+
+    @Test
+    fun `finishDrawing commits down-only stroke as short segment`() {
+        val state = PdfDrawingState()
+
+        state.startDrawing(x = 0.25f, y = 0.75f, normalizedStrokeWidth = 0.002f)
+
+        val completed = state.finishDrawing()
+
+        requireNotNull(completed)
+        assertEquals(1, state.currentPaths.size)
+        assertEquals(2, completed.points.size)
+        assertEquals(0.25f, completed.points.first().x)
+        assertEquals(0.75f, completed.points.first().y)
+        assertTrue(completed.points.last().x > completed.points.first().x)
+        assertEquals(completed.points.first().y, completed.points.last().y)
+        assertTrue(state.livePoints.isEmpty())
+    }
+
+    @Test
+    fun `finishDrawing keeps freehand samples unchanged`() {
+        val state = PdfDrawingState()
+
+        state.startDrawing(x = 0f, y = 0f)
+        state.addPoint(x = 0.001f, y = 0.0002f)
+        state.addPoint(x = 0.002f, y = -0.0002f)
+        state.addPoint(x = 0.003f, y = 0.0002f)
+        state.addPoint(x = 0.004f, y = 0f)
+
+        val liveSnapshot = state.livePoints.toList()
+        val completed = state.finishDrawing()
+
+        requireNotNull(completed)
+        assertEquals(liveSnapshot, completed.points)
+    }
+
+    @Test
+    fun `finishDrawing keeps stair stepped samples unchanged`() {
+        val state = PdfDrawingState()
+
+        state.startDrawing(x = 0f, y = 0f)
+        state.addPoint(x = 0.01f, y = 0f)
+        state.addPoint(x = 0.01f, y = 0.01f)
+        state.addPoint(x = 0.02f, y = 0.01f)
+        state.addPoint(x = 0.02f, y = 0.02f)
+        state.addPoint(x = 0.03f, y = 0.02f)
+        state.addPoint(x = 0.03f, y = 0.03f)
+
+        val liveSnapshot = state.livePoints.toList()
+        val completed = state.finishDrawing()
+
+        requireNotNull(completed)
+        assertEquals(liveSnapshot, completed.points)
+    }
+
     // -- restoreSnapshot --
 
     @Test

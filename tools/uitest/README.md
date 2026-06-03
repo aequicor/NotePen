@@ -1,11 +1,11 @@
-# NotePen UI-testing harness (Claude-Code-driven)
+# NotePen UI-testing harness (Codex / AI-vision driven)
 
-Scripts that let **Claude Code** drive and visually test the NotePen UI on every target this machine
+Scripts that let **Codex** drive and visually test the NotePen UI on every target this machine
 can reach — the **desktop** app (Windows, this machine) and the Android **phone + tablet** emulators
 (and any attached physical device) — and record **animations as GIF + PNG filmstrip**.
 
 This is *not* a JUnit/Robolectric/instrumented suite. It's a live-driving harness: launch the real
-app, drive it (computer-use for desktop, `adb` for Android), screenshot, and capture animations.
+app, drive it (`Drive-Desktop.ps1` for desktop, `adb` for Android), screenshot, and capture animations.
 For deterministic component snapshots see the separate Roborazzi tests in `reflow/impl` (`jvmTest`).
 
 Everything is dependency-free PowerShell — **no ffmpeg, no avdmanager required**. GIFs are encoded
@@ -36,8 +36,16 @@ with the built-in Windows WPF `GifBitmapEncoder` (`Capture-Gif.ps1`).
 # 1. Launch the app (starts ./gradlew runDesktop, waits for the "NotePen" window).
 ./Launch-Desktop.ps1                 # prints the window handle + screen bounds
 
-# 2. Drive it (Claude Code): request_access for `java.exe` (the JBR dev window — NOT the
-#    installed "NotePen"), then use computer-use screenshot / left_click / type.
+# 2. Drive it with client-relative physical pixels.
+# ./Drive-Desktop.ps1 -Action rect
+# ./Drive-Desktop.ps1 -Action capture -Out out\desktop\library.png
+# ./Drive-Desktop.ps1 -Action click -X 120 -Y 80
+# ./Drive-Desktop.ps1 -Action doubleClick -X 120 -Y 80
+# ./Drive-Desktop.ps1 -Action drag -X 220 -Y 500 -X2 760 -Y2 520 -DurationMs 650
+# ./Drive-Desktop.ps1 -Action scroll -X 800 -Y 500 -Delta -720
+# ./Drive-Desktop.ps1 -Action type -Text "C:\tmp\fixture.pdf"
+# ./Drive-Desktop.ps1 -Action key -Key "{ENTER}"
+# ./Drive-Desktop.ps1 -Action minimize
 
 # 3. Record an animation as a GIF (capture runs for -DurationMs from when it starts —
 #    trigger the animation right before/after launching this):
@@ -49,7 +57,7 @@ Notes:
 - The launcher leaves the Gradle process running while the app is open; it prints the PID and the
   `Stop-Process -Id <pid>` to close it.
 - `Capture-DesktopAnim.ps1` grabs the window region with GDI (`Graphics.CopyFromScreen`) — faster and
-  steadier than computer-use screenshots, so the framerate is tight.
+  steadier than interactive screenshots, so the framerate is tight.
 - The window matcher is an **exact** title `NotePen` so it doesn't grab the IntelliJ IDEA project
   window (`NotePen – Commit: …`). Override with `-TitleLike` if needed.
 
@@ -65,7 +73,7 @@ Notes:
 ./Start-AndroidTarget.ps1 -Serial 44RUN24B09G03494           # physical device
 #   add -Build to rebuild the APK first; -NoInstall to just relaunch.
 
-# Drive it (Claude Code) with adb:
+# Drive it with adb:
 adb -s <serial> shell input tap <x> <y>
 adb -s <serial> shell input swipe <x1> <y1> <x2> <y2> <ms>
 adb -s <serial> exec-out screencap -p > shot.png            # screenshot (cmd `>` keeps bytes intact)
@@ -108,6 +116,7 @@ For each run it writes:
 |---|---|
 | `Launch-Desktop.ps1` | Start `runDesktop`, wait for the app window, print its bounds. |
 | `Capture-DesktopAnim.ps1` | Record a desktop animation (GDI window capture) → GIF + filmstrip. |
+| `Drive-Desktop.ps1` | Drive the desktop window: capture, click, double-click, drag, scroll, type, key, minimize/maximize/restore/hide/show. |
 | `New-TabletAvd.ps1` | Create the tablet AVD by cloning the phone AVD's config (no avdmanager). |
 | `Start-AndroidTarget.ps1` | Boot AVD / pick device, install debug APK, launch NotePen. |
 | `Capture-AndroidAnim.ps1` | Record an Android animation (screencap burst) → GIF + filmstrip. |

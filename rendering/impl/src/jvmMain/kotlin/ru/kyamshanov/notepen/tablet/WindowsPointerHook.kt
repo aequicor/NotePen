@@ -10,6 +10,7 @@ import com.sun.jna.platform.win32.WinDef.HWND
 import com.sun.jna.platform.win32.WinDef.LPARAM
 import com.sun.jna.platform.win32.WinDef.LRESULT
 import com.sun.jna.platform.win32.WinDef.POINT
+import com.sun.jna.platform.win32.WinDef.RECT
 import com.sun.jna.platform.win32.WinDef.WPARAM
 import com.sun.jna.platform.win32.WinUser.WNDENUMPROC
 import com.sun.jna.ptr.IntByReference
@@ -91,6 +92,17 @@ private interface User32WndProc : StdCallLibrary {
     fun ScreenToClient(
         hWnd: HWND,
         lpPoint: POINT,
+    ): Boolean
+
+    fun ClientToScreen(
+        hWnd: HWND,
+        lpPoint: POINT,
+    ): Boolean
+
+    fun GetPointerDeviceRects(
+        device: Pointer,
+        pointerDeviceRect: RECT,
+        displayRect: RECT,
     ): Boolean
 }
 
@@ -226,6 +238,17 @@ private const val PEN_PRESSURE_MAX: Float = 1024f
  * получать обычные mouse-события.
  */
 object WindowsPointerHook {
+    private data class PointerDeviceMapping(
+        val pointerLeft: Int,
+        val pointerTop: Int,
+        val pointerWidth: Int,
+        val pointerHeight: Int,
+        val displayLeft: Int,
+        val displayTop: Int,
+        val displayWidth: Int,
+        val displayHeight: Int,
+    )
+
     private val user32: User32WndProc? by lazy {
         if (!Platform.isWindows()) {
             null
@@ -257,6 +280,8 @@ object WindowsPointerHook {
         )
 
     private val penButtonsFlow = MutableStateFlow<Set<Int>>(emptySet())
+
+    private val pointerDeviceMappings = mutableMapOf<Long, PointerDeviceMapping>()
 
     /**
      * Слушатель изменений состояния кнопок пера. Регистрируется
@@ -301,6 +326,12 @@ object WindowsPointerHook {
             logger.warn(t) { "WindowsPointerHook: EnumChildWindows threw" }
         }
         logger.info { "WindowsPointerHook: subclassed ${hooks.size} window(s)" }
+    }
+
+    fun uninstall(hwnd: HWND) {
+        val lib = user32 ?: return
+        val hook = hooks.remove(hwnd) ?: return
+        runCatching { lib.SetWindowLongPtrA(hwnd, GWLP_WNDPROC, hook.original) }
     }
 
     /** Снимает все ранее установленные subclass'ы. Идемпотентно. */
@@ -371,7 +402,10 @@ object WindowsPointerHook {
     ) {
         when (uMsg) {
             WM_POINTERDOWN -> emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.DOWN)
-            WM_POINTERUP -> emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UP)
+            WM_POINTERUP -> {
+                emitHistoryAsUpdates(lib, hwnd, pointerId)
+                emitFromInfo(lib, hwnd, pointerId, PenPointerEventType.UP)
+            }
             WM_POINTERUPDATE -> emitHistoryAsUpdates(lib, hwnd, pointerId)
             // ENTER / LEAVE / CAPCHG нас интересуют только как hover-индикатор;
             // drawing-pipeline их не требует — пропускаем (Compose hoverPosition
@@ -458,8 +492,7 @@ object WindowsPointerHook {
         // viewer'а сидит внутри Skiko-канваса, и его местные координаты
         // совпадают с client-coords Skiko HWND'а — это та же система, что у
         // Compose pointer-input'а из AWT mouse events.
-        val pt = POINT(info.pointerInfo.ptPixelLocationX, info.pointerInfo.ptPixelLocationY)
-        if (!lib.ScreenToClient(hwnd, pt)) return
+        val position = clientPosition(lib, hwnd, info) ?: return
 
         val pressure =
             if ((info.penMask and PEN_MASK_PRESSURE) != 0) {
@@ -476,7 +509,7 @@ object WindowsPointerHook {
         penEventsFlow.tryEmit(
             PenPointerEvent(
                 type = phase,
-                position = Offset(pt.x.toFloat(), pt.y.toFloat()),
+                position = position,
                 pressure = pressure,
                 tilt = tilt,
                 timestamp = System.currentTimeMillis(),
@@ -484,13 +517,80 @@ object WindowsPointerHook {
         )
     }
 
-    /**
+    /*
      * Извлекает состояние физических кнопок пера из [POINTER_INFO.pointerFlags]
      * и [PointerPenInfo.penFlags], кладёт в [penButtonsFlow] как Set<Int>:
      * - бит 1 = barrel (SECONDBUTTON ∨ PEN_FLAG_BARREL),
      * - биты 2..4 = дополнительные кнопки.
      * Бит 0 (касание тиром) намеренно НЕ включается.
      */
+    private fun clientPosition(
+        lib: User32WndProc,
+        hwnd: HWND,
+        info: PointerPenInfo,
+    ): Offset? =
+        himetricClientPosition(lib, hwnd, info)
+            ?: pixelClientPosition(lib, hwnd, info)
+
+    private fun himetricClientPosition(
+        lib: User32WndProc,
+        hwnd: HWND,
+        info: PointerPenInfo,
+    ): Offset? {
+        val mapping = pointerDeviceMapping(lib, info.pointerInfo.sourceDevice) ?: return null
+        val clientOrigin = POINT(0, 0)
+        if (!lib.ClientToScreen(hwnd, clientOrigin)) return null
+        val screenX =
+            mapping.displayLeft +
+                (info.pointerInfo.ptHimetricLocationX - mapping.pointerLeft).toFloat() *
+                mapping.displayWidth / mapping.pointerWidth
+        val screenY =
+            mapping.displayTop +
+                (info.pointerInfo.ptHimetricLocationY - mapping.pointerTop).toFloat() *
+                mapping.displayHeight / mapping.pointerHeight
+        return Offset(screenX - clientOrigin.x, screenY - clientOrigin.y)
+    }
+
+    private fun pointerDeviceMapping(
+        lib: User32WndProc,
+        sourceDevice: Pointer?,
+    ): PointerDeviceMapping? {
+        val device = sourceDevice ?: return null
+        val key = Pointer.nativeValue(device)
+        pointerDeviceMappings[key]?.let { return it }
+        val pointerRect = RECT()
+        val displayRect = RECT()
+        if (!lib.GetPointerDeviceRects(device, pointerRect, displayRect)) return null
+        val pointerWidth = pointerRect.right - pointerRect.left
+        val pointerHeight = pointerRect.bottom - pointerRect.top
+        val displayWidth = displayRect.right - displayRect.left
+        val displayHeight = displayRect.bottom - displayRect.top
+        if (pointerWidth == 0 || pointerHeight == 0 || displayWidth == 0 || displayHeight == 0) return null
+        val mapping =
+            PointerDeviceMapping(
+                pointerLeft = pointerRect.left,
+                pointerTop = pointerRect.top,
+                pointerWidth = pointerWidth,
+                pointerHeight = pointerHeight,
+                displayLeft = displayRect.left,
+                displayTop = displayRect.top,
+                displayWidth = displayWidth,
+                displayHeight = displayHeight,
+            )
+        pointerDeviceMappings[key] = mapping
+        return mapping
+    }
+
+    private fun pixelClientPosition(
+        lib: User32WndProc,
+        hwnd: HWND,
+        info: PointerPenInfo,
+    ): Offset? {
+        val pt = POINT(info.pointerInfo.ptPixelLocationX, info.pointerInfo.ptPixelLocationY)
+        if (!lib.ScreenToClient(hwnd, pt)) return null
+        return Offset(pt.x.toFloat(), pt.y.toFloat())
+    }
+
     private fun updatePenButtons(info: PointerPenInfo) {
         val pf = info.pointerInfo.pointerFlags
         val barrel =

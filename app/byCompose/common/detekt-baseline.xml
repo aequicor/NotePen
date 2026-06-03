@@ -15,30 +15,7 @@
     <ID>CyclomaticComplexMethod:ShortcutsSettingsDialog.kt:@Composable private fun BindingField</ID>
     <ID>CyclomaticComplexMethod:TabBar.kt:@Composable fun TabBar</ID>
     <ID>CyclomaticComplexMethod:TabBar.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun TabChip</ID>
-    <ID>ExplicitItLambdaMultipleParameters:PeerCatalogContent.kt:{ idx, it -&gt; "${idx}_${it.documentId}" }</ID>
     <ID>LargeClass:MainScreenViewModel.kt:MainScreenViewModel</ID>
-    <ID>LongMethod:ClientPairingPanel.android.kt:@Composable actual fun CameraScanSlot</ID>
-    <ID>LongMethod:ClientPairingPanel.kt:@Composable fun ClientPairingPanel</ID>
-    <ID>LongMethod:ClientPairingPanel.kt:@Composable private fun ConnectionsScreen</ID>
-    <ID>LongMethod:DetailsContent.kt:@Composable private fun BoxScope.FocusedPanelMenus</ID>
-    <ID>LongMethod:DetailsContent.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun DetailsContent</ID>
-    <ID>LongMethod:EditorPanel.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun EditorPanel</ID>
-    <ID>LongMethod:FolderContent.kt:@Composable fun FolderContent</ID>
-    <ID>LongMethod:MainContent.kt:@Composable fun MainContent</ID>
-    <ID>LongMethod:MainContent.kt:@Composable private fun RecentFilesAndFoldersList</ID>
-    <ID>LongMethod:PageIndicatorAirbar.kt:@Composable private fun EditablePageNumber</ID>
-    <ID>LongMethod:PageThumbnailsSidebar.kt:@Composable fun PageThumbnailsSidebar</ID>
-    <ID>LongMethod:PageThumbnailsSidebar.kt:@Composable private fun FilterModeChip</ID>
-    <ID>LongMethod:PageThumbnailsSidebar.kt:@Composable private fun ThumbnailItem</ID>
-    <ID>LongMethod:PeerCatalogContent.kt:@Composable fun PeerCatalogContent</ID>
-    <ID>LongMethod:PenSettingsPanel.kt:@Composable fun PenSettingsPanel</ID>
-    <ID>LongMethod:PortraitTopBar.kt:@Composable fun PortraitTopBar</ID>
-    <ID>LongMethod:PortraitTopBar.kt:@Composable private fun PortraitPageCounter</ID>
-    <ID>LongMethod:RecentFileCard.kt:@Composable fun RecentFileCard</ID>
-    <ID>LongMethod:RootContent.kt:@Composable fun RootContent</ID>
-    <ID>LongMethod:ShortcutsSettingsDialog.kt:@Composable private fun BindingField</ID>
-    <ID>LongMethod:TabBar.kt:@Composable fun TabBar</ID>
-    <ID>LongMethod:TabBar.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun TabChip</ID>
     <ID>LongMethod:ToolRail.kt:internal fun systemControlEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LongMethod:ToolRail.kt:internal fun unifiedToolWheelEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LongMethod:ToolSettingsFloatingPanel.kt:internal fun toolPresetEntries: List&lt;WheelEntry&gt;</ID>
@@ -50,37 +27,10 @@
     <ID>MatchingDeclarationName:PageThumbnailsSidebar.kt:PageFilterMode</ID>
     <ID>MatchingDeclarationName:PeerCatalogComponent.kt:PeerCatalogComponentImpl : PeerCatalogComponentComponentContext</ID>
     <ID>MatchingDeclarationName:ReflowSourceStat.kt:SourceStat</ID>
-    <ID>MaxLineLength:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer.PageComposer$canvas.drawLine(MARGIN.toFloat(), cursorY.toFloat(), (PAGE_WIDTH - MARGIN).toFloat(), cursorY.toFloat(), paint)</ID>
-    <ID>MaxLineLength:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer.PageComposer$paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)</ID>
-    <ID>MaxLineLength:AndroidDocumentLoader.kt:AndroidDocumentLoader$override suspend fun load: PdfDocument</ID>
-    <ID>MaxLineLength:AndroidPdfExporter.kt:AndroidPdfExporter$val pageInfo = PdfDocument.PageInfo.Builder(bitmapWidth, bitmapHeight, i + 1).create()</ID>
-    <ID>MaxLineLength:DetailsContent.kt:modifier = Modifier.size(width = landscapeToolbarWidthDp, height = landscapePageCounterHeightDp)</ID>
-    <ID>MaxLineLength:DetailsContent.kt:vs.zoomBy(TOOLBAR_ZOOM_STEP_IN, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))</ID>
-    <ID>MaxLineLength:DetailsContent.kt:vs.zoomBy(TOOLBAR_ZOOM_STEP_OUT, Offset(vs.viewportSize.width / 2f, vs.viewportSize.height / 2f))</ID>
-    <ID>MaxLineLength:EbookAwarePdfReflowExtractor.kt:EbookAwarePdfReflowExtractor$private suspend fun resolve: String</ID>
-    <ID>MaxLineLength:EditorPanel.kt:LaunchedEffect</ID>
-    <ID>MaxLineLength:EditorPanel.kt:StrokeDelta.Removed(strokeId = id, pageIndex = pageIndex, authorDeviceId = engine.deviceId, clock = 0)</ID>
-    <ID>MaxLineLength:EditorPanel.kt:drawingStates[pageIdx]?.let { handlePanelEraseFinished(it, pageIdx, before, syncEngineRef.value) }</ID>
-    <ID>MaxLineLength:EditorPanel.kt:if (magnifierState.attachment != ru.kyamshanov.notepen.magnifier.MagnifierAttachment.SCREEN) return@LaunchedEffect</ID>
-    <ID>MaxLineLength:EditorPanel.kt:val result = pdfExporter.export(sourcePdfPath = filePath, annotations = annotations, outputPath = outputPath)</ID>
-    <ID>MaxLineLength:GridContainer.kt:GridColumn(layout, p[1], p[3], onSetRatio, onFocusPanel, content, heightPx, Modifier.weight(1f - layout.ratios[0]))</ID>
-    <ID>MaxLineLength:JmDnsServiceRegistrar.kt:JmDnsServiceRegistrar$logger.info { "mDNS registered: ${device.name} port=${device.port} bind=${bindAddress?.hostAddress ?: "default"}" }</ID>
-    <ID>MaxLineLength:JvmBookPdfRenderer.kt:JvmBookPdfRenderer.PageComposer$paragraph(listOf(InlineSpan(markerFor(block))) + block.text, indent = (block.level + 1) * LIST_INDENT_STEP)</ID>
-    <ID>MaxLineLength:JvmDocumentLoader.kt:JvmDocumentLoader$override suspend fun load: PdfDocument</ID>
-    <ID>MaxLineLength:MainScreenViewModel.kt:MainScreenViewModel$if (m.id == intent.existingId) m.copy(availabilityStatus = AvailabilityStatus.FILE_ERROR) else m</ID>
-    <ID>MaxLineLength:PdfExporterJvm.kt:actual fun createPdfExporter: PdfExporter</ID>
-    <ID>MaxLineLength:ReaderSettingsRepositoryAndroid.kt:actual fun createReaderSettingsRepository: ReaderSettingsRepository</ID>
-    <ID>MaxLineLength:RootContent.kt:?:</ID>
-    <ID>MaxLineLength:TabBar.kt:.</ID>
-    <ID>MaxLineLength:TabSession.kt:TabSession$val tab = DocumentTab(id = idGenerator.next(), filePath = ts.filePath, displayName = ts.displayName)</ID>
-    <ID>MaxLineLength:ToolSettingsFloatingPanel.kt:.</ID>
-    <ID>MaxLineLength:ToolSettingsFloatingPanel.kt:onPresetsChange(presets.copy(eraser = presets.eraser + EraserPreset(generateUuid(), eraserSettings)))</ID>
-    <ID>MaxLineLength:ToolSettingsFloatingPanel.kt:onPresetsChange(presets.copy(marker = presets.marker + MarkerPreset(generateUuid(), markerSettings)))</ID>
-    <ID>MaxLineLength:WorkspaceLayout.kt:WorkspaceLayout$fun</ID>
     <ID>ReturnCount:BookFileTypes.kt:fun detectBookFormat: BookFormat?</ID>
     <ID>ReturnCount:EditorPanel.kt:fun bindingActive: Boolean</ID>
     <ID>ReturnCount:EditorPanel.kt:fun routedOnDown</ID>
-    <ID>ReturnCount:MainScreenViewModel.kt:MainScreenViewModel$private suspend fun openRecentFileById</ID>
+    <ID>ReturnCount:FilePicker.jvm.kt:private fun pickDocumentWithAwtDialog: String?</ID>
     <ID>ReturnCount:OpenDocuments.kt:OpenDocuments$fun closeTab: OpenDocuments?</ID>
     <ID>ReturnCount:PeerCatalogViewModel.kt:PeerCatalogViewModel$private fun hasCachedCopy: Boolean</ID>
     <ID>ReturnCount:ReflowSourceStat.android.kt:private fun statUri: SourceStat?</ID>
