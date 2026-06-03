@@ -1210,6 +1210,7 @@ fun EditorPanel(
     val viewerOriginInWindow = remember { mutableStateOf(Offset.Zero) }
     val openTriggerProvider = rememberUpdatedState(isOpenTriggerActive)
     val penPanTriggerProvider = rememberUpdatedState(isPenPanTriggerActive)
+    val ctrlPanProvider = rememberUpdatedState(ctrlHeld)
     val magnifierInputControllerHolder =
         remember(pdfState) {
             mutableStateOf<ru.kyamshanov.notepen.magnifier.MagnifierInputController?>(null)
@@ -1654,7 +1655,7 @@ fun EditorPanel(
                     // десктопе pan-обработчик ловит Press на Initial-проходе раньше
                     // внутреннего drag-роутера, поэтому без этой проверки страница
                     // перетаскивалась вместо рамки.
-                    if (penPanTriggerProvider.value) {
+                    if (penPanTriggerProvider.value || ctrlPanProvider.value) {
                         true
                     } else {
                         (toolModeProvider.value == ToolMode.NONE || pencilModeProvider.value) &&
@@ -1674,18 +1675,24 @@ fun EditorPanel(
                         palmRejectionActive = palmRejectionActive,
                         nativePositionOffset = { viewerOriginInWindow.value },
                         nativePenInputEnabled = false,
-                        fallbackDrawingPointerEnabled = { !nativePenFallbackSuppressed.value },
+                        fallbackDrawingPointerEnabled = {
+                            !nativePenFallbackSuppressed.value &&
+                                !penPanTriggerProvider.value &&
+                                !ctrlPanProvider.value
+                        },
                         captureGesture = { pos ->
                             quickLoupeArmed.value ||
                                 openTriggerProvider.value ||
                                 (
                                     !penPanTriggerProvider.value &&
+                                        !ctrlPanProvider.value &&
                                         magnifierState.enabled &&
                                         magnifierTargetGestureController.hitTest(pos) !=
                                         ru.kyamshanov.notepen.magnifier.MagnifierTargetGestureController.Mode.NONE
                                 ) ||
                                 (
                                     !penPanTriggerProvider.value &&
+                                        !ctrlPanProvider.value &&
                                         !pencilModeProvider.value &&
                                         toolModeProvider.value != ToolMode.NONE &&
                                         drawingController.isInsidePdfPage(pos)
