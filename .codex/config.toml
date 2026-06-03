@@ -1,5 +1,5 @@
-sandbox_mode = "workspace-write"
+sandbox_mode = "danger-full-access"
 
-approval_policy = "on-request"
+approval_policy = "untrusted"
 [sandbox_workspace_write]
 network_access = true

@@ -18,6 +18,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryBookId
 import ru.kyamshanov.notepen.library.api.LibraryRegistry
@@ -595,6 +596,9 @@ class MainScreenViewModel(
         val uri = domainRecord.uri
         when (val result = openRecentFile.execute(uri)) {
             is OpenFileResult.Success -> {
+                val lastPage = record.lastPageIndex
+                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, lastPage)) }
+                yield()
                 try {
                     val upsertResult =
                         addToHistory.execute(
@@ -610,8 +614,6 @@ class MainScreenViewModel(
                 } catch (_: Exception) {
                     _state.update { it.copy(errorEvent = ErrorEvent.HistoryFlushFailed) }
                 }
-                val lastPage = record.lastPageIndex
-                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, lastPage)) }
             }
             is OpenFileResult.NotAvailable -> {
                 isNavigating = false
