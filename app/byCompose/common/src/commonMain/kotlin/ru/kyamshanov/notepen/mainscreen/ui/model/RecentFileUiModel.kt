@@ -8,6 +8,7 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.AvailabilityStatus
  * @property id Уникальный идентификатор записи.
  * @property uri Нормализованный URI файла (используется для drag-and-drop).
  * @property displayName Отображаемое имя файла.
+ * @property fileSize Размер файла в байтах, если известен.
  * @property openedAt Момент последнего открытия (epochMillis).
  * @property availabilityStatus Текущий статус доступности файла.
  * @property thumbnailState Состояние загрузки миниатюры.
@@ -17,6 +18,7 @@ data class RecentFileUiModel(
     val id: String,
     val uri: String,
     val displayName: String,
+    val fileSize: Long? = null,
     val openedAt: Long,
     val availabilityStatus: AvailabilityStatus,
     val thumbnailState: ThumbnailState,

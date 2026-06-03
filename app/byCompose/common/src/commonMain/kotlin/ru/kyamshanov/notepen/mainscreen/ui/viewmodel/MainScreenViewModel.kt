@@ -18,7 +18,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.yield
 import ru.kyamshanov.notepen.library.api.Library
 import ru.kyamshanov.notepen.library.api.LibraryBookId
 import ru.kyamshanov.notepen.library.api.LibraryRegistry
@@ -583,30 +582,44 @@ class MainScreenViewModel(
         )
     }
 
-    private suspend fun openRecentFileById(id: String) {
+    private fun openRecentFileById(id: String) {
         if (isNavigating) return
         val record = _state.value.recentFiles.firstOrNull { it.id == id } ?: return
-        isNavigating = true
-        val allFiles = historyRepository.getAll()
-        val domainRecord =
-            allFiles.firstOrNull { it.id == id } ?: run {
-                isNavigating = false
+        when (record.availabilityStatus) {
+            AvailabilityStatus.NOT_FOUND -> {
+                _state.update { it.copy(errorEvent = ErrorEvent.FileNotFound) }
                 return
             }
-        val uri = domainRecord.uri
+            AvailabilityStatus.FILE_ERROR,
+            AvailabilityStatus.ARCHIVED_UNAVAILABLE,
+            -> {
+                _state.update { it.copy(errorEvent = ErrorEvent.FileError) }
+                return
+            }
+            AvailabilityStatus.AVAILABLE,
+            AvailabilityStatus.UNKNOWN,
+            -> Unit
+        }
+        isNavigating = true
+        val uri = record.uri
+        _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, record.lastPageIndex)) }
+        scope.launch {
+            refreshOpenedRecentFile(record)
+        }
+    }
+
+    private suspend fun refreshOpenedRecentFile(record: RecentFileUiModel) {
+        val uri = record.uri
         when (val result = openRecentFile.execute(uri)) {
             is OpenFileResult.Success -> {
-                val lastPage = record.lastPageIndex
-                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, lastPage)) }
-                yield()
                 try {
                     val upsertResult =
                         addToHistory.execute(
                             uri = uri,
-                            displayName = domainRecord.displayName,
-                            fileSize = domainRecord.fileSize,
+                            displayName = record.displayName,
+                            fileSize = record.fileSize,
                             openedAt = nowMillis(),
-                            lastPageIndex = domainRecord.lastPageIndex,
+                            lastPageIndex = record.lastPageIndex,
                         )
                     if (upsertResult.isFailure) {
                         _state.update { it.copy(errorEvent = ErrorEvent.HistoryFlushFailed) }
@@ -616,7 +629,6 @@ class MainScreenViewModel(
                 }
             }
             is OpenFileResult.NotAvailable -> {
-                isNavigating = false
                 val errorEvent =
                     when (result.status) {
                         AvailabilityStatus.NOT_FOUND -> ErrorEvent.FileNotFound
@@ -626,7 +638,7 @@ class MainScreenViewModel(
                     s.copy(
                         recentFiles =
                             s.recentFiles.map { m ->
-                                if (m.id == id) {
+                                if (m.id == record.id) {
                                     // CC-23: preserve ARCHIVED_UNAVAILABLE — a live check cannot downgrade it
                                     val newStatus =
                                         if (m.availabilityStatus == AvailabilityStatus.ARCHIVED_UNAVAILABLE) {
@@ -886,6 +898,7 @@ private fun RecentFile.toUiModel() =
         id = id,
         uri = uri,
         displayName = displayName,
+        fileSize = fileSize,
         openedAt = openedAt,
         availabilityStatus = availabilityStatus,
         thumbnailState = ThumbnailState.Loading,

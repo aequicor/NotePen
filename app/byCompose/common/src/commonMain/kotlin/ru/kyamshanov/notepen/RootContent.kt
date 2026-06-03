@@ -1,9 +1,11 @@
 package ru.kyamshanov.notepen
 
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.stack.animation.fade
@@ -34,6 +36,8 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+
+private const val ROOT_STACK_FADE_MS = 90
 
 @Composable
 fun RootContent(
@@ -83,7 +87,7 @@ fun RootContent(
     Children(
         stack = component.stack,
         modifier = modifier,
-        animation = stackAnimation(fade()),
+        animation = stackAnimation(fade(animationSpec = tween(ROOT_STACK_FADE_MS))),
     ) {
         when (val child = it.instance) {
             is RootComponent.Child.MainChild -> {
@@ -97,6 +101,7 @@ fun RootContent(
                 LaunchedEffect(state.navigationTarget) {
                     when (val target = state.navigationTarget) {
                         is NavigationTarget.Editor -> {
+                            withFrameNanos { }
                             mainScreenComponent.onOpenEditor(target.uri, target.lastPageIndex)
                             mainScreenComponent.viewModel.onNavigationHandled()
                         }

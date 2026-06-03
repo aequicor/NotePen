@@ -168,9 +168,10 @@ class MainScreenViewModelTest {
                 uri = "file:///missing.pdf",
                 displayName = "missing.pdf",
                 openedAt = 3000L,
-                availabilityStatus = AvailabilityStatus.AVAILABLE,
+                availabilityStatus = AvailabilityStatus.NOT_FOUND,
             )
         fakeHistoryRepo.files = listOf(file)
+        fakeAvailabilityChecker.asyncResult = AvailabilityStatus.NOT_FOUND
         fakeAvailabilityChecker.syncResult = AvailabilityStatus.NOT_FOUND
 
         viewModel.onIntent(MainScreenIntent.ScreenVisible)
