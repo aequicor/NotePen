@@ -286,6 +286,7 @@ compose.desktop {
         // Taskbar.setIconImage() only works while AWT is alive, this flag persists through shutdown.
         val hostOs = System.getProperty("os.name").lowercase()
         if (hostOs.contains("mac") || hostOs.contains("darwin")) {
+            jvmArgs += "-Xdock:name=NotePen"
             jvmArgs += "-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon.icns").asFile.absolutePath}"
         }
     }
@@ -301,7 +302,10 @@ tasks.withType<JavaExec>().configureEach {
         jvmArgs("--enable-native-access=ALL-UNNAMED", "-Dnotepen.eapIcon=true")
         val hostOs = System.getProperty("os.name").lowercase()
         if (hostOs.contains("mac") || hostOs.contains("darwin")) {
-            jvmArgs("-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon_eap.icns").asFile.absolutePath}")
+            jvmArgs(
+                "-Xdock:name=NotePen",
+                "-Xdock:icon=${project.layout.projectDirectory.file("icons/app_icon_eap.icns").asFile.absolutePath}",
+            )
         }
     }
 }
