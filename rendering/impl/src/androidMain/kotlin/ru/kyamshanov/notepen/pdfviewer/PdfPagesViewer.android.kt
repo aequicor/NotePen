@@ -56,6 +56,9 @@ private const val RENDER_SAMPLE_MS = 100L
  * pixel-ceiling LRU внутри [PdfBitmapCache].
  */
 private const val MAX_CACHE_ENTRIES = 10
+private const val TILE_SIZE_PX = 512
+private const val TILE_MODE_MIN_SCALE_PERCENT = 300
+private const val MAX_TILE_CACHE_PIXELS = 48_000_000L
 
 /**
  * Cap on PDF bitmap dimensions. Above this, the page is just upscaled by
@@ -125,6 +128,7 @@ actual fun PdfPagesViewer(
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
+    val tileCache = remember(pdfDocument) { PdfTileCache(maxTotalPixels = MAX_TILE_CACHE_PIXELS) }
     val density = LocalDensity.current
     val renderDispatcher = Dispatchers.Default
 
@@ -186,6 +190,8 @@ actual fun PdfPagesViewer(
                         visible = range,
                     ),
                 scalePercent = state.renderScalePercent,
+                zoom = state.zoom,
+                pan = state.pan,
                 basePageWidthPx = state.basePageWidthPx,
                 viewportSize = state.viewportSize,
                 rotationSignature =
@@ -248,6 +254,79 @@ actual fun PdfPagesViewer(
                             .coerceAtLeast(1)
                             .coerceAtMost(MAX_RENDER_DIM_PX)
                     val cropSig = cropSignatureOf(src)
+                    val tileMode =
+                        shouldUsePdfTiles(
+                            scalePercent = snap.scalePercent,
+                            targetWidthPx = targetWidthPx,
+                            targetHeightPx = targetHeightPx,
+                            maxRenderDimensionPx = MAX_RENDER_DIM_PX,
+                            minTileScalePercent = TILE_MODE_MIN_SCALE_PERCENT,
+                        )
+                    if (tileMode) {
+                        val scaleBucket = pdfTileScaleBucket(snap.scalePercent)
+                        val requests =
+                            visiblePdfTileRequests(
+                                layout = state.layout,
+                                pageIndex = i,
+                                source = src,
+                                pan = snap.pan,
+                                zoom = snap.zoom,
+                                viewportSize = snap.viewportSize,
+                                scaleBucket = scaleBucket,
+                                rotationQuarters = rotation,
+                                cropSignature = cropSig,
+                                tileSizePx = TILE_SIZE_PX,
+                            )
+                        val protectedKeys = requests.map { it.key }.toSet()
+                        val renderedTiles = ArrayList<PdfTile>(requests.size)
+                        for (request in requests) {
+                            if (tileCache.get(request.key) != null) continue
+                            val tileBitmap =
+                                withContext(renderDispatcher) {
+                                    renderer.renderTile(
+                                        document = doc,
+                                        pageIndex = src.sourceIndex,
+                                        fullPageWidthPx = request.fullPageWidthPx,
+                                        fullPageHeightPx = request.fullPageHeightPx,
+                                        tileLeftPx = request.tileLeftPx,
+                                        tileTopPx = request.tileTopPx,
+                                        tileWidthPx = request.tileWidthPx,
+                                        tileHeightPx = request.tileHeightPx,
+                                        rotationQuarters = rotation,
+                                        cropLeftN = src.cropLeftN,
+                                        cropTopN = src.cropTopN,
+                                        cropRightN = src.cropRightN,
+                                        cropBottomN = src.cropBottomN,
+                                    ).toImageBitmap()
+                                }
+                            if (
+                                state.viewportSize == snap.viewportSize &&
+                                state.basePageWidthPx == snap.basePageWidthPx &&
+                                state.renderScalePercent == snap.scalePercent
+                            ) {
+                                renderedTiles +=
+                                    PdfTile(
+                                        bitmap = tileBitmap,
+                                        key = request.key,
+                                        tileLeftPx = request.tileLeftPx,
+                                        tileTopPx = request.tileTopPx,
+                                        tileWidthPx = request.tileWidthPx,
+                                        tileHeightPx = request.tileHeightPx,
+                                        fullPageWidthPx = request.fullPageWidthPx,
+                                        fullPageHeightPx = request.fullPageHeightPx,
+                                        renderedScalePercent = scaleBucket,
+                                    )
+                            }
+                        }
+                        if (
+                            state.viewportSize == snap.viewportSize &&
+                            state.basePageWidthPx == snap.basePageWidthPx &&
+                            state.renderScalePercent == snap.scalePercent
+                        ) {
+                            tileCache.putAll(renderedTiles, protectedKeys = protectedKeys)
+                        }
+                        continue
+                    }
                     val cached = cache.get(i)
                     if (
                         cached != null &&
@@ -419,10 +498,51 @@ actual fun PdfPagesViewer(
                 val pagePlaceables =
                     subcompose(i) {
                         val cached = cache.entries[i]?.bitmap
+                        val rotation = userRotationQuarters(i)
+                        val src = currentPageSource(i)
+                        val cropSig = cropSignatureOf(src)
+                        val scaleBucket = pdfTileScaleBucket(state.renderScalePercent)
+                        val tileLayerActive =
+                            shouldUsePdfTiles(
+                                scalePercent = state.renderScalePercent,
+                                targetWidthPx = (layout.basePageWidthPx * lz).roundToInt(),
+                                targetHeightPx = (pdfH * lz).roundToInt(),
+                                maxRenderDimensionPx = MAX_RENDER_DIM_PX,
+                                minTileScalePercent = TILE_MODE_MIN_SCALE_PERCENT,
+                            )
+                        val layer =
+                            if (tileLayerActive) {
+                                val requests =
+                                    visiblePdfTileRequests(
+                                        layout = layout,
+                                        pageIndex = i,
+                                        source = src,
+                                        pan = pan,
+                                        zoom = zoom,
+                                        viewportSize =
+                                            IntSize(
+                                                constraints.maxWidth,
+                                                constraints.maxHeight,
+                                            ),
+                                        scaleBucket = scaleBucket,
+                                        rotationQuarters = rotation,
+                                        cropSignature = cropSig,
+                                        tileSizePx = TILE_SIZE_PX,
+                                        preloadTileRing = 0,
+                                    )
+                                PdfPageLayer.Tiles(
+                                    tiles = tileCache.tilesForRequests(requests),
+                                    missingTiles = tileCache.missingTilesForRequests(requests),
+                                    lowResPreview = cached,
+                                )
+                            } else {
+                                PdfPageLayer.FullBitmap(cached)
+                            }
                         val scope =
                             ImmutablePdfPageScope(
                                 pageIndex = i,
                                 bitmap = cached,
+                                pdfLayer = layer,
                                 visualWidth = visualWidthDp,
                                 visualHeight = visualHeightDp,
                                 pdfWidth = pdfWidthDp,
@@ -454,6 +574,8 @@ private data class VisibleSnapshot(
     val visLast: Int = last,
     val primaryVisible: Int = visFirst,
     val scalePercent: Int,
+    val zoom: Float,
+    val pan: Offset,
     val basePageWidthPx: Float,
     val viewportSize: IntSize,
     val rotationSignature: Int = 0,
@@ -463,6 +585,7 @@ private data class VisibleSnapshot(
 private data class ImmutablePdfPageScope(
     override val pageIndex: Int,
     override val bitmap: androidx.compose.ui.graphics.ImageBitmap?,
+    override val pdfLayer: PdfPageLayer?,
     override val visualWidth: androidx.compose.ui.unit.Dp,
     override val visualHeight: androidx.compose.ui.unit.Dp,
     override val pdfWidth: androidx.compose.ui.unit.Dp,

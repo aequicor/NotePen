@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -56,6 +57,15 @@ internal const val INK_CACHE_DIM_BUCKET_PX = 256
  * the rebuild keeps live overlay frames ahead of background cache work.
  */
 internal const val COMPLETED_INK_REBUILD_IDLE_DELAY_MS = 120L
+
+/**
+ * Upper bound for vector anti-flicker tails while the completed-ink bitmap cache
+ * is cold or catching up. Larger tails are deferred to the async bitmap cache:
+ * replaying many variable-width strokes on the UI draw path is the exact freeze
+ * seen on high-zoom pages with annotations.
+ */
+internal const val MAX_VECTOR_INK_TAIL_PATHS = 24
+internal const val MAX_VECTOR_INK_TAIL_POINTS = 1_200
 
 internal data class CompletedInk(
     val strokeCount: Int,
@@ -153,6 +163,25 @@ internal fun completedInkTailStart(
     cachedStrokeCount: Int?,
 ): Int = cachedStrokeCount?.coerceIn(0, pathCount) ?: 0
 
+internal inline fun shouldDrawCompletedInkTail(
+    paths: List<DrawingPath>,
+    tailStart: Int,
+    maxTailPaths: Int = MAX_VECTOR_INK_TAIL_PATHS,
+    maxTailPoints: Int = MAX_VECTOR_INK_TAIL_POINTS,
+    includePath: (DrawingPath) -> Boolean,
+): Boolean {
+    var pathCount = 0
+    var pointCount = 0
+    for (i in tailStart until paths.size) {
+        val path = paths[i]
+        if (!includePath(path)) continue
+        pathCount += 1
+        pointCount += path.points.size
+        if (pathCount > maxTailPaths || pointCount > maxTailPoints) return false
+    }
+    return true
+}
+
 /**
  * Rasterises completed pen strokes into an off-screen bitmap. Marker strokes
  * are intentionally skipped: they must be multiply-blended directly over PDF
@@ -186,6 +215,7 @@ internal suspend fun buildCompletedInk(
             }
         }
     }
+    prewarmNativeImage(bmp)
     return bmp
 }
 
@@ -233,6 +263,7 @@ internal suspend fun buildCompletedMarkerInk(
             }
         }
     }
+    prewarmNativeImage(bmp)
     return bmp
 }
 
@@ -241,13 +272,12 @@ internal fun DrawScope.drawCompletedMarkerInk(
     cached: CompletedInk?,
     spec: InkRenderSpec,
     scratch: Path,
+    nativeImageDrawCache: NativeImageDrawCache? = null,
 ) {
     cached?.let { completed ->
-        drawImage(
-            image = completed.bitmap,
-            srcOffset = IntOffset.Zero,
-            srcSize = IntSize(completed.bitmap.width, completed.bitmap.height),
-            dstOffset = IntOffset.Zero,
+        drawCompletedInkBitmap(
+            nativeImageDrawCache = nativeImageDrawCache,
+            bitmap = completed.bitmap,
             dstSize = spec.surfaceSize,
             blendMode = BlendMode.Multiply,
         )
@@ -256,6 +286,7 @@ internal fun DrawScope.drawCompletedMarkerInk(
     val cachedCount = cached?.strokeCount ?: 0
     val tailStart = completedInkTailStart(paths.size, cached?.strokeCount)
     if (paths.size <= cachedCount && cached != null) return
+    if (!shouldDrawCompletedInkTail(paths, tailStart) { it.toolType == ToolKind.MARKER }) return
     withInkTransform(spec) {
         for (i in tailStart until paths.size) {
             val path = paths[i]
@@ -274,25 +305,13 @@ internal fun DrawScope.drawCompletedMarkerInk(
     }
 }
 
-internal fun DrawScope.drawCompletedMarkers(
-    paths: List<DrawingPath>,
-    spec: InkRenderSpec,
-    scratch: Path,
-) {
-    drawCompletedMarkerInk(
-        paths = paths,
-        cached = null,
-        spec = spec,
-        scratch = scratch,
-    )
-}
-
 internal fun DrawScope.drawCompletedPenInk(
     paths: List<DrawingPath>,
     cached: CompletedInk?,
     spec: InkRenderSpec,
     scratch: Path,
     vectorWhenUpscaled: Boolean,
+    nativeImageDrawCache: NativeImageDrawCache? = null,
 ) {
     if (paths.isEmpty()) return
     val drawVectors = vectorWhenUpscaled && cached?.isUpscaledTo(spec.surfaceSize) == true
@@ -309,18 +328,18 @@ internal fun DrawScope.drawCompletedPenInk(
     }
 
     cached?.let { completed ->
-        drawImage(
-            image = completed.bitmap,
-            srcOffset = IntOffset.Zero,
-            srcSize = IntSize(completed.bitmap.width, completed.bitmap.height),
-            dstOffset = IntOffset.Zero,
+        drawCompletedInkBitmap(
+            nativeImageDrawCache = nativeImageDrawCache,
+            bitmap = completed.bitmap,
             dstSize = spec.surfaceSize,
+            blendMode = BlendMode.SrcOver,
         )
     }
 
     val cachedCount = cached?.strokeCount ?: 0
     val tailStart = completedInkTailStart(paths.size, cached?.strokeCount)
     if (paths.size <= cachedCount && cached != null) return
+    if (!shouldDrawCompletedInkTail(paths, tailStart) { it.toolType != ToolKind.MARKER }) return
     withInkTransform(spec) {
         for (i in tailStart until paths.size) {
             val path = paths[i]
@@ -328,6 +347,35 @@ internal fun DrawScope.drawCompletedPenInk(
                 drawStrokeWithPressure(path, spec.pdfWidthPx, spec.pdfHeightPx, spec.extent, scratch)
             }
         }
+    }
+}
+
+private fun DrawScope.drawCompletedInkBitmap(
+    nativeImageDrawCache: NativeImageDrawCache?,
+    bitmap: ImageBitmap,
+    dstSize: IntSize,
+    blendMode: BlendMode,
+) {
+    if (nativeImageDrawCache != null) {
+        drawNativeCachedImage(
+            cache = nativeImageDrawCache,
+            image = bitmap,
+            srcOffset = IntOffset.Zero,
+            srcSize = IntSize(bitmap.width, bitmap.height),
+            dstOffset = IntOffset.Zero,
+            dstSize = dstSize,
+            blendMode = blendMode,
+            filterQuality = FilterQuality.Medium,
+        )
+    } else {
+        drawImage(
+            image = bitmap,
+            srcOffset = IntOffset.Zero,
+            srcSize = IntSize(bitmap.width, bitmap.height),
+            dstOffset = IntOffset.Zero,
+            dstSize = dstSize,
+            blendMode = blendMode,
+        )
     }
 }
 

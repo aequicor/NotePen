@@ -3,7 +3,10 @@ package ru.kyamshanov.notepen
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.IntSize
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
+import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -57,6 +60,48 @@ class InkRenderingTest {
         assertEquals(40, completedInkTailStart(pathCount = 60, cachedStrokeCount = 40))
         assertEquals(60, completedInkTailStart(pathCount = 60, cachedStrokeCount = 99))
     }
+
+    @Test
+    fun `heavy completed ink tail is deferred to bitmap cache`() {
+        val paths = List(MAX_VECTOR_INK_TAIL_PATHS + 1) { testPath(toolKind = ToolKind.PEN) }
+
+        assertEquals(
+            false,
+            shouldDrawCompletedInkTail(paths, tailStart = 0) { it.toolType != ToolKind.MARKER },
+        )
+    }
+
+    @Test
+    fun `small completed ink tail is drawn as vector anti flicker tail`() {
+        val paths = List(3) { testPath(toolKind = ToolKind.PEN) }
+
+        assertEquals(
+            true,
+            shouldDrawCompletedInkTail(paths, tailStart = 0) { it.toolType != ToolKind.MARKER },
+        )
+    }
+
+    @Test
+    fun `completed ink tail limit ignores unrelated tools`() {
+        val paths = List(MAX_VECTOR_INK_TAIL_PATHS + 1) { testPath(toolKind = ToolKind.MARKER) }
+
+        assertEquals(
+            true,
+            shouldDrawCompletedInkTail(paths, tailStart = 0) { it.toolType != ToolKind.MARKER },
+        )
+    }
+
+    private fun testPath(toolKind: ToolKind): DrawingPath =
+        DrawingPath(
+            points =
+                listOf(
+                    DrawingPoint(x = 0f, y = 0f),
+                    DrawingPoint(x = 1f, y = 1f),
+                ),
+            colorArgb = 0xff000000,
+            strokeWidth = 0.01f,
+            toolType = toolKind,
+        )
 
     private fun assertNear(
         expected: Float,

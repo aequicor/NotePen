@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.key
@@ -41,7 +42,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -69,6 +72,7 @@ import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.COMPLETED_INK_REBUILD_IDLE_DELAY_MS
 import ru.kyamshanov.notepen.CompletedInk
 import ru.kyamshanov.notepen.InkRenderSpec
+import ru.kyamshanov.notepen.NativeImageDrawCache
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.EraserShape
@@ -76,11 +80,13 @@ import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.buildCompletedInk
+import ru.kyamshanov.notepen.buildCompletedMarkerInk
 import ru.kyamshanov.notepen.completedInkCacheKey
 import ru.kyamshanov.notepen.detectStylusAwareDrag
-import ru.kyamshanov.notepen.drawCompletedMarkers
+import ru.kyamshanov.notepen.drawCompletedMarkerInk
 import ru.kyamshanov.notepen.drawCompletedPenInk
 import ru.kyamshanov.notepen.drawLiveStroke
+import ru.kyamshanov.notepen.drawNativeCachedImage
 import ru.kyamshanov.notepen.drawing.api.EraseGesture
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
@@ -367,12 +373,22 @@ private fun MagnifierContent(
         val drawSpec = magnifierSegmentInkSpec(contentSize.value, segment, drawingState.extent.value) ?: continue
         key(segment.pageIndex, segment.panelTopFrac, segment.panelBottomFrac, segment.targetOnPage) {
             val completedInk =
-                rememberMagnifierCompletedInk(
+                rememberMagnifierCompletedInkCache(
                     drawingState = drawingState,
                     cacheSpec = drawSpec,
                     density = density,
                     layoutDirection = layoutDirection,
                     rasterDispatcher = rasterDispatcher,
+                    builder = ::buildCompletedInk,
+                )
+            val completedMarkerInk =
+                rememberMagnifierCompletedInkCache(
+                    drawingState = drawingState,
+                    cacheSpec = drawSpec,
+                    density = density,
+                    layoutDirection = layoutDirection,
+                    rasterDispatcher = rasterDispatcher,
+                    builder = ::buildCompletedMarkerInk,
                 )
             renderSegments +=
                 MagnifierRenderSegment(
@@ -380,6 +396,7 @@ private fun MagnifierContent(
                     drawingState = drawingState,
                     drawSpec = drawSpec,
                     completedInk = completedInk,
+                    completedMarkerInk = completedMarkerInk,
                 )
         }
     }
@@ -470,15 +487,17 @@ private data class MagnifierRenderSegment(
     val drawingState: PdfDrawingState,
     val drawSpec: InkRenderSpec,
     val completedInk: State<CompletedInk?>,
+    val completedMarkerInk: State<CompletedInk?>,
 )
 
 @Composable
-private fun rememberMagnifierCompletedInk(
+private fun rememberMagnifierCompletedInkCache(
     drawingState: PdfDrawingState,
     cacheSpec: InkRenderSpec,
     density: Density,
     layoutDirection: LayoutDirection,
     rasterDispatcher: CoroutineDispatcher,
+    builder: suspend (InkRenderSpec, List<DrawingPath>, Density, LayoutDirection) -> ImageBitmap,
 ): State<CompletedInk?> {
     val completedInk = remember { mutableStateOf<CompletedInk?>(null) }
     val previousSpec = remember { mutableStateOf<InkRenderSpec?>(null) }
@@ -504,7 +523,7 @@ private fun rememberMagnifierCompletedInk(
         }
         val bitmap =
             withContext(rasterDispatcher) {
-                buildCompletedInk(cacheSpec, paths, density, layoutDirection)
+                builder(cacheSpec, paths, density, layoutDirection)
             }
         completedInk.value = CompletedInk(paths.size, bitmap)
     }
@@ -539,6 +558,10 @@ private fun MagnifierBaseLayer(
     modifier: Modifier = Modifier,
 ) {
     val scratch = remember { Path() }
+    val nativeImageDrawCache = remember { NativeImageDrawCache() }
+    DisposableEffect(nativeImageDrawCache) {
+        onDispose { nativeImageDrawCache.close() }
+    }
     Canvas(modifier = modifier) {
         val panelW = size.width
         val panelH = size.height
@@ -549,6 +572,7 @@ private fun MagnifierBaseLayer(
             val segmentH = (segmentBottom - segmentTop).coerceAtLeast(0f)
             if (segmentH <= 0f) return@forEach
             drawMagnifierPdfSegment(
+                nativeImageDrawCache = nativeImageDrawCache,
                 bitmap = state.pageBitmap(segment.pageIndex),
                 segment = segment,
                 segmentTop = segmentTop,
@@ -559,13 +583,20 @@ private fun MagnifierBaseLayer(
             if (paths.isNotEmpty()) {
                 clipRect(left = 0f, top = segmentTop, right = panelW, bottom = segmentBottom) {
                     translate(top = segmentTop) {
-                        drawCompletedMarkers(paths, renderSegment.drawSpec, scratch)
+                        drawCompletedMarkerInk(
+                            paths = paths,
+                            cached = renderSegment.completedMarkerInk.value,
+                            spec = renderSegment.drawSpec,
+                            scratch = scratch,
+                            nativeImageDrawCache = nativeImageDrawCache,
+                        )
                         drawCompletedPenInk(
                             paths = paths,
                             cached = renderSegment.completedInk.value,
                             spec = renderSegment.drawSpec,
                             scratch = scratch,
                             vectorWhenUpscaled = false,
+                            nativeImageDrawCache = nativeImageDrawCache,
                         )
                     }
                 }
@@ -633,6 +664,7 @@ private fun MagnifierLiveLayer(
 }
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagnifierPdfSegment(
+    nativeImageDrawCache: NativeImageDrawCache,
     bitmap: ImageBitmap?,
     segment: MagnifierPageSegment,
     segmentTop: Float,
@@ -647,12 +679,15 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawMagnifierPdfSeg
     val srcOffsetY = (target.top * bitmap.height).toInt().coerceAtLeast(0)
     val srcW = (tw * bitmap.width).toInt().coerceAtLeast(1).coerceAtMost(bitmap.width - srcOffsetX)
     val srcH = (th * bitmap.height).toInt().coerceAtLeast(1).coerceAtMost(bitmap.height - srcOffsetY)
-    drawImage(
+    drawNativeCachedImage(
+        cache = nativeImageDrawCache,
         image = bitmap,
         srcOffset = IntOffset(srcOffsetX, srcOffsetY),
         srcSize = IntSize(srcW, srcH),
         dstOffset = IntOffset(0, segmentTop.toInt()),
         dstSize = IntSize(panelWidth.toInt(), segmentHeight.toInt().coerceAtLeast(1)),
+        blendMode = BlendMode.SrcOver,
+        filterQuality = FilterQuality.Medium,
     )
 }
 

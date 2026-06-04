@@ -361,7 +361,10 @@ class FolderContentsViewModel(
                             updateThumbnail(file.id, ThumbnailState.Ready(data))
                         },
                         onFailure = { cause ->
-                            logger.warn(cause) { "Thumbnail generation failed for ${file.id}" }
+                            logger.warn {
+                                "Thumbnail generation failed for ${file.id}: " +
+                                    (cause.cause?.message ?: cause.message ?: cause::class.simpleName)
+                            }
                             updateThumbnail(file.id, ThumbnailState.Error)
                         },
                     )

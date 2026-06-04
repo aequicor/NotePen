@@ -60,9 +60,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.PageSource
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
@@ -109,6 +112,7 @@ fun PageThumbnailsSidebar(
      * (см. [SpreadSplit]); по умолчанию целая страница 1:1.
      */
     pageSource: (Int) -> PageSource = { PageSource(it) },
+    bitmapConversionDispatcher: CoroutineDispatcher = Dispatchers.Default,
     modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
@@ -280,6 +284,7 @@ fun PageThumbnailsSidebar(
                             onBitmapRendered = { bm -> bitmapCache[page.pageIndex] = bm },
                             pdfIdle = pdfIdle,
                             renderMutex = thumbRenderMutex,
+                            bitmapConversionDispatcher = bitmapConversionDispatcher,
                             onClick = { onPageClick(page.pageIndex) },
                             onToggleFavorite = { onToggleFavorite(page.pageIndex) },
                         )
@@ -417,6 +422,7 @@ private fun ThumbnailItem(
     onBitmapRendered: (ImageBitmap) -> Unit,
     pdfIdle: State<Boolean>,
     renderMutex: kotlinx.coroutines.sync.Mutex,
+    bitmapConversionDispatcher: CoroutineDispatcher,
     onClick: () -> Unit,
     onToggleFavorite: () -> Unit,
 ) {
@@ -441,16 +447,18 @@ private fun ThumbnailItem(
                         if (!pdfIdle.value) {
                             null
                         } else {
-                            renderer.renderPage(
-                                document = doc,
-                                pageIndex = source.sourceIndex,
-                                widthPx = thumbWidthPx,
-                                heightPx = thumbHeightPx,
-                                cropLeftN = source.crop.leftN,
-                                cropTopN = source.crop.topN,
-                                cropRightN = source.crop.rightN,
-                                cropBottomN = source.crop.bottomN,
-                            ).toImageBitmap()
+                            withContext(bitmapConversionDispatcher) {
+                                renderer.renderPage(
+                                    document = doc,
+                                    pageIndex = source.sourceIndex,
+                                    widthPx = thumbWidthPx,
+                                    heightPx = thumbHeightPx,
+                                    cropLeftN = source.crop.leftN,
+                                    cropTopN = source.crop.topN,
+                                    cropRightN = source.crop.rightN,
+                                    cropBottomN = source.crop.bottomN,
+                                ).toImageBitmap()
+                            }
                         }
                     } finally {
                         renderMutex.unlock()

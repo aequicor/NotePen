@@ -347,6 +347,18 @@ actual class PdfViewerState internal constructor(
             )
     }
 
+    internal fun transientPanBy(delta: Offset) {
+        val current = pan + gestureTranslation
+        val candidate = current + delta
+        val c = clamped(candidate)
+        val next =
+            Offset(
+                x = if (delta.x == 0f) current.x else c.x,
+                y = if (delta.y == 0f) current.y else c.y,
+            )
+        gestureTranslation = next - pan
+    }
+
     // ===== Overscroll =====
     // [pan] всегда жёстко кламплен; «перелёт» за край показывается отдельным
     // визуальным смещением контента [overscrollOffset] (GPU-трансляция во
@@ -395,6 +407,11 @@ actual class PdfViewerState internal constructor(
         overscrollHeld = true
     }
 
+    internal fun beginTransientPanGesture() {
+        dragRawPan = pan + gestureTranslation
+        overscrollHeld = true
+    }
+
     /**
      * Drag-сдвиг: [pan] жёстко кламплен, а «перелёт» пальца за окно clamp'а
      * демпфируется [softDampOverscroll] и пишется в [overscrollOffset] — контент
@@ -417,6 +434,27 @@ actual class PdfViewerState internal constructor(
                 x = if (delta.x == 0f) pan.x else c.x,
                 y = if (delta.y == 0f) pan.y else c.y,
             )
+        overscrollOffset =
+            Offset(
+                x = if (delta.x == 0f) overscrollOffset.x else softDampOverscroll(dragRawPan.x - c.x),
+                y = if (delta.y == 0f) overscrollOffset.y else softDampOverscroll(dragRawPan.y - c.y),
+            )
+    }
+
+    internal fun transientPanGestureBy(delta: Offset) {
+        dragRawPan =
+            Offset(
+                x = if (delta.x == 0f) dragRawPan.x else dragRawPan.x + delta.x,
+                y = if (delta.y == 0f) dragRawPan.y else dragRawPan.y + delta.y,
+            )
+        val c = clampedFree(dragRawPan)
+        val current = pan + gestureTranslation
+        val next =
+            Offset(
+                x = if (delta.x == 0f) current.x else c.x,
+                y = if (delta.y == 0f) current.y else c.y,
+            )
+        gestureTranslation = next - pan
         overscrollOffset =
             Offset(
                 x = if (delta.x == 0f) overscrollOffset.x else softDampOverscroll(dragRawPan.x - c.x),
@@ -450,6 +488,24 @@ actual class PdfViewerState internal constructor(
                 x = if (delta.x == 0f) pan.x else c.x,
                 y = if (delta.y == 0f) pan.y else c.y,
             )
+        val unX = if (delta.x == 0f) 0f else candidate.x - c.x
+        val unY = if (delta.y == 0f) 0f else candidate.y - c.y
+        if (unX != 0f || unY != 0f) {
+            pendingWheelOverscroll += Offset(unX, unY)
+        }
+    }
+
+    internal fun transientWheelScrollBy(delta: Offset) {
+        overscrollHeld = false
+        val current = pan + gestureTranslation
+        val candidate = current + delta
+        val c = clamped(candidate)
+        val next =
+            Offset(
+                x = if (delta.x == 0f) current.x else c.x,
+                y = if (delta.y == 0f) current.y else c.y,
+            )
+        gestureTranslation = next - pan
         val unX = if (delta.x == 0f) 0f else candidate.x - c.x
         val unY = if (delta.y == 0f) 0f else candidate.y - c.y
         if (unX != 0f || unY != 0f) {

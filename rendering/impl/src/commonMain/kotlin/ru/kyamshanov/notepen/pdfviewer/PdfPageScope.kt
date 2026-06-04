@@ -15,6 +15,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
  *   рендера); может быть отрисован при другом масштабе — он будет
  *   растянут в `Modifier.size(pdfWidth, pdfHeight)` пока
  *   фоновый рендер на текущий масштаб не завершится
+ * @property pdfLayer слой PDF-фона: либо full-page bitmap, либо набор тайлов
+ *   поверх low-res preview при высоком зуме
  * @property visualWidth ширина **слота** страницы (Dp) — включает
  *   расширенную рисуемую область за пределами PDF
  * @property visualHeight высота **слота** страницы (Dp)
@@ -27,6 +29,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 interface PdfPageScope {
     val pageIndex: Int
     val bitmap: ImageBitmap?
+    val pdfLayer: PdfPageLayer?
     val visualWidth: Dp
     val visualHeight: Dp
     val pdfWidth: Dp

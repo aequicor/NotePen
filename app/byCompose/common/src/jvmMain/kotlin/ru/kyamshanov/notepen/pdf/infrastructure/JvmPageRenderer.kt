@@ -42,4 +42,37 @@ class JvmPageRenderer(
         val renderer = if (document is ImageBackedDocument) imageRenderer else pdfRenderer
         return renderer.documentTextLineHeight(document)
     }
+
+    override suspend fun renderTile(
+        document: PdfDocument,
+        pageIndex: Int,
+        fullPageWidthPx: Int,
+        fullPageHeightPx: Int,
+        tileLeftPx: Int,
+        tileTopPx: Int,
+        tileWidthPx: Int,
+        tileHeightPx: Int,
+        rotationQuarters: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
+    ): PdfPageData {
+        val renderer = if (document is ImageBackedDocument) imageRenderer else pdfRenderer
+        return renderer.renderTile(
+            document = document,
+            pageIndex = pageIndex,
+            fullPageWidthPx = fullPageWidthPx,
+            fullPageHeightPx = fullPageHeightPx,
+            tileLeftPx = tileLeftPx,
+            tileTopPx = tileTopPx,
+            tileWidthPx = tileWidthPx,
+            tileHeightPx = tileHeightPx,
+            rotationQuarters = rotationQuarters,
+            cropLeftN = cropLeftN,
+            cropTopN = cropTopN,
+            cropRightN = cropRightN,
+            cropBottomN = cropBottomN,
+        )
+    }
 }

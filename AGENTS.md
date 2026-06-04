@@ -75,6 +75,22 @@ This crosses several modules and is the thing to understand first:
 - **Each module has its own `detekt-baseline.xml`** capturing pre-existing findings. When detekt flags legacy code unrelated to your change, regenerate the module's baseline (`./gradlew :<module>:detektBaseline`) rather than refactoring around it. Don't silence findings with `@Suppress`; fix the cause or adjust the rule in `detekt.yml` with justification.
 - Screenshot tests use **Roborazzi + Compose Desktop UI test** in `:reflow:impl` (`jvmTest`). Record golden images with `-Proborazzi.test.record=true`; otherwise the test verifies against committed images.
 
+## Knowledge docs (КД)
+
+Project principle: **code is the documentation**. A КД is only a short navigation note for future agents, not a duplicate spec or code retelling.
+
+Codex must create or update a КД automatically when a task introduces or materially changes a non-obvious architectural decision, rendering/sync/storage pipeline, cross-platform actual pair, cache/invalidation rule, or workaround that future maintainers must preserve. Prefer Russian.
+
+КД lives under `vault/kd/<module>/<slug>.md` and should be concise:
+
+- problem/context in 2-4 sentences;
+- where the real source of truth lives, with file paths and key symbols;
+- invariants and sharp edges that are not obvious from a local diff;
+- verification commands that proved the behavior;
+- links to related tests or follow-up debt.
+
+Do not create КД for trivial UI copy, one-line fixes, formatting, dependency bumps with no code impact, or behavior that is already obvious from names and tests. If an existing КД covers the area, update it instead of creating a parallel note.
+
 ## Packaging & release
 
 - **Desktop:** `createReleaseDistributable` builds the app-image (ProGuard + obfuscation on). macOS/Linux installers via jpackage (`TargetFormat.Dmg`/`Deb`). **Windows is packaged by Inno Setup** ([installer/windows/notepen.iss](installer/windows)), not jpackage — extend Windows file associations there. A portable no-install Windows ZIP is produced by the `packageReleasePortableZip` task.

@@ -154,6 +154,9 @@ private const val RENDER_DEBOUNCE_MS = 300L
  */
 private const val MAX_CACHE_ENTRIES = 10
 private const val MAX_RENDER_DIM_PX = 4000
+private const val TILE_SIZE_PX = 768
+private const val TILE_MODE_MIN_SCALE_PERCENT = 300
+private const val MAX_TILE_CACHE_PIXELS = 96_000_000L
 
 /**
  * Нижний порог отношения «пиксели растра / пиксели на экране» (суперсэмплинг).
@@ -175,6 +178,7 @@ private const val ZOOM_BURST_RESET_PX = 8f
  * [RENDER_DEBOUNCE_MS], иначе high-res рендер не дождётся настоящего `zoom`.
  */
 private const val GESTURE_COMMIT_IDLE_MS = 100L
+private const val PAN_COMMIT_IDLE_MS = 180L
 
 /**
  * Off-screen битмап с масштабом > 2× или < 0.5× от текущего считается
@@ -217,6 +221,17 @@ private class PendingZoom {
         factor = 1f
         return f to p
     }
+}
+
+private class PendingPanCommit {
+    @Volatile private var version: Int = 0
+
+    @Synchronized
+    fun mark() {
+        version += 1
+    }
+
+    fun version(): Int = version
 }
 
 /**
@@ -326,8 +341,10 @@ actual fun PdfPagesViewer(
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
+    val tileCache = remember(pdfDocument) { PdfTileCache(maxTotalPixels = MAX_TILE_CACHE_PIXELS) }
     val density = LocalDensity.current
     val pendingZoom = remember { PendingZoom() }
+    val pendingPanCommit = remember { PendingPanCommit() }
     val renderDispatcher = Dispatchers.Default
     // M3 edge-effect: тонируем краевую overscroll-тень цветом схемы — в стиле
     // приложения, адаптивно к светлой/тёмной теме.
@@ -377,6 +394,9 @@ actual fun PdfPagesViewer(
     LaunchedEffect(state) {
         var lastZoomMillis = 0L
         var hasPendingCommit = false
+        var observedPanVersion = 0
+        var lastPanMillis = 0L
+        var hasPendingPanCommit = false
         var lastFrameMillis = 0L
         while (true) {
             val now = withFrameMillis { it }
@@ -391,6 +411,21 @@ actual fun PdfPagesViewer(
             } else if (hasPendingCommit && now - lastZoomMillis >= GESTURE_COMMIT_IDLE_MS) {
                 state.commitPinchGesture()
                 hasPendingCommit = false
+            }
+            val panVersion = pendingPanCommit.version()
+            if (panVersion != observedPanVersion) {
+                observedPanVersion = panVersion
+                lastPanMillis = now
+                if (!hasPendingPanCommit) {
+                    hasPendingPanCommit = true
+                }
+            }
+            if (
+                hasPendingPanCommit &&
+                now - lastPanMillis >= PAN_COMMIT_IDLE_MS
+            ) {
+                state.commitPinchGesture()
+                hasPendingPanCommit = false
             }
             // Свёртка накопленного за кадр wheel-overscroll + пружинное затухание.
             // Раз в кадр — чтобы поток wheel-событий не дёргал overscroll.
@@ -435,6 +470,8 @@ actual fun PdfPagesViewer(
                             visible = range,
                         ),
                     scalePercent = state.renderScalePercent,
+                    zoom = state.zoom,
+                    pan = state.pan,
                     basePageWidthPx = state.basePageWidthPx,
                     viewportSize = state.viewportSize,
                     // Хэш поворотов видимых страниц: его смена дёргает ре-рендер.
@@ -551,6 +588,21 @@ actual fun PdfPagesViewer(
                         widthCapped to heightFromWidth
                     }
                 val cropSig = cropSignatureOf(src)
+                val tileMode =
+                    shouldUsePdfTiles(
+                        scalePercent = snap.scalePercent,
+                        targetWidthPx = targetWidthPx,
+                        targetHeightPx = targetHeightPx,
+                        maxRenderDimensionPx = MAX_RENDER_DIM_PX,
+                        minTileScalePercent = TILE_MODE_MIN_SCALE_PERCENT,
+                    )
+
+                fun canPublishForSnapshot(): Boolean =
+                    !state.isVisualTransformActive &&
+                        state.viewportSize == snap.viewportSize &&
+                        state.basePageWidthPx == snap.basePageWidthPx &&
+                        state.renderScalePercent == snap.scalePercent
+
                 var cached = cache.get(i)
                 if (cached == null && i in snap.visFirst..snap.visLast) {
                     val previewSupersample = maxOf(0.5f, density.density * FIRST_PAINT_SUPERSAMPLE)
@@ -584,9 +636,7 @@ actual fun PdfPagesViewer(
                                 ).toImageBitmap()
                             }
                         if (
-                            state.viewportSize == snap.viewportSize &&
-                            state.basePageWidthPx == snap.basePageWidthPx &&
-                            state.renderScalePercent == snap.scalePercent &&
+                            canPublishForSnapshot() &&
                             cache.get(i) == null
                         ) {
                             val previewScalePercent =
@@ -608,6 +658,72 @@ actual fun PdfPagesViewer(
                     }
                 }
                 if (!fullQuality) return
+                if (tileMode) {
+                    val scaleBucket = pdfTileScaleBucket(snap.scalePercent)
+                    val requests =
+                        visiblePdfTileRequests(
+                            layout = state.layout,
+                            pageIndex = i,
+                            source = src,
+                            pan = snap.pan,
+                            zoom = snap.zoom,
+                            viewportSize = snap.viewportSize,
+                            scaleBucket = scaleBucket,
+                            rotationQuarters = rotation,
+                            cropSignature = cropSig,
+                            tileSizePx = TILE_SIZE_PX,
+                        )
+                    val protectedKeys = requests.map { it.key }.toSet()
+                    val renderedTiles = ArrayList<PdfTile>(requests.size)
+
+                    fun publishRenderedTiles() {
+                        if (!canPublishForSnapshot() || renderedTiles.isEmpty()) return
+                        tileCache.putAll(renderedTiles.toList(), protectedKeys = protectedKeys)
+                        renderedTiles.clear()
+                    }
+
+                    for (request in requests) {
+                        if (tileCache.get(request.key) != null) continue
+                        val tileBitmap =
+                            withContext(renderDispatcher) {
+                                renderer.renderTile(
+                                    document = doc,
+                                    pageIndex = src.sourceIndex,
+                                    fullPageWidthPx = request.fullPageWidthPx,
+                                    fullPageHeightPx = request.fullPageHeightPx,
+                                    tileLeftPx = request.tileLeftPx,
+                                    tileTopPx = request.tileTopPx,
+                                    tileWidthPx = request.tileWidthPx,
+                                    tileHeightPx = request.tileHeightPx,
+                                    rotationQuarters = rotation,
+                                    cropLeftN = src.cropLeftN,
+                                    cropTopN = src.cropTopN,
+                                    cropRightN = src.cropRightN,
+                                    cropBottomN = src.cropBottomN,
+                                ).toImageBitmap()
+                            }
+                        if (canPublishForSnapshot()) {
+                            renderedTiles +=
+                                PdfTile(
+                                    bitmap = tileBitmap,
+                                    key = request.key,
+                                    tileLeftPx = request.tileLeftPx,
+                                    tileTopPx = request.tileTopPx,
+                                    tileWidthPx = request.tileWidthPx,
+                                    tileHeightPx = request.tileHeightPx,
+                                    fullPageWidthPx = request.fullPageWidthPx,
+                                    fullPageHeightPx = request.fullPageHeightPx,
+                                    renderedScalePercent = scaleBucket,
+                                )
+                        }
+                        if (switchToLatestIfChanged()) {
+                            publishRenderedTiles()
+                            return
+                        }
+                    }
+                    publishRenderedTiles()
+                    return
+                }
                 if (
                     cached != null &&
                     cache.isFresh(
@@ -637,9 +753,7 @@ actual fun PdfPagesViewer(
                         ).toImageBitmap()
                     }
                 if (
-                    state.viewportSize == snap.viewportSize &&
-                    state.basePageWidthPx == snap.basePageWidthPx &&
-                    state.renderScalePercent == snap.scalePercent
+                    canPublishForSnapshot()
                 ) {
                     cache.put(
                         i,
@@ -735,7 +849,7 @@ actual fun PdfPagesViewer(
                     .fillMaxSize()
                     .clipToBounds()
                     .overscrollGlow(overscrollColor) { state.overscrollOffset }
-                    .pdfDesktopPointerInput(state, pendingZoom, primaryDragPanEnabled)
+                    .pdfDesktopPointerInput(state, pendingZoom, pendingPanCommit, primaryDragPanEnabled)
                     .then(gestureModifier),
         ) {
             SubcomposeLayout(
@@ -822,10 +936,51 @@ actual fun PdfPagesViewer(
                     val pagePlaceables =
                         subcompose(i) {
                             val cached = cache.entries[i]?.bitmap
+                            val rotation = userRotationQuarters(i)
+                            val src = currentPageSource(i)
+                            val cropSig = cropSignatureOf(src)
+                            val scaleBucket = pdfTileScaleBucket(state.renderScalePercent)
+                            val tileLayerActive =
+                                shouldUsePdfTiles(
+                                    scalePercent = state.renderScalePercent,
+                                    targetWidthPx = (layout.basePageWidthPx * lz).roundToInt(),
+                                    targetHeightPx = (pdfH * lz).roundToInt(),
+                                    maxRenderDimensionPx = MAX_RENDER_DIM_PX,
+                                    minTileScalePercent = TILE_MODE_MIN_SCALE_PERCENT,
+                                )
+                            val layer =
+                                if (tileLayerActive) {
+                                    val requests =
+                                        visiblePdfTileRequests(
+                                            layout = layout,
+                                            pageIndex = i,
+                                            source = src,
+                                            pan = pan,
+                                            zoom = zoom,
+                                            viewportSize =
+                                                IntSize(
+                                                    constraints.maxWidth,
+                                                    constraints.maxHeight,
+                                                ),
+                                            scaleBucket = scaleBucket,
+                                            rotationQuarters = rotation,
+                                            cropSignature = cropSig,
+                                            tileSizePx = TILE_SIZE_PX,
+                                            preloadTileRing = 0,
+                                        )
+                                    PdfPageLayer.Tiles(
+                                        tiles = tileCache.tilesForRequests(requests),
+                                        missingTiles = tileCache.missingTilesForRequests(requests),
+                                        lowResPreview = cached,
+                                    )
+                                } else {
+                                    PdfPageLayer.FullBitmap(cached)
+                                }
                             val scope =
                                 ImmutablePdfPageScope(
                                     pageIndex = i,
                                     bitmap = cached,
+                                    pdfLayer = layer,
                                     visualWidth = visualWidthDp,
                                     visualHeight = visualHeightDp,
                                     pdfWidth = pdfWidthDp,
@@ -891,6 +1046,8 @@ private data class VisibleSnapshot(
     val visLast: Int = last,
     val primaryVisible: Int = visFirst,
     val scalePercent: Int,
+    val zoom: Float,
+    val pan: Offset,
     val basePageWidthPx: Float,
     val viewportSize: IntSize,
     val rotationSignature: Int = 0,
@@ -900,6 +1057,7 @@ private data class VisibleSnapshot(
 private data class ImmutablePdfPageScope(
     override val pageIndex: Int,
     override val bitmap: androidx.compose.ui.graphics.ImageBitmap?,
+    override val pdfLayer: PdfPageLayer?,
     override val visualWidth: androidx.compose.ui.unit.Dp,
     override val visualHeight: androidx.compose.ui.unit.Dp,
     override val pdfWidth: androidx.compose.ui.unit.Dp,
@@ -1023,6 +1181,7 @@ private fun Modifier.overscrollGlow(
 private fun Modifier.pdfDesktopPointerInput(
     state: PdfViewerState,
     pendingZoom: PendingZoom,
+    pendingPanCommit: PendingPanCommit,
     primaryDragPanEnabled: (position: Offset) -> Boolean,
 ): Modifier =
     this.pointerInput(state) {
@@ -1057,8 +1216,13 @@ private fun Modifier.pdfDesktopPointerInput(
                             // pan-дельта в viewport-пикселях, и если оставить
                             // gestureScale != 1, 1px движения мыши даст scale*1
                             // пикселей визуально — рассинхрон с курсором.
-                            state.commitPinchGesture()
-                            state.panGestureBy(change.position - middleOrigin)
+                            if (state.gestureScale != 1f) state.commitPinchGesture()
+                            if (state.renderScalePercent >= TILE_MODE_MIN_SCALE_PERCENT) {
+                                state.transientPanGestureBy(change.position - middleOrigin)
+                                pendingPanCommit.mark()
+                            } else {
+                                state.panGestureBy(change.position - middleOrigin)
+                            }
                             middleDragOrigin = change.position
                             change.consume()
                         }
@@ -1067,8 +1231,13 @@ private fun Modifier.pdfDesktopPointerInput(
                         // (по позиции нажатия) — здесь лишь продолжаем начатый pan.
                         // `primOrigin != null` гарантирует, что на Press pan был разрешён.
                         if (primOrigin != null && event.buttons.isPrimaryPressed && change != null) {
-                            state.commitPinchGesture()
-                            state.panGestureBy(change.position - primOrigin)
+                            if (state.gestureScale != 1f) state.commitPinchGesture()
+                            if (state.renderScalePercent >= TILE_MODE_MIN_SCALE_PERCENT) {
+                                state.transientPanGestureBy(change.position - primOrigin)
+                                pendingPanCommit.mark()
+                            } else {
+                                state.panGestureBy(change.position - primOrigin)
+                            }
                             primaryDragOrigin = change.position
                             change.consume()
                         }
@@ -1089,12 +1258,20 @@ private fun Modifier.pdfDesktopPointerInput(
                                 change.consume()
                             } else if (event.buttons.isTertiaryPressed) {
                                 state.commitPinchGesture()
-                                state.beginPanGesture()
+                                if (state.renderScalePercent >= TILE_MODE_MIN_SCALE_PERCENT) {
+                                    state.beginTransientPanGesture()
+                                } else {
+                                    state.beginPanGesture()
+                                }
                                 middleDragOrigin = change.position
                                 change.consume()
                             } else if (event.buttons.isPrimaryPressed && primaryPanHere) {
                                 state.commitPinchGesture()
-                                state.beginPanGesture()
+                                if (state.renderScalePercent >= TILE_MODE_MIN_SCALE_PERCENT) {
+                                    state.beginTransientPanGesture()
+                                } else {
+                                    state.beginPanGesture()
+                                }
                                 primaryDragOrigin = change.position
                                 change.consume()
                             }
@@ -1106,7 +1283,10 @@ private fun Modifier.pdfDesktopPointerInput(
                         if (!event.buttons.isPrimaryPressed) primaryDragOrigin = null
                         val stillDragging = middleDragOrigin != null || primaryDragOrigin != null
                         // Drag завершён — overscroll-смещение пружинит к нулю (per-frame).
-                        if (wasDragging && !stillDragging) state.endPanGesture()
+                        if (wasDragging && !stillDragging) {
+                            state.commitPinchGesture()
+                            state.endPanGesture()
+                        }
                     }
                     PointerEventType.Scroll -> {
                         if (change == null) continue
@@ -1140,7 +1320,7 @@ private fun Modifier.pdfDesktopPointerInput(
                                 pendingZoom.accumulate(factor, focus)
                             }
                             shift -> {
-                                state.commitPinchGesture()
+                                if (state.gestureScale != 1f) state.commitPinchGesture()
                                 // On macOS with JBR, trackpad horizontal swipe arrives as
                                 // shift=true + delta.x, dy=0 (synthetic shift — not a keyboard key).
                                 // Update EMA for both axes (dy=0 here → vScrollEma decays).
@@ -1176,10 +1356,16 @@ private fun Modifier.pdfDesktopPointerInput(
                                     } else {
                                         -delta.y * WHEEL_SCROLL_PX_PER_TICK
                                     }
-                                state.wheelScrollBy(Offset(hPx, vPx))
+                                val scroll = Offset(hPx, vPx)
+                                if (state.renderScalePercent >= TILE_MODE_MIN_SCALE_PERCENT) {
+                                    state.transientWheelScrollBy(scroll)
+                                    pendingPanCommit.mark()
+                                } else {
+                                    state.wheelScrollBy(scroll)
+                                }
                             }
                             else -> {
-                                state.commitPinchGesture()
+                                if (state.gestureScale != 1f) state.commitPinchGesture()
                                 // dx=0 here in JBR vertical events → hScrollEma decays.
                                 vScrollEma = vScrollEma * (1f - SCROLL_EMA_ALPHA) +
                                     kotlin.math.abs(delta.y) * SCROLL_EMA_ALPHA
@@ -1191,7 +1377,13 @@ private fun Modifier.pdfDesktopPointerInput(
                                     } else {
                                         -delta.y * WHEEL_SCROLL_PX_PER_TICK
                                     }
-                                state.wheelScrollBy(Offset(0f, vPx))
+                                val scroll = Offset(0f, vPx)
+                                if (state.renderScalePercent >= TILE_MODE_MIN_SCALE_PERCENT) {
+                                    state.transientWheelScrollBy(scroll)
+                                    pendingPanCommit.mark()
+                                } else {
+                                    state.wheelScrollBy(scroll)
+                                }
                             }
                         }
                         change.consume()

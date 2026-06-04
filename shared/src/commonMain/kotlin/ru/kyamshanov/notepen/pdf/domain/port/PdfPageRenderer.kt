@@ -50,6 +50,59 @@ interface PdfPageRenderer {
     ): PdfPageData
 
     /**
+     * Растеризует прямоугольный тайл страницы в пиксельном пространстве уже
+     * обрезанной и повернутой логической страницы. [fullPageWidthPx] /
+     * [fullPageHeightPx] задают размер этой логической страницы в том же
+     * масштабе, что и [tileLeftPx]..[tileHeightPx].
+     *
+     * Реализации могут переопределить метод и рендерить только нужный участок
+     * исходного PDF. Дефолт сохраняет совместимость: рендерит страницу целиком
+     * через [renderPage] и вырезает тайл из результата.
+     */
+    suspend fun renderTile(
+        document: PdfDocument,
+        pageIndex: Int,
+        fullPageWidthPx: Int,
+        fullPageHeightPx: Int,
+        tileLeftPx: Int,
+        tileTopPx: Int,
+        tileWidthPx: Int,
+        tileHeightPx: Int,
+        rotationQuarters: Int = 0,
+        cropLeftN: Float = 0f,
+        cropTopN: Float = 0f,
+        cropRightN: Float = 1f,
+        cropBottomN: Float = 1f,
+    ): PdfPageData {
+        val full =
+            renderPage(
+                document = document,
+                pageIndex = pageIndex,
+                widthPx = fullPageWidthPx,
+                heightPx = fullPageHeightPx,
+                rotationQuarters = rotationQuarters,
+                cropLeftN = cropLeftN,
+                cropTopN = cropTopN,
+                cropRightN = cropRightN,
+                cropBottomN = cropBottomN,
+            )
+        val left = tileLeftPx.coerceIn(0, full.widthPx - 1)
+        val top = tileTopPx.coerceIn(0, full.heightPx - 1)
+        val width = tileWidthPx.coerceIn(1, full.widthPx - left)
+        val height = tileHeightPx.coerceIn(1, full.heightPx - top)
+        val pixels = IntArray(width * height)
+        for (y in 0 until height) {
+            full.pixels.copyInto(
+                destination = pixels,
+                destinationOffset = y * width,
+                startIndex = (top + y) * full.widthPx + left,
+                endIndex = (top + y) * full.widthPx + left + width,
+            )
+        }
+        return PdfPageData(widthPx = width, heightPx = height, pixels = pixels)
+    }
+
+    /**
      * Возвращает репрезентативную высоту строки текста [document], нормированную
      * к ширине страницы (доля от ширины — в тех же единицах, что и
      * `MarkerSettings.strokeWidth` / `DrawingPath.strokeWidth`).

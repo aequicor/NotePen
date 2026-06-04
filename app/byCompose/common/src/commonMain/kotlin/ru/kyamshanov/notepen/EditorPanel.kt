@@ -63,6 +63,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
@@ -75,6 +77,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
@@ -318,6 +321,7 @@ fun EditorPanel(
     sessionsMenu: @Composable (expanded: Boolean, onDismiss: () -> Unit) -> Unit,
     fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
     fitWidthTopInset: androidx.compose.ui.unit.Dp = 0.dp,
+    bitmapConversionDispatcher: CoroutineDispatcher = Dispatchers.Default,
     modifier: Modifier = Modifier,
 ) {
     val openDocs = panel.tabs
@@ -463,7 +467,11 @@ fun EditorPanel(
         val info = doc.info.pages.getOrNull(pageIndex) ?: return@renderFig null
         val width = FIGURE_PAGE_RENDER_WIDTH_PX
         val height = (width / (info.aspectRatio.takeIf { it > 0f } ?: 1f)).toInt().coerceAtLeast(1)
-        runCatching { renderer.renderPage(doc, pageIndex, width, height).toImageBitmap() }
+        runCatching {
+            withContext(bitmapConversionDispatcher) {
+                renderer.renderPage(doc, pageIndex, width, height).toImageBitmap()
+            }
+        }
             .getOrNull()
             ?.also { figurePageCache[pageIndex] = it }
     }
@@ -627,19 +635,21 @@ fun EditorPanel(
                 }
             launch {
                 runCatching {
-                    val data =
-                        renderer.renderPage(
-                            document = doc,
-                            pageIndex = src.sourceIndex,
-                            widthPx = w,
-                            heightPx = h,
-                            rotationQuarters = userRotationOf(pageIndex),
-                            cropLeftN = src.cropLeftN,
-                            cropTopN = src.cropTopN,
-                            cropRightN = src.cropRightN,
-                            cropBottomN = src.cropBottomN,
-                        )
-                    magnifierState.updateHighResBitmap(pageIndex, data.toImageBitmap())
+                    val bitmap =
+                        withContext(bitmapConversionDispatcher) {
+                            renderer.renderPage(
+                                document = doc,
+                                pageIndex = src.sourceIndex,
+                                widthPx = w,
+                                heightPx = h,
+                                rotationQuarters = userRotationOf(pageIndex),
+                                cropLeftN = src.cropLeftN,
+                                cropTopN = src.cropTopN,
+                                cropRightN = src.cropRightN,
+                                cropBottomN = src.cropBottomN,
+                            ).toImageBitmap()
+                        }
+                    magnifierState.updateHighResBitmap(pageIndex, bitmap)
                 }.onFailure { e ->
                     panelLogger.warn { "Magnifier high-res render failed for page $pageIndex: ${e::class.simpleName}" }
                 }
@@ -1711,8 +1721,9 @@ fun EditorPanel(
                     ),
             ) {
                 val bm = bitmap
+                val layer = pdfLayer
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (bm != null) {
+                    if (layer != null) {
                         val pdfDrawingState =
                             remember(pageIndex) {
                                 drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
@@ -1721,10 +1732,10 @@ fun EditorPanel(
                             magnifierState.enabled &&
                                 magnifierState.segments.any { it.pageIndex == pageIndex }
                         if (isMagnifierPage) {
-                            SideEffect { magnifierState.updatePageBitmap(pageIndex, bm) }
+                            bm?.let { bitmap -> SideEffect { magnifierState.updatePageBitmap(pageIndex, bitmap) } }
                         }
                         DrawablePdfPage(
-                            bitmap = bm,
+                            pdfLayer = layer,
                             pdfDrawingState = pdfDrawingState,
                             toolMode = toolMode,
                             penSettings = penSettings,

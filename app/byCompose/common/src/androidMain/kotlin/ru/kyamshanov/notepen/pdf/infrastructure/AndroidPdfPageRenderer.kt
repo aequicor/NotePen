@@ -1,7 +1,9 @@
 package ru.kyamshanov.notepen.pdf.infrastructure
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Matrix
+import android.graphics.Rect
 import android.graphics.pdf.PdfRenderer
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -81,6 +83,114 @@ class AndroidPdfPageRenderer(
             sized.recycle()
 
             PdfPageData(widthPx = widthPx, heightPx = heightPx, pixels = pixels)
+        }
+
+    override suspend fun renderTile(
+        document: PdfDocument,
+        pageIndex: Int,
+        fullPageWidthPx: Int,
+        fullPageHeightPx: Int,
+        tileLeftPx: Int,
+        tileTopPx: Int,
+        tileWidthPx: Int,
+        tileHeightPx: Int,
+        rotationQuarters: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
+    ): PdfPageData =
+        if (PageRotation.normalizeQuarters(rotationQuarters) != 0) {
+            super.renderTile(
+                document = document,
+                pageIndex = pageIndex,
+                fullPageWidthPx = fullPageWidthPx,
+                fullPageHeightPx = fullPageHeightPx,
+                tileLeftPx = tileLeftPx,
+                tileTopPx = tileTopPx,
+                tileWidthPx = tileWidthPx,
+                tileHeightPx = tileHeightPx,
+                rotationQuarters = rotationQuarters,
+                cropLeftN = cropLeftN,
+                cropTopN = cropTopN,
+                cropRightN = cropRightN,
+                cropBottomN = cropBottomN,
+            )
+        } else {
+            renderTileDirect(
+                document = document,
+                pageIndex = pageIndex,
+                fullPageWidthPx = fullPageWidthPx,
+                fullPageHeightPx = fullPageHeightPx,
+                tileLeftPx = tileLeftPx,
+                tileTopPx = tileTopPx,
+                tileWidthPx = tileWidthPx,
+                tileHeightPx = tileHeightPx,
+                cropLeftN = cropLeftN,
+                cropTopN = cropTopN,
+                cropRightN = cropRightN,
+                cropBottomN = cropBottomN,
+            )
+        }
+
+    private suspend fun renderTileDirect(
+        document: PdfDocument,
+        pageIndex: Int,
+        fullPageWidthPx: Int,
+        fullPageHeightPx: Int,
+        tileLeftPx: Int,
+        tileTopPx: Int,
+        tileWidthPx: Int,
+        tileHeightPx: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
+    ): PdfPageData =
+        withContext(ioDispatcher) {
+            val androidDoc =
+                requireNotNull(document as? AndroidPdfDocument) {
+                    "AndroidPdfPageRenderer requires a document opened by AndroidPdfDocumentLoader"
+                }
+            if (pageIndex < 0 || pageIndex >= document.info.pageCount) {
+                throw IndexOutOfBoundsException(
+                    "pageIndex $pageIndex out of [0, ${document.info.pageCount})",
+                )
+            }
+
+            val tileW = tileWidthPx.coerceIn(1, fullPageWidthPx)
+            val tileH = tileHeightPx.coerceIn(1, fullPageHeightPx)
+            val bitmap = Bitmap.createBitmap(tileW, tileH, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.WHITE)
+            synchronized(PdfiumRenderLock.lock) {
+                val page: PdfRenderer.Page = androidDoc.renderer.openPage(pageIndex)
+                try {
+                    val cropW = (cropRightN - cropLeftN).coerceIn(0f, 1f).takeIf { it > 0f } ?: 1f
+                    val cropH = (cropBottomN - cropTopN).coerceIn(0f, 1f).takeIf { it > 0f } ?: 1f
+                    val fullSourceW = (fullPageWidthPx / cropW).coerceAtLeast(1f)
+                    val fullSourceH = (fullPageHeightPx / cropH).coerceAtLeast(1f)
+                    val matrix =
+                        Matrix().apply {
+                            setScale(fullSourceW / page.width, fullSourceH / page.height)
+                            postTranslate(
+                                -(cropLeftN.coerceIn(0f, 1f) * fullSourceW + tileLeftPx),
+                                -(cropTopN.coerceIn(0f, 1f) * fullSourceH + tileTopPx),
+                            )
+                        }
+                    page.render(
+                        bitmap,
+                        Rect(0, 0, tileW, tileH),
+                        matrix,
+                        PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY,
+                    )
+                } finally {
+                    page.close()
+                }
+            }
+            val pixels = IntArray(tileW * tileH)
+            bitmap.getPixels(pixels, 0, tileW, 0, 0, tileW, tileH)
+            bitmap.recycle()
+            PdfPageData(widthPx = tileW, heightPx = tileH, pixels = pixels)
         }
 
     /**
