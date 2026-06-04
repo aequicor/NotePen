@@ -173,6 +173,7 @@ class JvmPdfPageRenderer(
             val image = BufferedImage(tileW, tileH, BufferedImage.TYPE_INT_RGB)
             val g = image.createGraphics()
             try {
+                g.background = AwtColor.WHITE
                 g.color = AwtColor.WHITE
                 g.fillRect(0, 0, tileW, tileH)
                 g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)

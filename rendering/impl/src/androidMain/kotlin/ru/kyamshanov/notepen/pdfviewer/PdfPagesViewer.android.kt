@@ -59,6 +59,7 @@ private const val MAX_CACHE_ENTRIES = 10
 private const val TILE_SIZE_PX = 512
 private const val TILE_MODE_MIN_SCALE_PERCENT = 300
 private const val MAX_TILE_CACHE_PIXELS = 48_000_000L
+private const val TILE_PREVIEW_MAX_DIM_PX = 1024
 
 /**
  * Cap on PDF bitmap dimensions. Above this, the page is just upscaled by
@@ -262,6 +263,53 @@ actual fun PdfPagesViewer(
                             maxRenderDimensionPx = MAX_RENDER_DIM_PX,
                             minTileScalePercent = TILE_MODE_MIN_SCALE_PERCENT,
                         )
+                    var cached = cache.get(i)
+                    if (tileMode && cached == null && i in visibleSet) {
+                        val previewSize =
+                            pdfTilePreviewSize(
+                                targetWidthPx = targetWidthPx,
+                                targetHeightPx = targetHeightPx,
+                                maxDimensionPx = TILE_PREVIEW_MAX_DIM_PX,
+                            )
+                        if (previewSize.width < targetWidthPx || previewSize.height < targetHeightPx) {
+                            val previewBitmap =
+                                withContext(renderDispatcher) {
+                                    renderer.renderPage(
+                                        doc,
+                                        src.sourceIndex,
+                                        previewSize.width,
+                                        previewSize.height,
+                                        rotation,
+                                        src.cropLeftN,
+                                        src.cropTopN,
+                                        src.cropRightN,
+                                        src.cropBottomN,
+                                    ).toImageBitmap()
+                                }
+                            val snapshotStillCurrent =
+                                state.viewportSize == snap.viewportSize &&
+                                    state.basePageWidthPx == snap.basePageWidthPx &&
+                                    state.renderScalePercent == snap.scalePercent
+                            val previewStillNeeded = cache.get(i) == null
+                            if (snapshotStillCurrent && previewStillNeeded) {
+                                val previewScalePercent =
+                                    (snap.scalePercent * previewSize.width.toFloat() / targetWidthPx)
+                                        .roundToInt()
+                                        .coerceAtLeast(1)
+                                cache.put(
+                                    i,
+                                    RenderedPage(
+                                        bitmap = previewBitmap,
+                                        renderedAtScalePercent = previewScalePercent,
+                                        renderedAtRotationQuarters = rotation,
+                                        renderedAtCropSignature = cropSig,
+                                    ),
+                                    protectedPageIndices = visibleSet,
+                                )
+                                cached = cache.get(i)
+                            }
+                        }
+                    }
                     if (tileMode) {
                         val scaleBucket = pdfTileScaleBucket(snap.scalePercent)
                         val requests =
@@ -327,7 +375,6 @@ actual fun PdfPagesViewer(
                         }
                         continue
                     }
-                    val cached = cache.get(i)
                     if (
                         cached != null &&
                         cache.isFresh(

@@ -60,6 +60,7 @@ class AndroidPdfPageRenderer(
             val renderH = (croppedH / cropH).toInt().coerceAtLeast(1)
 
             val bitmap = Bitmap.createBitmap(renderW, renderH, Bitmap.Config.ARGB_8888)
+            bitmap.eraseColor(Color.WHITE)
             // Process-global pdfium lock, not per-renderer: concurrent open/render/close
             // across different PdfRenderer instances corrupts pdfium's shared, non-thread-safe
             // FreeType font module → native crash in FT_Done_Face. See PdfiumRenderLock.

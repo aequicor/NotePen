@@ -101,6 +101,26 @@ class PdfTileRenderingTest {
         assertEquals(newTiles.map { it.key }.toSet(), cache.entries.keys.toSet())
     }
 
+    @Test
+    fun pdfTilePreviewSizeCapsLongEdgeAndKeepsAspect() {
+        assertEquals(
+            IntSize(width = 768, height = 1024),
+            pdfTilePreviewSize(targetWidthPx = 2400, targetHeightPx = 3200, maxDimensionPx = 1024),
+        )
+    }
+
+    @Test
+    fun pdfTilePreviewSizeKeepsSmallTargetsAndCoercesInvalidOnes() {
+        assertEquals(
+            IntSize(width = 800, height = 600),
+            pdfTilePreviewSize(targetWidthPx = 800, targetHeightPx = 600, maxDimensionPx = 1024),
+        )
+        assertEquals(
+            IntSize(width = 1, height = 1),
+            pdfTilePreviewSize(targetWidthPx = 0, targetHeightPx = 0, maxDimensionPx = 1024),
+        )
+    }
+
     private fun oneSquarePageLayout(): PdfPagesLayout =
         PdfPagesLayout.build(
             pages = listOf(PdfPageInfo(pageIndex = 0, widthPt = 1000f, heightPt = 1000f)),

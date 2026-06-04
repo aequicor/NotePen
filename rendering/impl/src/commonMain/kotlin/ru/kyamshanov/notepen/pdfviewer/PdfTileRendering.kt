@@ -174,6 +174,23 @@ internal fun pdfTileScaleBucket(scalePercent: Int): Int {
     return buckets.firstOrNull { it >= scalePercent } ?: buckets.last()
 }
 
+internal fun pdfTilePreviewSize(
+    targetWidthPx: Int,
+    targetHeightPx: Int,
+    maxDimensionPx: Int,
+): IntSize {
+    val maxDim = maxOf(targetWidthPx, targetHeightPx)
+    val limit = maxDimensionPx.coerceAtLeast(1)
+    if (maxDim <= 0 || maxDim <= limit) {
+        return IntSize(targetWidthPx.coerceAtLeast(1), targetHeightPx.coerceAtLeast(1))
+    }
+    val scale = limit.toFloat() / maxDim
+    return IntSize(
+        width = (targetWidthPx * scale).roundToInt().coerceAtLeast(1),
+        height = (targetHeightPx * scale).roundToInt().coerceAtLeast(1),
+    )
+}
+
 internal fun visiblePdfTileRequests(
     layout: PdfPagesLayout,
     pageIndex: Int,
