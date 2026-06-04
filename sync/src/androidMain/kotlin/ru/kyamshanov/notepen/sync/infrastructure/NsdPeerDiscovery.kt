@@ -18,7 +18,9 @@ private val logger = KotlinLogging.logger {}
 /**
  * Android [PeerDiscovery] backed by [NsdManager] (DNS-SD), browsing the
  * `_notepen._tcp` service the desktop host advertises. Resolves each found
- * service to read its host/port and the pairing code from the `c` TXT record.
+ * service to read its host/port and name. The pairing code is **not** on the
+ * wire (it never was safe to broadcast), so every discovered host arrives with
+ * a blank code and the UI must collect the code via QR / manual entry.
  *
  * Threading: NsdManager callbacks arrive on a binder thread; state is published
  * through a thread-safe [MutableStateFlow]. Resolves are serialized through a
@@ -153,13 +155,15 @@ class NsdPeerDiscovery(
         if (port <= 0) return
         val attrs = info.attributes
         val name = attrs["name"]?.toString(Charsets.UTF_8) ?: info.serviceName
-        val code = attrs["c"]?.toString(Charsets.UTF_8).orEmpty()
+        // The host no longer publishes its pairing code on the LAN, so discovery
+        // can only surface the host's existence — the code must come from the QR
+        // or manual entry. A blank code routes the connect flow to that prompt.
         // Mirror PairingUri.toServerDeviceInfo: the real host id arrives in
         // PairAccepted, so a host:port placeholder is the correct seed here.
         val discovered =
             DiscoveredHost(
                 deviceInfo = DeviceInfo(id = "$host:$port", name = name, host = host, port = port),
-                code = code,
+                code = "",
             )
         synchronized(lock) {
             byServiceName[info.serviceName] = discovered

@@ -35,7 +35,13 @@ object Fb2Parser {
      * @throws IllegalArgumentException если это не валидный FB2
      */
     fun parse(bytes: ByteArray): BookContent {
+        if (bytes.size > BookLimits.MAX_FB2_BYTES) {
+            throw DocumentTooLargeException("FB2 input exceeds ${BookLimits.MAX_FB2_BYTES} bytes")
+        }
         val xml = unwrapZip(bytes)
+        if (xml.size > BookLimits.MAX_FB2_BYTES) {
+            throw DocumentTooLargeException("FB2 inflated size exceeds ${BookLimits.MAX_FB2_BYTES} bytes")
+        }
         val doc = Jsoup.parse(String(xml, detectCharset(xml)), "", Parser.xmlParser())
         val binaries = readBinaries(doc)
         val body =
@@ -177,10 +183,14 @@ object Fb2Parser {
         if (bytes.size < 4 || bytes[0] != 'P'.code.toByte() || bytes[1] != 'K'.code.toByte()) return bytes
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             var firstEntry: ByteArray? = null
+            var entryCount = 0
             var entry = zip.nextEntry
             while (entry != null) {
                 if (!entry.isDirectory) {
-                    val content = zip.readBytes()
+                    if (++entryCount > BookLimits.MAX_ENTRY_COUNT) {
+                        throw DocumentTooLargeException("FB2 container has more than ${BookLimits.MAX_ENTRY_COUNT} entries")
+                    }
+                    val content = zip.readEntryBounded(entry.name, BookLimits.MAX_FB2_BYTES)
                     if (entry.name.endsWith(".fb2", ignoreCase = true)) return content
                     if (firstEntry == null) firstEntry = content
                 }

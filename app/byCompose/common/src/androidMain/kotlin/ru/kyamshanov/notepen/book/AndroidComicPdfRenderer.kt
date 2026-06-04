@@ -23,9 +23,15 @@ object AndroidComicPdfRenderer {
         images: List<ByteArray>,
         output: File,
     ) {
+        if (images.size > BookLimits.MAX_COMIC_IMAGES) {
+            throw DocumentTooLargeException("Comic has more than ${BookLimits.MAX_COMIC_IMAGES} images")
+        }
         val pdf = PdfDocument()
         var pageNumber = 1
         for (bytes in images) {
+            if (bytes.size > BookLimits.MAX_ENTRY_BYTES) {
+                throw DocumentTooLargeException("Comic image exceeds ${BookLimits.MAX_ENTRY_BYTES} bytes")
+            }
             val bitmap = runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size) }.getOrNull() ?: continue
             val page = pdf.startPage(PdfDocument.PageInfo.Builder(bitmap.width, bitmap.height, pageNumber).create())
             page.canvas.drawBitmap(bitmap, 0f, 0f, null)

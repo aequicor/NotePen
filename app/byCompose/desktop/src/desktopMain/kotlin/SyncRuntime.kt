@@ -375,7 +375,7 @@ class SyncRuntime(
                 withContext(Dispatchers.IO) {
                     when (state) {
                         is ServerLifecycleState.Running ->
-                            registrar.register(selfInfo.copy(host = state.host, port = state.port), state.code)
+                            registrar.register(selfInfo.copy(host = state.host, port = state.port))
                         is ServerLifecycleState.Idle,
                         is ServerLifecycleState.Stopped,
                         -> registrar.unregister()

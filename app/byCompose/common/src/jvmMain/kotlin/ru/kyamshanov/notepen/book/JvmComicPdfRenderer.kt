@@ -26,8 +26,16 @@ object JvmComicPdfRenderer {
         images: List<ByteArray>,
         output: File,
     ) {
+        if (images.size > BookLimits.MAX_COMIC_IMAGES) {
+            throw DocumentTooLargeException("Comic has more than ${BookLimits.MAX_COMIC_IMAGES} images")
+        }
         PDDocument().use { doc ->
             for (bytes in images) {
+                if (bytes.size > BookLimits.MAX_ENTRY_BYTES) {
+                    throw DocumentTooLargeException(
+                        "Comic image exceeds ${BookLimits.MAX_ENTRY_BYTES} bytes",
+                    )
+                }
                 val image = imageOf(doc, bytes) ?: continue
                 val page = PDPage(PDRectangle(image.width.toFloat(), image.height.toFloat()))
                 doc.addPage(page)

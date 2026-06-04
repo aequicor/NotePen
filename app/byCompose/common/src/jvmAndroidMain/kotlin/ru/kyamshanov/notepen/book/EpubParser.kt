@@ -63,11 +63,25 @@ object EpubParser {
 
     private fun readZipEntries(bytes: ByteArray): Map<String, ByteArray> {
         val result = LinkedHashMap<String, ByteArray>()
+        var entryCount = 0
+        var totalBytes = 0L
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
                 if (!entry.isDirectory) {
-                    result[normalize(entry.name)] = zip.readBytes()
+                    if (++entryCount > BookLimits.MAX_ENTRY_COUNT) {
+                        throw DocumentTooLargeException(
+                            "EPUB has more than ${BookLimits.MAX_ENTRY_COUNT} entries",
+                        )
+                    }
+                    val data = zip.readEntryBounded(entry.name)
+                    totalBytes += data.size
+                    if (totalBytes > BookLimits.MAX_TOTAL_BYTES) {
+                        throw DocumentTooLargeException(
+                            "EPUB inflated size exceeds ${BookLimits.MAX_TOTAL_BYTES} bytes",
+                        )
+                    }
+                    result[normalize(entry.name)] = data
                 }
                 zip.closeEntry()
                 entry = zip.nextEntry

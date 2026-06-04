@@ -20,20 +20,19 @@ class JmDnsServiceRegistrar {
     private var registered: ServiceInfo? = null
 
     /**
-     * Registers the local server described by [device] on the LAN, publishing
-     * the pairing [code] in the `c` TXT record so a discovering client can
-     * one-tap connect. The host's manual approval dialog remains the real
-     * security gate — the code on the LAN is the same trust posture as the QR.
+     * Registers the local server described by [device] on the LAN, advertising
+     * only its id, name and port. The pairing code is deliberately **not** put on
+     * the wire: a discovering client learns the host exists but must obtain the
+     * code out-of-band (scan the host's QR or type it in) before it can pair.
+     * Broadcasting the code would have let any LAN listener pair silently, so the
+     * mDNS advert no longer carries the same trust as the QR.
      *
      * Binds JmDNS explicitly to [DeviceInfo.host] so the announcement goes
      * out on the LAN interface and not on a VPN / virtual adapter that JmDNS
      * would otherwise pick by default.
      */
-    fun register(
-        device: DeviceInfo,
-        code: String,
-    ) {
-        val props = mapOf("id" to device.id, "name" to device.name, "c" to code)
+    fun register(device: DeviceInfo) {
+        val props = mapOf("id" to device.id, "name" to device.name)
         val serviceInfo =
             ServiceInfo.create(
                 SERVICE_TYPE,
