@@ -3,18 +3,28 @@ package ru.kyamshanov.notepen
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
+import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.appsettings.rememberAppSettings
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.pdfviewer.createPdfViewerState
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
+import ru.kyamshanov.notepen.session.createSessionRepository
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
@@ -94,6 +104,7 @@ fun App(
     // Глобальный always-on-display: пока [App] в композиции, экран не гаснет.
     // На десктопе actual — no-op (см. [KeepScreenOn]).
     KeepScreenOn(appSettings.alwaysOnDisplay)
+    EditorColdStartWarmup()
     ComposableAppTheme {
         Surface {
             RootContent(
@@ -118,6 +129,31 @@ fun App(
                 openDocumentsSink = openDocumentsSink,
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+    }
+}
+
+@Composable
+private fun EditorColdStartWarmup() {
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        launch(Dispatchers.Default) {
+            runCatching {
+                createAnnotationRepository()
+                createSessionRepository()
+                createPdfExporter()
+                createPdfReflowExtractor()
+                createToolPresetsRepository()
+                createReaderSettingsRepository()
+                createPdfViewerState()
+                PdfDrawingState()
+                PenSettings()
+                MarkerSettings()
+                EraserSettings()
+                documentIdFromFilePath("warmup.pdf")
+            }.onFailure { e ->
+                appLogger.warn { "Editor warm-up failed: ${e::class.simpleName}" }
+            }
         }
     }
 }

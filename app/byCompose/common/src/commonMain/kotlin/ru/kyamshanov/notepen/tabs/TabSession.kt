@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.resolveDocumentDisplayName
 
 /** Hard cap on simultaneously open panels. */
@@ -298,6 +299,10 @@ class TabSession internal constructor(
     fun disposeAll() {
         documentStatesMap.values.forEach { it.closeDocument() }
     }
+
+    fun detachAllDocuments(): List<PdfDocument> =
+        documentStatesMap.values
+            .mapNotNull { it.detachDocument() }
 
     private fun collectTabIds(layout: WorkspaceLayout): Set<DocumentId> =
         layout.panels.flatMapTo(mutableSetOf()) { panel -> panel.tabs.tabs.map { it.id } }

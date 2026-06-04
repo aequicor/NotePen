@@ -559,6 +559,13 @@ class PdfDocumentState internal constructor(
         pdfDocument = null
     }
 
+    // Used on editor shutdown when the document must be closed later on a background dispatcher.
+    internal fun detachDocument(): PdfDocument? {
+        val detached = pdfDocument
+        pdfDocument = null
+        return detached
+    }
+
     companion object {
         /** Углы собственного `/Rotate` PDF, при которых mediabox повёрнут на бок. */
         private const val ROTATE_90 = 90

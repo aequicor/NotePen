@@ -76,6 +76,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -101,13 +102,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
@@ -159,6 +165,9 @@ import ru.kyamshanov.notepen.tabs.toSnapshot
 import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
+// App-lifetime background work for editor shutdown paths. Keep PDF close/save off the UI thread
+// so the first navigation back from a cold editor is not delayed by PDFBox or disk I/O.
+private val editorBackgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 private const val MARKER_WIDTH_SCAN_DELAY_AFTER_OPEN_MS = 1_500L
 
@@ -224,6 +233,19 @@ fun DetailsContent(
     val density = LocalDensity.current
     val model by component.model.subscribeAsState()
     val initialFilePath = remember(model.title) { model.title }
+    var editorBodyReady by remember(initialFilePath) { mutableStateOf(false) }
+    LaunchedEffect(initialFilePath) {
+        withFrameNanos { }
+        editorBodyReady = true
+    }
+    if (!editorBodyReady) {
+        EditorStartupFrame(
+            title = resolveDocumentDisplayName(initialFilePath) ?: initialFilePath,
+            onBack = component::onBack,
+            modifier = modifier,
+        )
+        return
+    }
 
     // Resolves the sync wire id for a local file path. Order of preference:
     //   1. remote-cached files → the host's id from the registry (must match the
@@ -347,7 +369,13 @@ fun DetailsContent(
 
     DisposableEffect(tabSession) {
         onDispose {
-            tabSession.disposeAll()
+            val documents = tabSession.detachAllDocuments()
+            editorBackgroundScope.launch {
+                documents.forEach { document ->
+                    runCatching { document.close() }
+                        .onFailure { logger.warn { "PDF close failed: ${it::class.simpleName}" } }
+                }
+            }
             // Редактор закрыт — больше нечего «отдавать как открытое».
             openDocumentsSink?.invoke(emptyList())
         }
@@ -705,11 +733,14 @@ fun DetailsContent(
             .forEach { saveTab(tabSession.stateOf(it)) }
     }
     val onBackWithSave: () -> Unit = {
-        coroutineScope.launch {
-            saveAllOpenTabs()
-            component.saveLastPageIndex(currentPage - 1)
-            component.onBack()
+        // Pop the editor immediately; persistence can finish after the UI has returned to main.
+        editorBackgroundScope.launch {
+            withContext(NonCancellable) {
+                saveAllOpenTabs()
+                component.saveLastPageIndex(currentPage - 1)
+            }
         }
+        component.onBack()
     }
     val onOpenLibrary: () -> Unit = {
         coroutineScope.launch {
@@ -1529,6 +1560,47 @@ fun DetailsContent(
 
 private val SyncConnectedGreen = Color(0xFF2E7D32)
 private val SyncUnstableYellow = Color(0xFFF9A825)
+
+@Composable
+private fun EditorStartupFrame(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = BACK_CONTENT_DESCRIPTION,
+                    )
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)),
+            )
+        }
+    }
+}
 
 /**
  * Tint for the sync button in the quick-actions airbar, signalling connection
