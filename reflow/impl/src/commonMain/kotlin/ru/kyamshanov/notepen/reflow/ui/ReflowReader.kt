@@ -72,6 +72,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
@@ -118,6 +120,7 @@ import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.time.TimeSource
 
@@ -913,11 +916,21 @@ private fun PagedReflowContent(
         // Ширина контентной колонки в пикселях. Используется и для бэк-обмера
         // через TextMeasurer, и как ключ дискового layout-кэша (см. LaunchedEffect
         // ниже). Считается из BoxWithConstraints.maxWidth с учётом
-        // maxContentWidth и горизонтального padding'а — той же формулой, что
-        // диктует фактический рендер LazyColumn внутри pager'а.
+        // maxContentWidth, горизонтального padding'а и режима разворота — той же
+        // формулой, что диктует фактический рендер LazyColumn внутри pager'а.
+        val pageOuterWidth =
+            remember(maxWidth, settings.maxContentWidth, settings.contentPadding, settings.twoPageSpread) {
+                val availableForPage =
+                    if (settings.twoPageSpread) {
+                        ((maxWidth - BOOK_SPREAD_GAP) / 2f).coerceAtLeast(1.dp)
+                    } else {
+                        maxWidth
+                    }
+                availableForPage.coerceAtMost(settings.maxContentWidth).coerceAtLeast(settings.contentPadding * 2)
+            }
         val contentWidthPx =
             with(density) {
-                (maxWidth.coerceAtMost(settings.maxContentWidth) - settings.contentPadding * 2)
+                (pageOuterWidth - settings.contentPadding * 2)
                     .roundToPx()
                     .coerceAtLeast(1)
             }
@@ -1115,7 +1128,10 @@ private fun PagedReflowContent(
             }
         if (windows.isEmpty()) return@BoxWithConstraints
 
-        val lastPage = windows.lastIndex
+        val pagesPerSpread = if (settings.twoPageSpread) 2 else 1
+        val lastWindowPage = windows.lastIndex
+        val spreadCount = spreadCount(windows.size, pagesPerSpread)
+        val lastPagerPage = (spreadCount - 1).coerceAtLeast(0)
         val scope = rememberCoroutineScope()
         // Якорь чтения — TextAnchor начала текущей страницы. Durable: переживает
         // ре-пагинацию (смена кегля/полей/ориентации) и переключение страница<->скролл.
@@ -1137,13 +1153,17 @@ private fun PagedReflowContent(
                     density = density,
                 )
             }
-        val pagerState = rememberPagerState(initialPage = initialPage) { windows.size }
+        val initialSpread = windowPageToSpread(initialPage, pagesPerSpread)
+        val pagerState = rememberPagerState(initialPage = initialSpread) { spreadCount }
         // Свежие значения для трекера якоря ниже: он НЕ перезапускается на ре-пагинации
         // (иначе перечитал бы устаревший индекс страницы в новой раскладке и затёр якорь —
         // F-10: место чтения терялось при смене ориентации). См. LaunchedEffect(pagerState).
         val latestWindows = rememberUpdatedState(windows)
         val latestContentWidthPx = rememberUpdatedState(contentWidthPx)
         val latestSettings = rememberUpdatedState(settings)
+        val playPageTurnSound = rememberPageTurnSoundPlayer()
+        val latestPlayPageTurnSound = rememberUpdatedState(playPageTurnSound)
+        var lastSoundPagerPage by remember(document) { mutableStateOf<Int?>(null) }
         // Ре-пагинация: встаём на страницу, открывающуюся якорным блоком (не на тот же
         // номер) — место чтения сохраняется при смене кегля/полей/ориентации. Тяжёлый measure
         // (до ~50 ms для блока-главы EPUB) уносим на Default, чтобы не блокировать main.
@@ -1152,7 +1172,7 @@ private fun PagedReflowContent(
         LaunchedEffect(windows) {
             val restoreAnchor = anchor
             val base = ReaderPagination.pageForAnchor(windows, restoreAnchor)
-            val newPage =
+            val newWindowPage =
                 withContext(Dispatchers.Default) {
                     refinePageForCharStart(
                         windows = windows,
@@ -1166,14 +1186,15 @@ private fun PagedReflowContent(
                         density = density,
                     )
                 }
-            if (newPage != pagerState.currentPage) pagerState.scrollToPage(newPage)
+            val newSpread = windowPageToSpread(newWindowPage, pagesPerSpread)
+            if (newSpread != pagerState.currentPage) pagerState.scrollToPage(newSpread)
         }
         val pagedBlockTarget by navigateToBlock
         LaunchedEffect(pagedBlockTarget) {
             val block = pagedBlockTarget ?: return@LaunchedEffect
-            val target =
+            val targetWindowPage =
                 windows.indexOfLast { it.firstBlock <= block }.takeIf { it >= 0 } ?: return@LaunchedEffect
-            pagerState.animateScrollToPage(target)
+            pagerState.animateScrollToPage(windowPageToSpread(targetWindowPage, pagesPerSpread))
             navigateToBlock.value = null
         }
         // Первый блок текущей страницы = якорь; публикуем наружу (прогресс + смена режима).
@@ -1183,9 +1204,18 @@ private fun PagedReflowContent(
         // и реагирует лишь на реальные смены страницы (свайп/тап/клавиша/восстановление
         // выше), а не на рестарт из-за смены раскладки. windows/ширину/настройки читаем
         // «вживую» через rememberUpdatedState, чтобы маппинг был по актуальной раскладке.
-        LaunchedEffect(pagerState, document) {
-            snapshotFlow { pagerState.currentPage }.collect { pageIndex ->
-                val window = latestWindows.value.getOrNull(pageIndex)
+        LaunchedEffect(pagerState, document, pagesPerSpread, lastWindowPage) {
+            snapshotFlow { pagerState.currentPage }.collect { pagerPage ->
+                val previousSoundPage = lastSoundPagerPage
+                if (previousSoundPage != null &&
+                    previousSoundPage != pagerPage &&
+                    latestSettings.value.pageTurnSound
+                ) {
+                    latestPlayPageTurnSound.value()
+                }
+                lastSoundPagerPage = pagerPage
+                val windowIndex = (pagerPage * pagesPerSpread).coerceAtMost(lastWindowPage)
+                val window = latestWindows.value.getOrNull(windowIndex)
                 val first = window?.firstBlock ?: 0
                 val charStart =
                     if (window != null && window.firstBlockOffsetPx > 0) {
@@ -1217,9 +1247,9 @@ private fun PagedReflowContent(
         // через programmatic scroll. NONE и «уменьшить движение» → мгновенно, иначе анимация.
         val animatePager = !isReducedMotionEnabled() && settings.pageTransition != PageTransition.NONE
         val pageDeltaHandler: (Int) -> Unit =
-            remember(scope, pagerState, lastPage, animatePager) {
+            remember(scope, pagerState, lastPagerPage, animatePager) {
                 { delta ->
-                    val target = (pagerState.currentPage + delta).coerceIn(0, lastPage)
+                    val target = (pagerState.currentPage + delta).coerceIn(0, lastPagerPage)
                     scope.launch {
                         if (animatePager) pagerState.animateScrollToPage(target) else pagerState.scrollToPage(target)
                     }
@@ -1243,69 +1273,191 @@ private fun PagedReflowContent(
                     .fillMaxSize()
                     .padding(top = settings.topMargin, bottom = settings.bottomMargin)
                     .clipToBounds(),
-        ) { pageIndex ->
+        ) { pagerPage ->
             if (!firstPageLogged.value) {
                 SideEffect {
                     if (!firstPageLogged.value) {
                         firstPageLogged.value = true
                         readerLogger.info {
-                            "PdfReflow: first-page-composed page=$pageIndex windows=${windows.size} " +
+                            "PdfReflow: first-page-composed page=$pagerPage windows=${windows.size} " +
                                 "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
                         }
                     }
                 }
             }
-            val pageWindow = windows[pageIndex]
-            // Высота окна обрезана по границе строки: нижняя строка не режется пополам, а внизу
-            // остаётся зазор меньше строки (поле, как в книге), а не целый незаполненный абзац.
-            val windowHeightDp = with(density) { pageWindow.heightPx.toDp() }
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                // Страница — окно в непрерывную колонку: LazyColumn без пользовательского скролла,
-                // спозиционированный на стартовую строку окна. Тот же рендер блоков, что и в
-                // скролл-режиме (виртуализация, выделение, провенанс-спаны работают без изменений).
-                val pageList = rememberLazyListState(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
-                // Держим страницу на её строке при ре-пагинации (смена кегля/полей).
-                LaunchedEffect(pageWindow) {
-                    pageList.scrollToItem(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
-                }
-                LazyColumn(
-                    state = pageList,
-                    userScrollEnabled = false,
-                    modifier =
-                        Modifier
-                            .widthIn(max = settings.maxContentWidth)
-                            .fillMaxWidth()
-                            .height(windowHeightDp)
-                            .clipToBounds(),
-                    contentPadding = PaddingValues(horizontal = settings.contentPadding),
-                    verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
-                ) {
-                    itemsIndexed(document.blocks) { index, block ->
-                        // onSizeChanged больше не используется: высоты блоков заданы
-                        // детерминированно (BlockHeightCalculator на фоне +
-                        // figureHeights аналитически), а ре-замер на render-фазе
-                        // — главный источник layout drift'а при возврате на читанную
-                        // страницу (defect b). Если TextMeasurer-обмер расходится
-                        // с BasicText-рендером, корень — в TextStyle (см.
-                        // DeterministicLineHeight / readerPlatformTextStyle), не
-                        // в auto-correction после рендера.
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            ReflowBlockView(
-                                block,
-                                anchorsByBlock[index].orEmpty(),
-                                settings,
-                                renderPage,
-                                blockIndex = index,
-                                notes = notesByBlock[index].orEmpty(),
-                                onNoteTap = onNoteTap,
-                            )
-                        }
+            val pageOffset =
+                ((pagerState.currentPage - pagerPage) + pagerState.currentPageOffsetFraction)
+                    .coerceIn(-1f, 1f)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pageTransitionLayer(settings.pageTransition, pageOffset, density.density),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                if (settings.twoPageSpread) {
+                    Row(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.Top,
+                    ) {
+                        PageWindowColumn(
+                            document = document,
+                            pageWindow = windows.getOrNull(pagerPage * pagesPerSpread),
+                            pageIndex = pagerPage * pagesPerSpread,
+                            anchorsByBlock = anchorsByBlock,
+                            notesByBlock = notesByBlock,
+                            onNoteTap = onNoteTap,
+                            settings = settings,
+                            renderPage = renderPage,
+                            pageOuterWidth = pageOuterWidth,
+                            density = density,
+                        )
+                        BookSpine(settings)
+                        PageWindowColumn(
+                            document = document,
+                            pageWindow = windows.getOrNull(pagerPage * pagesPerSpread + 1),
+                            pageIndex = pagerPage * pagesPerSpread + 1,
+                            anchorsByBlock = anchorsByBlock,
+                            notesByBlock = notesByBlock,
+                            onNoteTap = onNoteTap,
+                            settings = settings,
+                            renderPage = renderPage,
+                            pageOuterWidth = pageOuterWidth,
+                            density = density,
+                        )
                     }
+                } else {
+                    PageWindowColumn(
+                        document = document,
+                        pageWindow = windows.getOrNull(pagerPage),
+                        pageIndex = pagerPage,
+                        anchorsByBlock = anchorsByBlock,
+                        notesByBlock = notesByBlock,
+                        onNoteTap = onNoteTap,
+                        settings = settings,
+                        renderPage = renderPage,
+                        pageOuterWidth = pageOuterWidth,
+                        density = density,
+                    )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun PageWindowColumn(
+    document: ReflowDocument,
+    pageWindow: ReaderPagination.PageWindow?,
+    pageIndex: Int,
+    anchorsByBlock: Map<Int, List<TextAnchor>>,
+    notesByBlock: Map<Int, List<NoteAnchor>>,
+    onNoteTap: (PageNote) -> Unit,
+    settings: ReflowReaderSettings,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+    pageOuterWidth: Dp,
+    density: Density,
+) {
+    if (pageWindow == null) {
+        Box(Modifier.width(pageOuterWidth).fillMaxHeight())
+        return
+    }
+    val windowHeightDp = with(density) { pageWindow.heightPx.toDp() }
+    Box(Modifier.width(pageOuterWidth), contentAlignment = Alignment.TopCenter) {
+        // Страница — окно в непрерывную колонку: LazyColumn без пользовательского скролла,
+        // спозиционированный на стартовую строку окна. Тот же рендер блоков, что и в
+        // скролл-режиме (виртуализация, выделение, провенанс-спаны работают без изменений).
+        val pageList = rememberLazyListState(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
+        // Держим страницу на её строке при ре-пагинации (смена кегля/полей).
+        LaunchedEffect(pageWindow) {
+            pageList.scrollToItem(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
+        }
+        LazyColumn(
+            state = pageList,
+            userScrollEnabled = false,
+            modifier =
+                Modifier
+                    .width(pageOuterWidth)
+                    .height(windowHeightDp)
+                    .clipToBounds(),
+            contentPadding = PaddingValues(horizontal = settings.contentPadding),
+            verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
+        ) {
+            itemsIndexed(document.blocks) { index, block ->
+                // onSizeChanged больше не используется: высоты блоков заданы
+                // детерминированно (BlockHeightCalculator на фоне + figureHeights
+                // аналитически), а ре-замер на render-фазе — главный источник layout
+                // drift'а при возврате на читанную страницу.
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    ReflowBlockView(
+                        block,
+                        anchorsByBlock[index].orEmpty(),
+                        settings,
+                        renderPage,
+                        blockIndex = index,
+                        occurrenceKey = pageIndex,
+                        notes = notesByBlock[index].orEmpty(),
+                        onNoteTap = onNoteTap,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BookSpine(settings: ReflowReaderSettings) {
+    Box(
+        modifier =
+            Modifier
+                .width(BOOK_SPREAD_GAP)
+                .fillMaxHeight()
+                .drawBehind {
+                    val centerX = size.width / 2f
+                    drawLine(
+                        color = settings.textColor.copy(alpha = BOOK_SPINE_ALPHA),
+                        start = Offset(centerX, 0f),
+                        end = Offset(centerX, size.height),
+                        strokeWidth = BOOK_SPINE_WIDTH_PX,
+                    )
+                },
+    )
+}
+
+private fun Modifier.pageTransitionLayer(
+    transition: PageTransition,
+    pageOffset: Float,
+    densityScale: Float,
+): Modifier {
+    val absOffset = abs(pageOffset)
+    return when (transition) {
+        PageTransition.BOOK ->
+            graphicsLayer {
+                cameraDistance = BOOK_CAMERA_DISTANCE * densityScale
+                transformOrigin = TransformOrigin(if (pageOffset > 0f) 1f else 0f, 0.5f)
+                rotationY = pageOffset * BOOK_ROTATION_DEGREES
+                scaleX = 1f - absOffset * BOOK_SCALE_LOSS
+                alpha = 1f - absOffset * BOOK_ALPHA_LOSS
+            }
+        PageTransition.FADE ->
+            graphicsLayer {
+                alpha = 1f - absOffset
+            }
+        PageTransition.SLIDE,
+        PageTransition.NONE,
+        -> this
+    }
+}
+
+private fun spreadCount(
+    pageCount: Int,
+    pagesPerSpread: Int,
+): Int = ceil(pageCount / pagesPerSpread.toFloat()).roundToInt().coerceAtLeast(1)
+
+private fun windowPageToSpread(
+    pageIndex: Int,
+    pagesPerSpread: Int,
+): Int = (pageIndex / pagesPerSpread).coerceAtLeast(0)
 
 @Composable
 private fun ReflowBlockView(
@@ -1314,6 +1466,7 @@ private fun ReflowBlockView(
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
     blockIndex: Int,
+    occurrenceKey: Int = 0,
     onLines: ((List<Float>) -> Unit)? = null,
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
@@ -1327,6 +1480,7 @@ private fun ReflowBlockView(
                 style = settings.headingStyle(block.level),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 notes = notes,
                 onNoteTap = onNoteTap,
             )
@@ -1338,6 +1492,7 @@ private fun ReflowBlockView(
                 style = settings.paragraphStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
@@ -1357,6 +1512,7 @@ private fun ReflowBlockView(
                 style = settings.paragraphStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 contentPadding = PaddingValues(start = settings.contentPadding * (block.level + 1)),
                 notes = notes,
@@ -1364,7 +1520,7 @@ private fun ReflowBlockView(
             )
 
         is ReflowBlock.Blockquote ->
-            BlockquoteView(block, anchors, settings, blockIndex, onLines, notes, onNoteTap)
+            BlockquoteView(block, anchors, settings, blockIndex, occurrenceKey, onLines, notes, onNoteTap)
 
         is ReflowBlock.Table -> TableView(block, settings)
 
@@ -1382,6 +1538,7 @@ private fun ReflowBlockView(
                 style = settings.codeStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
@@ -1396,6 +1553,7 @@ private fun ReflowBlockView(
                 style = settings.footnoteStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
@@ -1431,14 +1589,15 @@ private fun SelectableReflowText(
     style: TextStyle,
     settings: ReflowReaderSettings,
     blockIndex: Int,
+    occurrenceKey: Int = 0,
     onLines: ((List<Float>) -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(),
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
 ) {
     val selectionState = LocalReflowSelectionState.current
-    DisposableEffect(selectionState, blockIndex) {
-        onDispose { selectionState.forget(blockIndex) }
+    DisposableEffect(selectionState, blockIndex, occurrenceKey) {
+        onDispose { selectionState.forget(blockIndex, occurrenceKey) }
     }
     val liveAnchor = selectionState.selectionAnchorFor(blockIndex)
     val liveAnchors = if (liveAnchor != null) anchors + liveAnchor else anchors
@@ -1454,7 +1613,7 @@ private fun SelectableReflowText(
             style = style,
             onTextLayout = { layout ->
                 textLayout = layout
-                selectionState.reportLayout(blockIndex, layout)
+                selectionState.reportLayout(blockIndex, layout, occurrenceKey)
                 // Нижние границы строк (для построчной раскладки страниц): снимаем только когда
                 // нужно (проход обмера в PagedReflowContent передаёт onLines).
                 onLines?.invoke(List(layout.lineCount) { layout.getLineBottom(it) })
@@ -1467,7 +1626,7 @@ private fun SelectableReflowText(
                 Modifier
                     .padding(contentPadding)
                     .onGloballyPositioned { coordinates ->
-                        selectionState.reportCoordinates(blockIndex, coordinates)
+                        selectionState.reportCoordinates(blockIndex, coordinates, occurrenceKey)
                     },
         )
 
@@ -1505,6 +1664,7 @@ private fun BlockquoteView(
     anchors: List<TextAnchor>,
     settings: ReflowReaderSettings,
     blockIndex: Int,
+    occurrenceKey: Int = 0,
     onLines: ((List<Float>) -> Unit)? = null,
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
@@ -1526,6 +1686,7 @@ private fun BlockquoteView(
             style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic),
             settings = settings,
             blockIndex = blockIndex,
+            occurrenceKey = occurrenceKey,
             onLines = onLines,
             contentPadding = PaddingValues(start = settings.contentPadding),
             notes = notes,
@@ -2218,6 +2379,14 @@ private const val TAP_ZONE_NEXT_FRACTION = 0.3f
 // Доля ширины, на которую нужно увести горизонтальный свайп, чтобы листнуть страницу
 // (защита от случайных микро-сдвигов).
 private const val SWIPE_TURN_FRACTION = 0.18f
+
+private val BOOK_SPREAD_GAP = 28.dp
+private const val BOOK_SPINE_ALPHA = 0.16f
+private const val BOOK_SPINE_WIDTH_PX = 1.2f
+private const val BOOK_CAMERA_DISTANCE = 32f
+private const val BOOK_ROTATION_DEGREES = 34f
+private const val BOOK_SCALE_LOSS = 0.025f
+private const val BOOK_ALPHA_LOSS = 0.08f
 
 private const val HEADING_SCALE_1 = 1.6f
 private const val HEADING_SCALE_2 = 1.35f

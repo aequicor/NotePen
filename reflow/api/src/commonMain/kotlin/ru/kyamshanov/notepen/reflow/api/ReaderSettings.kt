@@ -104,6 +104,9 @@ public enum class ProgressFormat {
  */
 @Serializable
 public enum class PageTransition {
+    /** Книжное перелистывание: страница поворачивается от корешка с лёгкой тенью. */
+    BOOK,
+
     /** Книжный горизонтальный слайд: вперёд страница уезжает влево. */
     SLIDE,
 
@@ -137,7 +140,10 @@ public enum class PageTransition {
  * @property brightness внутренняя яркость `[MIN_BRIGHTNESS]..1` (1 — без затемнения)
  * @property sunsetWarm плавно теплеть после захода солнца (по локальному времени)
  * @property paged страничный режим (по умолчанию) вместо непрерывного скролла
+ * @property twoPageSpread показывать страничный режим разворотом: две текстовые
+ *   страницы рядом, как раскрытая книга
  * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property pageTurnSound короткий звук перелистывания при смене страницы/разворота
  * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право); при `false`
  *   тап в любом месте лишь показывает/прячет панель — защита от случайных перелистываний
  * @property autoHideSec автоскрытие панелей через N секунд (0 — не скрывать)
@@ -165,7 +171,9 @@ public data class ReaderSettings(
     public val brightness: Float = 1f,
     public val sunsetWarm: Boolean = false,
     public val paged: Boolean = true,
-    public val pageTransition: PageTransition = PageTransition.SLIDE,
+    public val twoPageSpread: Boolean = false,
+    public val pageTransition: PageTransition = PageTransition.BOOK,
+    public val pageTurnSound: Boolean = true,
     public val tapToTurn: Boolean = true,
     public val autoHideSec: Int = 0,
     public val progress: ProgressFormat = ProgressFormat.PERCENT,

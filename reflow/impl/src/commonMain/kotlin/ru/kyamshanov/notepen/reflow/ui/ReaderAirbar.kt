@@ -786,12 +786,26 @@ private fun TuneSheet(
                 onSelect = { onChange(settings.copy(paged = it)) },
             )
             LabeledChoice(
+                label = "Страниц",
+                options = listOf(false, true),
+                selected = settings.twoPageSpread,
+                labelOf = { if (it) "Разворот" else "Одна" },
+                textColor = textColor,
+                onSelect = { onChange(settings.copy(twoPageSpread = it, paged = true)) },
+            )
+            LabeledChoice(
                 label = "Переход",
                 options = PageTransition.entries,
                 selected = settings.pageTransition,
                 labelOf = ::transitionName,
                 textColor = textColor,
                 onSelect = { onChange(settings.copy(pageTransition = it)) },
+            )
+            ToggleRow(
+                label = "Звук страниц",
+                checked = settings.pageTurnSound,
+                textColor = textColor,
+                onChange = { onChange(settings.copy(pageTurnSound = it)) },
             )
             ToggleRow(
                 label = "Тап для листания",
@@ -1125,6 +1139,7 @@ private fun progressName(format: ProgressFormat): String =
 
 private fun transitionName(transition: PageTransition): String =
     when (transition) {
+        PageTransition.BOOK -> "Книга"
         PageTransition.SLIDE -> "Слайд"
         PageTransition.FADE -> "Затухание"
         PageTransition.NONE -> "Нет"
