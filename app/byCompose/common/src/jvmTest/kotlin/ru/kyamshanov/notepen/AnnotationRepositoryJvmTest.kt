@@ -12,6 +12,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.NormalizedRect
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -156,6 +157,56 @@ class AnnotationRepositoryJvmTest {
             assertEquals(pen.alpha, bundle.pen.alpha)
             assertEquals(pen.colorArgb, bundle.pen.colorArgb, "ARGB Long round-trip")
             assertEquals(eraser, bundle.eraser)
+        }
+
+    @Test
+    fun save_withToolMode_roundTripsActiveTool() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_tool_mode")
+            val pdfPath = dir.resolve("doc.pdf").toString()
+
+            repo.save(pdfPath, emptyMap(), scale = 100, toolMode = ToolMode.MARKER)
+
+            val content = java.io.File("$pdfPath.notepen.json").readText()
+            assertTrue(content.contains("\"toolMode\":\"MARKER\""), "JSON must contain active tool: $content")
+            assertEquals(ToolMode.MARKER, repo.load(pdfPath).getOrThrow().toolMode)
+        }
+
+    @Test
+    fun save_preserveToolSettings_keepsExistingToolSnapshot() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_tool_preserve")
+            val pdfPath = dir.resolve("doc.pdf").toString()
+            val pen = PenSettings(colorArgb = 0xFF43A047L, strokeWidth = 25f, alpha = 0.7f)
+            val marker = MarkerSettings(colorArgb = 0x80FFEB3BL, strokeWidth = 0.08f, sticky = false)
+            val eraser = EraserSettings(shape = EraserShape.SQUARE, sizeNormalized = 0.15f)
+
+            repo.save(
+                pdfPath,
+                emptyMap(),
+                scale = 100,
+                toolMode = ToolMode.ERASER,
+                pen = pen,
+                marker = marker,
+                eraser = eraser,
+            )
+            repo.save(
+                pdfPath,
+                emptyMap(),
+                scale = 120,
+                toolMode = ToolMode.PEN,
+                pen = PenSettings(),
+                marker = MarkerSettings(),
+                eraser = EraserSettings(),
+                preserveToolSettings = true,
+            )
+
+            val bundle = repo.load(pdfPath).getOrThrow()
+            assertEquals(ToolMode.ERASER, bundle.toolMode)
+            assertEquals(pen, bundle.pen)
+            assertEquals(marker, bundle.marker)
+            assertEquals(eraser, bundle.eraser)
+            assertEquals(120, bundle.scale)
         }
 
     // TC-18: save under IOException returns Result.failure

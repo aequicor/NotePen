@@ -17,6 +17,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 import ru.kyamshanov.notepen.mainscreen.domain.model.Folder
 import ru.kyamshanov.notepen.mainscreen.domain.port.FolderRepository
 import ru.kyamshanov.notepen.sync.domain.model.BookId
@@ -138,9 +139,11 @@ private class FakeAnnotationRepository(
         pdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,
         scale: Int,
+        toolMode: ToolMode,
         pen: PenSettings,
         marker: MarkerSettings,
         eraser: EraserSettings,
+        preserveToolSettings: Boolean,
         currentPage: Int,
         currentPageOffset: Int,
         favoritePageIndices: Set<Int>,

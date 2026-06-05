@@ -327,7 +327,7 @@ fun EditorPanel(
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)?,
     documentBroadcastController: DocumentBroadcastController?,
     showSnackbar: (String) -> Unit,
-    onRestoreToolSettings: (PenSettings, MarkerSettings, EraserSettings) -> Unit,
+    onRestoreToolSettings: (ToolMode, PenSettings, MarkerSettings, EraserSettings) -> Unit,
     onAddTab: () -> Unit,
     onAllTabsClosed: () -> Unit,
     onOpenPanelPicker: ((DocumentId) -> Unit)?,
@@ -879,6 +879,7 @@ fun EditorPanel(
                 pdfPath = filePath,
                 annotations = annotations,
                 scale = currentScalePercent,
+                toolMode = toolMode,
                 pen = penSettings,
                 marker = markerSettings,
                 eraser = eraserSettings,
@@ -1101,6 +1102,7 @@ fun EditorPanel(
                 )
             }
             onRestoreToolSettings(
+                bundle.toolMode,
                 bundle.pen.sanitizedForCurrentScheme(),
                 bundle.marker.sanitizedForCurrentScheme(),
                 bundle.eraser,
@@ -1145,9 +1147,7 @@ fun EditorPanel(
                 pdfPath = state.filePath,
                 annotations = annotations,
                 scale = state.pdfViewerState.scalePercent,
-                pen = penSettings,
-                marker = markerSettings,
-                eraser = eraserSettings,
+                preserveToolSettings = true,
                 currentPage = state.pdfViewerState.firstVisiblePageIndex,
                 currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
                 favoritePageIndices = state.favoritePageIndices.toSet(),

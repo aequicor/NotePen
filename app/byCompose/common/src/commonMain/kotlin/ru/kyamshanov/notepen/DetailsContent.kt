@@ -807,6 +807,7 @@ fun DetailsContent(
                 pdfPath = state.filePath,
                 annotations = annotations,
                 scale = state.pdfViewerState.scalePercent,
+                toolMode = tools.toolMode,
                 pen = tools.penSettings,
                 marker = tools.markerSettings,
                 eraser = tools.eraserSettings,
@@ -1111,24 +1112,29 @@ fun DetailsContent(
                         hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                         documentBroadcastController = documentBroadcastController,
                         showSnackbar = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } },
-                        onRestoreToolSettings = { pen, marker, eraser ->
-                            penSettings = pen
-                            markerSettings = marker
-                            // A restored width is the user's own choice — don't override it.
-                            markerWidthPinned = true
-                            eraserSettings = eraser
+                        onRestoreToolSettings = { restoredToolMode, pen, marker, eraser ->
+                            val restoredFilePath = panel.tabs.activeTab?.filePath
                             // Seed this document's tool checkpoint with its just-loaded
                             // settings (keyed by file path), so switching away and back
                             // restores them.
-                            panel.tabs.activeTab?.filePath?.let { filePath ->
+                            restoredFilePath?.let { filePath ->
                                 documentToolStates[filePath] =
                                     ToolStateSnapshot(
-                                        toolMode = toolMode,
+                                        toolMode = restoredToolMode,
                                         penSettings = pen,
                                         markerSettings = marker,
                                         eraserSettings = eraser,
                                         markerWidthPinned = true,
                                     )
+                            }
+                            if (restoredFilePath == tabSession.focusedActiveState?.filePath) {
+                                if (restoredToolMode != toolMode) suppressNextPresetApply = true
+                                toolMode = restoredToolMode
+                                penSettings = pen
+                                markerSettings = marker
+                                // A restored width is the user's own choice — don't override it.
+                                markerWidthPinned = true
+                                eraserSettings = eraser
                             }
                         },
                         onAddTab = { onAddTabToPanel(panel.id) },
