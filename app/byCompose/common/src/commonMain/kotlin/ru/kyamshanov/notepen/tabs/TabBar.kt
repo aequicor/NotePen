@@ -62,6 +62,11 @@ private val TAB_MIN_WIDTH = 96.dp
 private val TAB_CLOSE_SLOT = 28.dp
 private val TAB_SHAPE = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
 
+private enum class TabChromeHitMode {
+    Drag,
+    Interactive,
+}
+
 /**
  * Horizontal tab strip for one panel. Tabs share all available space equally
  * (Safari-style) and shrink down to [TAB_MIN_WIDTH] with horizontal scroll when
@@ -225,13 +230,18 @@ fun TabBar(
                                 }
                             }
                         }
-                        // Carve the chip out of the title-bar drag zone with a stable
-                        // outer Box marked interactive — same pattern as the «Сессии» / «+»
-                        // buttons above. Threading interactive through the chip's own
-                        // modifier chain (alongside combinedClickable) leaves the OS
-                        // treating a clean tap as a window-drag, so the tab never switches.
+                        // Inactive chips must be non-drag so a clean tap switches tabs.
+                        // The active chip is the available editor title-bar handle: a
+                        // single active tab otherwise fills the strip and leaves no room
+                        // to move the desktop window.
+                        val chipChromeModifier =
+                            if (tab.id == openDocs.activeId) {
+                                titleBarInteraction?.dragArea(Modifier) ?: Modifier
+                            } else {
+                                titleBarInteraction?.interactive(Modifier) ?: Modifier
+                            }
                         Box(
-                            modifier = (titleBarInteraction?.interactive(Modifier) ?: Modifier).width(tabWidth),
+                            modifier = chipChromeModifier.width(tabWidth),
                         ) {
                             TabChip(
                                 tab = tab,
@@ -243,6 +253,12 @@ fun TabBar(
                                 onOpenInNewPanel = onOpenInNewPanel?.let { cb -> { cb(tab.id) } },
                                 onClosePanel = onClosePanel,
                                 contentColor = contentColor,
+                                titleBarHitMode =
+                                    if (tab.id == openDocs.activeId) {
+                                        TabChromeHitMode.Drag
+                                    } else {
+                                        TabChromeHitMode.Interactive
+                                    },
                                 modifier = Modifier.fillMaxWidth(),
                             )
                         }
@@ -283,6 +299,7 @@ private fun TabChip(
      * back to the Material scheme (see [TabBar.contentColor]).
      */
     contentColor: Color? = null,
+    titleBarHitMode: TabChromeHitMode = TabChromeHitMode.Interactive,
 ) {
     // "Новая вкладка" is always available, so the context menu always opens.
     val hasMenu = true
@@ -311,9 +328,14 @@ private fun TabChip(
     val density = LocalDensity.current
     val titleBarInteraction = LocalTitleBarInteraction.current
     val chipBaseModifier = modifier.height(TAB_BAR_HEIGHT).background(color = chipBackground, shape = TAB_SHAPE)
+    val chipChromeModifier =
+        when (titleBarHitMode) {
+            TabChromeHitMode.Drag -> titleBarInteraction?.dragArea(chipBaseModifier) ?: chipBaseModifier
+            TabChromeHitMode.Interactive -> titleBarInteraction?.interactive(chipBaseModifier) ?: chipBaseModifier
+        }
     Box(
         modifier =
-            (titleBarInteraction?.interactive(chipBaseModifier) ?: chipBaseModifier)
+            chipChromeModifier
                 .pointerInput(Unit) {
                     // Non-consuming press tracker (initial pass) so long-press can
                     // open the menu where the finger went down.
@@ -370,9 +392,10 @@ private fun TabChip(
                 )
             }
             if (showClose) {
+                val closeModifier = Modifier.size(TAB_CLOSE_SLOT)
                 IconButton(
                     onClick = onClose,
-                    modifier = Modifier.size(TAB_CLOSE_SLOT),
+                    modifier = titleBarInteraction?.interactive(closeModifier) ?: closeModifier,
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
