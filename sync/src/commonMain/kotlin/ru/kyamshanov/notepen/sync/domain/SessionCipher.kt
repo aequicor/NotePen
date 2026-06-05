@@ -19,7 +19,10 @@ enum class Direction {
 }
 
 /** Raised when a frame cannot be authenticated, is malformed, or is a replay. */
-class SessionCipherException(message: String, cause: Throwable? = null) : Exception(message, cause)
+class SessionCipherException(
+    message: String,
+    cause: Throwable? = null,
+) : Exception(message, cause)
 
 /**
  * Symmetric, per-session AEAD channel for the peer-to-peer sync link.
@@ -66,16 +69,18 @@ class SessionCipher(
     private val serverToClientKey: ByteArray = hkdfSha256(sharedSecret, salt, INFO_S2C.encodeToByteArray(), KEY_BYTES)
 
     /** Next counter to stamp into an outbound nonce, per direction. */
-    private val outboundCounters = mutableMapOf(
-        Direction.CLIENT_TO_SERVER to 0L,
-        Direction.SERVER_TO_CLIENT to 0L,
-    )
+    private val outboundCounters =
+        mutableMapOf(
+            Direction.CLIENT_TO_SERVER to 0L,
+            Direction.SERVER_TO_CLIENT to 0L,
+        )
 
     /** Highest counter accepted on an inbound frame, per direction (-1 = nothing yet). */
-    private val inboundHighestSeen = mutableMapOf(
-        Direction.CLIENT_TO_SERVER to -1L,
-        Direction.SERVER_TO_CLIENT to -1L,
-    )
+    private val inboundHighestSeen =
+        mutableMapOf(
+            Direction.CLIENT_TO_SERVER to -1L,
+            Direction.SERVER_TO_CLIENT to -1L,
+        )
 
     init {
         require(sessionPrefix.size == SESSION_PREFIX_BYTES) {

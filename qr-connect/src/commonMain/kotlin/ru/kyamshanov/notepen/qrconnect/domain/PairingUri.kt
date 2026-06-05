@@ -108,8 +108,7 @@ data class PairingUri(
          * in [CODE_ALPHABET]. Rejects empty, short/long, or out-of-alphabet codes so a
          * tampered or legacy QR never reaches the pairing handshake.
          */
-        private fun isValidCode(code: String): Boolean =
-            code.length == CODE_LENGTH && code.all { it in CODE_ALPHABET }
+        private fun isValidCode(code: String): Boolean = code.length == CODE_LENGTH && code.all { it in CODE_ALPHABET }
     }
 }
 

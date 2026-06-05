@@ -68,13 +68,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
@@ -135,6 +133,7 @@ import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.PenPointerEventType
 import ru.kyamshanov.notepen.tablet.stylusEventSink
@@ -170,6 +169,24 @@ private val PREPARING_INDICATOR_SPACING = 12.dp
 private val NOTE_POPOVER_WIDTH = 320.dp
 private val NOTE_POPOVER_PADDING = 16.dp
 private val NOTE_POPOVER_ELEVATION = 6.dp
+
+private data class DocumentBroadcastSnapshot(
+    val documentId: String,
+    val page: Int,
+    val pageOffsetPx: Int,
+    val panX: Float,
+    val zoom: Float,
+    val toolMode: ToolMode,
+)
+
+private fun ToolMode.broadcastLabel(): String =
+    when (this) {
+        ToolMode.NONE -> "рука"
+        ToolMode.PEN -> "перо"
+        ToolMode.MARKER -> "маркер"
+        ToolMode.ERASER -> "ластик"
+        ToolMode.NOTE -> "заметка"
+    }
 
 /**
  * Per-panel actions and read-outs the unified toolbar drives for the focused
@@ -308,6 +325,7 @@ fun EditorPanel(
      */
     liveSyncController: ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController?,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)?,
+    documentBroadcastController: DocumentBroadcastController?,
     showSnackbar: (String) -> Unit,
     onRestoreToolSettings: (PenSettings, MarkerSettings, EraserSettings) -> Unit,
     onAddTab: () -> Unit,
@@ -400,9 +418,9 @@ fun EditorPanel(
     val tabletController = LocalTabletInputController.current
     val syncEngine = remember(syncEngineFor, documentId) { syncEngineFor?.invoke(documentId) }
 
-    // Per-document live-sync toggle (M4). Default OFF: bind pauses this document's
-    // engine on open so merely opening it never starts broadcasting. The toolbar
-    // reflects [liveSyncEnabled].
+    // Per-document live-sync toggle (M4). `bind` starts from the persisted/manual
+    // state, then a connected peer auto-enables live sync unless the user has
+    // explicitly paused this document. The toolbar reflects [liveSyncEnabled].
     //
     // On close (onDispose) we `disable` the document: that flips the toggle OFF,
     // pauses broadcasting, AND releases the CONTROLLER's enable-time pin (the
@@ -417,9 +435,7 @@ fun EditorPanel(
     }
     // Есть ли хотя бы один подключённый пир (как хост, так и клиент).
     val anyPeerConnected by produceState(false, peerClient, peerServer) {
-        val hosts = peerClient?.connectedHosts ?: flowOf(emptySet())
-        val peers = peerServer?.connectedPeers ?: flowOf(emptySet())
-        combine(hosts, peers) { h, p -> h.isNotEmpty() || p.isNotEmpty() }
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
             .collect { value = it }
     }
     DisposableEffect(liveSyncController, documentId) {
@@ -436,7 +452,13 @@ fun EditorPanel(
     // синхронизирует надписи без ручного тумблера. Если пользователь явно поставил
     // документ на паузу, авто-включение не срабатывает даже при переподключении.
     LaunchedEffect(liveSyncController, documentId, anyPeerConnected, userPausedSync) {
-        if (anyPeerConnected && !userPausedSync) liveSyncController?.enable(documentId)
+        if (shouldAutoEnableLiveSync(hasBroadcastConnection = anyPeerConnected, userPausedSync = userPausedSync)) {
+            liveSyncController?.enable(documentId)
+        }
+    }
+    val hasBroadcastPeer by produceState(false, peerServer, peerClient) {
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
+            .collect { value = it }
     }
 
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
@@ -631,6 +653,95 @@ fun EditorPanel(
     }
     val canPersistLiveViewState: () -> Boolean = {
         pages.isNotEmpty() && pdfViewerState.basePageWidthPx > 0f
+    }
+
+    LaunchedEffect(
+        documentBroadcastController,
+        peerClient,
+        peerServer,
+        isFocused,
+        liveSyncEnabled,
+        documentId,
+        toolMode,
+    ) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        if (
+            !shouldPublishBroadcastFrame(
+                hasPeerClient = peerClient != null,
+                hasPeerServer = peerServer != null,
+                isFocused = isFocused,
+                liveSyncEnabled = liveSyncEnabled,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        snapshotFlow {
+            DocumentBroadcastSnapshot(
+                documentId = documentId,
+                page = pdfViewerState.firstVisiblePageIndex,
+                pageOffsetPx = pdfViewerState.firstVisiblePageOffsetPx,
+                panX = pdfViewerState.pan.x,
+                zoom = pdfViewerState.zoom,
+                toolMode = toolMode,
+            )
+        }
+            .distinctUntilChanged()
+            .collect { snapshot ->
+                controller.updateFrame(
+                    documentId = snapshot.documentId,
+                    page = snapshot.page,
+                    viewportOffsetX = snapshot.panX,
+                    viewportOffsetY = snapshot.pageOffsetPx.toFloat(),
+                    viewportScale = snapshot.zoom,
+                    toolMode = snapshot.toolMode,
+                )
+            }
+    }
+
+    val remoteBroadcastToolMode by produceState<ToolMode?>(
+        null,
+        documentBroadcastController,
+        peerServer,
+        documentId,
+        hasBroadcastPeer,
+    ) {
+        val controller = documentBroadcastController ?: return@produceState
+        if (peerServer == null || !hasBroadcastPeer) return@produceState
+        controller.currentFrame.collect { frame ->
+            value = broadcastToolModeForDocument(frame, documentId)
+        }
+    }
+
+    LaunchedEffect(documentBroadcastController, peerServer, isFocused, documentId, hasBroadcastPeer) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        if (
+            !shouldApplyBroadcastFrame(
+                hasPeerServer = peerServer != null,
+                isFocused = isFocused,
+                hasBroadcastConnection = hasBroadcastPeer,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        controller.currentFrame.collect { frame ->
+            val command =
+                broadcastViewportCommandForDocument(
+                    frame = frame,
+                    documentId = documentId,
+                    currentScalePercent = pdfViewerState.scalePercent,
+                    currentPanX = pdfViewerState.pan.x,
+                ) ?: return@collect
+            command.targetScalePercent?.let { scalePercent ->
+                pdfViewerState.setScalePercent(scalePercent)
+            }
+            pdfViewerState.scrollToPage(command.page, command.pageOffsetPx)
+            command.targetPanX?.let { targetPanX ->
+                val deltaX = targetPanX - pdfViewerState.pan.x
+                if (deltaX.isFinite() && (deltaX > 0.5f || deltaX < -0.5f)) {
+                    pdfViewerState.panGestureBy(Offset(deltaX, 0f))
+                }
+            }
+        }
     }
 
     // ---- High-res magnifier render ---------------------------------------
@@ -1788,6 +1899,25 @@ fun EditorPanel(
                                     ),
                         )
                     }
+                }
+            }
+
+            remoteBroadcastToolMode?.let { mode ->
+                Surface(
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .padding(12.dp),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    tonalElevation = 2.dp,
+                ) {
+                    Text(
+                        text = "Планшет: ${mode.broadcastLabel()}",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
                 }
             }
 

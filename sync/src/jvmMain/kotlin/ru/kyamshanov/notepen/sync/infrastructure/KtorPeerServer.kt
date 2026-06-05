@@ -211,36 +211,7 @@ class KtorPeerServer(
 
     @Suppress("ReturnCount", "LongMethod")
     private suspend fun handleSession(session: DefaultWebSocketServerSession) {
-        // Identify the caller by remote IP for rate limiting. Direct LAN connections
-        // have no proxy, so origin falls back to the real peer address; keying on the
-        // address (not the ephemeral source port) stops a guesser cycling ports.
-        val remoteKey = session.call.request.remoteKey()
-        // Reject a remote that's already over its failure budget before reading the
-        // body, so a brute-forcer gets a uniform fast close with no validity signal.
-        if (rateLimiter.isLockedOut(remoteKey)) {
-            session.close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "too many attempts"))
-            return
-        }
-        val first = runCatching { session.receiveDeserialized<NetworkMessage>() }.getOrNull()
-        if (first !is NetworkMessage.PairRequest) {
-            session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "expected pair_request"))
-            return
-        }
-        if (!pairing.validate(first.code)) {
-            // Count the failure; if it tips the remote over the threshold, close hard
-            // (no PairRejected) so repeat offenders stop getting a clean "invalid code".
-            val lockedOut = rateLimiter.recordFailure(remoteKey)
-            if (lockedOut) {
-                session.close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "too many attempts"))
-            } else {
-                session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("invalid code"))
-                session.close()
-            }
-            return
-        }
-        // Valid code: clear this remote's failure history so an earlier mistype by a
-        // legitimate client doesn't count against its later successful attempts.
-        rateLimiter.reset(remoteKey)
+        val first = receiveValidatedPairRequest(session) ?: return
         val peer = first.device
         // Reconnect handling: a new connection from a device id that already has
         // a (possibly stale, half-open) session REPLACES the old one rather than
@@ -248,51 +219,15 @@ class KtorPeerServer(
         // with "already connected" until the dead TCP timed out. A peer approved
         // earlier this cycle is auto-accepted (no second prompt), so reconnects
         // are seamless.
-        val replaced: EncryptedSession?
-        val autoApprove: Boolean
-        sessionMutex.withLock {
-            // A first-time approval is mid-decision — don't disrupt it; the legit
-            // client will retry and succeed once the user approves.
-            if (pendingPeers.containsKey(peer.id)) {
-                session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("approval in progress"))
-                session.close()
-                return
-            }
-            replaced = sessions.remove(peer.id)
-            autoApprove = peer.id in approvedPeerIds
-            if (!autoApprove) pendingPeers[peer.id] = peer
-        }
+        val prepared = preparePeerSession(session, peer) ?: return
         // Evict the old session outside the lock (close can block on a half-open
         // socket). Plain graceful close — no `Disconnect` message, the old client
         // must not tear down its own document state on a mere replacement.
-        replaced?.let { old -> runCatching { old.session.close(CloseReason(CloseReason.Codes.NORMAL, "replaced")) } }
-
-        if (!autoApprove) {
-            val approvalDeferred = CompletableDeferred<Boolean>()
-            sessionMutex.withLock { approvalDeferreds[peer.id] = approvalDeferred }
-            _pendingApprovals.emit(peer)
-
-            // Bound the wait: a peer that opens the handshake but is never approved/rejected
-            // must not pin this coroutine and its pendingPeers/approvalDeferreds slots forever.
-            // null = the user never decided in time; treat as a rejection.
-            val approved = withTimeoutOrNull(approvalTimeout) { approvalDeferred.await() }
-            sessionMutex.withLock {
-                approvalDeferreds.remove(peer.id)
-                pendingPeers.remove(peer.id)
-                if (approved == true) approvedPeerIds.add(peer.id)
-            }
-            if (approved == null) {
-                logger.warn { "Approval for ${peer.name} (${peer.id}) timed out after $approvalTimeout; rejecting" }
-                runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("approval timed out")) }
-                runCatching { session.close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "approval timed out")) }
-                return
-            }
-            if (!approved) {
-                runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.Disconnect) }
-                session.close(CloseReason(CloseReason.Codes.NORMAL, "rejected by user"))
-                return
-            }
+        prepared.replaced?.let { old ->
+            runCatching { old.session.close(CloseReason(CloseReason.Codes.NORMAL, "replaced")) }
         }
+
+        if (!prepared.autoApprove && !awaitPeerApproval(session, peer)) return
 
         // Approval done — accept in cleartext (the user-facing bootstrap), then upgrade
         // the link to the authenticated-encryption channel before doing anything else.
@@ -325,19 +260,7 @@ class KtorPeerServer(
         // generous (see SessionMessageRateLimiter), so honest clients never trip it.
         val messageLimiter = SessionMessageRateLimiter(maxMessages = maxMessagesPerSecond, now = now)
         try {
-            while (true) {
-                // Inbound application frames are encrypted (client→server). A null means
-                // the socket closed; a thrown SessionCipherException means a forged or
-                // tampered frame — both end the loop and tear the session down.
-                val msg = SecureChannel.receiveEncrypted(session, cipher, Direction.CLIENT_TO_SERVER, json) ?: break
-                if (!messageLimiter.allow()) {
-                    logger.warn { "Closing session for ${peer.name} (${peer.id}): inbound message rate exceeded" }
-                    session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "message rate exceeded"))
-                    break
-                }
-                if (msg is NetworkMessage.Disconnect) break
-                _incoming.emit(PeerMessage(peer, msg))
-            }
+            consumePeerMessages(session, peer, cipher, messageLimiter)
         } catch (e: Exception) {
             logger.warn { "Session for ${peer.name} ended: ${e.message}" }
         } finally {
@@ -353,6 +276,133 @@ class KtorPeerServer(
             publishConnectedPeers()
         }
     }
+
+    private suspend fun receiveValidatedPairRequest(session: DefaultWebSocketServerSession): NetworkMessage.PairRequest? {
+        // Identify the caller by remote IP for rate limiting. Direct LAN connections
+        // have no proxy, so origin falls back to the real peer address; keying on the
+        // address (not the ephemeral source port) stops a guesser cycling ports.
+        val remoteKey = session.call.request.remoteKey()
+        var validated: NetworkMessage.PairRequest? = null
+        when {
+            // Reject a remote that's already over its failure budget before reading the
+            // body, so a brute-forcer gets a uniform fast close with no validity signal.
+            rateLimiter.isLockedOut(remoteKey) ->
+                session.close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "too many attempts"))
+            else -> {
+                val first = runCatching { session.receiveDeserialized<NetworkMessage>() }.getOrNull()
+                when {
+                    first !is NetworkMessage.PairRequest ->
+                        session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "expected pair_request"))
+                    pairing.validate(first.code) -> {
+                        // Valid code: clear this remote's failure history so an earlier mistype by a
+                        // legitimate client doesn't count against its later successful attempts.
+                        rateLimiter.reset(remoteKey)
+                        validated = first
+                    }
+                    else -> rejectInvalidPairCode(session, remoteKey)
+                }
+            }
+        }
+        return validated
+    }
+
+    private suspend fun rejectInvalidPairCode(
+        session: DefaultWebSocketServerSession,
+        remoteKey: String,
+    ) {
+        // Count the failure; if it tips the remote over the threshold, close hard
+        // (no PairRejected) so repeat offenders stop getting a clean "invalid code".
+        if (rateLimiter.recordFailure(remoteKey)) {
+            session.close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "too many attempts"))
+        } else {
+            session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("invalid code"))
+            session.close()
+        }
+    }
+
+    private suspend fun preparePeerSession(
+        session: DefaultWebSocketServerSession,
+        peer: DeviceInfo,
+    ): PreparedPeerSession? {
+        val replaced: EncryptedSession?
+        val autoApprove: Boolean
+        sessionMutex.withLock {
+            // A first-time approval is mid-decision — don't disrupt it; the legit
+            // client will retry and succeed once the user approves.
+            if (pendingPeers.containsKey(peer.id)) {
+                session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("approval in progress"))
+                session.close()
+                return null
+            }
+            replaced = sessions.remove(peer.id)
+            autoApprove = peer.id in approvedPeerIds
+            if (!autoApprove) pendingPeers[peer.id] = peer
+        }
+        return PreparedPeerSession(replaced = replaced, autoApprove = autoApprove)
+    }
+
+    private suspend fun awaitPeerApproval(
+        session: DefaultWebSocketServerSession,
+        peer: DeviceInfo,
+    ): Boolean {
+        val approvalDeferred = CompletableDeferred<Boolean>()
+        sessionMutex.withLock { approvalDeferreds[peer.id] = approvalDeferred }
+        _pendingApprovals.emit(peer)
+
+        // Bound the wait: a peer that opens the handshake but is never approved/rejected
+        // must not pin this coroutine and its pendingPeers/approvalDeferreds slots forever.
+        // null = the user never decided in time; treat as a rejection.
+        val approved = withTimeoutOrNull(approvalTimeout) { approvalDeferred.await() }
+        sessionMutex.withLock {
+            approvalDeferreds.remove(peer.id)
+            pendingPeers.remove(peer.id)
+            if (approved == true) approvedPeerIds.add(peer.id)
+        }
+        return when (approved) {
+            true -> true
+            false -> {
+                runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.Disconnect) }
+                session.close(CloseReason(CloseReason.Codes.NORMAL, "rejected by user"))
+                false
+            }
+            null -> {
+                logger.warn { "Approval for ${peer.name} (${peer.id}) timed out after $approvalTimeout; rejecting" }
+                runCatching { session.sendSerialized<NetworkMessage>(NetworkMessage.PairRejected("approval timed out")) }
+                runCatching { session.close(CloseReason(CloseReason.Codes.TRY_AGAIN_LATER, "approval timed out")) }
+                false
+            }
+        }
+    }
+
+    private suspend fun consumePeerMessages(
+        session: DefaultWebSocketServerSession,
+        peer: DeviceInfo,
+        cipher: SessionCipher,
+        messageLimiter: SessionMessageRateLimiter,
+    ) {
+        var running = true
+        while (running) {
+            // Inbound application frames are encrypted (client→server). A null means
+            // the socket closed; a thrown SessionCipherException means a forged or
+            // tampered frame — both end the loop and tear the session down.
+            val msg = SecureChannel.receiveEncrypted(session, cipher, Direction.CLIENT_TO_SERVER, json)
+            when {
+                msg == null -> running = false
+                !messageLimiter.allow() -> {
+                    logger.warn { "Closing session for ${peer.name} (${peer.id}): inbound message rate exceeded" }
+                    session.close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "message rate exceeded"))
+                    running = false
+                }
+                msg is NetworkMessage.Disconnect -> running = false
+                else -> _incoming.emit(PeerMessage(peer, msg))
+            }
+        }
+    }
+
+    private data class PreparedPeerSession(
+        val replaced: EncryptedSession?,
+        val autoApprove: Boolean,
+    )
 
     /**
      * Performs the post-handshake key confirmation for [session] against [peer].

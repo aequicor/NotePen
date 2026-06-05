@@ -52,11 +52,14 @@ class InMemoryPendingDeltaQueue(
                     "Pending queue per-document cap ($maxPerDocument) reached for doc=$documentId; dropped oldest delta"
                 }
             }
-            // Global cap: drop the oldest delta across the OTHER documents until there is
-            // room for one more. The current document is excluded so the newest edit always
-            // lands; the per-document cap above already keeps `deque` within its own bound.
+            // Global cap: prefer dropping from other documents, but fall back to the current
+            // document when it is the only queue with data. The newest edit is appended after
+            // eviction, so it still lands while the total cap remains strict.
             while (totalSizeLocked() >= maxTotal) {
-                val victim = oldestEvictableQueueLocked(except = documentId) ?: break
+                val victim =
+                    oldestEvictableQueueLocked(except = documentId)
+                        ?: oldestEvictableQueueLocked(except = null)
+                        ?: break
                 victim.value.removeFirst()
                 if (victim.value.isEmpty()) queues.remove(victim.key)
                 logger.debug {
@@ -98,11 +101,11 @@ class InMemoryPendingDeltaQueue(
     private fun totalSizeLocked(): Int = queues.values.sumOf { it.size }
 
     /**
-     * The non-empty queue (other than [except]) whose head delta is the oldest by
-     * `clock` — the global FIFO eviction victim. `null` when no other document has
+     * The non-empty queue (other than [except], when present) whose head delta is the oldest by
+     * `clock` — the global FIFO eviction victim. `null` when no matching document has
      * anything to drop. Caller holds [mutex].
      */
-    private fun oldestEvictableQueueLocked(except: String): Map.Entry<String, ArrayDeque<StrokeDelta>>? =
+    private fun oldestEvictableQueueLocked(except: String?): Map.Entry<String, ArrayDeque<StrokeDelta>>? =
         queues.entries
             .filter { it.key != except && it.value.isNotEmpty() }
             .minByOrNull { it.value.first().clock }

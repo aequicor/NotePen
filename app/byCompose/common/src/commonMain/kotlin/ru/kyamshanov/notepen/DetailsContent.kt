@@ -146,14 +146,17 @@ import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tabs.DIVIDER_HIT
 import ru.kyamshanov.notepen.tabs.DocumentId
+import ru.kyamshanov.notepen.tabs.DocumentTab
 import ru.kyamshanov.notepen.tabs.GridContainer
 import ru.kyamshanov.notepen.tabs.LayoutPickerOverlay
 import ru.kyamshanov.notepen.tabs.LayoutTemplate
@@ -195,6 +198,24 @@ private data class ToolStateSnapshot(
     val markerWidthPinned: Boolean,
 )
 
+internal fun openDocumentInfosForBroadcast(
+    layout: WorkspaceLayout,
+    stateOf: (DocumentTab) -> PdfDocumentState,
+    receivedPdfDir: String?,
+): List<OpenDocumentInfo> =
+    layout.panels
+        .flatMap { panel -> panel.tabs.tabs }
+        .filterNot { tab -> receivedPdfDir != null && tab.filePath.startsWith(receivedPdfDir) }
+        .map { tab ->
+            val state = stateOf(tab)
+            OpenDocumentInfo(
+                documentId = state.documentId,
+                displayName = tab.displayName,
+                absolutePath = tab.filePath,
+            )
+        }.filter { it.documentId.isNotBlank() }
+        .distinctBy { it.documentId }
+
 /**
  * Editor screen: a unified toolbar plus a grid of 1–[ru.kyamshanov.notepen.tabs.MAX_PANELS]
  * [EditorPanel]s. Tab / panel / layout state lives in the
@@ -223,6 +244,8 @@ fun DetailsContent(
     documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     openDocumentsSink: ((List<ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo>) -> Unit)? = null,
+    documentBroadcastController: DocumentBroadcastController? = null,
+    broadcastDocumentUriFor: (suspend (documentId: String) -> String?)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Размер окна редактора берём из достоверного для платформы источника
@@ -326,6 +349,42 @@ fun DetailsContent(
         component.onPendingTabHandled()
     }
 
+    val hasBroadcastPeer by produceState(false, peerServer, peerClient) {
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
+            .collect { value = it }
+    }
+
+    LaunchedEffect(
+        documentBroadcastController,
+        peerServer,
+        broadcastDocumentUriFor,
+        workspaceRestored,
+        hasBroadcastPeer,
+        tabSession,
+    ) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        val resolver = broadcastDocumentUriFor ?: return@LaunchedEffect
+        if (peerServer == null || !hasBroadcastPeer || !workspaceRestored) return@LaunchedEffect
+        controller.currentFrame.collect { frame ->
+            val documentId = broadcastDocumentId(frame) ?: return@collect
+            val existingFocused = tabSession.focusDocument(documentId)
+            val uri = if (existingFocused) null else resolver(documentId)
+            val action =
+                broadcastDocumentOpenAction(
+                    frame = frame,
+                    documentAlreadyOpen = existingFocused,
+                    resolvedUri = uri,
+                )
+            if (action is BroadcastDocumentOpenAction.FocusExisting) return@collect
+            if (action !is BroadcastDocumentOpenAction.OpenResolved) return@collect
+            tabSession.openTab(
+                panelId = tabSession.layout.focusedPanelId,
+                filePath = action.uri,
+                displayName = resolveDocumentDisplayName(action.uri),
+            )
+        }
+    }
+
     // Warm the content-addressed wire id for every open document so the
     // synchronous [syncDocumentIdFor] resolves to the canonical id instead of
     // the legacy fallback. Remote-cached files are skipped — their id comes from
@@ -350,22 +409,18 @@ fun DetailsContent(
 
     // Публикуем открытые во вкладках документы, чтобы хост раздал их пирам
     // (раздел «Открыто на устройстве» в каталоге пира). Remote-кешированные файлы
-    // пропускаем — их documentId принадлежит чужому хосту. Wire-id берём тем же
-    // [syncDocumentIdFor], что и для синхронизации, чтобы пир попал в тот же документ.
+    // пропускаем — их documentId принадлежит чужому хосту. Wire-id берём из уже
+    // созданного [PdfDocumentState], чтобы каталог, sync engine и ProjectionFrame
+    // не разошлись, если content-addressed identity cache прогрелся после создания
+    // вкладки.
     if (openDocumentsSink != null) {
-        LaunchedEffect(tabSession, openDocumentsSink, receivedPdfDir, syncDocumentIdFor) {
+        LaunchedEffect(tabSession, openDocumentsSink, receivedPdfDir) {
             snapshotFlow {
-                tabSession.layout.panels
-                    .flatMap { panel -> panel.tabs.tabs }
-                    .filterNot { tab -> receivedPdfDir != null && tab.filePath.startsWith(receivedPdfDir) }
-                    .map { tab ->
-                        ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo(
-                            documentId = syncDocumentIdFor(tab.filePath),
-                            displayName = tab.displayName,
-                            absolutePath = tab.filePath,
-                        )
-                    }.filter { it.documentId.isNotBlank() }
-                    .distinctBy { it.documentId }
+                openDocumentInfosForBroadcast(
+                    layout = tabSession.layout,
+                    stateOf = tabSession::stateOf,
+                    receivedPdfDir = receivedPdfDir,
+                )
             }.collect { openDocumentsSink(it) }
         }
     }
@@ -476,6 +531,24 @@ fun DetailsContent(
             1 in shortcutsSettings.loupeClose.penButtons ||
             1 in shortcutsSettings.penPan.penButtons
     val eraserOverride = (barrelPressed && !barrelBoundToShortcut) || eraserTipActive
+    val focusedDocumentId by remember(tabSession) {
+        derivedStateOf { tabSession.focusedActiveState?.documentId }
+    }
+    val broadcastToolbarToolMode by produceState<ToolMode?>(
+        null,
+        documentBroadcastController,
+        peerServer,
+        focusedDocumentId,
+        hasBroadcastPeer,
+    ) {
+        val controller = documentBroadcastController ?: return@produceState
+        val documentId = focusedDocumentId?.takeIf { it.isNotBlank() } ?: return@produceState
+        if (peerServer == null || !hasBroadcastPeer) return@produceState
+        controller.currentFrame.collect { frame ->
+            value = broadcastToolModeForDocument(frame, documentId)
+        }
+    }
+    val toolbarToolMode = displayedToolMode(localToolMode = toolMode, broadcastToolMode = broadcastToolbarToolMode)
 
     LaunchedEffect(stylusEverSeen, pencilModeManuallyTouched) {
         if (pencilModeManuallyTouched) return@LaunchedEffect
@@ -1036,6 +1109,7 @@ fun DetailsContent(
                         openDocumentRegistry = openDocumentRegistry,
                         liveSyncController = liveSyncController,
                         hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
+                        documentBroadcastController = documentBroadcastController,
                         showSnackbar = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } },
                         onRestoreToolSettings = { pen, marker, eraser ->
                             penSettings = pen
@@ -1176,7 +1250,7 @@ fun DetailsContent(
                             LandscapeToolRail(
                                 tools =
                                     ToolRailTools(
-                                        toolMode = toolMode,
+                                        toolMode = toolbarToolMode,
                                         onToolModeChange = { toolMode = it },
                                         penSettings = penSettings,
                                         onPenSettingsChange = { penSettings = it },
@@ -1324,7 +1398,7 @@ fun DetailsContent(
                                 currentPage = currentPage,
                                 totalPages = totalPages,
                                 onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
-                                toolMode = toolMode,
+                                toolMode = toolbarToolMode,
                                 onToolModeChange = { toolMode = it },
                                 penSettings = penSettings,
                                 onPenSettingsChange = { penSettings = it },

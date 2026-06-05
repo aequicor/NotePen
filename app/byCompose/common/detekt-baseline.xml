@@ -55,6 +55,7 @@
     <ID>TooManyFunctions:FolderRepositoryDesktop.kt:FolderRepositoryDesktop : FolderRepository</ID>
     <ID>TooManyFunctions:GridContainer.kt:ru.kyamshanov.notepen.tabs.GridContainer.kt</ID>
     <ID>TooManyFunctions:JvmBookPdfRenderer.kt:JvmBookPdfRenderer$PageComposer</ID>
+    <ID>TooManyFunctions:JvmLibraryConnectionStore.kt:JvmLibraryConnectionStore : LibraryConnectionStore</ID>
     <ID>TooManyFunctions:MainScreenViewModel.kt:MainScreenViewModel</ID>
     <ID>TooManyFunctions:SessionRepositoryDesktop.kt:SessionRepositoryDesktop : SessionRepository</ID>
     <ID>TooManyFunctions:TabSession.kt:TabSession</ID>

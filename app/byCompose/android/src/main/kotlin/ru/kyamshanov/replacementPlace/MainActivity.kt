@@ -26,9 +26,13 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.serialization.kotlinx.KotlinxWebsocketSerializationConverter
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
@@ -86,6 +90,7 @@ import ru.kyamshanov.notepen.qrconnect.peerLibraryRegistrar
 import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvider
 import ru.kyamshanov.notepen.sync.domain.CatalogDiffOrphanDetector
 import ru.kyamshanov.notepen.sync.domain.DocumentStatusCoordinator
+import ru.kyamshanov.notepen.sync.domain.DocumentTransferRequestHandler
 import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
 import ru.kyamshanov.notepen.sync.domain.LocalCachedDocumentCleaner
@@ -94,11 +99,14 @@ import ru.kyamshanov.notepen.sync.domain.RemoteCatalogClientCoordinator
 import ru.kyamshanov.notepen.sync.domain.RemoteCatalogProvider
 import ru.kyamshanov.notepen.sync.domain.RemoteDocumentOpener
 import ru.kyamshanov.notepen.sync.domain.SyncEngineRegistry
+import ru.kyamshanov.notepen.sync.domain.documentIdToCacheFileName
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
+import ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo
 import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
+import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentsRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteCatalogCache
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryRemoteDocumentStatusRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.JsonLocalDocumentIdRegistry
@@ -134,6 +142,57 @@ private const val INPUT_RECOVERY_DELAY_MS = 150L
 private fun recoverRootInput(view: android.view.View) {
     view.isFocusableInTouchMode = true
     view.requestFocus()
+}
+
+private suspend fun publishTransferableOpenDocuments(
+    context: android.content.Context,
+    registry: InMemoryOpenDocumentsRegistry,
+    documents: List<OpenDocumentInfo>,
+) {
+    val cacheDir = java.io.File(context.cacheDir, "sync/open-documents")
+    val transferable =
+        documents.mapNotNull { document ->
+            materializeOpenDocumentForTransfer(context, cacheDir, document)
+        }
+    currentCoroutineContext().ensureActive()
+    registry.publish(transferable)
+}
+
+private suspend fun materializeOpenDocumentForTransfer(
+    context: android.content.Context,
+    cacheDir: java.io.File,
+    document: OpenDocumentInfo,
+): OpenDocumentInfo? {
+    currentCoroutineContext().ensureActive()
+    val uri = runCatching { Uri.parse(document.absolutePath) }.getOrNull()
+    return when (uri?.scheme) {
+        android.content.ContentResolver.SCHEME_CONTENT ->
+            try {
+                cacheDir.mkdirs()
+                val target = java.io.File(cacheDir, documentIdToCacheFileName(document.documentId, document.displayName))
+                val input =
+                    context.contentResolver.openInputStream(uri)
+                        ?: error("ContentResolver returned null stream")
+                input.use { source ->
+                    target.outputStream().use { sink -> source.copyTo(sink) }
+                }
+                currentCoroutineContext().ensureActive()
+                document.copy(
+                    absolutePath = target.absolutePath,
+                    fileSize = target.length().takeIf { it >= 0L },
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Throwable) {
+                null
+            }
+        android.content.ContentResolver.SCHEME_FILE ->
+            uri.path
+                ?.takeIf { it.isNotBlank() }
+                ?.let { path -> document.copy(absolutePath = path) }
+                ?: document
+        else -> document
+    }
 }
 
 class MainActivity : ComponentActivity() {
@@ -229,6 +288,7 @@ class MainActivity : ComponentActivity() {
         val remoteCatalogCache = InMemoryRemoteCatalogCache()
         val remoteDocumentStatusRegistry = InMemoryRemoteDocumentStatusRegistry()
         val openDocumentRegistry = InMemoryOpenDocumentRegistry()
+        val openDocumentsRegistry = InMemoryOpenDocumentsRegistry()
         val localDocumentIdRegistry =
             JsonLocalDocumentIdRegistry(
                 manifestPath = "$receivedDir/.notepen-doc-ids.json",
@@ -471,8 +531,11 @@ class MainActivity : ComponentActivity() {
                             identityProvider = documentIdentityProvider,
                         ),
                     folderRepository = folderRepo,
+                    openDocumentsProvider = openDocumentsRegistry,
                 )
             remoteCatalogProvider.serve(client = syncClient, scope = appScope)
+            DocumentTransferRequestHandler(client = syncClient, provider = remoteCatalogProvider)
+                .start(scope = appScope)
             remoteCatalogProvider.broadcastChanges(
                 notifier = catalogChangeNotifier,
                 client = syncClient,
@@ -727,6 +790,10 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+            val openDocumentsPublishJob = remember { arrayOf<Job?>(null) }
+            DisposableEffect(openDocumentsPublishJob) {
+                onDispose { openDocumentsPublishJob[0]?.cancel() }
+            }
             CompositionLocalProvider(LocalTabletInputController provides tabletController) {
                 App(
                     rootComponent = root,
@@ -744,6 +811,17 @@ class MainActivity : ComponentActivity() {
                     liveSyncController = liveSyncController,
                     localDocumentIdRegistry = localDocumentIdRegistry,
                     documentIdentityProvider = documentIdentityProvider,
+                    openDocumentsSink = { documents ->
+                        openDocumentsPublishJob[0]?.cancel()
+                        openDocumentsPublishJob[0] =
+                            appScope.launch(Dispatchers.IO) {
+                                publishTransferableOpenDocuments(
+                                    context = context,
+                                    registry = openDocumentsRegistry,
+                                    documents = documents,
+                                )
+                            }
+                    },
                 )
             }
         }

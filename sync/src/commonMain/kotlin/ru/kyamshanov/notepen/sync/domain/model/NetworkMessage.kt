@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.sync.domain.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 
 /**
  * Typed WebSocket protocol for peer-to-peer communication.
@@ -107,9 +108,11 @@ sealed class NetworkMessage {
     ) : NetworkMessage()
 
     /**
-     * Broadcast from host to viewer: current viewport and optional pointer position.
+     * Broadcast from the controlling device to passive viewers: current document,
+     * viewport, selected tool and optional pointer position.
      *
-     * Sent at ≤30 fps via `conflate()` to avoid flooding the WebSocket.
+     * Sent by [ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController]
+     * with pacing + `conflate()` to avoid flooding the WebSocket.
      * [pointerX] / [pointerY] are normalised [0..1] within the page, or null if
      * the pointer is not active.
      */
@@ -121,6 +124,9 @@ sealed class NetworkMessage {
         val viewportScale: Float,
         val pointerX: Float? = null,
         val pointerY: Float? = null,
+        val documentId: String = "",
+        val viewportOffsetX: Float = 0f,
+        val toolMode: ToolMode = ToolMode.NONE,
     ) : NetworkMessage()
 
     /** Viewer sends this to request detaching from the host's viewport ("free scroll"). */

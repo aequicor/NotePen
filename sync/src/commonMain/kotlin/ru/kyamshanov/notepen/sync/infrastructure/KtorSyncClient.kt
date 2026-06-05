@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.sync.infrastructure
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.receiveDeserialized
 import io.ktor.client.plugins.websocket.sendSerialized
@@ -284,7 +285,6 @@ private class HostSession(
         outgoingChannel.close()
     }
 
-    @Suppress("LongMethod")
     private suspend fun runSession(firstAttempt: Boolean): SessionOutcome {
         var outcome: SessionOutcome = SessionOutcome.Disconnected
         // Fresh per-session client nonce so every (re)connection derives a distinct
@@ -296,26 +296,9 @@ private class HostSession(
                 sendSerialized<NetworkMessage>(
                     NetworkMessage.PairRequest(code = pairingCode, device = selfInfo, clientNonce = clientNonce),
                 )
-                val accepted =
-                    when (val reply = receiveDeserialized<NetworkMessage>()) {
-                        is NetworkMessage.PairAccepted -> reply
-                        is NetworkMessage.PairRejected -> {
-                            onStateChange(server.id, PairingState.Error("Pairing rejected: ${reply.reason}"))
-                            return@webSocket Unit.also {
-                                outcome =
-                                    if (firstAttempt) {
-                                        SessionOutcome.PairingFailed(reply.reason)
-                                    } else {
-                                        SessionOutcome.Disconnected
-                                    }
-                            }
-                        }
-                        else -> {
-                            onStateChange(server.id, PairingState.Error("Unexpected reply: $reply"))
-                            outcome = SessionOutcome.PairingFailed("unexpected reply")
-                            return@webSocket
-                        }
-                    }
+                val pairReply = receivePairReply(firstAttempt)
+                outcome = pairReply.outcome
+                val accepted = pairReply.accepted ?: return@webSocket
 
                 // Authenticated-encryption upgrade (F2/F3): derive the session cipher
                 // from the pairing code + both nonces and confirm the host holds the
@@ -323,11 +306,7 @@ private class HostSession(
                 // lacks the code cannot produce a hello that opens, so we fail closed
                 // and never expose this client's data on the channel.
                 val cipher =
-                    runCatching {
-                        confirmKeys(session = this, accepted = accepted, clientNonce = clientNonce)
-                    }.getOrElse {
-                        logger.warn { "Key confirmation with ${server.id} failed: ${it.message}" }
-                        onStateChange(server.id, PairingState.Error("Secure channel setup failed"))
+                    confirmKeysOrFail(this, accepted, clientNonce) ?: run {
                         outcome = SessionOutcome.PairingFailed("secure channel setup failed")
                         return@webSocket
                     }
@@ -337,35 +316,16 @@ private class HostSession(
                 connectedFlag = true
                 onStateChange(server.id, PairingState.Connected(accepted.serverDevice))
                 outcome = SessionOutcome.Paired(accepted.serverDevice)
+                if (firstAttempt) {
+                    firstPairingResult.complete(Result.success(accepted.serverDevice))
+                }
                 logger.info { "Paired with ${accepted.serverDevice.name} (host=${server.id})" }
 
                 val session = this
-                val forwarder =
-                    launch {
-                        try {
-                            while (true) {
-                                val msg = outgoingChannel.receive()
-                                SecureChannel.sendEncrypted(session, cipher, Direction.CLIENT_TO_SERVER, json, msg)
-                            }
-                        } catch (_: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
-                            // Channel closed by [HostSession.cancel] — normal shutdown path.
-                        }
-                    }
+                val forwarder = launchForwarder(sessionScope = this, session = session, cipher = cipher)
                 try {
                     val hostPeer = peer ?: server
-                    while (true) {
-                        // Inbound application frames are encrypted (server→client). null =
-                        // socket closed; a thrown SessionCipherException = forged/tampered
-                        // frame, caught by the outer handler which ends the session.
-                        val msg =
-                            SecureChannel.receiveEncrypted(session, cipher, Direction.SERVER_TO_CLIENT, json) ?: break
-                        if (msg is NetworkMessage.Disconnect) {
-                            // Host deliberately closed us — terminal, do not reconnect.
-                            outcome = SessionOutcome.RemoteClosed
-                            break
-                        }
-                        incomingFlow.emit(HostMessage(hostPeer, msg))
-                    }
+                    outcome = consumeEncryptedIncoming(session, cipher, hostPeer)
                 } finally {
                     forwarder.cancel()
                     connectedFlag = false
@@ -376,6 +336,81 @@ private class HostSession(
         } catch (e: Exception) {
             logger.warn { "Session for ${server.id} ended: ${e.message}" }
             connectedFlag = false
+        }
+        return outcome
+    }
+
+    private suspend fun DefaultClientWebSocketSession.receivePairReply(firstAttempt: Boolean): PairReply =
+        when (val reply = receiveDeserialized<NetworkMessage>()) {
+            is NetworkMessage.PairAccepted -> PairReply(accepted = reply, outcome = SessionOutcome.Paired(reply.serverDevice))
+            is NetworkMessage.PairRejected -> {
+                onStateChange(server.id, PairingState.Error("Pairing rejected: ${reply.reason}"))
+                PairReply(
+                    accepted = null,
+                    outcome =
+                        if (firstAttempt) {
+                            SessionOutcome.PairingFailed(reply.reason)
+                        } else {
+                            SessionOutcome.Disconnected
+                        },
+                )
+            }
+            else -> {
+                onStateChange(server.id, PairingState.Error("Unexpected reply: $reply"))
+                PairReply(accepted = null, outcome = SessionOutcome.PairingFailed("unexpected reply"))
+            }
+        }
+
+    private suspend fun confirmKeysOrFail(
+        session: WebSocketSession,
+        accepted: NetworkMessage.PairAccepted,
+        clientNonce: String,
+    ): SessionCipher? =
+        runCatching {
+            confirmKeys(session = session, accepted = accepted, clientNonce = clientNonce)
+        }.getOrElse {
+            logger.warn { "Key confirmation with ${server.id} failed: ${it.message}" }
+            onStateChange(server.id, PairingState.Error("Secure channel setup failed"))
+            null
+        }
+
+    private fun launchForwarder(
+        sessionScope: CoroutineScope,
+        session: WebSocketSession,
+        cipher: SessionCipher,
+    ): Job =
+        sessionScope.launch {
+            try {
+                while (true) {
+                    val msg = outgoingChannel.receive()
+                    SecureChannel.sendEncrypted(session, cipher, Direction.CLIENT_TO_SERVER, json, msg)
+                }
+            } catch (_: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
+                // Channel closed by [HostSession.cancel] — normal shutdown path.
+            }
+        }
+
+    private suspend fun consumeEncryptedIncoming(
+        session: WebSocketSession,
+        cipher: SessionCipher,
+        hostPeer: DeviceInfo,
+    ): SessionOutcome {
+        var outcome: SessionOutcome = SessionOutcome.Paired(hostPeer)
+        var running = true
+        while (running) {
+            // Inbound application frames are encrypted (server→client). null =
+            // socket closed; a thrown SessionCipherException = forged/tampered
+            // frame, caught by the outer handler which ends the session.
+            val msg = SecureChannel.receiveEncrypted(session, cipher, Direction.SERVER_TO_CLIENT, json)
+            when {
+                msg == null -> running = false
+                msg is NetworkMessage.Disconnect -> {
+                    // Host deliberately closed us — terminal, do not reconnect.
+                    outcome = SessionOutcome.RemoteClosed
+                    running = false
+                }
+                else -> incomingFlow.emit(HostMessage(hostPeer, msg))
+            }
         }
         return outcome
     }
@@ -421,6 +456,11 @@ private class HostSession(
         return false
     }
 }
+
+private data class PairReply(
+    val accepted: NetworkMessage.PairAccepted?,
+    val outcome: SessionOutcome,
+)
 
 private sealed class SessionOutcome {
     data class Paired(

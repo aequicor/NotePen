@@ -162,6 +162,24 @@ class TabSession internal constructor(
         layout = layout.focusPanel(panelId)
     }
 
+    /**
+     * Focuses the first open tab whose sync id matches [documentId].
+     * Returns `false` when the document is not open in this editor session.
+     */
+    fun focusDocument(documentId: String): Boolean =
+        documentId
+            .takeIf { it.isNotBlank() }
+            ?.let { id ->
+                layout.panels.firstNotNullOfOrNull { panel ->
+                    panel.tabs.tabs.firstOrNull { tab -> stateOf(tab).documentId == id }
+                        ?.let { tab -> panel.id to tab.id }
+                }
+            }
+            ?.also { target ->
+                focusPanel(target.first)
+                setActiveTab(target.first, target.second)
+            } != null
+
     /** Templates that would host exactly one more panel than is open now (empty at [MAX_PANELS]). */
     fun availableTemplatesForAdd(): List<LayoutTemplate> {
         val target = layout.panels.size + 1

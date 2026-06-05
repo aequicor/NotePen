@@ -286,7 +286,15 @@ class DefaultRootComponent(
 
     @OptIn(DelicateDecomposeApi::class)
     override fun openDetailsExternally(uri: String) {
-        navigation.push(Config.Details(uri = uri, lastPageIndex = 0, instanceId = nextInstanceId()))
+        val existingIndex =
+            stack.value.items.indexOfLast { item ->
+                (item.configuration as? Config.Details)?.uri == uri
+            }
+        if (existingIndex >= 0) {
+            navigation.popTo(index = existingIndex)
+        } else {
+            navigation.push(Config.Details(uri = uri, lastPageIndex = 0, instanceId = nextInstanceId()))
+        }
     }
 
     @Serializable
