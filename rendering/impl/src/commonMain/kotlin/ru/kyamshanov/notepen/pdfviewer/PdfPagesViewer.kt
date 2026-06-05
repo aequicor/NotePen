@@ -224,6 +224,12 @@ expect class PdfViewerState {
     var zoom: Float
         private set
 
+    /** Ширина области просмотра в физических пикселях. */
+    val viewportWidthPx: Float
+
+    /** Высота области просмотра в физических пикселях. */
+    val viewportHeightPx: Float
+
     /**
      * Транзитный коэффициент масштаба, применяемый поверх [zoom] во время
      * активного pinch-жеста через `Modifier.graphicsLayer`. Равен `1f`, когда

@@ -68,6 +68,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -102,6 +103,7 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
+import ru.kyamshanov.notepen.pdfviewer.PdfViewerMath
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.pdfviewer.ScrollMode
 import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
@@ -161,6 +163,7 @@ private const val FIGURE_PAGE_RENDER_WIDTH_PX = 1600
 private const val PANEL_SIDEBAR_ANIM_MS = 220
 private const val REFLOW_PROBE_DELAY_AFTER_OPEN_MS = 750L
 private const val NATIVE_PEN_FALLBACK_SUPPRESS_MS = 500L
+private const val BROADCAST_ZOOM_SETTLE_DELAY_MS = 90L
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
@@ -176,8 +179,33 @@ private data class DocumentBroadcastSnapshot(
     val pageOffsetPx: Int,
     val panX: Float,
     val zoom: Float,
+    val viewportCenterX: Float?,
+    val viewportCenterY: Float?,
     val toolMode: ToolMode,
 )
+
+private fun PdfViewerState.applyBroadcastViewportCommand(command: BroadcastViewportCommand) {
+    command.targetScalePercent?.let { scalePercent ->
+        setScalePercent(scalePercent)
+    }
+    if (command.shouldScroll) {
+        scrollToPage(command.page, command.pageOffsetPx)
+    }
+    val deltaX = command.targetPanX?.let { it - pan.x } ?: 0f
+    val deltaY = command.targetPanY?.let { it - pan.y } ?: 0f
+    if (
+        deltaX.isFinite() &&
+        deltaY.isFinite() &&
+        (deltaX > 0.5f || deltaX < -0.5f || deltaY > 0.5f || deltaY < -0.5f)
+    ) {
+        beginPanGesture()
+        try {
+            panGestureBy(Offset(deltaX, deltaY))
+        } finally {
+            endPanGesture()
+        }
+    }
+}
 
 private fun ToolMode.broadcastLabel(): String =
     when (this) {
@@ -676,13 +704,32 @@ fun EditorPanel(
             return@LaunchedEffect
         }
         snapshotFlow {
+            val layout = pdfViewerState.layout
+            val pan = pdfViewerState.effectivePan
+            val zoom = pdfViewerState.effectiveZoom
+            val page = PdfViewerMath.firstVisiblePageIndex(layout, pan.y, zoom)
             DocumentBroadcastSnapshot(
                 documentId = documentId,
-                page = pdfViewerState.firstVisiblePageIndex,
-                pageOffsetPx = pdfViewerState.firstVisiblePageOffsetPx,
-                panX = pdfViewerState.pan.x,
-                zoom = pdfViewerState.zoom,
-                toolMode = toolMode,
+                page = page,
+                pageOffsetPx = PdfViewerMath.pageScrollOffsetPx(layout, page, pan.y, zoom),
+                panX = pan.x,
+                zoom = zoom,
+                viewportCenterX =
+                    viewportCenterX(
+                        panX = pan.x,
+                        viewportWidthPx = pdfViewerState.viewportWidthPx,
+                        rowWidthPx = PdfViewerMath.rowWidthPx(layout),
+                        zoom = zoom,
+                    ),
+                viewportCenterY =
+                    viewportCenterY(
+                        panY = pan.y,
+                        viewportHeightPx = pdfViewerState.viewportHeightPx,
+                        pageTopsPx = layout.pageTopsPx,
+                        pageHeightsPx = layout.pageHeightsPx,
+                        zoom = zoom,
+                    ),
+                toolMode = projectedToolMode(toolMode, eraserOverride),
             )
         }
             .distinctUntilChanged()
@@ -693,6 +740,8 @@ fun EditorPanel(
                     viewportOffsetX = snapshot.panX,
                     viewportOffsetY = snapshot.pageOffsetPx.toFloat(),
                     viewportScale = snapshot.zoom,
+                    viewportCenterX = snapshot.viewportCenterX,
+                    viewportCenterY = snapshot.viewportCenterY,
                     toolMode = snapshot.toolMode,
                 )
             }
@@ -723,23 +772,48 @@ fun EditorPanel(
         ) {
             return@LaunchedEffect
         }
-        controller.currentFrame.collect { frame ->
+        var previousFrame: NetworkMessage.ProjectionFrame? = null
+        controller.currentFrame.collectLatest { frame ->
+            val matchingPreviousFrame = previousFrame?.takeIf { it.documentId == frame?.documentId }
+            previousFrame = frame?.takeIf { it.documentId == documentId }
             val command =
                 broadcastViewportCommandForDocument(
                     frame = frame,
                     documentId = documentId,
+                    previousFrame = matchingPreviousFrame,
+                    currentPage = pdfViewerState.firstVisiblePageIndex,
+                    currentPageOffsetPx = pdfViewerState.firstVisiblePageOffsetPx,
                     currentScalePercent = pdfViewerState.scalePercent,
                     currentPanX = pdfViewerState.pan.x,
-                ) ?: return@collect
-            command.targetScalePercent?.let { scalePercent ->
-                pdfViewerState.setScalePercent(scalePercent)
-            }
-            pdfViewerState.scrollToPage(command.page, command.pageOffsetPx)
-            command.targetPanX?.let { targetPanX ->
-                val deltaX = targetPanX - pdfViewerState.pan.x
-                if (deltaX.isFinite() && (deltaX > 0.5f || deltaX < -0.5f)) {
-                    pdfViewerState.panGestureBy(Offset(deltaX, 0f))
-                }
+                    currentPanY = pdfViewerState.pan.y,
+                    currentViewportWidthPx = pdfViewerState.viewportWidthPx,
+                    currentViewportHeightPx = pdfViewerState.viewportHeightPx,
+                    currentRowWidthPx = PdfViewerMath.rowWidthPx(pdfViewerState.layout),
+                    currentPageTopsPx = pdfViewerState.layout.pageTopsPx,
+                    currentPageHeightsPx = pdfViewerState.layout.pageHeightsPx,
+                ) ?: return@collectLatest
+            if (command.targetScalePercent != null) {
+                delay(BROADCAST_ZOOM_SETTLE_DELAY_MS)
+                val settledCommand =
+                    broadcastViewportCommandForDocument(
+                        frame = frame,
+                        documentId = documentId,
+                        previousFrame = frame,
+                        currentPage = pdfViewerState.firstVisiblePageIndex,
+                        currentPageOffsetPx = pdfViewerState.firstVisiblePageOffsetPx,
+                        currentScalePercent = pdfViewerState.scalePercent,
+                        currentPanX = pdfViewerState.pan.x,
+                        currentPanY = pdfViewerState.pan.y,
+                        currentViewportWidthPx = pdfViewerState.viewportWidthPx,
+                        currentViewportHeightPx = pdfViewerState.viewportHeightPx,
+                        currentRowWidthPx = PdfViewerMath.rowWidthPx(pdfViewerState.layout),
+                        currentPageTopsPx = pdfViewerState.layout.pageTopsPx,
+                        currentPageHeightsPx = pdfViewerState.layout.pageHeightsPx,
+                        applyPanDuringScaleChange = true,
+                    ) ?: return@collectLatest
+                pdfViewerState.applyBroadcastViewportCommand(settledCommand)
+            } else {
+                pdfViewerState.applyBroadcastViewportCommand(command)
             }
         }
     }

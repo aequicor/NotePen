@@ -1083,7 +1083,7 @@ fun DetailsContent(
                         loader = loader,
                         renderer = renderer,
                         outlineProvider = outlineProvider,
-                        toolMode = toolMode,
+                        toolMode = toolbarToolMode,
                         penSettings = penSettings,
                         markerSettings = markerSettings,
                         eraserSettings = eraserSettings,

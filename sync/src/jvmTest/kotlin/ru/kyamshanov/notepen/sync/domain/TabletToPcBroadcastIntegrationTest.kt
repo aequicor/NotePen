@@ -124,6 +124,8 @@ class TabletToPcBroadcastIntegrationTest {
                 viewportOffsetX = -24f,
                 viewportOffsetY = 480f,
                 viewportScale = 1.75f,
+                viewportCenterX = 0.625f,
+                viewportCenterY = 3.96f,
                 toolMode = ToolMode.ERASER,
             )
 
@@ -135,6 +137,8 @@ class TabletToPcBroadcastIntegrationTest {
             assertEquals(-24f, frame.viewportOffsetX)
             assertEquals(480f, frame.viewportOffsetY)
             assertEquals(1.75f, frame.viewportScale)
+            assertEquals(0.625f, frame.viewportCenterX)
+            assertEquals(3.96f, frame.viewportCenterY)
             assertEquals(ToolMode.ERASER, frame.toolMode)
 
             val pcRegistry =

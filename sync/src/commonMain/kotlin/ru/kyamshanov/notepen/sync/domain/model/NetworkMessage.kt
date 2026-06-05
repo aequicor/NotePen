@@ -127,6 +127,8 @@ sealed class NetworkMessage {
         val documentId: String = "",
         val viewportOffsetX: Float = 0f,
         val toolMode: ToolMode = ToolMode.NONE,
+        val viewportCenterX: Float? = null,
+        val viewportCenterY: Float? = null,
     ) : NetworkMessage()
 
     /** Viewer sends this to request detaching from the host's viewport ("free scroll"). */

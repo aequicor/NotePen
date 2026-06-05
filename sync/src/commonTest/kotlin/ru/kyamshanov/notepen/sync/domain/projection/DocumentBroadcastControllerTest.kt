@@ -38,6 +38,8 @@ class DocumentBroadcastControllerTest {
                 viewportOffsetX = -12f,
                 viewportOffsetY = -120f,
                 viewportScale = 1.5f,
+                viewportCenterX = 0.75f,
+                viewportCenterY = 2.64f,
                 toolMode = ToolMode.MARKER,
             )
             runCurrent()
@@ -48,6 +50,8 @@ class DocumentBroadcastControllerTest {
             assertEquals(-12f, sent.single().viewportOffsetX)
             assertEquals(-120f, sent.single().viewportOffsetY)
             assertEquals(1.5f, sent.single().viewportScale)
+            assertEquals(0.75f, sent.single().viewportCenterX)
+            assertEquals(2.64f, sent.single().viewportCenterY)
             assertEquals(ToolMode.MARKER, sent.single().toolMode)
         }
 
@@ -96,6 +100,8 @@ class DocumentBroadcastControllerTest {
                 viewportOffsetX = Float.NaN,
                 viewportOffsetY = Float.POSITIVE_INFINITY,
                 viewportScale = 0f,
+                viewportCenterX = Float.NaN,
+                viewportCenterY = Float.NEGATIVE_INFINITY,
                 toolMode = ToolMode.PEN,
             )
             runCurrent()
@@ -105,6 +111,8 @@ class DocumentBroadcastControllerTest {
             assertEquals(0f, frame.viewportOffsetX)
             assertEquals(0f, frame.viewportOffsetY)
             assertEquals(1f, frame.viewportScale)
+            assertNull(frame.viewportCenterX)
+            assertNull(frame.viewportCenterY)
         }
 
     @Test
@@ -360,6 +368,7 @@ class DocumentBroadcastControllerTest {
                     viewportOffsetX = Float.NEGATIVE_INFINITY,
                     viewportOffsetY = Float.NaN,
                     viewportScale = -1f,
+                    viewportCenterX = Float.POSITIVE_INFINITY,
                     pointerX = 2f,
                     pointerY = Float.NaN,
                     toolMode = ToolMode.MARKER,
@@ -372,6 +381,7 @@ class DocumentBroadcastControllerTest {
             assertEquals(0f, frame?.viewportOffsetX)
             assertEquals(0f, frame?.viewportOffsetY)
             assertEquals(1f, frame?.viewportScale)
+            assertNull(frame?.viewportCenterX)
             assertEquals(1f, frame?.pointerX)
             assertNull(frame?.pointerY)
             assertEquals(ToolMode.MARKER, frame?.toolMode)
@@ -415,6 +425,8 @@ class DocumentBroadcastControllerTest {
                 viewportScale = 1.75f,
                 pointerX = 0.2f,
                 pointerY = 0.8f,
+                viewportCenterX = 0.6f,
+                viewportCenterY = 4.72f,
                 toolMode = ToolMode.ERASER,
             )
 
@@ -428,6 +440,8 @@ class DocumentBroadcastControllerTest {
         assertEquals(1.75f, projection.viewportScale)
         assertEquals(0.2f, projection.pointerX)
         assertEquals(0.8f, projection.pointerY)
+        assertEquals(0.6f, projection.viewportCenterX)
+        assertEquals(4.72f, projection.viewportCenterY)
         assertEquals(ToolMode.ERASER, projection.toolMode)
     }
 }

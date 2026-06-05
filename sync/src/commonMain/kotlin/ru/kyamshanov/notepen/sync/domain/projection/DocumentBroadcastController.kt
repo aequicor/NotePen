@@ -70,6 +70,8 @@ class DocumentBroadcastController(
         viewportOffsetX: Float,
         viewportOffsetY: Float,
         viewportScale: Float,
+        viewportCenterX: Float? = null,
+        viewportCenterY: Float? = null,
         toolMode: ToolMode,
     ) {
         if (documentId.isBlank()) return
@@ -81,6 +83,8 @@ class DocumentBroadcastController(
                 viewportOffsetX = viewportOffsetX.finiteOrZero(),
                 viewportOffsetY = viewportOffsetY.finiteOrZero(),
                 viewportScale = viewportScale.positiveFiniteOrOne(),
+                viewportCenterX = viewportCenterX?.normalizedPointer(),
+                viewportCenterY = viewportCenterY?.finiteNonNegative(),
                 pointerX = current?.pointerX,
                 pointerY = current?.pointerY,
                 toolMode = toolMode,
@@ -132,6 +136,8 @@ private fun NetworkMessage.ProjectionFrame.sanitized(): NetworkMessage.Projectio
         viewportOffsetX = viewportOffsetX.finiteOrZero(),
         viewportOffsetY = viewportOffsetY.finiteOrZero(),
         viewportScale = viewportScale.positiveFiniteOrOne(),
+        viewportCenterX = viewportCenterX?.normalizedPointer(),
+        viewportCenterY = viewportCenterY?.finiteNonNegative(),
         pointerX = pointerX?.normalizedPointer(),
         pointerY = pointerY?.normalizedPointer(),
     )
@@ -141,3 +147,5 @@ private fun Float.finiteOrZero(): Float = takeIf { it.isFinite() } ?: 0f
 private fun Float.positiveFiniteOrOne(): Float = takeIf { it.isFinite() && it > 0f } ?: 1f
 
 private fun Float.normalizedPointer(): Float? = takeIf { it.isFinite() }?.coerceIn(0f, 1f)
+
+private fun Float.finiteNonNegative(): Float? = takeIf { it.isFinite() }?.coerceAtLeast(0f)

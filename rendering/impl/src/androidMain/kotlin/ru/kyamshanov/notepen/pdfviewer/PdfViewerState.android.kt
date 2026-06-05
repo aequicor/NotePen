@@ -46,6 +46,12 @@ actual class PdfViewerState internal constructor(
     var viewportSize: IntSize by mutableStateOf(IntSize.Zero)
         internal set
 
+    actual val viewportWidthPx: Float
+        get() = viewportSize.width.toFloat()
+
+    actual val viewportHeightPx: Float
+        get() = viewportSize.height.toFloat()
+
     /** Текущий список страниц документа. */
     var pages: List<PdfPageInfo> by mutableStateOf(emptyList())
         internal set

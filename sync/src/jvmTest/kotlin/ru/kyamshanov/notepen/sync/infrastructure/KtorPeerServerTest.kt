@@ -292,6 +292,7 @@ class KtorPeerServerTest {
                                 viewportOffsetX = -12f,
                                 viewportOffsetY = 240f,
                                 viewportScale = 1.5f,
+                                viewportCenterX = 0.4f,
                                 toolMode = ToolMode.MARKER,
                             ),
                     )
@@ -303,6 +304,7 @@ class KtorPeerServerTest {
                 assertEquals(-12f, frame.viewportOffsetX)
                 assertEquals(240f, frame.viewportOffsetY)
                 assertEquals(1.5f, frame.viewportScale)
+                assertEquals(0.4f, frame.viewportCenterX)
                 assertEquals(ToolMode.MARKER, frame.toolMode)
             } finally {
                 approver.cancel()
@@ -351,6 +353,7 @@ class KtorPeerServerTest {
                         viewportOffsetX = 18f,
                         viewportOffsetY = 360f,
                         viewportScale = 2.25f,
+                        viewportCenterX = 0.8f,
                         toolMode = ToolMode.ERASER,
                     ),
                 )
@@ -361,6 +364,7 @@ class KtorPeerServerTest {
                 assertEquals(18f, frame.viewportOffsetX)
                 assertEquals(360f, frame.viewportOffsetY)
                 assertEquals(2.25f, frame.viewportScale)
+                assertEquals(0.8f, frame.viewportCenterX)
                 assertEquals(ToolMode.ERASER, frame.toolMode)
             } finally {
                 syncClient.disconnectAll()

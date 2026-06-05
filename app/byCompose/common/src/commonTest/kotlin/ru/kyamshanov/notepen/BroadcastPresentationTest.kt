@@ -21,6 +21,9 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class BroadcastPresentationTest {
+    private val testPageTops = floatArrayOf(0f, 1000f, 2000f, 3000f, 4000f)
+    private val testPageHeights = floatArrayOf(1000f, 1000f, 1000f, 1000f, 1000f)
+
     @Test
     fun `broadcast tool mode is used only for matching document`() {
         val frame =
@@ -69,6 +72,18 @@ class BroadcastPresentationTest {
     }
 
     @Test
+    fun `projected tool mode uses eraser override`() {
+        assertEquals(
+            ToolMode.ERASER,
+            projectedToolMode(localToolMode = ToolMode.PEN, eraserOverride = true),
+        )
+        assertEquals(
+            ToolMode.MARKER,
+            projectedToolMode(localToolMode = ToolMode.MARKER, eraserOverride = false),
+        )
+    }
+
+    @Test
     fun `broadcast viewport command maps matching frame to page zoom and pan`() {
         val frame =
             NetworkMessage.ProjectionFrame(
@@ -83,16 +98,26 @@ class BroadcastPresentationTest {
             broadcastViewportCommandForDocument(
                 frame = frame,
                 documentId = "doc-1",
+                currentPage = 0,
+                currentPageOffsetPx = 0,
                 currentScalePercent = 100,
                 currentPanX = -10f,
+                currentPanY = -20f,
+                currentViewportWidthPx = 1200f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
             )
 
         assertEquals(
             BroadcastViewportCommand(
                 page = 4,
                 pageOffsetPx = 321,
+                shouldScroll = true,
                 targetScalePercent = 175,
-                targetPanX = -30f,
+                targetPanX = null,
+                targetPanY = null,
             ),
             command,
         )
@@ -113,22 +138,40 @@ class BroadcastPresentationTest {
             broadcastViewportCommandForDocument(
                 frame = frame,
                 documentId = "doc-2",
+                currentPage = 2,
+                currentPageOffsetPx = 0,
                 currentScalePercent = 100,
                 currentPanX = 10f,
+                currentPanY = -20f,
+                currentViewportWidthPx = 1200f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
             ),
         )
         assertEquals(
             BroadcastViewportCommand(
                 page = 2,
                 pageOffsetPx = 0,
+                shouldScroll = false,
                 targetScalePercent = null,
                 targetPanX = null,
+                targetPanY = null,
             ),
             broadcastViewportCommandForDocument(
                 frame = frame,
                 documentId = "doc-1",
+                currentPage = 2,
+                currentPageOffsetPx = 0,
                 currentScalePercent = 100,
                 currentPanX = 10f,
+                currentPanY = -20f,
+                currentViewportWidthPx = 1200f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
             ),
         )
     }
@@ -148,20 +191,30 @@ class BroadcastPresentationTest {
             BroadcastViewportCommand(
                 page = 0,
                 pageOffsetPx = 0,
+                shouldScroll = false,
                 targetScalePercent = null,
                 targetPanX = null,
+                targetPanY = null,
             ),
             broadcastViewportCommandForDocument(
                 frame = frame,
                 documentId = "doc-1",
+                currentPage = 0,
+                currentPageOffsetPx = 0,
                 currentScalePercent = 100,
                 currentPanX = 10f,
+                currentPanY = -20f,
+                currentViewportWidthPx = 1200f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
             ),
         )
     }
 
     @Test
-    fun `broadcast viewport command keeps target pan when zoom changes`() {
+    fun `broadcast viewport command preserves local horizontal pan when zoom changes`() {
         val frame =
             NetworkMessage.ProjectionFrame(
                 documentId = "doc-1",
@@ -175,14 +228,351 @@ class BroadcastPresentationTest {
             BroadcastViewportCommand(
                 page = 1,
                 pageOffsetPx = 10,
+                shouldScroll = true,
                 targetScalePercent = 150,
-                targetPanX = 42f,
+                targetPanX = null,
+                targetPanY = null,
             ),
             broadcastViewportCommandForDocument(
                 frame = frame,
                 documentId = "doc-1",
+                currentPage = 1,
+                currentPageOffsetPx = 10,
                 currentScalePercent = 100,
                 currentPanX = 42f,
+                currentPanY = -20f,
+                currentViewportWidthPx = 1200f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command maps normalized horizontal center to local viewport`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetX = -300f,
+                viewportOffsetY = 10f,
+                viewportScale = 2f,
+                viewportCenterX = 0.75f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 1,
+                pageOffsetPx = 10,
+                shouldScroll = false,
+                targetScalePercent = null,
+                targetPanX = -400f,
+                targetPanY = null,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                currentPage = 1,
+                currentPageOffsetPx = 10,
+                currentScalePercent = 200,
+                currentPanX = 0f,
+                currentPanY = -20f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command defers vertical pan during zoom frame`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetY = 100f,
+                viewportScale = 2f,
+                viewportCenterY = 1.6f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 1,
+                pageOffsetPx = 100,
+                shouldScroll = false,
+                targetScalePercent = 200,
+                targetPanX = null,
+                targetPanY = null,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                currentPage = 1,
+                currentPageOffsetPx = 100,
+                currentScalePercent = 100,
+                currentPanX = 0f,
+                currentPanY = -100f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command maps vertical center after scale settles`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetY = 100f,
+                viewportScale = 2f,
+                viewportCenterY = 1.6f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 1,
+                pageOffsetPx = 100,
+                shouldScroll = false,
+                targetScalePercent = null,
+                targetPanX = null,
+                targetPanY = -2750f,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                previousFrame = frame,
+                currentPage = 1,
+                currentPageOffsetPx = 100,
+                currentScalePercent = 200,
+                currentPanX = 0f,
+                currentPanY = -100f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command applies vertical center with settled zoom command`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetY = 100f,
+                viewportScale = 2f,
+                viewportCenterY = 1.6f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 1,
+                pageOffsetPx = 100,
+                shouldScroll = false,
+                targetScalePercent = 200,
+                targetPanX = null,
+                targetPanY = -2750f,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                previousFrame = frame,
+                currentPage = 1,
+                currentPageOffsetPx = 100,
+                currentScalePercent = 100,
+                currentPanX = 0f,
+                currentPanY = -100f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+                applyPanDuringScaleChange = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command applies horizontal center with settled zoom command`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetY = 100f,
+                viewportScale = 2f,
+                viewportCenterX = 0.75f,
+                viewportCenterY = 1.6f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 1,
+                pageOffsetPx = 100,
+                shouldScroll = false,
+                targetScalePercent = 200,
+                targetPanX = -400f,
+                targetPanY = -2750f,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                previousFrame = frame,
+                currentPage = 1,
+                currentPageOffsetPx = 100,
+                currentScalePercent = 100,
+                currentPanX = 0f,
+                currentPanY = -100f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+                applyPanDuringScaleChange = true,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command does not drag horizontal pan during zoom frame`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetY = 100f,
+                viewportScale = 2f,
+                viewportCenterX = 0.05f,
+                viewportCenterY = 1.6f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 1,
+                pageOffsetPx = 100,
+                shouldScroll = false,
+                targetScalePercent = 200,
+                targetPanX = null,
+                targetPanY = null,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                currentPage = 1,
+                currentPageOffsetPx = 100,
+                currentScalePercent = 100,
+                currentPanX = 0f,
+                currentPanY = -100f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command applies horizontal pan from remote center movement`() {
+        val previousFrame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetY = 100f,
+                viewportScale = 2f,
+                viewportCenterX = 0.50f,
+                viewportCenterY = 1.60f,
+            )
+        val frame =
+            previousFrame.copy(
+                viewportOffsetY = 112f,
+                viewportCenterX = 0.75f,
+                viewportCenterY = 1.61f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 1,
+                pageOffsetPx = 112,
+                shouldScroll = false,
+                targetScalePercent = null,
+                targetPanX = -400f,
+                targetPanY = -2770f,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                previousFrame = previousFrame,
+                currentPage = 1,
+                currentPageOffsetPx = 100,
+                currentScalePercent = 200,
+                currentPanX = 0f,
+                currentPanY = -100f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
+            ),
+        )
+    }
+
+    @Test
+    fun `viewport center y is encoded as page plus normalized page offset`() {
+        assertEquals(
+            1.6f,
+            viewportCenterY(
+                panY = -1150f,
+                viewportHeightPx = 900f,
+                pageTopsPx = testPageTops,
+                pageHeightsPx = testPageHeights,
+                zoom = 1f,
+            ),
+        )
+    }
+
+    @Test
+    fun `broadcast viewport command applies normalized horizontal center while remote scrolls vertically`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 2,
+                viewportOffsetX = -240f,
+                viewportOffsetY = 320f,
+                viewportScale = 1f,
+                viewportCenterX = 0.75f,
+            )
+
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 2,
+                pageOffsetPx = 320,
+                shouldScroll = true,
+                targetScalePercent = null,
+                targetPanX = 200f,
+                targetPanY = null,
+            ),
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                currentPage = 2,
+                currentPageOffsetPx = 300,
+                currentScalePercent = 100,
+                currentPanX = 120f,
+                currentPanY = -20f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = testPageTops,
+                currentPageHeightsPx = testPageHeights,
             ),
         )
     }
