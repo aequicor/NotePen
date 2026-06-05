@@ -115,7 +115,8 @@ actual class PdfViewerState internal constructor(
     private var pendingInitialPage: Int? = initialPageIndex.takeIf { it > 0 || initialPageOffsetPx > 0 }
     private var pendingInitialOffset: Int = initialPageOffsetPx
     private var pendingInitialScalePercent: Int? = null
-    private var hasInitialCentered: Boolean = false
+    private var pendingInitialPanXPx: Float? = null
+    private var hasInitialCentered: Boolean = initialPanX != 0f || initialPanY != 0f
 
     /** Отложенная перецентровка (см. [requestRecenter]). */
     private var pendingRecenterPage: Int? = null
@@ -132,8 +133,10 @@ actual class PdfViewerState internal constructor(
         val page = pendingInitialPage
         if (page != null) {
             applyInitialPosition(page, pendingInitialOffset)
+            applyInitialPanX(pendingInitialPanXPx)
             pendingInitialPage = null
             pendingInitialOffset = 0
+            pendingInitialPanXPx = null
             hasInitialCentered = true
             return
         }
@@ -170,16 +173,24 @@ actual class PdfViewerState internal constructor(
         scalePercent: Int,
         pageIndex: Int,
         pageOffsetPx: Int,
+        panXPx: Float?,
     ) {
         if (viewportSize.width > 0 && pages.isNotEmpty()) {
             setScalePercent(scalePercent)
             applyInitialPosition(pageIndex, pageOffsetPx)
+            applyInitialPanX(panXPx)
             hasInitialCentered = true
         } else {
             pendingInitialScalePercent = scalePercent
             pendingInitialPage = pageIndex
             pendingInitialOffset = pageOffsetPx
+            pendingInitialPanXPx = panXPx
         }
+    }
+
+    private fun applyInitialPanX(panXPx: Float?) {
+        panXPx ?: return
+        pan = centeredAndClamped(Offset(panXPx, pan.y))
     }
 
     actual val firstVisiblePageIndex: Int by derivedStateOf {
@@ -507,6 +518,7 @@ actual class PdfViewerState internal constructor(
                         s.zoom.toDouble(),
                         s.firstVisiblePageIndex,
                         s.firstVisiblePageOffsetPx,
+                        s.pan.x.toDouble(),
                     )
                 },
                 restore = { saved: List<Any?> ->
@@ -514,6 +526,7 @@ actual class PdfViewerState internal constructor(
                         initialZoom = (saved[0] as Number).toFloat(),
                         initialPageIndex = (saved[1] as Number).toInt(),
                         initialPageOffsetPx = (saved[2] as Number).toInt(),
+                        initialPanX = (saved.getOrNull(3) as? Number)?.toFloat() ?: 0f,
                     )
                 },
             )

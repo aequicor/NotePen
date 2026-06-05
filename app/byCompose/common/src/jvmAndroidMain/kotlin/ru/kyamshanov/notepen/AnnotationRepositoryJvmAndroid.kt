@@ -118,6 +118,9 @@ private data class AnnotationViewStateDto(
     val scale: Int = 100,
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
+    // Горизонтальный pan добавлен позже. null у легаси-сайдкаров означает
+    // прежнее поведение: восстановить страницу/вертикальный offset и центрировать X.
+    val panXPx: Float? = null,
     val readingMode: Boolean = false,
     // Дефолты сохраняют BC с легаси-сайдкарами без reflow-якоря: read даст 0/0,
     // что эквивалентно «открыть с начала» (так же, как для свежего документа).
@@ -382,6 +385,7 @@ class AnnotationRepositoryJvmAndroid(
                             scale = dto.scale,
                             currentPage = dto.currentPage,
                             currentPageOffset = dto.currentPageOffset,
+                            panXPx = dto.panXPx,
                             readingMode = dto.readingMode,
                             reflowAnchorBlockIndex = dto.reflowAnchorBlockIndex,
                             reflowAnchorCharStart = dto.reflowAnchorCharStart,
@@ -413,6 +417,7 @@ class AnnotationRepositoryJvmAndroid(
                             scale = viewState.scale,
                             currentPage = viewState.currentPage,
                             currentPageOffset = viewState.currentPageOffset,
+                            panXPx = viewState.panXPx,
                             readingMode = viewState.readingMode,
                             reflowAnchorBlockIndex = viewState.reflowAnchorBlockIndex,
                             reflowAnchorCharStart = viewState.reflowAnchorCharStart,

@@ -315,7 +315,13 @@ class AnnotationRepositoryJvmTest {
             val pdfPath = dir.resolve("doc.pdf").toString()
             repo.saveViewState(
                 pdfPath,
-                AnnotationViewState(scale = 130, currentPage = 5, currentPageOffset = 64, readingMode = true),
+                AnnotationViewState(
+                    scale = 130,
+                    currentPage = 5,
+                    currentPageOffset = 64,
+                    panXPx = -512.5f,
+                    readingMode = true,
+                ),
             )
 
             val view = repo.loadViewState(pdfPath).getOrThrow()
@@ -323,6 +329,7 @@ class AnnotationRepositoryJvmTest {
             assertEquals(130, view?.scale)
             assertEquals(5, view?.currentPage)
             assertEquals(64, view?.currentPageOffset)
+            assertEquals(-512.5f, view?.panXPx)
             assertEquals(true, view?.readingMode)
         }
 

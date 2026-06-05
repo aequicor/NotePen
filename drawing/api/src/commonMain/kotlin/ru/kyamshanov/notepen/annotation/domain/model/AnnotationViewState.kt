@@ -17,6 +17,8 @@ package ru.kyamshanov.notepen.annotation.domain.model
  * @property scale масштаб в процентах.
  * @property currentPage индекс верхней видимой страницы.
  * @property currentPageOffset вертикальный сдвиг внутри [currentPage] в пикселях.
+ * @property panXPx горизонтальный сдвиг документа во вьюпорте, в пикселях.
+ *   `null` означает легаси-сайдкар без сохранённого горизонтального pan.
  * @property readingMode включён ли режим чтения (reflow) для документа.
  * @property reflowAnchorBlockIndex индекс блока, открывающего текущую страницу
  *   в reflow-режиме (используется как `TextAnchor.blockIndex`). По умолчанию 0
@@ -50,6 +52,7 @@ data class AnnotationViewState(
     val scale: Int = 100,
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
+    val panXPx: Float? = null,
     val readingMode: Boolean = false,
     val reflowAnchorBlockIndex: Int = 0,
     val reflowAnchorCharStart: Int = 0,

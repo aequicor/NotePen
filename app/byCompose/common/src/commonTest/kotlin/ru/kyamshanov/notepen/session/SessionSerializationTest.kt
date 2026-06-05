@@ -42,7 +42,7 @@ class SessionSerializationTest {
             tabViewStates =
                 listOf(
                     listOf(
-                        TabViewState(scalePercent = 125, pageIndex = 3, pageOffsetPx = 42),
+                        TabViewState(scalePercent = 125, pageIndex = 3, pageOffsetPx = 42, panXPx = -240.5f),
                         TabViewState(),
                     ),
                     listOf(TabViewState(scalePercent = 80, pageIndex = 0, pageOffsetPx = -10)),
@@ -90,5 +90,6 @@ class SessionSerializationTest {
         assertEquals(100, decoded.scalePercent)
         assertEquals(0, decoded.pageIndex)
         assertEquals(0, decoded.pageOffsetPx)
+        assertEquals(null, decoded.panXPx)
     }
 }

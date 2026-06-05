@@ -73,6 +73,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -113,6 +114,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
@@ -165,6 +167,7 @@ import ru.kyamshanov.notepen.tabs.toSnapshot
 import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
+
 // App-lifetime background work for editor shutdown paths. Keep PDF close/save off the UI thread
 // so the first navigation back from a cold editor is not delayed by PDFBox or disk I/O.
 private val editorBackgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -412,22 +415,27 @@ fun DetailsContent(
     // tabs of the same file share it. A restore suppresses the preset effect below
     // so the document's saved settings aren't overwritten by a preset.
     val documentToolStates = remember { mutableStateMapOf<String, ToolStateSnapshot>() }
+    val currentToolSnapshot: () -> ToolStateSnapshot = {
+        ToolStateSnapshot(
+            toolMode = toolMode,
+            penSettings = penSettings,
+            markerSettings = markerSettings,
+            eraserSettings = eraserSettings,
+            markerWidthPinned = markerWidthPinned,
+        )
+    }
+    val checkpointFocusedToolState: () -> Unit = {
+        tabSession.focusedActiveState?.filePath?.let { filePath ->
+            documentToolStates[filePath] = currentToolSnapshot()
+        }
+    }
     LaunchedEffect(tabSession) {
         var previousFilePath = tabSession.focusedActiveState?.filePath
         snapshotFlow { tabSession.focusedActiveState?.filePath }
             .distinctUntilChanged()
             .drop(1)
             .collect { newFilePath ->
-                previousFilePath?.let { prev ->
-                    documentToolStates[prev] =
-                        ToolStateSnapshot(
-                            toolMode = toolMode,
-                            penSettings = penSettings,
-                            markerSettings = markerSettings,
-                            eraserSettings = eraserSettings,
-                            markerWidthPinned = markerWidthPinned,
-                        )
-                }
+                previousFilePath?.let { prev -> documentToolStates[prev] = currentToolSnapshot() }
                 previousFilePath = newFilePath
                 val restored = newFilePath?.let { documentToolStates[it] }
                 if (restored != null) {
@@ -506,6 +514,13 @@ fun DetailsContent(
             .distinctUntilChanged()
             .debounce(SESSION_AUTOSAVE_DEBOUNCE_MS)
             .collect { sessionRepository.saveAutosave(it) }
+    }
+    DisposableEffect(tabSession, sessionRepository) {
+        onDispose {
+            runBlocking(NonCancellable) {
+                sessionRepository.saveAutosave(tabSession.captureSession())
+            }
+        }
     }
     val pdfExporter = remember { createPdfExporter() }
     val reflowExtractor = remember { createPdfReflowExtractor() }
@@ -614,6 +629,7 @@ fun DetailsContent(
     val controls = focusedControls
     val totalPages = controls?.totalPages ?: 0
     val currentPage = controls?.currentPage ?: 1
+    val latestCurrentPageForFinalSave by rememberUpdatedState(currentPage)
     val scale = controls?.scalePercent ?: 100
     val hasAnnotations = controls?.hasAnnotations ?: false
     val isExporting = controls?.isExporting ?: false
@@ -712,25 +728,38 @@ fun DetailsContent(
     val saveTab: suspend (PdfDocumentState) -> Unit = { state ->
         val annotations = state.drawingStates.mapValues { (_, s) -> s.currentPaths.toList() }
         val extents = state.drawingStates.mapValues { (_, s) -> s.extent.value }
+        val tools = documentToolStates[state.filePath] ?: currentToolSnapshot()
         annotationRepository
             .save(
                 pdfPath = state.filePath,
                 annotations = annotations,
                 scale = state.pdfViewerState.scalePercent,
-                pen = penSettings,
-                marker = markerSettings,
-                eraser = eraserSettings,
+                pen = tools.penSettings,
+                marker = tools.markerSettings,
+                eraser = tools.eraserSettings,
                 currentPage = state.pdfViewerState.firstVisiblePageIndex,
                 currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
                 favoritePageIndices = state.favoritePageIndices.toSet(),
                 pageExtents = extents,
+                highlights = state.highlights.toMap(),
+                notes = state.notes.toMap(),
             ).onFailure { e -> logger.warn { "Save failed for ${state.filePath}: ${e::class.simpleName}" } }
     }
     val saveAllOpenTabs: suspend () -> Unit = {
+        checkpointFocusedToolState()
         tabSession.layout.panels
             .flatMap { it.tabs.tabs }
             .distinctBy { it.id }
             .forEach { saveTab(tabSession.stateOf(it)) }
+    }
+    val latestSaveAllOpenTabs by rememberUpdatedState(saveAllOpenTabs)
+    DisposableEffect(tabSession, annotationRepository) {
+        onDispose {
+            runBlocking(NonCancellable) {
+                latestSaveAllOpenTabs()
+                component.saveLastPageIndex(latestCurrentPageForFinalSave - 1)
+            }
+        }
     }
     val onBackWithSave: () -> Unit = {
         // Pop the editor immediately; persistence can finish after the UI has returned to main.

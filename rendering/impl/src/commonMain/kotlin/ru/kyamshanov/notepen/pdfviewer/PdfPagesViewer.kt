@@ -160,6 +160,7 @@ expect class PdfViewerState {
         scalePercent: Int,
         pageIndex: Int,
         pageOffsetPx: Int,
+        panXPx: Float? = null,
     )
 
     /**

@@ -27,6 +27,7 @@ fun TabSession.captureSession(): SessionData {
                         scalePercent = state.pdfViewerState.scalePercent,
                         pageIndex = state.pdfViewerState.firstVisiblePageIndex,
                         pageOffsetPx = state.pdfViewerState.firstVisiblePageOffsetPx,
+                        panXPx = state.pdfViewerState.pan.x,
                     )
             }
         }

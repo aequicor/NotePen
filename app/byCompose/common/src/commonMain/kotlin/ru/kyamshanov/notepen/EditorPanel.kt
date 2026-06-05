@@ -66,6 +66,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
@@ -77,6 +78,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
@@ -613,6 +615,23 @@ fun EditorPanel(
     val firstVisiblePage by remember(pdfState) { derivedStateOf { pdfViewerState.firstVisiblePageIndex } }
     val currentScalePercent by remember(pdfState) { derivedStateOf { pdfViewerState.scalePercent } }
     val currentPageOffsetPx by remember(pdfState) { derivedStateOf { pdfViewerState.firstVisiblePageOffsetPx } }
+    val currentViewState: () -> AnnotationViewState = {
+        AnnotationViewState(
+            scale = pdfViewerState.scalePercent,
+            currentPage = pdfViewerState.firstVisiblePageIndex,
+            currentPageOffset = pdfViewerState.firstVisiblePageOffsetPx,
+            panXPx = pdfViewerState.pan.x,
+            readingMode = pdfState.readingMode,
+            reflowAnchorBlockIndex = currentReadingAnchor.blockIndex,
+            reflowAnchorCharStart = currentReadingAnchor.charStart,
+            pageRotations = pageRotations.toMap(),
+            spreadSplit = pdfState.spreadSplit,
+            spreadViewOverride = pdfState.spreadViewOverride,
+        )
+    }
+    val canPersistLiveViewState: () -> Boolean = {
+        pages.isNotEmpty() && pdfViewerState.basePageWidthPx > 0f
+    }
 
     // ---- High-res magnifier render ---------------------------------------
     val magnifierPageIndices = magnifierState.segments.map { it.pageIndex }
@@ -903,6 +922,7 @@ fun EditorPanel(
                 scalePercent = viewOverride.scalePercent,
                 pageIndex = viewOverride.pageIndex,
                 pageOffsetPx = viewOverride.pageOffsetPx,
+                panXPx = viewOverride.panXPx,
             )
         }
         if (pdfState.annotationsLoaded) return@LaunchedEffect
@@ -914,6 +934,7 @@ fun EditorPanel(
                         scalePercent = view.scale,
                         pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
                         pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
+                        panXPx = if (pdfState.skipPageRestore) null else view.panXPx,
                     )
                 }
                 // Вторичный таб того же файла открываем в обычном (не reading) режиме —
@@ -965,6 +986,7 @@ fun EditorPanel(
                     scalePercent = bundle.scale,
                     pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,
                     pageOffsetPx = if (pdfState.skipPageRestore) 0 else bundle.currentPageOffset,
+                    panXPx = null,
                 )
             }
             onRestoreToolSettings(
@@ -1060,19 +1082,7 @@ fun EditorPanel(
     // «убийство приложения»: навигация успевает сохраниться по ходу сессии,
     // а не только на «назад»/«в библиотеку».
     LaunchedEffect(pdfState) {
-        snapshotFlow {
-            AnnotationViewState(
-                scale = pdfViewerState.scalePercent,
-                currentPage = pdfViewerState.firstVisiblePageIndex,
-                currentPageOffset = pdfViewerState.firstVisiblePageOffsetPx,
-                readingMode = pdfState.readingMode,
-                reflowAnchorBlockIndex = currentReadingAnchor.blockIndex,
-                reflowAnchorCharStart = currentReadingAnchor.charStart,
-                pageRotations = pageRotations.toMap(),
-                spreadSplit = pdfState.spreadSplit,
-                spreadViewOverride = pdfState.spreadViewOverride,
-            )
-        }.drop(1)
+        snapshotFlow { currentViewState() }.drop(1)
             .distinctUntilChanged()
             .debounce(PANEL_AUTOSAVE_DEBOUNCE)
             .collect { view ->
@@ -1080,6 +1090,17 @@ fun EditorPanel(
                     panelLogger.warn { "View-state save failed for $filePath: ${e::class.simpleName}" }
                 }
             }
+    }
+    DisposableEffect(pdfState, annotationRepository, filePath) {
+        onDispose {
+            if (canPersistLiveViewState()) {
+                runBlocking(NonCancellable) {
+                    annotationRepository.saveViewState(filePath, currentViewState()).onFailure { e ->
+                        panelLogger.warn { "Final view-state save failed for $filePath: ${e::class.simpleName}" }
+                    }
+                }
+            }
+        }
     }
 
     // ---- Gesture pipeline -------------------------------------------------
