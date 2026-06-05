@@ -1,10 +1,12 @@
 package ru.kyamshanov.notepen.rendering.api
 
+import kotlin.math.pow
+
 /**
  * Вычисляет ширину сегмента штриха с учётом давления и наклона пера.
  *
- * Формула: `baseWidthPx × pressure × (1 + tiltWidthGain × tilt)`,
- * результат не менее [RenderingConstants.MIN_RENDERED_STROKE_PX].
+ * Давление проходит через gamma-кривую с минимальным множителем, чтобы первые
+ * сэмплы пера с малым pressure не превращались в почти невидимый штрих.
  *
  * @param baseWidthPx базовая ширина штриха в пикселях (= normalizedWidth × pageWidthPx)
  * @param pressure давление стилуса `[0..1]`
@@ -18,5 +20,11 @@ public fun computeSegmentWidth(
     tilt: Float,
     tiltWidthGain: Float = RenderingConstants.TILT_WIDTH_GAIN,
 ): Float =
-    (baseWidthPx * pressure * (1f + tiltWidthGain * tilt))
+    (baseWidthPx * pressureWidthFactor(pressure) * (1f + tiltWidthGain * tilt))
         .coerceAtLeast(RenderingConstants.MIN_RENDERED_STROKE_PX)
+
+private fun pressureWidthFactor(pressure: Float): Float {
+    val curved = pressure.coerceIn(0f, 1f).pow(RenderingConstants.PRESSURE_WIDTH_GAMMA)
+    return RenderingConstants.MIN_PRESSURE_WIDTH_FACTOR +
+        (1f - RenderingConstants.MIN_PRESSURE_WIDTH_FACTOR) * curved
+}

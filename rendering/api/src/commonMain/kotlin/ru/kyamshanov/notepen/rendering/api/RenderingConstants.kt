@@ -8,6 +8,12 @@ public object RenderingConstants {
     /** Минимальная толщина сегмента штриха в пикселях canvas (ниже — Skia рисует артефакты). */
     public const val MIN_RENDERED_STROKE_PX: Float = 1f
 
+    /** Минимальный множитель ширины пера при очень слабом давлении. */
+    public const val MIN_PRESSURE_WIDTH_FACTOR: Float = 0.42f
+
+    /** Gamma-кривая давления: сглаживает малые значения pressure у начала штриха. */
+    public const val PRESSURE_WIDTH_GAMMA: Float = 0.65f
+
     /** Потолок каждого измерения off-screen ink-cache bitmap (px). */
     public const val INK_CACHE_MAX_DIMENSION_PX: Int = 3072
 

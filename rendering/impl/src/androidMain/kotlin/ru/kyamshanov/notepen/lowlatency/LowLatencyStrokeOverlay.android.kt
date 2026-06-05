@@ -34,15 +34,10 @@ import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.drawing.api.LiveStrokeSample
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+import ru.kyamshanov.notepen.rendering.api.RenderingConstants
+import ru.kyamshanov.notepen.rendering.api.computeSegmentWidth
 import kotlin.math.cos
 import kotlin.math.sin
-
-/**
- * Width modulation factor applied per tilt unit, mirroring the gain used in
- * the Compose-rendered live stroke so the visual width matches when the
- * overlay hands off to the cached bitmap on lift-off.
- */
-private const val TILT_WIDTH_GAIN = 0.5f
 
 private const val HANDOFF_FALLBACK_MS = 250L
 private const val HANDOFF_FRAME_DELAY = 2
@@ -338,7 +333,7 @@ private fun LiveStrokeSample.toStrokeSegment(slotWidthPx: Int): StrokeSegment {
 actual fun rememberLowLatencyOverlayAvailable(): Boolean = remember { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q }
 
 @Composable
-actual fun rememberLowLatencyOverlayMaxDimensionPx(): Int = remember { 2400 }
+actual fun rememberLowLatencyOverlayMaxDimensionPx(): Int = remember { RenderingConstants.LOW_LATENCY_OVERLAY_MAX_DIM_PX }
 
 private const val HIDDEN_ALPHA = 0f
 private const val VISIBLE_ALPHA = 1f
@@ -404,8 +399,7 @@ private fun drawSegment(
     }
 
     penPaint.color = segment.colorArgb
-    val tiltBoost = 1f + TILT_WIDTH_GAIN * curr.tilt
-    penPaint.strokeWidth = (segment.widthPx * curr.pressure * tiltBoost).coerceAtLeast(1f)
+    penPaint.strokeWidth = computeSegmentWidth(segment.widthPx, curr.pressure, curr.tilt)
     if (prev == null) {
         canvas.drawCircle(x, y, penPaint.strokeWidth * 0.5f, penPaint)
     } else {

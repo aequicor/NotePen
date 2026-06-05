@@ -108,8 +108,6 @@ private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
  * acceptable degradation only at extreme zoom, where the user is rarely
  * drawing.
  */
-private const val LOW_LATENCY_OVERLAY_MAX_DIM_PX = 2400
-
 private fun cappedLowLatencyOverlaySize(
     pageSize: IntSize,
     maxDimensionPx: Int,
@@ -118,11 +116,7 @@ private fun cappedLowLatencyOverlaySize(
     val h = pageSize.height
     if (w <= 0 || h <= 0) return IntSize.Zero
     val longest = maxOf(w, h)
-    if (longest <= maxDimensionPx) return pageSize
-    return IntSize(
-        width = (w.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
-        height = (h.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
-    )
+    return if (longest <= maxDimensionPx) pageSize else IntSize.Zero
 }
 
 @Composable

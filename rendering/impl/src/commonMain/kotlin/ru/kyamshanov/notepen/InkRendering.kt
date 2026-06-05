@@ -24,21 +24,9 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
+import ru.kyamshanov.notepen.rendering.api.computeSegmentWidth
 import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
-import kotlin.math.pow
 import androidx.compose.ui.graphics.Canvas as GraphicsCanvas
-
-/** Множитель «расширения» штриха при сильном наклоне пера (0..1 → ×(1..1+gain)). */
-private const val TILT_WIDTH_GAIN = 0.5f
-
-/**
- * Floor for any rendered stroke segment in pixels. Below 1px Skia's stroking
- * pipeline produces broken or invisible lines.
- */
-private const val MIN_RENDERED_STROKE_PX = 1f
-
-private const val MIN_WIDTH_FACTOR = 0.42f
-private const val PRESSURE_GAMMA = 0.65f
 
 /**
  * Android ceiling on either dimension of the off-screen ink-cache bitmap.
@@ -456,11 +444,6 @@ private fun DrawScope.drawStartDot(
     )
 }
 
-private fun pressureWidthFactor(pressure: Float): Float {
-    val curved = pressure.coerceIn(0f, 1f).pow(PRESSURE_GAMMA)
-    return MIN_WIDTH_FACTOR + (1f - MIN_WIDTH_FACTOR) * curved
-}
-
 private class RenderSampleScratch(
     var x: Float = 0f,
     var y: Float = 0f,
@@ -472,7 +455,7 @@ internal fun renderedPenStrokeWidth(
     baseWidth: Float,
     pressure: Float,
     tilt: Float,
-): Float = (baseWidth * pressureWidthFactor(pressure) * (1f + TILT_WIDTH_GAIN * tilt)).coerceAtLeast(MIN_RENDERED_STROKE_PX)
+): Float = computeSegmentWidth(baseWidth, pressure, tilt)
 
 /**
  * Renders [stroke] with per-segment width modulated by [DrawingPoint.pressure]
