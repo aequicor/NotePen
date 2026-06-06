@@ -62,18 +62,22 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
@@ -119,6 +123,11 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlOverlay
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlState
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.isBookCurlNativeRendererSupported
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
@@ -1164,6 +1173,12 @@ private fun PagedReflowContent(
         val playPageTurnSound = rememberPageTurnSoundPlayer()
         val latestPlayPageTurnSound = rememberUpdatedState(playPageTurnSound)
         var lastSoundPagerPage by remember(document) { mutableStateOf<Int?>(null) }
+        val reducedMotion = isReducedMotionEnabled()
+        val useNativeBookCurl =
+            !reducedMotion &&
+                settings.pageTransition == PageTransition.BOOK &&
+                isBookCurlNativeRendererSupported()
+        val animatePager = !reducedMotion && settings.pageTransition != PageTransition.NONE
         // Ре-пагинация: встаём на страницу, открывающуюся якорным блоком (не на тот же
         // номер) — место чтения сохраняется при смене кегля/полей/ориентации. Тяжёлый measure
         // (до ~50 ms для блока-главы EPUB) уносим на Default, чтобы не блокировать main.
@@ -1190,11 +1205,16 @@ private fun PagedReflowContent(
             if (newSpread != pagerState.currentPage) pagerState.scrollToPage(newSpread)
         }
         val pagedBlockTarget by navigateToBlock
-        LaunchedEffect(pagedBlockTarget) {
+        LaunchedEffect(pagedBlockTarget, useNativeBookCurl, animatePager) {
             val block = pagedBlockTarget ?: return@LaunchedEffect
             val targetWindowPage =
                 windows.indexOfLast { it.firstBlock <= block }.takeIf { it >= 0 } ?: return@LaunchedEffect
-            pagerState.animateScrollToPage(windowPageToSpread(targetWindowPage, pagesPerSpread))
+            val targetSpread = windowPageToSpread(targetWindowPage, pagesPerSpread)
+            if (useNativeBookCurl || !animatePager) {
+                pagerState.scrollToPage(targetSpread)
+            } else {
+                pagerState.animateScrollToPage(targetSpread)
+            }
             navigateToBlock.value = null
         }
         // Первый блок текущей страницы = якорь; публикуем наружу (прогресс + смена режима).
@@ -1245,13 +1265,95 @@ private fun PagedReflowContent(
 
         // «Листнуть на ±N»: тап-зоны, клавиши и Initial-свайп (при активном маркере) идут
         // через programmatic scroll. NONE и «уменьшить движение» → мгновенно, иначе анимация.
-        val animatePager = !isReducedMotionEnabled() && settings.pageTransition != PageTransition.NONE
+        var curlProgress by remember(document) { mutableStateOf(0f) }
+        var curlDirection by remember(document) { mutableStateOf(1) }
+        var curlGripYFraction by remember(document) { mutableStateOf(PAGE_CURL_DEFAULT_GRIP_Y) }
+        var curlVelocityX by remember(document) { mutableStateOf(0f) }
+        var curlPhase by remember(document) { mutableStateOf(BookCurlPhase.Idle) }
+        var curlTargetPage by remember(document) { mutableStateOf<Int?>(null) }
+
+        suspend fun animateCurlTo(
+            targetProgress: Float,
+            phase: BookCurlPhase,
+        ) {
+            curlPhase = phase
+            val start = curlProgress
+            val startNanos = withFrameNanos { it }
+            var done = false
+            while (!done) {
+                val now = withFrameNanos { it }
+                val raw = ((now - startNanos) / PAGE_CURL_SETTLE_NANOS.toFloat()).coerceIn(0f, 1f)
+                val eased = raw * raw * (3f - 2f * raw)
+                curlProgress = start + (targetProgress - start) * eased
+                done = raw >= 1f
+            }
+            curlProgress = targetProgress
+        }
+
+        suspend fun resetCurl() {
+            curlProgress = 0f
+            curlVelocityX = 0f
+            curlPhase = BookCurlPhase.Idle
+            curlTargetPage = null
+        }
+
+        val scrollLocked = LocalReflowSelectionState.current.scrollLocked
+        val pageCaptureLayers = remember(document, measureKey) { mutableStateMapOf<Int, GraphicsLayer>() }
+        val pageCurlImages = remember(document, measureKey) { mutableStateMapOf<Int, ImageBitmap>() }
+        val captureKeys = pageCaptureLayers.keys.toList()
+
+        suspend fun ensureCurlImage(page: Int): ImageBitmap? {
+            val cached = pageCurlImages[page]
+            val captured =
+                if (cached == null) {
+                    pageCaptureLayers[page]
+                        ?.let { layer -> runCatching { layer.toImageBitmap() }.getOrNull() }
+                        ?.also { pageCurlImages[page] = it }
+                } else {
+                    null
+                }
+            return cached ?: captured
+        }
+
+        suspend fun hasCurlImagesFor(
+            current: Int,
+            target: Int,
+        ): Boolean = ensureCurlImage(current) != null && ensureCurlImage(target) != null
+
+        suspend fun awaitCurlImagesFor(
+            current: Int,
+            target: Int,
+        ): Boolean {
+            repeat(PAGE_CURL_CAPTURE_ATTEMPTS) { attempt ->
+                if (hasCurlImagesFor(current, target)) return true
+                if (attempt < PAGE_CURL_CAPTURE_ATTEMPTS - 1) delay(PAGE_CURL_CAPTURE_DELAY_MS)
+            }
+            return false
+        }
+
         val pageDeltaHandler: (Int) -> Unit =
-            remember(scope, pagerState, lastPagerPage, animatePager) {
+            remember(scope, pagerState, lastPagerPage, animatePager, useNativeBookCurl, pageCaptureLayers, pageCurlImages) {
                 { delta ->
                     val target = (pagerState.currentPage + delta).coerceIn(0, lastPagerPage)
                     scope.launch {
-                        if (animatePager) pagerState.animateScrollToPage(target) else pagerState.scrollToPage(target)
+                        if (target == pagerState.currentPage) return@launch
+                        if (useNativeBookCurl) {
+                            if (!awaitCurlImagesFor(pagerState.currentPage, target)) {
+                                pagerState.scrollToPage(target)
+                                return@launch
+                            }
+                            curlDirection = if (delta > 0) 1 else -1
+                            curlGripYFraction = PAGE_CURL_DEFAULT_GRIP_Y
+                            curlVelocityX = -curlDirection * PAGE_CURL_SYNTHETIC_VELOCITY
+                            curlPhase = BookCurlPhase.Completing
+                            curlTargetPage = target
+                            curlProgress = PAGE_CURL_VISIBLE_PROGRESS
+                            animateCurlTo(1f, BookCurlPhase.Completing)
+                            pagerState.scrollToPage(target)
+                            resetCurl()
+                        } else {
+                            if (animatePager) pagerState.animateScrollToPage(target) else pagerState.scrollToPage(target)
+                        }
                     }
                 }
             }
@@ -1260,20 +1362,125 @@ private fun PagedReflowContent(
             onDispose { onPageDeltaReady(null) }
         }
 
-        val scrollLocked = LocalReflowSelectionState.current.scrollLocked
+        LaunchedEffect(pagerState.currentPage, captureKeys, useNativeBookCurl) {
+            if (!useNativeBookCurl) return@LaunchedEffect
+            delay(PAGE_CURL_CAPTURE_DELAY_MS)
+            val pages = (pagerState.currentPage - 1)..(pagerState.currentPage + 1)
+            pages.forEach { page ->
+                val layer = pageCaptureLayers[page] ?: return@forEach
+                runCatching { layer.toImageBitmap() }
+                    .onSuccess { pageCurlImages[page] = it }
+            }
+        }
         HorizontalPager(
             state = pagerState,
             // Соседние страницы не держим скомпонованными: при построчном переносе один блок
             // попадает на две страницы, а двойная регистрация координат ломала бы хит-тест
             // выделения. На свайпе сосед всё равно скомпонуется (выделение тогда заблокировано).
-            beyondViewportPageCount = 0,
-            userScrollEnabled = !scrollLocked,
+            beyondViewportPageCount = if (useNativeBookCurl) 1 else 0,
+            userScrollEnabled = !scrollLocked && !useNativeBookCurl,
             modifier =
                 Modifier
                     .fillMaxSize()
                     .padding(top = settings.topMargin, bottom = settings.bottomMargin)
-                    .clipToBounds(),
+                    .clipToBounds()
+                    .then(
+                        if (useNativeBookCurl && !scrollLocked) {
+                            Modifier.pointerInput(lastPagerPage, pagerState.currentPage) {
+                                var dragActive = false
+                                var totalDragX = 0f
+                                var targetPage = pagerState.currentPage
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        val fromForwardEdge = offset.x >= size.width * PAGE_CURL_FORWARD_EDGE_FRACTION
+                                        val fromBackEdge = offset.x <= size.width * PAGE_CURL_BACK_EDGE_FRACTION
+                                        val direction =
+                                            when {
+                                                fromForwardEdge -> 1
+                                                fromBackEdge -> -1
+                                                else -> 0
+                                            }
+                                        val target = (pagerState.currentPage + direction).coerceIn(0, lastPagerPage)
+                                        dragActive =
+                                            direction != 0 &&
+                                            target != pagerState.currentPage &&
+                                            pageCurlImages[pagerState.currentPage] != null &&
+                                            pageCurlImages[target] != null
+                                        if (dragActive) {
+                                            curlDirection = direction
+                                            curlGripYFraction =
+                                                (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                            curlTargetPage = target
+                                            curlVelocityX = 0f
+                                            curlPhase = BookCurlPhase.Dragging
+                                            curlProgress = 0f
+                                            totalDragX = 0f
+                                            targetPage = target
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        if (dragActive) {
+                                            scope.launch {
+                                                animateCurlTo(0f, BookCurlPhase.Returning)
+                                                resetCurl()
+                                            }
+                                        }
+                                        dragActive = false
+                                    },
+                                    onDragEnd = {
+                                        if (dragActive) {
+                                            val complete =
+                                                BookCurlPhysics.shouldComplete(
+                                                    BookCurlState(
+                                                        direction = curlDirection,
+                                                        gripY = curlGripYFraction * size.height,
+                                                        fingerX = 0f,
+                                                        fingerY = curlGripYFraction * size.height,
+                                                        velocityX = curlVelocityX,
+                                                        velocityY = 0f,
+                                                        progress = curlProgress,
+                                                        phase = BookCurlPhase.Dragging,
+                                                    ),
+                                                )
+                                            scope.launch {
+                                                if (complete) {
+                                                    animateCurlTo(1f, BookCurlPhase.Completing)
+                                                    pagerState.scrollToPage(targetPage)
+                                                } else {
+                                                    animateCurlTo(0f, BookCurlPhase.Returning)
+                                                }
+                                                resetCurl()
+                                            }
+                                        }
+                                        dragActive = false
+                                    },
+                                    onDrag = { change, dragAmount ->
+                                        if (dragActive) {
+                                            change.consume()
+                                            curlPhase = BookCurlPhase.Dragging
+                                            totalDragX += dragAmount.x
+                                            curlVelocityX = dragAmount.x * PAGE_CURL_DRAG_VELOCITY_SCALE
+                                            val signed = -totalDragX * curlDirection
+                                            curlProgress =
+                                                (signed / (size.width * PAGE_CURL_DRAG_DISTANCE_FRACTION))
+                                                    .coerceIn(0f, 1f)
+                                        }
+                                    },
+                                )
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
         ) { pagerPage ->
+            val captureLayer = rememberGraphicsLayer()
+            DisposableEffect(pagerPage, captureLayer) {
+                pageCaptureLayers[pagerPage] = captureLayer
+                onDispose {
+                    if (pageCaptureLayers[pagerPage] === captureLayer) pageCaptureLayers.remove(pagerPage)
+                    pageCurlImages.remove(pagerPage)
+                }
+            }
             if (!firstPageLogged.value) {
                 SideEffect {
                     if (!firstPageLogged.value) {
@@ -1291,7 +1498,11 @@ private fun PagedReflowContent(
             Box(
                 Modifier
                     .fillMaxSize()
-                    .pageTransitionLayer(settings.pageTransition, pageOffset, density.density),
+                    .pageTransitionLayer(
+                        transition = if (useNativeBookCurl) PageTransition.NONE else settings.pageTransition,
+                        pageOffset = pageOffset,
+                        densityScale = density.density,
+                    ).captureToLayer(captureLayer),
                 contentAlignment = Alignment.TopCenter,
             ) {
                 if (settings.twoPageSpread) {
@@ -1340,6 +1551,26 @@ private fun PagedReflowContent(
                         density = density,
                     )
                 }
+            }
+        }
+        if (useNativeBookCurl && !scrollLocked) {
+            val target = curlTargetPage
+            if (target != null && curlProgress > PAGE_CURL_VISIBLE_PROGRESS) {
+                BookCurlOverlay(
+                    front = pageCurlImages[pagerState.currentPage],
+                    back = pageCurlImages[target],
+                    progress = curlProgress,
+                    direction = curlDirection,
+                    gripYFraction = curlGripYFraction,
+                    velocityX = curlVelocityX,
+                    phase = curlPhase,
+                    twoPageSpread = settings.twoPageSpread,
+                    modifier =
+                        Modifier
+                            .fillMaxSize()
+                            .padding(top = settings.topMargin, bottom = settings.bottomMargin)
+                            .clipToBounds(),
+                )
             }
         }
     }
@@ -1448,6 +1679,23 @@ private fun Modifier.pageTransitionLayer(
         -> this
     }
 }
+
+private fun Modifier.captureToLayer(layer: GraphicsLayer): Modifier =
+    drawWithContent {
+        val layerSize =
+            IntSize(
+                width = size.width.roundToInt().coerceAtLeast(1),
+                height = size.height.roundToInt().coerceAtLeast(1),
+            )
+        layer.record(
+            density = this,
+            layoutDirection = layoutDirection,
+            size = layerSize,
+        ) {
+            this@drawWithContent.drawContent()
+        }
+        drawContent()
+    }
 
 private fun spreadCount(
     pageCount: Int,
@@ -2387,6 +2635,16 @@ private const val BOOK_CAMERA_DISTANCE = 32f
 private const val BOOK_ROTATION_DEGREES = 34f
 private const val BOOK_SCALE_LOSS = 0.025f
 private const val BOOK_ALPHA_LOSS = 0.08f
+private const val PAGE_CURL_CAPTURE_DELAY_MS = 32L
+private const val PAGE_CURL_CAPTURE_ATTEMPTS = 3
+private const val PAGE_CURL_VISIBLE_PROGRESS = 0.015f
+private const val PAGE_CURL_DEFAULT_GRIP_Y = 0.66f
+private const val PAGE_CURL_SYNTHETIC_VELOCITY = 2200f
+private const val PAGE_CURL_SETTLE_NANOS = 220_000_000L
+private const val PAGE_CURL_FORWARD_EDGE_FRACTION = 0.66f
+private const val PAGE_CURL_BACK_EDGE_FRACTION = 0.34f
+private const val PAGE_CURL_DRAG_DISTANCE_FRACTION = 0.55f
+private const val PAGE_CURL_DRAG_VELOCITY_SCALE = 60f
 
 private const val HEADING_SCALE_1 = 1.6f
 private const val HEADING_SCALE_2 = 1.35f
