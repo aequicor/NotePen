@@ -123,6 +123,7 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlDerived
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlMaterial
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlOverlay
@@ -132,6 +133,7 @@ import ru.kyamshanov.notepen.reflow.ui.bookcurl.captureReflowTexture
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.isBookCurlNativeRendererSupported
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.time.TimeSource
 
@@ -1270,24 +1272,48 @@ private fun PagedReflowContent(
         var curlProgress by remember(document) { mutableStateOf(0f) }
         var curlDirection by remember(document) { mutableStateOf(1) }
         var curlGripYFraction by remember(document) { mutableStateOf(PAGE_CURL_DEFAULT_GRIP_Y) }
+        // Текущая вертикаль пальца: при диагональном свайпе ≠ захвату ⇒ ось сгиба наклоняется (загиб «за угол»).
+        var curlFingerYFraction by remember(document) { mutableStateOf(PAGE_CURL_DEFAULT_GRIP_Y) }
         var curlVelocityX by remember(document) { mutableStateOf(0f) }
         var curlPhase by remember(document) { mutableStateOf(BookCurlPhase.Idle) }
         var curlTargetPage by remember(document) { mutableStateOf<Int?>(null) }
+        // Инерция/оседание зависят от материала: omega (жёсткость/масса) и zeta (демпфирование).
+        // omega/zeta размерно-независимы (физическая ширина страницы фиксирована), поэтому ширина px
+        // здесь не важна.
+        val curlSettle =
+            remember(settings.bookCurlMaterial) {
+                BookCurlDerived(BookCurlMaterial.of(settings.bookCurlMaterial), 1f)
+            }
 
+        // Оседание после отпускания — затухающий осциллятор (а не линейный ease): лист не «щёлкает»
+        // в позу, а догоняет цель и успокаивается по-разному для разных материалов (газета вяло,
+        // глянец чётко, картон быстро-жёстко). Жёсткий потолок времени гарантирует завершение.
         suspend fun animateCurlTo(
             targetProgress: Float,
             phase: BookCurlPhase,
         ) {
             curlPhase = phase
-            val start = curlProgress
-            val startNanos = withFrameNanos { it }
-            var done = false
-            while (!done) {
+            var value = curlProgress
+            var velocity = 0f
+            val omega = curlSettle.omega
+            val zeta = curlSettle.zeta
+            var prevNanos = withFrameNanos { it }
+            val deadline = prevNanos + PAGE_CURL_MAX_SETTLE_NANOS
+            var settled = false
+            while (!settled) {
                 val now = withFrameNanos { it }
-                val raw = ((now - startNanos) / PAGE_CURL_SETTLE_NANOS.toFloat()).coerceIn(0f, 1f)
-                val eased = raw * raw * (3f - 2f * raw)
-                curlProgress = start + (targetProgress - start) * eased
-                done = raw >= 1f
+                var remaining = ((now - prevNanos) / NANOS_PER_SECOND).coerceIn(0f, BookCurlPhysics.MAX_FRAME_SECONDS)
+                prevNanos = now
+                while (remaining > MIN_SUBSTEP_SECONDS) {
+                    val dt = minOf(BookCurlPhysics.FIXED_STEP_SECONDS, remaining)
+                    val accel = omega * omega * (targetProgress - value) - 2f * zeta * omega * velocity
+                    velocity += accel * dt
+                    value += velocity * dt
+                    remaining -= dt
+                }
+                curlProgress = value.coerceIn(0f, 1f)
+                val atRest = abs(targetProgress - value) < PAGE_CURL_SETTLE_EPS && abs(velocity) < PAGE_CURL_SETTLE_EPS
+                settled = atRest || now >= deadline
             }
             curlProgress = targetProgress
         }
@@ -1422,6 +1448,7 @@ private fun PagedReflowContent(
                             Modifier.pointerInput(lastPagerPage, pagerState.currentPage) {
                                 var dragActive = false
                                 var totalDragX = 0f
+                                var totalDragY = 0f
                                 var targetPage = pagerState.currentPage
                                 detectDragGestures(
                                     onDragStart = { offset ->
@@ -1441,11 +1468,13 @@ private fun PagedReflowContent(
                                             curlDirection = direction
                                             curlGripYFraction =
                                                 (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                            curlFingerYFraction = curlGripYFraction
                                             curlTargetPage = target
                                             curlVelocityX = 0f
                                             curlPhase = BookCurlPhase.Dragging
                                             curlProgress = 0f
                                             totalDragX = 0f
+                                            totalDragY = 0f
                                             targetPage = target
                                         }
                                     },
@@ -1490,10 +1519,17 @@ private fun PagedReflowContent(
                                             change.consume()
                                             curlPhase = BookCurlPhase.Dragging
                                             totalDragX += dragAmount.x
+                                            totalDragY += dragAmount.y
                                             curlVelocityX = dragAmount.x * PAGE_CURL_DRAG_VELOCITY_SCALE
-                                            val signed = -totalDragX * curlDirection
+                                            curlFingerYFraction =
+                                                (curlGripYFraction + totalDragY / size.height.toFloat().coerceAtLeast(1f))
+                                                    .coerceIn(0f, 1f)
+                                            // Прогресс по ПОЛНОЙ длине протяжки (с вертикалью), но только в нужную
+                                            // сторону (inward); диагональный свайп тоже долистывает, а не пружинит.
+                                            val inward = (-totalDragX * curlDirection).coerceAtLeast(0f)
+                                            val travel = hypot(inward, totalDragY)
                                             curlProgress =
-                                                (signed / (size.width * PAGE_CURL_DRAG_DISTANCE_FRACTION))
+                                                (travel / (size.width * PAGE_CURL_DRAG_DISTANCE_FRACTION))
                                                     .coerceIn(0f, 1f)
                                         }
                                     },
@@ -1561,15 +1597,12 @@ private fun PagedReflowContent(
                     progress = curlProgress,
                     direction = curlDirection,
                     gripYFraction = curlGripYFraction,
+                    fingerYFraction = curlFingerYFraction,
                     velocityX = curlVelocityX,
                     phase = curlPhase,
                     twoPageSpread = settings.twoPageSpread,
                     pageWidthPx = with(density) { pageOuterWidth.roundToPx() },
-                    material =
-                        BookCurlMaterial(
-                            weight = settings.bookCurlWeight,
-                            stiffness = settings.bookCurlStiffness,
-                        ),
+                    material = BookCurlMaterial.of(settings.bookCurlMaterial),
                     modifier =
                         Modifier
                             .fillMaxSize()
@@ -2712,10 +2745,24 @@ private const val PAGE_CURL_CAPTURE_ATTEMPTS = 3
 private const val PAGE_CURL_VISIBLE_PROGRESS = 0.015f
 private const val PAGE_CURL_DEFAULT_GRIP_Y = 0.66f
 private const val PAGE_CURL_SYNTHETIC_VELOCITY = 2200f
-private const val PAGE_CURL_SETTLE_NANOS = 420_000_000L
+
+/**
+ * Потолок длительности перелистывания (нс) — к этому моменту лист уже у цели; остаточные микроколебания
+ * осциллятора зажаты в [0,1] и невидимы, поэтому коммитим страницу здесь, не дожидаясь полного покоя.
+ */
+private const val PAGE_CURL_MAX_SETTLE_NANOS = 440_000_000L
+
+/** Наносекунд в секунде — перевод dt кадра в секунды для интегратора. */
+private const val NANOS_PER_SECOND = 1_000_000_000f
+
+/** Минимальный остаток субшага интегрирования (с) — ниже не дробим. */
+private const val MIN_SUBSTEP_SECONDS = 1e-4f
+
+/** Порог «осело»: и до цели, и по скорости — лист замер. */
+private const val PAGE_CURL_SETTLE_EPS = 1e-3f
 private const val PAGE_CURL_FORWARD_EDGE_FRACTION = 0.66f
 private const val PAGE_CURL_BACK_EDGE_FRACTION = 0.34f
-private const val PAGE_CURL_DRAG_DISTANCE_FRACTION = 0.55f
+private const val PAGE_CURL_DRAG_DISTANCE_FRACTION = 0.50f
 private const val PAGE_CURL_DRAG_VELOCITY_SCALE = 60f
 
 private const val HEADING_SCALE_1 = 1.6f

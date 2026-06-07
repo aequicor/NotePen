@@ -85,6 +85,7 @@ import ru.kyamshanov.notepen.WHEEL_EDGE_BAND_WIDE
 import ru.kyamshanov.notepen.WheelScrollButtons
 import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.fadingEdges
+import ru.kyamshanov.notepen.reflow.api.BookCurlMaterialId
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
@@ -802,21 +803,13 @@ private fun TuneSheet(
                 onSelect = { onChange(settings.copy(pageTransition = it)) },
             )
             if (settings.pageTransition == PageTransition.BOOK) {
-                LabeledSlider(
-                    label = "Вес листа",
-                    value = settings.bookCurlWeight,
-                    range = 0f..1f,
-                    valueText = percentText(settings.bookCurlWeight),
+                LabeledChoice(
+                    label = "Материал листа",
+                    options = BookCurlMaterialId.entries,
+                    selected = settings.bookCurlMaterial,
+                    labelOf = ::bookCurlMaterialName,
                     textColor = textColor,
-                    onChange = { onChange(settings.copy(bookCurlWeight = it)) },
-                )
-                LabeledSlider(
-                    label = "Жёсткость листа",
-                    value = settings.bookCurlStiffness,
-                    range = 0f..1f,
-                    valueText = percentText(settings.bookCurlStiffness),
-                    textColor = textColor,
-                    onChange = { onChange(settings.copy(bookCurlStiffness = it)) },
+                    onSelect = { onChange(settings.copy(bookCurlMaterial = it)) },
                 )
             }
             ToggleRow(
@@ -1161,6 +1154,17 @@ private fun transitionName(transition: PageTransition): String =
         PageTransition.SLIDE -> "Слайд"
         PageTransition.FADE -> "Затухание"
         PageTransition.NONE -> "Нет"
+    }
+
+private fun bookCurlMaterialName(id: BookCurlMaterialId): String =
+    when (id) {
+        BookCurlMaterialId.OFFICE -> "Офисная"
+        BookCurlMaterialId.BOOK -> "Книжная"
+        BookCurlMaterialId.NEWSPRINT -> "Газетная"
+        BookCurlMaterialId.COATED -> "Мелованная"
+        BookCurlMaterialId.GLOSSY -> "Глянцевая"
+        BookCurlMaterialId.MATTE -> "Матовая"
+        BookCurlMaterialId.CARDBOARD -> "Картон"
     }
 
 private fun percentText(value: Float): String = "${(value * 100).roundToInt()}%"

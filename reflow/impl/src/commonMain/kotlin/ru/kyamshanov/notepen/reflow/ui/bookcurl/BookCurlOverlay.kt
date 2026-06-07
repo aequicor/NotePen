@@ -20,6 +20,7 @@ internal fun BookCurlOverlay(
     direction: Int,
     gripYFraction: Float,
     velocityX: Float,
+    fingerYFraction: Float = gripYFraction,
     phase: BookCurlPhase,
     twoPageSpread: Boolean,
     pageWidthPx: Int,
@@ -52,14 +53,15 @@ internal fun BookCurlOverlay(
                 )
             }
         }
-    // Изнанка переворачиваемого листа — колонка СЛЕДУЮЩЕЙ страницы (тот же столбец, что и лицо),
-    // зеркальная по горизонтали: после переворота вокруг корешка текст читается нормально. Зеркалим
-    // один раз (не покадрово) — рендерер кроет её на завернувшиеся треугольники как есть.
+    // Изнанка переворачиваемого листа = НАСТОЯЩАЯ следующая страница. В развороте это ПРОТИВОПОЛОЖНАЯ
+    // половина следующего разворота (а не тот же столбец — иначе показывали бы страницу через одну).
+    // Зеркалим один раз: после переворота вокруг корешка текст читается нормально.
     val backFaceImage =
-        remember(back, sheetGeometry) {
+        remember(back, front.width, pageWidthPx, direction, twoPageSpread) {
             back?.let { image ->
+                val backGeometry = bookCurlBackFaceGeometry(image.width, pageWidthPx, direction, twoPageSpread)
                 mirrorBookCurlImageHorizontally(
-                    cropBookCurlImage(image = image, sourceX = sheetGeometry.sourceX, width = sheetGeometry.width),
+                    cropBookCurlImage(image = image, sourceX = backGeometry.sourceX, width = backGeometry.width),
                 )
             }
         }
@@ -78,12 +80,12 @@ internal fun BookCurlOverlay(
             )
         }
     val state =
-        remember(progress, direction, gripYFraction, velocityX, phase, sheet.width, sheet.height) {
+        remember(progress, direction, gripYFraction, fingerYFraction, velocityX, phase, sheet.width, sheet.height) {
             BookCurlState(
                 direction = direction,
                 gripY = sheet.height * gripYFraction.coerceIn(0f, 1f),
                 fingerX = sheet.width * (1f - progress.coerceIn(0f, 1f)),
-                fingerY = sheet.height * gripYFraction.coerceIn(0f, 1f),
+                fingerY = sheet.height * fingerYFraction.coerceIn(0f, 1f),
                 velocityX = velocityX,
                 velocityY = 0f,
                 progress = progress.coerceIn(0f, 1f),
@@ -174,6 +176,23 @@ internal fun bookCurlUnderPageGeometry(
     direction: Int,
     twoPageSpread: Boolean,
 ): BookCurlSheetGeometry = bookCurlSheetGeometry(fullWidth, pageWidth, direction, twoPageSpread)
+
+/**
+ * Геометрия кропа ИЗНАНКИ переворачиваемого листа. Одиночная страница — тот же столбец. Разворот:
+ * изнанка показывает противоположную половину следующего разворота (= настоящую следующую страницу),
+ * то есть геометрию как у `-direction`. Исправляет показ «страницы через одну» в двухстраничном режиме.
+ */
+internal fun bookCurlBackFaceGeometry(
+    fullWidth: Int,
+    pageWidth: Int,
+    direction: Int,
+    twoPageSpread: Boolean,
+): BookCurlSheetGeometry =
+    if (!twoPageSpread) {
+        bookCurlSheetGeometry(fullWidth, pageWidth, direction, false)
+    } else {
+        bookCurlSheetGeometry(fullWidth, pageWidth, -direction, true)
+    }
 
 internal fun bookCurlTargetReveal(progress: Float): Float {
     val t = ((progress.coerceIn(0f, 1f) - 0.42f) / 0.48f).coerceIn(0f, 1f)
