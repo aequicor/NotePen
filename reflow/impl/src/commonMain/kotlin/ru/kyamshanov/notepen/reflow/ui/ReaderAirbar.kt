@@ -801,6 +801,24 @@ private fun TuneSheet(
                 textColor = textColor,
                 onSelect = { onChange(settings.copy(pageTransition = it)) },
             )
+            if (settings.pageTransition == PageTransition.BOOK) {
+                LabeledSlider(
+                    label = "Вес листа",
+                    value = settings.bookCurlWeight,
+                    range = 0f..1f,
+                    valueText = percentText(settings.bookCurlWeight),
+                    textColor = textColor,
+                    onChange = { onChange(settings.copy(bookCurlWeight = it)) },
+                )
+                LabeledSlider(
+                    label = "Жёсткость листа",
+                    value = settings.bookCurlStiffness,
+                    range = 0f..1f,
+                    valueText = percentText(settings.bookCurlStiffness),
+                    textColor = textColor,
+                    onChange = { onChange(settings.copy(bookCurlStiffness = it)) },
+                )
+            }
             ToggleRow(
                 label = "Звук страниц",
                 checked = settings.pageTurnSound,

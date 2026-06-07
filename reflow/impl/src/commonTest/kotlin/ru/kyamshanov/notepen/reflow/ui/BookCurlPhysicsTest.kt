@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlMaterial
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlProfile
@@ -27,7 +28,6 @@ class BookCurlPhysicsTest {
                     ),
                 widthPx = 900f,
                 heightPx = 1300f,
-                elapsedSeconds = 2.4f,
                 profile = BookCurlProfile.Low,
             )
 
@@ -37,20 +37,51 @@ class BookCurlPhysicsTest {
     }
 
     @Test
-    fun gripYBendsNearbyRowsBeforeFarRows() {
-        val topGrip =
+    fun stiffCurlLiftsTowardFreeEdgeUniformlyAcrossRows() {
+        // Без провисания (невесомый лист): подъём одинаков во всех строках.
+        val mesh =
             BookCurlPhysics.mesh(
-                state = state(gripY = 100f, progress = 0.22f, velocityX = -1800f),
+                state = state(gripY = 100f, progress = 0.5f, velocityX = -1800f),
                 widthPx = 800f,
                 heightPx = 1200f,
-                elapsedSeconds = 0.1f,
                 profile = BookCurlProfile.Low,
+                material = BookCurlMaterial(weight = 0f),
             )
 
-        val nearTopLift = topGrip.liftAt(row = 2, col = topGrip.columns)
-        val farBottomLift = topGrip.liftAt(row = topGrip.rows - 2, col = topGrip.columns)
+        // Подъём + загиб: корешок (s=0) — ось, остаётся на поверхности; к свободному краю лист
+        // поднимается всё выше (сначала жёстким наклоном, затем загибом).
+        val spinePivot = mesh.liftAt(row = mesh.rows / 2, col = 0)
+        val freeEdgeLift = mesh.liftAt(row = mesh.rows / 2, col = mesh.columns)
+        assertEquals(0f, spinePivot, "the spine pivot (s=0) must stay on the surface")
+        assertTrue(freeEdgeLift > spinePivot + 1f, "the sheet must lift toward the free edge")
 
-        assertTrue(nearTopLift > farBottomLift * 2f, "curl must start near the original grip")
+        // Без веса загиб ровный по высоте: одинаковый подъём во всех строках.
+        val edgeTop = mesh.liftAt(row = 1, col = mesh.columns)
+        val edgeBottom = mesh.liftAt(row = mesh.rows - 1, col = mesh.columns)
+        assertTrue(
+            abs(edgeTop - edgeBottom) < freeEdgeLift * 0.05f + 0.5f,
+            "weightless sheet must lift every row equally: top=$edgeTop bottom=$edgeBottom",
+        )
+    }
+
+    @Test
+    fun heavySheetSagsAwayFromGrip() {
+        // Захват у нижнего края: тяжёлый мягкий лист провисает вверху (дальше от захвата).
+        val mesh =
+            BookCurlPhysics.mesh(
+                state = state(gripY = 1100f, progress = 0.4f, velocityX = -1800f),
+                widthPx = 800f,
+                heightPx = 1200f,
+                profile = BookCurlProfile.Low,
+                material = BookCurlMaterial(weight = 0.9f, stiffness = 0.3f),
+            )
+
+        val nearGrip = mesh.liftAt(row = mesh.rows - 1, col = mesh.columns)
+        val farFromGrip = mesh.liftAt(row = 1, col = mesh.columns)
+        assertTrue(
+            nearGrip > farFromGrip * 1.25f,
+            "heavy sheet must sag away from the grip: nearGrip=$nearGrip far=$farFromGrip",
+        )
     }
 
     @Test
@@ -106,36 +137,38 @@ class BookCurlPhysicsTest {
 
     @Test
     fun twoPageSpreadUsesSpineAsSheetHinge() {
-        val forward = bookCurlSheetGeometry(fullWidth = 1000, direction = 1, twoPageSpread = true)
-        val backward = bookCurlSheetGeometry(fullWidth = 1000, direction = -1, twoPageSpread = true)
-        val single = bookCurlSheetGeometry(fullWidth = 1000, direction = 1, twoPageSpread = false)
+        // Окно 1000, страница контента 300: корешок по центру (500), свободный край у края контента.
+        val forward = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = true)
+        val backward = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 300, direction = -1, twoPageSpread = true)
+        val single = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = false)
 
         assertEquals(500, forward.sourceX)
-        assertEquals(500, forward.width)
+        assertEquals(300, forward.width)
         assertEquals(500f, forward.offsetX)
-        assertEquals(0, backward.sourceX)
-        assertEquals(500, backward.width)
-        assertEquals(0f, backward.offsetX)
-        assertEquals(0, single.sourceX)
-        assertEquals(1000, single.width)
-        assertEquals(0f, single.offsetX)
+        assertEquals(200, backward.sourceX)
+        assertEquals(300, backward.width)
+        assertEquals(200f, backward.offsetX)
+        // Одиночная страница центрируется в окне: (1000-300)/2 = 350.
+        assertEquals(350, single.sourceX)
+        assertEquals(300, single.width)
+        assertEquals(350f, single.offsetX)
     }
 
     @Test
     fun twoPageSpreadPlacesTargetHalfUnderTurnedSheetSlot() {
-        val forward = bookCurlUnderPageGeometry(fullWidth = 1000, direction = 1, twoPageSpread = true)
-        val backward = bookCurlUnderPageGeometry(fullWidth = 1000, direction = -1, twoPageSpread = true)
-        val single = bookCurlUnderPageGeometry(fullWidth = 1000, direction = 1, twoPageSpread = false)
+        val forward = bookCurlUnderPageGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = true)
+        val backward = bookCurlUnderPageGeometry(fullWidth = 1000, pageWidth = 300, direction = -1, twoPageSpread = true)
+        val single = bookCurlUnderPageGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = false)
 
         assertEquals(500, forward.sourceX)
-        assertEquals(500, forward.width)
+        assertEquals(300, forward.width)
         assertEquals(500f, forward.offsetX)
-        assertEquals(0, backward.sourceX)
-        assertEquals(500, backward.width)
-        assertEquals(0f, backward.offsetX)
-        assertEquals(0, single.sourceX)
-        assertEquals(1000, single.width)
-        assertEquals(0f, single.offsetX)
+        assertEquals(200, backward.sourceX)
+        assertEquals(300, backward.width)
+        assertEquals(200f, backward.offsetX)
+        assertEquals(350, single.sourceX)
+        assertEquals(300, single.width)
+        assertEquals(350f, single.offsetX)
     }
 
     private fun state(

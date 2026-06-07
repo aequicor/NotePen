@@ -7,3 +7,6 @@ internal expect fun cropBookCurlImage(
     sourceX: Int,
     width: Int,
 ): ImageBitmap
+
+/** Зеркало изображения по горизонтали — для изнанки листа, которая после переворота читается верно. */
+internal expect fun mirrorBookCurlImageHorizontally(image: ImageBitmap): ImageBitmap

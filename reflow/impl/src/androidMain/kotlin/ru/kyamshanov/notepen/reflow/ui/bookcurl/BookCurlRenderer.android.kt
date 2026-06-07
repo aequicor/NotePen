@@ -1,10 +1,9 @@
 package ru.kyamshanov.notepen.reflow.ui.bookcurl
 
+import android.graphics.BlurMaskFilter
 import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Path
-import android.graphics.PorterDuff
-import android.graphics.PorterDuffColorFilter
 import android.graphics.RectF
 import android.graphics.Shader
 import androidx.compose.ui.graphics.ImageBitmap
@@ -33,54 +32,44 @@ internal actual fun DrawScope.drawBookCurlNative(
             drawCastShadow(canvas = canvas, mesh = mesh, paint = paint)
             drawPaperBase(canvas = canvas, mesh = mesh, paint = paint)
 
-            back?.let {
-                val backPaint =
-                    Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                        alpha = 46
-                        colorFilter =
-                            PorterDuffColorFilter(
-                                paint.paperTint.copy(alpha = 0.18f).toArgb(),
-                                PorterDuff.Mode.SRC_ATOP,
-                            )
-                    }
-                canvas.drawBitmapMesh(it.toSoftwareBookCurlBitmap(), mesh.columns, mesh.rows, verts, 0, null, 0, backPaint)
-            }
-
-            val frontBitmap = front.toSoftwareBookCurlBitmap()
-            val frontPaint =
-                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                    alpha = (frontAlpha(mesh) * 255).toInt()
-                }
-            val readablePaint =
-                Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                    alpha = (readableBaseAlpha(mesh) * 255).toInt()
-                }
-            drawReadableTextureBase(canvas = canvas, bitmap = frontBitmap, mesh = mesh, paint = readablePaint)
+            val meshPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { alpha = 255 }
+            // Лицо — текущая страница на весь меш.
             canvas.drawBitmapMesh(
-                frontBitmap,
+                front.toSoftwareBookCurlBitmap(),
                 mesh.columns,
                 mesh.rows,
                 verts,
                 0,
-                null,
+                mesh.shadeColors(),
                 0,
-                frontPaint,
+                meshPaint,
             )
+            // Изнанка завернувшейся части — следующая страница (картинка уже зеркальная). drawBitmapMesh
+            // не умеет отбирать треугольники, поэтому клипуем по силуэту обратных (facing<0) граней.
+            back?.let { image ->
+                val backPath = mesh.backFacingPath()
+                if (!backPath.isEmpty) {
+                    canvas.save()
+                    canvas.clipPath(backPath)
+                    canvas.drawBitmapMesh(
+                        image.toSoftwareBookCurlBitmap(),
+                        mesh.columns,
+                        mesh.rows,
+                        verts,
+                        0,
+                        mesh.shadeColors(),
+                        0,
+                        meshPaint,
+                    )
+                    canvas.restore()
+                }
+            }
 
             drawRimHighlight(canvas = canvas, mesh = mesh, paint = paint)
         } finally {
             canvas.restore()
         }
     }
-}
-
-private fun drawReadableTextureBase(
-    canvas: android.graphics.Canvas,
-    bitmap: android.graphics.Bitmap,
-    mesh: BookCurlMesh,
-    paint: Paint,
-) {
-    canvas.drawBitmap(bitmap, null, RectF(0f, 0f, mesh.widthPx, mesh.heightPx), paint)
 }
 
 private fun drawPaperBase(
@@ -112,44 +101,56 @@ private fun BookCurlMesh.outlinePath(): Path {
     return path
 }
 
+/** Силуэт завернувшихся (facing < 0) треугольников — клип для текстуры изнанки. */
+private fun BookCurlMesh.backFacingPath(): Path {
+    val path = Path()
+
+    fun addTriangle(
+        a: Int,
+        b: Int,
+        c: Int,
+    ) {
+        path.moveTo(vertices2d[a * 2], vertices2d[a * 2 + 1])
+        path.lineTo(vertices2d[b * 2], vertices2d[b * 2 + 1])
+        path.lineTo(vertices2d[c * 2], vertices2d[c * 2 + 1])
+        path.close()
+    }
+
+    for (row in 0 until rows) {
+        for (col in 0 until columns) {
+            val p00 = row * (columns + 1) + col
+            val p10 = p00 + 1
+            val p01 = p00 + columns + 1
+            val p11 = p01 + 1
+            if (facing[p00] + facing[p10] + facing[p11] < 0f) addTriangle(p00, p10, p11)
+            if (facing[p00] + facing[p11] + facing[p01] < 0f) addTriangle(p00, p11, p01)
+        }
+    }
+    return path
+}
+
 private fun drawCastShadow(
     canvas: android.graphics.Canvas,
     mesh: BookCurlMesh,
     paint: BookCurlPaint,
 ) {
-    val band = liftedBand(mesh) ?: return
     val strength = (mesh.maxLiftPx / (mesh.widthPx * 0.18f).coerceAtLeast(1f)).coerceIn(0f, 1f)
-    val spread = mesh.widthPx * (0.09f + 0.16f * strength)
-    val left = (band.centerX - spread * 0.55f).coerceAtLeast(0f)
-    val right = (band.centerX + spread * 1.1f).coerceAtMost(mesh.widthPx)
-    if (right <= left) return
+    if (strength <= 0.02f) return
+    // Тень — силуэт страницы (с изогнутым краем), смещённый и размытый: повторяет форму изгиба
+    // края на открываемом листе. Рисуется первой — страница сверху перекрывает свою тень.
+    val lift = mesh.maxLiftPx
     val shadowPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader =
-                LinearGradient(
-                    left,
-                    0f,
-                    right,
-                    0f,
-                    intArrayOf(
-                        paint.shadow.copy(alpha = 0f).toArgb(),
-                        paint.shadow.copy(alpha = 0.24f * strength).toArgb(),
-                        paint.shadow.copy(alpha = 0.07f * strength).toArgb(),
-                        paint.shadow.copy(alpha = 0f).toArgb(),
-                    ),
-                    floatArrayOf(0f, 0.34f, 0.62f, 1f),
-                    Shader.TileMode.CLAMP,
-                )
+            color = paint.shadow.copy(alpha = SHADOW_CAST_ALPHA * strength).toArgb()
+            maskFilter = BlurMaskFilter((lift * SHADOW_CAST_BLUR).coerceAtLeast(1f), BlurMaskFilter.Blur.NORMAL)
         }
-    canvas.drawRect(
-        RectF(
-            left,
-            (band.minY - spread * 0.32f).coerceAtLeast(0f),
-            right,
-            (band.maxY + spread * 0.32f).coerceAtMost(mesh.heightPx),
-        ),
-        shadowPaint,
-    )
+    canvas.save()
+    canvas.translate(lift * SHADOW_CAST_OFFSET_X * mesh.direction, lift * SHADOW_CAST_OFFSET_Y)
+    try {
+        canvas.drawPath(mesh.outlinePath(), shadowPaint)
+    } finally {
+        canvas.restore()
+    }
 }
 
 private fun drawRimHighlight(
@@ -174,7 +175,7 @@ private fun drawRimHighlight(
                             0f,
                             intArrayOf(
                                 paint.highlight.copy(alpha = 0f).toArgb(),
-                                paint.highlight.copy(alpha = 0.11f * strength).toArgb(),
+                                paint.highlight.copy(alpha = 0.16f * strength).toArgb(),
                                 paint.highlight.copy(alpha = 0f).toArgb(),
                             ),
                             floatArrayOf(0f, 0.46f, 1f),
@@ -225,18 +226,6 @@ private fun liftedBand(mesh: BookCurlMesh): LiftedBand? {
     return LiftedBand(centerX = weightedX / weight, minY = minY, maxY = maxY)
 }
 
-private fun frontAlpha(mesh: BookCurlMesh): Float {
-    val t = ((mesh.progress - 0.84f) / 0.16f).coerceIn(0f, 1f)
-    val smooth = t * t * (3f - 2f * t)
-    return 1f - smooth * 0.12f
-}
-
-private fun readableBaseAlpha(mesh: BookCurlMesh): Float {
-    val t = ((mesh.progress - 0.58f) / 0.42f).coerceIn(0f, 1f)
-    val smooth = t * t * (3f - 2f * t)
-    return 1f - smooth * 0.88f
-}
-
 private fun androidx.compose.ui.graphics.Color.scaleRgb(scale: Float): androidx.compose.ui.graphics.Color =
     copy(
         red = (red * scale).coerceIn(0f, 1f),
@@ -244,3 +233,15 @@ private fun androidx.compose.ui.graphics.Color.scaleRgb(scale: Float): androidx.
         blue = (blue * scale).coerceIn(0f, 1f),
         alpha = 1f,
     )
+
+/** Прозрачность отбрасываемой тени-силуэта. */
+private const val SHADOW_CAST_ALPHA = 0.4f
+
+/** Смещение силуэта тени по горизонтали (× подъём, со знаком направления). */
+private const val SHADOW_CAST_OFFSET_X = 0.05f
+
+/** Смещение силуэта тени вниз (× подъём) — тень ложится под приподнятый лист. */
+private const val SHADOW_CAST_OFFSET_Y = 0.1f
+
+/** Радиус размытия тени (× подъём). */
+private const val SHADOW_CAST_BLUR = 0.05f

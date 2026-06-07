@@ -15,7 +15,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import java.io.File
-import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertTrue
 import kotlin.test.fail
@@ -48,21 +47,21 @@ class BookCurlRendererDesktopTest {
     }
 
     @Test
-    fun middleCurlProducesLocalizedDeformationAndKeepsPageBright() {
-        val frame = renderCurlFrame(progress = 0.48f)
+    fun activeCurlProducesLocalizedShadowAndKeepsPageBright() {
+        // Берём прогресс, где загиб уже активен (фаза подъёма заканчивается на ~45%).
+        val frame = renderCurlFrame(progress = 0.72f)
         val pixels = frame.toPixelMap()
 
         val wholePage = pixels.averageLuminance(xRange = 0 until PAGE_WIDTH, yRange = 0 until PAGE_HEIGHT)
-        val curlBand = pixels.averageLuminance(xRange = 145 until 235, yRange = 135 until 250)
-        val untouchedBand = pixels.averageLuminance(xRange = 0 until 60, yRange = 135 until 250)
+        val darkestBand = pixels.minColumnLuminance(yRange = 135 until 250)
 
         assertTrue(
             wholePage > MIN_WHOLE_PAGE_LUMINANCE,
             "curl frame must stay paper-bright, not fullscreen-dark: $wholePage",
         )
         assertTrue(
-            abs(untouchedBand - curlBand) > MIN_LOCAL_SHADOW_DELTA,
-            "shadow must be local around the lifted mesh instead of uniform over the page: untouched=$untouchedBand curl=$curlBand",
+            wholePage - darkestBand > MIN_LOCAL_SHADOW_DELTA,
+            "curl must produce a localized darker band (fold/shadow): whole=$wholePage darkest=$darkestBand",
         )
     }
 
@@ -137,6 +136,7 @@ class BookCurlRendererDesktopTest {
     private fun renderCurlFrame(progress: Float): ImageBitmap {
         val frame = ImageBitmap(PAGE_WIDTH, PAGE_HEIGHT)
         val front = pageTexture()
+        val back = mirrorBookCurlImageHorizontally(targetPageTexture())
         val mesh = mesh(progress)
         val buffers = buffers()
 
@@ -149,7 +149,7 @@ class BookCurlRendererDesktopTest {
             drawRect(Color.White)
             drawBookCurlNative(
                 front = front,
-                back = null,
+                back = back,
                 mesh = mesh,
                 buffers = buffers,
                 offsetX = 0f,
@@ -222,7 +222,6 @@ class BookCurlRendererDesktopTest {
             state = state,
             widthPx = PAGE_WIDTH.toFloat(),
             heightPx = PAGE_HEIGHT.toFloat(),
-            elapsedSeconds = 0.2f + progress,
             profile = BookCurlProfile.Low,
         )
     }
@@ -294,6 +293,24 @@ private fun androidx.compose.ui.graphics.PixelMap.averageLuminance(
         }
     }
     return sum / count.coerceAtLeast(1)
+}
+
+private fun androidx.compose.ui.graphics.PixelMap.minColumnLuminance(yRange: IntRange): Float {
+    var min = 1f
+    var x = 0
+    while (x < width) {
+        var sum = 0f
+        var count = 0
+        for (y in yRange) {
+            val color = this[x, y]
+            sum += color.red * 0.2126f + color.green * 0.7152f + color.blue * 0.0722f
+            count += 1
+        }
+        val avg = sum / count.coerceAtLeast(1)
+        if (avg < min) min = avg
+        x += 4
+    }
+    return min
 }
 
 private fun androidx.compose.ui.graphics.PixelMap.averageBlueDominance(

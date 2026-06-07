@@ -42,6 +42,8 @@ import ru.kyamshanov.notepen.reflow.api.ReaderTheme
  * @property paged страничный режим вместо скролла
  * @property twoPageSpread показывать страничный режим разворотом из двух страниц
  * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property bookCurlWeight вес листа при книжном перелистывании `0..1`
+ * @property bookCurlStiffness жёсткость листа при книжном перелистывании `0..1`
  * @property pageTurnSound звук перелистывания при смене страницы/разворота
  * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право)
  * @property autoHideMs автоскрытие панелей через N мс (0 — не скрывать)
@@ -74,6 +76,8 @@ public data class ReflowReaderSettings(
     public val paged: Boolean = false,
     public val twoPageSpread: Boolean = false,
     public val pageTransition: PageTransition = PageTransition.BOOK,
+    public val bookCurlWeight: Float = 0.5f,
+    public val bookCurlStiffness: Float = 0.6f,
     public val pageTurnSound: Boolean = true,
     public val tapToTurn: Boolean = true,
     public val autoHideMs: Long = 0L,
@@ -151,6 +155,8 @@ public fun ReaderSettings.toRenderSettings(): ReflowReaderSettings {
         paged = s.paged,
         twoPageSpread = s.twoPageSpread,
         pageTransition = s.pageTransition,
+        bookCurlWeight = s.bookCurlWeight,
+        bookCurlStiffness = s.bookCurlStiffness,
         pageTurnSound = s.pageTurnSound,
         tapToTurn = s.tapToTurn,
         autoHideMs = s.autoHideSec * 1000L,

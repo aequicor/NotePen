@@ -123,10 +123,12 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlMaterial
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlOverlay
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlState
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.captureReflowTexture
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.isBookCurlNativeRendererSupported
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -1301,6 +1303,10 @@ private fun PagedReflowContent(
         val pageCaptureLayers = remember(document, measureKey) { mutableStateMapOf<Int, GraphicsLayer>() }
         val pageCurlImages = remember(document, measureKey) { mutableStateMapOf<Int, ImageBitmap>() }
         val captureKeys = pageCaptureLayers.keys.toList()
+        // Размер «страницы» пейджера (px) — берём из onSizeChanged; на него рендерим текстуру кёрла.
+        var readerPageSizePx by remember(document, measureKey) { mutableStateOf(IntSize.Zero) }
+        // Общий кэш растров врезок — пробрасываем в закадровую сцену, чтобы картинки попали в текстуру.
+        val figureCache = LocalFigureBitmapCache.current
 
         suspend fun ensureCurlImage(page: Int): ImageBitmap? {
             val cached = pageCurlImages[page]
@@ -1362,14 +1368,41 @@ private fun PagedReflowContent(
             onDispose { onPageDeltaReady(null) }
         }
 
-        LaunchedEffect(pagerState.currentPage, captureKeys, useNativeBookCurl) {
-            if (!useNativeBookCurl) return@LaunchedEffect
+        LaunchedEffect(pagerState.currentPage, readerPageSizePx, useNativeBookCurl) {
+            if (!useNativeBookCurl || readerPageSizePx.width <= 0 || readerPageSizePx.height <= 0) return@LaunchedEffect
             delay(PAGE_CURL_CAPTURE_DELAY_MS)
             val pages = (pagerState.currentPage - 1)..(pagerState.currentPage + 1)
             pages.forEach { page ->
-                val layer = pageCaptureLayers[page] ?: return@forEach
-                runCatching { layer.toImageBitmap() }
-                    .onSuccess { pageCurlImages[page] = it }
+                if (page < 0 || page > lastPagerPage || pageCurlImages[page] != null) return@forEach
+                // Перекомпонуем страницу закадрово (ImageComposeScene) — GraphicsLayer.toImageBitmap()
+                // на Desktop отдаёт пустой кадр. Локали и фон проставляем, как на экране.
+                val texture =
+                    captureReflowTexture(readerPageSizePx.width, readerPageSizePx.height, density) {
+                        CompositionLocalProvider(
+                            LocalReflowSelectionState provides ReflowSelectionState(),
+                            LocalFigureBitmapCache provides figureCache,
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(settings.background),
+                                contentAlignment = Alignment.TopCenter,
+                            ) {
+                                ReflowSpread(
+                                    pagerPage = page,
+                                    document = document,
+                                    windows = windows,
+                                    pagesPerSpread = pagesPerSpread,
+                                    anchorsByBlock = anchorsByBlock,
+                                    notesByBlock = notesByBlock,
+                                    onNoteTap = onNoteTap,
+                                    settings = settings,
+                                    renderPage = renderPage,
+                                    pageOuterWidth = pageOuterWidth,
+                                    density = density,
+                                )
+                            }
+                        }
+                    }
+                if (texture != null) pageCurlImages[page] = texture
             }
         }
         HorizontalPager(
@@ -1401,11 +1434,9 @@ private fun PagedReflowContent(
                                                 else -> 0
                                             }
                                         val target = (pagerState.currentPage + direction).coerceIn(0, lastPagerPage)
-                                        dragActive =
-                                            direction != 0 &&
-                                            target != pagerState.currentPage &&
-                                            pageCurlImages[pagerState.currentPage] != null &&
-                                            pageCurlImages[target] != null
+                                        // Жест не блокируем готовностью текстур: даже без снимков перелистывание
+                                        // должно сработать (оверлей сам не рисуется, пока front/back == null).
+                                        dragActive = direction != 0 && target != pagerState.currentPage
                                         if (dragActive) {
                                             curlDirection = direction
                                             curlGripYFraction =
@@ -1502,55 +1533,23 @@ private fun PagedReflowContent(
                         transition = if (useNativeBookCurl) PageTransition.NONE else settings.pageTransition,
                         pageOffset = pageOffset,
                         densityScale = density.density,
-                    ).captureToLayer(captureLayer),
+                    ).onSizeChanged { readerPageSizePx = it }
+                    .captureToLayer(captureLayer),
                 contentAlignment = Alignment.TopCenter,
             ) {
-                if (settings.twoPageSpread) {
-                    Row(
-                        modifier = Modifier.fillMaxSize(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.Top,
-                    ) {
-                        PageWindowColumn(
-                            document = document,
-                            pageWindow = windows.getOrNull(pagerPage * pagesPerSpread),
-                            pageIndex = pagerPage * pagesPerSpread,
-                            anchorsByBlock = anchorsByBlock,
-                            notesByBlock = notesByBlock,
-                            onNoteTap = onNoteTap,
-                            settings = settings,
-                            renderPage = renderPage,
-                            pageOuterWidth = pageOuterWidth,
-                            density = density,
-                        )
-                        BookSpine(settings)
-                        PageWindowColumn(
-                            document = document,
-                            pageWindow = windows.getOrNull(pagerPage * pagesPerSpread + 1),
-                            pageIndex = pagerPage * pagesPerSpread + 1,
-                            anchorsByBlock = anchorsByBlock,
-                            notesByBlock = notesByBlock,
-                            onNoteTap = onNoteTap,
-                            settings = settings,
-                            renderPage = renderPage,
-                            pageOuterWidth = pageOuterWidth,
-                            density = density,
-                        )
-                    }
-                } else {
-                    PageWindowColumn(
-                        document = document,
-                        pageWindow = windows.getOrNull(pagerPage),
-                        pageIndex = pagerPage,
-                        anchorsByBlock = anchorsByBlock,
-                        notesByBlock = notesByBlock,
-                        onNoteTap = onNoteTap,
-                        settings = settings,
-                        renderPage = renderPage,
-                        pageOuterWidth = pageOuterWidth,
-                        density = density,
-                    )
-                }
+                ReflowSpread(
+                    pagerPage = pagerPage,
+                    document = document,
+                    windows = windows,
+                    pagesPerSpread = pagesPerSpread,
+                    anchorsByBlock = anchorsByBlock,
+                    notesByBlock = notesByBlock,
+                    onNoteTap = onNoteTap,
+                    settings = settings,
+                    renderPage = renderPage,
+                    pageOuterWidth = pageOuterWidth,
+                    density = density,
+                )
             }
         }
         if (useNativeBookCurl && !scrollLocked) {
@@ -1565,6 +1564,12 @@ private fun PagedReflowContent(
                     velocityX = curlVelocityX,
                     phase = curlPhase,
                     twoPageSpread = settings.twoPageSpread,
+                    pageWidthPx = with(density) { pageOuterWidth.roundToPx() },
+                    material =
+                        BookCurlMaterial(
+                            weight = settings.bookCurlWeight,
+                            stiffness = settings.bookCurlStiffness,
+                        ),
                     modifier =
                         Modifier
                             .fillMaxSize()
@@ -1573,6 +1578,73 @@ private fun PagedReflowContent(
                 )
             }
         }
+    }
+}
+
+/**
+ * Содержимое одной «страницы» пейджера (разворот или одиночная страница). Вынесено, чтобы
+ * рендерить ОДНИМ кодом и на экране, и в закадровой [captureReflowTexture] для текстуры кёрла —
+ * тогда снимок гарантированно совпадает с тем, что видит пользователь.
+ */
+@Composable
+private fun ReflowSpread(
+    pagerPage: Int,
+    document: ReflowDocument,
+    windows: List<ReaderPagination.PageWindow>,
+    pagesPerSpread: Int,
+    anchorsByBlock: Map<Int, List<TextAnchor>>,
+    notesByBlock: Map<Int, List<NoteAnchor>>,
+    onNoteTap: (PageNote) -> Unit,
+    settings: ReflowReaderSettings,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+    pageOuterWidth: Dp,
+    density: Density,
+) {
+    if (settings.twoPageSpread) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.Top,
+        ) {
+            PageWindowColumn(
+                document = document,
+                pageWindow = windows.getOrNull(pagerPage * pagesPerSpread),
+                pageIndex = pagerPage * pagesPerSpread,
+                anchorsByBlock = anchorsByBlock,
+                notesByBlock = notesByBlock,
+                onNoteTap = onNoteTap,
+                settings = settings,
+                renderPage = renderPage,
+                pageOuterWidth = pageOuterWidth,
+                density = density,
+            )
+            BookSpine(settings)
+            PageWindowColumn(
+                document = document,
+                pageWindow = windows.getOrNull(pagerPage * pagesPerSpread + 1),
+                pageIndex = pagerPage * pagesPerSpread + 1,
+                anchorsByBlock = anchorsByBlock,
+                notesByBlock = notesByBlock,
+                onNoteTap = onNoteTap,
+                settings = settings,
+                renderPage = renderPage,
+                pageOuterWidth = pageOuterWidth,
+                density = density,
+            )
+        }
+    } else {
+        PageWindowColumn(
+            document = document,
+            pageWindow = windows.getOrNull(pagerPage),
+            pageIndex = pagerPage,
+            anchorsByBlock = anchorsByBlock,
+            notesByBlock = notesByBlock,
+            onNoteTap = onNoteTap,
+            settings = settings,
+            renderPage = renderPage,
+            pageOuterWidth = pageOuterWidth,
+            density = density,
+        )
     }
 }
 
@@ -2640,7 +2712,7 @@ private const val PAGE_CURL_CAPTURE_ATTEMPTS = 3
 private const val PAGE_CURL_VISIBLE_PROGRESS = 0.015f
 private const val PAGE_CURL_DEFAULT_GRIP_Y = 0.66f
 private const val PAGE_CURL_SYNTHETIC_VELOCITY = 2200f
-private const val PAGE_CURL_SETTLE_NANOS = 220_000_000L
+private const val PAGE_CURL_SETTLE_NANOS = 420_000_000L
 private const val PAGE_CURL_FORWARD_EDGE_FRACTION = 0.66f
 private const val PAGE_CURL_BACK_EDGE_FRACTION = 0.34f
 private const val PAGE_CURL_DRAG_DISTANCE_FRACTION = 0.55f

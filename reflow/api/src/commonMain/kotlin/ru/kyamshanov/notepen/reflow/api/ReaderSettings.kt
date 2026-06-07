@@ -143,6 +143,8 @@ public enum class PageTransition {
  * @property twoPageSpread показывать страничный режим разворотом: две текстовые
  *   страницы рядом, как раскрытая книга
  * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property bookCurlWeight вес листа при книжном перелистывании `0..1` (больше — сильнее провисает)
+ * @property bookCurlStiffness жёсткость листа при книжном перелистывании `0..1` (больше — держит форму)
  * @property pageTurnSound короткий звук перелистывания при смене страницы/разворота
  * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право); при `false`
  *   тап в любом месте лишь показывает/прячет панель — защита от случайных перелистываний
@@ -173,6 +175,8 @@ public data class ReaderSettings(
     public val paged: Boolean = true,
     public val twoPageSpread: Boolean = false,
     public val pageTransition: PageTransition = PageTransition.BOOK,
+    public val bookCurlWeight: Float = 0.5f,
+    public val bookCurlStiffness: Float = 0.6f,
     public val pageTurnSound: Boolean = true,
     public val tapToTurn: Boolean = true,
     public val autoHideSec: Int = 0,
@@ -195,6 +199,8 @@ public data class ReaderSettings(
             wordSpacingSp = wordSpacingSp.coerceIn(MIN_WORD_SPACING_SP, MAX_WORD_SPACING_SP),
             brightness = brightness.coerceIn(MIN_BRIGHTNESS, 1f),
             backgroundWarmth = backgroundWarmth.coerceIn(0f, 1f),
+            bookCurlWeight = bookCurlWeight.coerceIn(0f, 1f),
+            bookCurlStiffness = bookCurlStiffness.coerceIn(0f, 1f),
             autoHideSec = autoHideSec.coerceIn(0, MAX_AUTO_HIDE_SEC),
         )
 

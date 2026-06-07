@@ -10,7 +10,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
-import kotlin.math.abs
 import kotlin.math.roundToInt
 
 @Composable
@@ -23,32 +22,44 @@ internal fun BookCurlOverlay(
     velocityX: Float,
     phase: BookCurlPhase,
     twoPageSpread: Boolean,
+    pageWidthPx: Int,
+    material: BookCurlMaterial = BookCurlMaterial.Default,
     modifier: Modifier = Modifier,
 ) {
     if (front == null || progress <= 0.001f || !isBookCurlNativeRendererSupported()) return
     val density = LocalDensity.current
+    // Загибаем только колонку страницы (по центру окна), а не всю ширину окна: на широком
+    // мониторе у книги большие боковые поля, и загиб должен начинаться от края текста, а не
+    // от края окна. В развороте корешок — по центру окна, свободный край — у края контента.
     val sheetGeometry =
-        remember(front.width, direction, twoPageSpread) {
-            bookCurlSheetGeometry(front.width, direction, twoPageSpread)
+        remember(front.width, pageWidthPx, direction, twoPageSpread) {
+            bookCurlSheetGeometry(front.width, pageWidthPx, direction, twoPageSpread)
         }
     val sheetSource =
-        remember(front, sheetGeometry, twoPageSpread) {
-            if (twoPageSpread) {
-                SheetSource(
-                    image = cropBookCurlImage(image = front, sourceX = sheetGeometry.sourceX, width = sheetGeometry.width),
-                    offsetX = sheetGeometry.offsetX,
-                )
-            } else {
-                SheetSource(image = front, offsetX = sheetGeometry.offsetX)
-            }
+        remember(front, sheetGeometry) {
+            SheetSource(
+                image = cropBookCurlImage(image = front, sourceX = sheetGeometry.sourceX, width = sheetGeometry.width),
+                offsetX = sheetGeometry.offsetX,
+            )
         }
     val underPageSource =
-        remember(back, direction, twoPageSpread, sheetSource.image.width, sheetSource.offsetX) {
+        remember(back, pageWidthPx, direction, twoPageSpread, sheetGeometry.offsetX) {
             back?.let { image ->
-                val geometry = bookCurlUnderPageGeometry(image.width, direction, twoPageSpread)
+                val geometry = bookCurlUnderPageGeometry(image.width, pageWidthPx, direction, twoPageSpread)
                 SheetSource(
                     image = cropBookCurlImage(image = image, sourceX = geometry.sourceX, width = geometry.width),
-                    offsetX = sheetSource.offsetX,
+                    offsetX = sheetGeometry.offsetX,
+                )
+            }
+        }
+    // Изнанка переворачиваемого листа — колонка СЛЕДУЮЩЕЙ страницы (тот же столбец, что и лицо),
+    // зеркальная по горизонтали: после переворота вокруг корешка текст читается нормально. Зеркалим
+    // один раз (не покадрово) — рендерер кроет её на завернувшиеся треугольники как есть.
+    val backFaceImage =
+        remember(back, sheetGeometry) {
+            back?.let { image ->
+                mirrorBookCurlImageHorizontally(
+                    cropBookCurlImage(image = image, sourceX = sheetGeometry.sourceX, width = sheetGeometry.width),
                 )
             }
         }
@@ -80,13 +91,13 @@ internal fun BookCurlOverlay(
             )
         }
     val mesh =
-        remember(state, profile, sheet.width, sheet.height) {
+        remember(state, profile, sheet.width, sheet.height, material) {
             BookCurlPhysics.mesh(
                 state = state,
                 widthPx = sheet.width.toFloat(),
                 heightPx = sheet.height.toFloat(),
-                elapsedSeconds = progress * 0.42f + abs(velocityX) / 8000f,
                 profile = profile,
+                material = material,
             )
         }
     val paint =
@@ -110,23 +121,12 @@ internal fun BookCurlOverlay(
         }
         drawBookCurlNative(
             front = sheet,
-            back = null,
+            back = backFaceImage,
             mesh = mesh,
             buffers = buffers,
             offsetX = sheetSource.offsetX,
             paint = paint,
         )
-        val readableAlpha = bookCurlReadableOverlayAlpha(progress)
-        if (readableAlpha > 0f) {
-            drawImage(
-                image = front,
-                srcOffset = IntOffset(sheetGeometry.sourceX, 0),
-                srcSize = IntSize(sheetGeometry.width, front.height),
-                dstOffset = IntOffset(sheetGeometry.offsetX.roundToInt(), 0),
-                dstSize = IntSize(sheetGeometry.width, front.height),
-                alpha = readableAlpha,
-            )
-        }
     }
 }
 
@@ -143,47 +143,39 @@ internal data class BookCurlSheetGeometry(
 
 internal fun bookCurlSheetGeometry(
     fullWidth: Int,
+    pageWidth: Int,
     direction: Int,
     twoPageSpread: Boolean,
 ): BookCurlSheetGeometry {
-    if (!twoPageSpread) return BookCurlSheetGeometry(sourceX = 0, width = fullWidth.coerceAtLeast(1), offsetX = 0f)
-    val halfWidth = (fullWidth / 2).coerceAtLeast(1)
+    val full = fullWidth.coerceAtLeast(1)
+    val page = pageWidth.coerceIn(1, full)
+    if (!twoPageSpread) {
+        // Одиночная страница: центрированная колонка контента шириной pageWidth.
+        val left = ((full - page) / 2).coerceIn(0, full - 1)
+        return BookCurlSheetGeometry(sourceX = left, width = page.coerceAtMost(full - left), offsetX = left.toFloat())
+    }
+    // Разворот: корешок по центру окна. Forward — правая страница, backward — левая.
+    val center = full / 2
     return if (direction > 0) {
         BookCurlSheetGeometry(
-            sourceX = halfWidth,
-            width = (fullWidth - halfWidth).coerceAtLeast(1),
-            offsetX = halfWidth.toFloat(),
+            sourceX = center,
+            width = page.coerceAtMost(full - center).coerceAtLeast(1),
+            offsetX = center.toFloat(),
         )
     } else {
-        BookCurlSheetGeometry(sourceX = 0, width = halfWidth, offsetX = 0f)
+        val left = (center - page).coerceIn(0, full - 1)
+        BookCurlSheetGeometry(sourceX = left, width = (center - left).coerceAtLeast(1), offsetX = left.toFloat())
     }
 }
 
 internal fun bookCurlUnderPageGeometry(
     fullWidth: Int,
+    pageWidth: Int,
     direction: Int,
     twoPageSpread: Boolean,
-): BookCurlSheetGeometry {
-    if (!twoPageSpread) return BookCurlSheetGeometry(sourceX = 0, width = fullWidth.coerceAtLeast(1), offsetX = 0f)
-    val halfWidth = (fullWidth / 2).coerceAtLeast(1)
-    return if (direction > 0) {
-        BookCurlSheetGeometry(
-            sourceX = halfWidth,
-            width = (fullWidth - halfWidth).coerceAtLeast(1),
-            offsetX = halfWidth.toFloat(),
-        )
-    } else {
-        BookCurlSheetGeometry(sourceX = 0, width = halfWidth, offsetX = 0f)
-    }
-}
+): BookCurlSheetGeometry = bookCurlSheetGeometry(fullWidth, pageWidth, direction, twoPageSpread)
 
 internal fun bookCurlTargetReveal(progress: Float): Float {
     val t = ((progress.coerceIn(0f, 1f) - 0.42f) / 0.48f).coerceIn(0f, 1f)
     return t * t * (3f - 2f * t)
-}
-
-internal fun bookCurlReadableOverlayAlpha(progress: Float): Float {
-    val t = ((progress.coerceIn(0f, 1f) - 0.58f) / 0.42f).coerceIn(0f, 1f)
-    val smooth = t * t * (3f - 2f * t)
-    return 0.92f * (1f - smooth)
 }
