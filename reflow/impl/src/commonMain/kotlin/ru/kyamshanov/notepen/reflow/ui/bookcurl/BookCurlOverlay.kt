@@ -174,21 +174,25 @@ internal fun bookCurlSheetGeometry(
         val left = ((full - page) / 2).coerceIn(0, full - 1)
         return BookCurlSheetGeometry(sourceX = left, width = page.coerceAtMost(full - left), offsetX = left.toFloat())
     }
-    // Разворот: корешок строго по центру окна (full/2), а колонки отстоят от него на ПОЛОВИНУ зазора
-    // BOOK_SPREAD_GAP. Позицию колонки берём как center ± gap/2, НЕ как full-page: на широком мониторе
-    // maxContentWidth добавляет боковые поля, и full-page заехало бы в правое поле (рваный лист). Так
-    // лист точно совпадает с живой колонкой и не «прыгает» по горизонтали при отдаче статике.
+    // Разворот: лист загибается ВОКРУГ КОРЕШКА (center = full/2), а не вокруг внутренней кромки своей
+    // колонки. Поэтому лист простирается от корешка до ВНЕШНЕГО края, включая жёлоб halfGap: плоская
+    // анкер-кромка меша (локальная s=0/корешок) ложится ровно на center, и лист вращается от корешка.
+    // Если бы лист был только колонкой (start = center ± halfGap), он пивотил бы у внутренней кромки
+    // колонки, в halfGap от корешка — «загиб не от корешка». Жёлоб входит в лист (как переплётное поле
+    // реального листа). В плоском состоянии (progress 0) лист всё равно точно перекрывает живую область
+    // [корешок..внешний край] (жёлоб + колонка), поэтому горизонтальной отдачи-прыжка это не вносит.
     val center = full / 2
     val halfGap = (spineGapPx / 2).coerceAtLeast(0)
+    val span = (page + halfGap).coerceAtLeast(1)
     val start =
         if (direction > 0) {
-            (center + halfGap).coerceIn(0, full - 1)
+            center.coerceIn(0, full - 1)
         } else {
-            (center - halfGap - page).coerceIn(0, full - 1)
+            (center - span).coerceIn(0, full - 1)
         }
     return BookCurlSheetGeometry(
         sourceX = start,
-        width = page.coerceAtMost(full - start).coerceAtLeast(1),
+        width = span.coerceAtMost(full - start).coerceAtLeast(1),
         offsetX = start.toFloat(),
     )
 }

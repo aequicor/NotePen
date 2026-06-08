@@ -189,7 +189,9 @@ class BookCurlPhysicsTest {
         }
         val total = mesh.vertices3d.size / 3
         assertTrue(flat > total * 9 / 10, "turned page must lie flat at full turn: flat=$flat/$total")
-        assertTrue(mesh.maxLiftPx < 0.10f * w, "maxLift must be small at full turn: ${mesh.maxLiftPx}")
+        // Лист должен лечь ПО-НАСТОЯЩЕМУ плашмя (остаточный завиток от EPS_RADIUS суб-пиксельный),
+        // иначе при снятии оверлея текст прыгает на остаток. ~0.2px при EPS_RADIUS=0.1; порог 1px с запасом.
+        assertTrue(mesh.maxLiftPx < 1f, "turned page must lie essentially flat at full turn (no residual lift): ${mesh.maxLiftPx}")
     }
 
     @Test
@@ -290,28 +292,32 @@ class BookCurlPhysicsTest {
         val single = bookCurlBackFaceGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = false)
         val frontForward = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = true, spineGapPx = 400)
 
-        // full=1000, page=300 ⇒ gap=400, колонки [0,300] и [700,1000]. Изнанка = противоположная
-        // половина: forward-лицо = правая [700,1000] ⇒ изнанка = левая (0); backward наоборот (700).
+        // full=1000, page=300 ⇒ gap=400, корешок на 500. Изнанка = ПРОТИВОПОЛОЖНАЯ половина с тем же
+        // спан-до-корешка: forward-лицо = правая [500,1000] ⇒ изнанка = левая [0,500] (sourceX=0);
+        // backward наоборот (sourceX=500). Ширина изнанки тоже page+halfGap=500.
         assertEquals(0, forward.sourceX)
-        assertEquals(300, forward.width)
-        assertEquals(700, backward.sourceX)
+        assertEquals(500, forward.width)
+        assertEquals(500, backward.sourceX)
         assertEquals(350, single.sourceX)
         assertTrue(forward.sourceX != frontForward.sourceX, "back-face must be the OPPOSITE half of the front sheet")
     }
 
     @Test
-    fun twoPageSpreadAlignsSheetToColumnNotSpine() {
-        // full=1000, page=300, gap=400 ⇒ колонки [0,300] и [700,1000]. Лист совпадает с ЖИВОЙ колонкой
-        // (правая на 700, левая на 0), а не у корешка (500), иначе при отдаче статике страница «прыгает».
+    fun twoPageSpreadAnchorsSheetAtSpine() {
+        // full=1000, page=300, gap=400 ⇒ колонки [0,300] и [700,1000], корешок на 500. Лист загибается
+        // ВОКРУГ КОРЕШКА: простирается от корешка (500) до внешнего края, включая жёлоб halfGap=200.
+        // forward ⇒ [500,1000] (sourceX=500, width=500); backward ⇒ [0,500] (sourceX=0, width=500).
+        // В плоском состоянии лист точно перекрывает живую область [корешок..внешний край] ⇒ отдача
+        // статике не «прыгает», но пивот теперь у корешка, а не у внутренней кромки колонки.
         val forward = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = true, spineGapPx = 400)
         val backward = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 300, direction = -1, twoPageSpread = true, spineGapPx = 400)
         val single = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = false)
 
-        assertEquals(700, forward.sourceX)
-        assertEquals(300, forward.width)
-        assertEquals(700f, forward.offsetX)
+        assertEquals(500, forward.sourceX)
+        assertEquals(500, forward.width)
+        assertEquals(500f, forward.offsetX)
         assertEquals(0, backward.sourceX)
-        assertEquals(300, backward.width)
+        assertEquals(500, backward.width)
         assertEquals(0f, backward.offsetX)
         assertEquals(350, single.sourceX)
         assertEquals(300, single.width)
@@ -321,16 +327,17 @@ class BookCurlPhysicsTest {
     @Test
     fun twoPageSpreadWithSideMarginsStaysInsideContent() {
         // Широкий экран: maxContentWidth ужал колонки (page=200), 2·200+gap(100)=500 < full(1000) ⇒
-        // боковые поля по 250. Колонка должна стоять на center±gap/2 (НЕ full-page=800, что заехало бы
-        // в правое поле и рвало лист). Правая: 500+50=550; левая: 500-50-200=250 (= боковое поле).
+        // боковые поля по 250. Лист идёт от корешка (center=500) до внешнего края, включая жёлоб
+        // halfGap=50: forward ⇒ [500,750] (sourceX=500, width=250), backward ⇒ [250,500] (sourceX=250,
+        // width=250). Внешние края (750/250) совпадают с краями контента — в боковое поле не заезжает.
         val forward = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 200, direction = 1, twoPageSpread = true, spineGapPx = 100)
         val backward = bookCurlSheetGeometry(fullWidth = 1000, pageWidth = 200, direction = -1, twoPageSpread = true, spineGapPx = 100)
 
-        assertEquals(550, forward.sourceX)
-        assertEquals(200, forward.width)
-        assertEquals(550f, forward.offsetX)
+        assertEquals(500, forward.sourceX)
+        assertEquals(250, forward.width)
+        assertEquals(500f, forward.offsetX)
         assertEquals(250, backward.sourceX)
-        assertEquals(200, backward.width)
+        assertEquals(250, backward.width)
         assertEquals(250f, backward.offsetX)
     }
 
@@ -340,11 +347,11 @@ class BookCurlPhysicsTest {
         val backward = bookCurlUnderPageGeometry(fullWidth = 1000, pageWidth = 300, direction = -1, twoPageSpread = true, spineGapPx = 400)
         val single = bookCurlUnderPageGeometry(fullWidth = 1000, pageWidth = 300, direction = 1, twoPageSpread = false)
 
-        assertEquals(700, forward.sourceX)
-        assertEquals(300, forward.width)
-        assertEquals(700f, forward.offsetX)
+        assertEquals(500, forward.sourceX)
+        assertEquals(500, forward.width)
+        assertEquals(500f, forward.offsetX)
         assertEquals(0, backward.sourceX)
-        assertEquals(300, backward.width)
+        assertEquals(500, backward.width)
         assertEquals(0f, backward.offsetX)
         assertEquals(350, single.sourceX)
         assertEquals(300, single.width)

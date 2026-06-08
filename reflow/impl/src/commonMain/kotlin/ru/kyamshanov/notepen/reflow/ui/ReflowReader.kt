@@ -76,6 +76,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -1277,6 +1278,12 @@ private fun PagedReflowContent(
         var curlVelocityX by remember(document) { mutableStateOf(0f) }
         var curlPhase by remember(document) { mutableStateOf(BookCurlPhase.Idle) }
         var curlTargetPage by remember(document) { mutableStateOf<Int?>(null) }
+        // Страница, С КОТОРОЙ переворачиваем (лицо завитка). Пиним её отдельно от
+        // pagerState.currentPage: на завершении завитка currentPage перескакивает на цель ДО снятия
+        // оверлея (scrollToPage идёт перед resetCurl). Если брать лицо как pageCurlImages[currentPage],
+        // текстура лица скачком сменится source→target прямо в кадре отдачи — видимый рывок. С пиннингом
+        // лицо остаётся исходной страницей до resetCurl.
+        var curlSourcePage by remember(document) { mutableStateOf<Int?>(null) }
         // Стиль листа (бумага/обложка) задаёт упругость пружины оседания: бумага мягко с лёгким
         // отскоком, обложка — резко и чётко. Размерно-независимо, поэтому без ширины px.
         val curlStyle =
@@ -1292,11 +1299,19 @@ private fun PagedReflowContent(
             initialVelocity: Float = 0f,
         ) {
             curlPhase = phase
+            // К ЗАВЕРШЁННОМУ состоянию (target=1) оседаем БЕЗ отскока. Недодемпфированная пружина
+            // (paper dampingRatio=0.75) проскакивает за 1.0 (клампится плашмя) и затем «недокручивает»
+            // обратно под 1.0 — лист на миг разворачивается назад: затенение не снимается до конца
+            // (бледный маркер) и текст прыгает на остаток при передаче живой странице. Критическое
+            // демпфирование (≥1) даёт монотонный доворот строго до плашмя. Отскок «бумаги» оставляем
+            // только на ВОЗВРАТ (target=0), где недокрут до 0 визуально безвреден.
+            val settleDamping =
+                if (targetProgress >= 1f) maxOf(1f, curlStyle.settleDampingRatio) else curlStyle.settleDampingRatio
             Animatable(curlProgress).animateTo(
                 targetValue = targetProgress,
                 animationSpec =
                     spring(
-                        dampingRatio = curlStyle.settleDampingRatio,
+                        dampingRatio = settleDamping,
                         stiffness = curlStyle.settleStiffness,
                     ),
                 initialVelocity = initialVelocity,
@@ -1311,6 +1326,7 @@ private fun PagedReflowContent(
             curlVelocityX = 0f
             curlPhase = BookCurlPhase.Idle
             curlTargetPage = null
+            curlSourcePage = null
         }
 
         val scrollLocked = LocalReflowSelectionState.current.scrollLocked
@@ -1368,6 +1384,7 @@ private fun PagedReflowContent(
                             curlFingerYFraction = PAGE_CURL_DEFAULT_GRIP_Y
                             curlVelocityX = 0f
                             curlPhase = BookCurlPhase.Completing
+                            curlSourcePage = pagerState.currentPage
                             curlTargetPage = target
                             curlProgress = PAGE_CURL_VISIBLE_PROGRESS
                             animateCurlTo(1f, BookCurlPhase.Completing)
@@ -1474,6 +1491,7 @@ private fun PagedReflowContent(
                                             curlGripYFraction =
                                                 (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
                                             curlFingerYFraction = curlGripYFraction
+                                            curlSourcePage = pagerState.currentPage
                                             curlTargetPage = target
                                             curlVelocityX = 0f
                                             curlPhase = BookCurlPhase.Dragging
@@ -1512,6 +1530,11 @@ private fun PagedReflowContent(
                                             scope.launch {
                                                 if (complete) {
                                                     animateCurlTo(1f, BookCurlPhase.Completing, flingProgress)
+                                                    // progress=1 совпадает с целью: коммитим и снимаем
+                                                    // оверлей в ОДИН кадр, без кросс-фейда. Фейд блендил
+                                                    // две почти-одинаковые непрозрачные картинки —
+                                                    // суб-пиксель давал призрак-сдвиг, а усреднение цвета —
+                                                    // бледный маркер. Подмена незаметна (реконструкция = живой).
                                                     pagerState.scrollToPage(targetPage)
                                                 } else {
                                                     animateCurlTo(0f, BookCurlPhase.Returning, flingProgress)
@@ -1598,7 +1621,11 @@ private fun PagedReflowContent(
         }
         if (useNativeBookCurl && !scrollLocked) {
             val target = curlTargetPage
-            val frontTexture = pageCurlImages[pagerState.currentPage]
+            // Лицо завитка — ИСХОДНАЯ страница (curlSourcePage), а не pagerState.currentPage:
+            // после scrollToPage(target) на завершении currentPage уже = target, и привязка к нему
+            // подменяла бы лицо целевой страницей в кадре отдачи (рывок). До старта завитка
+            // source == currentPage, поэтому фолбэк безопасен.
+            val frontTexture = pageCurlImages[curlSourcePage ?: pagerState.currentPage]
             if (target != null && frontTexture != null && curlProgress > PAGE_CURL_VISIBLE_PROGRESS) {
                 // Текстура захватывается с супер-сэмплингом (front.width = экранная ширина × N), а
                 // геометрия кропа листа сравнивает pageWidth с front.width — значит pageWidth тоже
@@ -2641,6 +2668,13 @@ internal fun styledText(
     if (source.isEmpty() && anchors.isEmpty() && !settings.bionic && !needsWordSpacing) {
         return AnnotatedString(text)
     }
+    // Полупрозрачные фоны (подсветка выделений/код) ПРЕДкомпозитим в НЕПРОЗРАЧНЫЙ цвет над фоном
+    // страницы. Полупрозрачное смешивание запекается в закадровой sRGB-текстуре завитка иначе, чем в
+    // живом (color-managed, P3) окне, поэтому подсветка на завитке выходит бледнее/другого оттенка, а
+    // на стыке оверлей→живая страница «меняет оттенок». Непрозрачный цвет color-менеджится одинаково
+    // (как текст и фон, которые уже совпадают). Над фоном страницы результат визуально тот же.
+    val codeBg = settings.codeBackground.compositeOver(settings.background)
+    val highlightBg = settings.highlightColor.compositeOver(settings.background)
     return buildAnnotatedString {
         append(text)
         source.forEach { span ->
@@ -2649,7 +2683,7 @@ internal fun styledText(
             if (start >= end) return@forEach
             if (span.bold) addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, end)
             if (span.monospace) {
-                addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = settings.codeBackground), start, end)
+                addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg), start, end)
             }
         }
         if (needsWordSpacing) {
@@ -2667,7 +2701,7 @@ internal fun styledText(
         anchors.forEach { anchor ->
             val start = anchor.charStart.coerceIn(0, text.length)
             val end = anchor.charEnd.coerceIn(start, text.length)
-            if (start < end) addStyle(SpanStyle(background = settings.highlightColor), start, end)
+            if (start < end) addStyle(SpanStyle(background = highlightBg), start, end)
         }
     }
 }
