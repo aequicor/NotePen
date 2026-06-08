@@ -1392,8 +1392,8 @@ private fun PagedReflowContent(
                 if (page < 0 || page > lastPagerPage || pageCurlImages[page] != null) return@forEach
                 // Перекомпонуем страницу закадрово (ImageComposeScene) — GraphicsLayer.toImageBitmap()
                 // на Desktop отдаёт пустой кадр. Локали и фон проставляем, как на экране.
-                // Супер-сэмплинг ×N: рендерим текстуру в N раз крупнее (размер и плотность ×N) — при
-                // натягивании на меш билинейная выборка не «худит» текст; оверлей ужимает обратно в 1/N.
+                // Рендерим в 1× (см. PAGE_CURL_TEXTURE_SUPERSAMPLE): завиток только сжимает текстуру, а
+                // супер-сэмплинг с обратным уменьшением в sRGB делал бы текст блёклым/тонким.
                 val ss = PAGE_CURL_TEXTURE_SUPERSAMPLE
                 val texture =
                     captureReflowTexture(
@@ -1598,9 +1598,21 @@ private fun PagedReflowContent(
         }
         if (useNativeBookCurl && !scrollLocked) {
             val target = curlTargetPage
-            if (target != null && curlProgress > PAGE_CURL_VISIBLE_PROGRESS) {
+            val frontTexture = pageCurlImages[pagerState.currentPage]
+            if (target != null && frontTexture != null && curlProgress > PAGE_CURL_VISIBLE_PROGRESS) {
+                // Текстура захватывается с супер-сэмплингом (front.width = экранная ширина × N), а
+                // геометрия кропа листа сравнивает pageWidth с front.width — значит pageWidth тоже
+                // обязан быть в пикселях ТЕКСТУРЫ, иначе кропается лишь 1/N (на Desktop ровно половина)
+                // столбца страницы. Масштаб берём из реального отношения текстуры к экрану (Android-
+                // фолбэк рендерит 1×, Desktop — ×N), а не из константы.
+                val textureScale =
+                    if (readerPageSizePx.width > 0) {
+                        frontTexture.width.toFloat() / readerPageSizePx.width
+                    } else {
+                        1f
+                    }
                 BookCurlOverlay(
-                    front = pageCurlImages[pagerState.currentPage],
+                    front = frontTexture,
                     back = pageCurlImages[target],
                     progress = curlProgress,
                     direction = curlDirection,
@@ -1609,7 +1621,8 @@ private fun PagedReflowContent(
                     velocityX = curlVelocityX,
                     phase = curlPhase,
                     twoPageSpread = settings.twoPageSpread,
-                    pageWidthPx = with(density) { pageOuterWidth.roundToPx() },
+                    pageWidthPx = with(density) { (pageOuterWidth.roundToPx() * textureScale).roundToInt() },
+                    spineGapPx = with(density) { (BOOK_SPREAD_GAP.roundToPx() * textureScale).roundToInt() },
                     style = curlStyle,
                     modifier =
                         Modifier
@@ -2759,9 +2772,13 @@ private const val PAGE_CURL_BACK_EDGE_FRACTION = 0.34f
  * единицы — иначе на широком экране лист не довернуть рукой; ~0.6 = комфортный свайп доводит до конца. */
 private const val PAGE_CURL_DRAG_COMPLETE_FRACTION = 0.6f
 
-/** Кратность супер-сэмплинга текстуры страницы для завитка: рендерим в N раз крупнее ради чёткого
- * текста при натягивании на меш (оверлей ужимает обратно). 2× — заметно чётче без большой цены. */
-private const val PAGE_CURL_TEXTURE_SUPERSAMPLE = 2
+/** Кратность супер-сэмплинга текстуры страницы для завитка. ДОЛЖНА быть 1: цилиндрический завиток
+ * только СЖИМАЕТ лист по горизонтали (никогда не увеличивает текстуру сверх плоского размера), поэтому
+ * супер-сэмплинг не добавляет чёткости — но при N>1 меш ужимает текстуру обратно в 1/N, а Skia делает
+ * это уменьшение в sRGB-пространстве (не в линейном). Сглаженные края чёрного текста на белом при этом
+ * «светлеют» — на завитке текст выглядит тоньше и блёклее живой страницы (которая растеризуется один раз
+ * в 1× с хинтингом). N=1 ⇒ текстура совпадает с экраном пиксель-в-пиксель, текст идентичен живому. */
+private const val PAGE_CURL_TEXTURE_SUPERSAMPLE = 1
 
 private const val HEADING_SCALE_1 = 1.6f
 private const val HEADING_SCALE_2 = 1.35f

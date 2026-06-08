@@ -219,8 +219,16 @@ private class MeshBuild(
             (radiusFrac * widthPx * (1f - collapse)).coerceAtLeast(EPS_RADIUS)
         }
 
-    // Затухание блика/тени к полному перевороту — лист лёг, подсветки не остаётся.
-    val shadeFade = 1f - smoothstep01((progress - SHADE_FADE_START) / (1f - SHADE_FADE_START))
+    // «Горб» затенения: 0 в НАЧАЛЬНОМ (progress→0) и КОНЕЧНОМ (progress→1) положениях, ~1 в середине.
+    // В покое (лист у статики в начале и лёг плашмя в конце) цвета СОВПАДАЮТ со статичной страницей —
+    // без затемнения/блика; 3D-светотень нарастает только в движении. Вход (fadeIn) симметрично зеркалит
+    // выход (fadeOut), поэтому ни на старте, ни в конце «искажения» цвета подсветок нет.
+    val shadeFade =
+        run {
+            val fadeIn = smoothstep01(progress / SHADE_FADE_IN_END)
+            val fadeOut = 1f - smoothstep01((progress - SHADE_FADE_START) / (1f - SHADE_FADE_START))
+            fadeIn * fadeOut
+        }
 
     /**
      * Одна строка листа. Линия сгиба для строки зажата у корешка (foldS≥0): корешок (s=0≤foldS) всегда
@@ -348,6 +356,10 @@ private const val R_COLLAPSE_START = 0.55f
 /** Прогресс, с которого затухают блик/тень и лист выходит на полную яркость (совпадает с началом
  * схлопывания радиуса): к финалу подсветки/приглушения не остаётся, страница лежит нормально освещённой. */
 private const val SHADE_FADE_START = 0.55f
+
+/** Прогресс, к которому светотень ВХОДИТ от нуля на старте: до него цвета как на статичной странице,
+ * затем 3D-затенение нарастает к середине. Симметрично [SHADE_FADE_START] на выходе. */
+private const val SHADE_FADE_IN_END = 0.25f
 
 /** Пол радиуса завитка (px) — лишь чтобы не делить на ноль на полном перевороте. */
 private const val EPS_RADIUS = 1.5f

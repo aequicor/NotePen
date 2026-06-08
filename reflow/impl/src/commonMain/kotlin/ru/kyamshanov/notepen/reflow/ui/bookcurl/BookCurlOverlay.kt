@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -26,6 +27,7 @@ internal fun BookCurlOverlay(
     phase: BookCurlPhase,
     twoPageSpread: Boolean,
     pageWidthPx: Int,
+    spineGapPx: Int = 0,
     style: PageTurnStyle = PageTurnStyle.Default,
     modifier: Modifier = Modifier,
 ) {
@@ -35,8 +37,8 @@ internal fun BookCurlOverlay(
     // мониторе у книги большие боковые поля, и загиб должен начинаться от края текста, а не
     // от края окна. В развороте корешок — по центру окна, свободный край — у края контента.
     val sheetGeometry =
-        remember(front.width, pageWidthPx, direction, twoPageSpread) {
-            bookCurlSheetGeometry(front.width, pageWidthPx, direction, twoPageSpread)
+        remember(front.width, pageWidthPx, direction, twoPageSpread, spineGapPx) {
+            bookCurlSheetGeometry(front.width, pageWidthPx, direction, twoPageSpread, spineGapPx)
         }
     val sheetSource =
         remember(front, sheetGeometry) {
@@ -46,9 +48,9 @@ internal fun BookCurlOverlay(
             )
         }
     val underPageSource =
-        remember(back, pageWidthPx, direction, twoPageSpread, sheetGeometry.offsetX) {
+        remember(back, pageWidthPx, direction, twoPageSpread, spineGapPx, sheetGeometry.offsetX) {
             back?.let { image ->
-                val geometry = bookCurlUnderPageGeometry(image.width, pageWidthPx, direction, twoPageSpread)
+                val geometry = bookCurlUnderPageGeometry(image.width, pageWidthPx, direction, twoPageSpread, spineGapPx)
                 SheetSource(
                     image = cropBookCurlImage(image = image, sourceX = geometry.sourceX, width = geometry.width),
                     offsetX = sheetGeometry.offsetX,
@@ -59,9 +61,9 @@ internal fun BookCurlOverlay(
     // половина следующего разворота (а не тот же столбец — иначе показывали бы страницу через одну).
     // Зеркалим один раз: после переворота вокруг корешка текст читается нормально.
     val backFaceImage =
-        remember(back, front.width, pageWidthPx, direction, twoPageSpread) {
+        remember(back, front.width, pageWidthPx, direction, twoPageSpread, spineGapPx) {
             back?.let { image ->
-                val backGeometry = bookCurlBackFaceGeometry(image.width, pageWidthPx, direction, twoPageSpread)
+                val backGeometry = bookCurlBackFaceGeometry(image.width, pageWidthPx, direction, twoPageSpread, spineGapPx)
                 mirrorBookCurlImageHorizontally(
                     cropBookCurlImage(image = image, sourceX = backGeometry.sourceX, width = backGeometry.width),
                 )
@@ -110,7 +112,15 @@ internal fun BookCurlOverlay(
                 highlight = Color.White,
             )
         }
-    Canvas(modifier.fillMaxSize()) {
+    // Плавное ПОЯВЛЕНИЕ оверлея: вместо резкой подмены живой страницы текстурой в один кадр (на старте
+    // свайпа это читалось как рывок цвета) оверлей вплывает альфой на первых ~12 % прогресса. Любая
+    // мелкая разница «текстура vs живой рендер» на стыке размывается кросс-фейдом.
+    val appearAlpha =
+        remember(progress) {
+            val t = (progress / APPEAR_FADE_END).coerceIn(0f, 1f)
+            t * t * (3f - 2f * t)
+        }
+    Canvas(modifier.fillMaxSize().graphicsLayer { alpha = appearAlpha }) {
         // Текстуры захватываются с супер-сэмплингом (×N) для чёткого текста на завитке. Геометрия и
         // текст-координаты живут в пикселях ТЕКСТУРЫ (×N), поэтому весь рисунок ужимаем в 1/N до
         // экранных пикселей. N выводим из отношения высоты текстуры к экранной высоте оверлея (на
@@ -155,6 +165,7 @@ internal fun bookCurlSheetGeometry(
     pageWidth: Int,
     direction: Int,
     twoPageSpread: Boolean,
+    spineGapPx: Int = 0,
 ): BookCurlSheetGeometry {
     val full = fullWidth.coerceAtLeast(1)
     val page = pageWidth.coerceIn(1, full)
@@ -163,18 +174,23 @@ internal fun bookCurlSheetGeometry(
         val left = ((full - page) / 2).coerceIn(0, full - 1)
         return BookCurlSheetGeometry(sourceX = left, width = page.coerceAtMost(full - left), offsetX = left.toFloat())
     }
-    // Разворот: корешок по центру окна. Forward — правая страница, backward — левая.
+    // Разворот: корешок строго по центру окна (full/2), а колонки отстоят от него на ПОЛОВИНУ зазора
+    // BOOK_SPREAD_GAP. Позицию колонки берём как center ± gap/2, НЕ как full-page: на широком мониторе
+    // maxContentWidth добавляет боковые поля, и full-page заехало бы в правое поле (рваный лист). Так
+    // лист точно совпадает с живой колонкой и не «прыгает» по горизонтали при отдаче статике.
     val center = full / 2
-    return if (direction > 0) {
-        BookCurlSheetGeometry(
-            sourceX = center,
-            width = page.coerceAtMost(full - center).coerceAtLeast(1),
-            offsetX = center.toFloat(),
-        )
-    } else {
-        val left = (center - page).coerceIn(0, full - 1)
-        BookCurlSheetGeometry(sourceX = left, width = (center - left).coerceAtLeast(1), offsetX = left.toFloat())
-    }
+    val halfGap = (spineGapPx / 2).coerceAtLeast(0)
+    val start =
+        if (direction > 0) {
+            (center + halfGap).coerceIn(0, full - 1)
+        } else {
+            (center - halfGap - page).coerceIn(0, full - 1)
+        }
+    return BookCurlSheetGeometry(
+        sourceX = start,
+        width = page.coerceAtMost(full - start).coerceAtLeast(1),
+        offsetX = start.toFloat(),
+    )
 }
 
 internal fun bookCurlUnderPageGeometry(
@@ -182,7 +198,8 @@ internal fun bookCurlUnderPageGeometry(
     pageWidth: Int,
     direction: Int,
     twoPageSpread: Boolean,
-): BookCurlSheetGeometry = bookCurlSheetGeometry(fullWidth, pageWidth, direction, twoPageSpread)
+    spineGapPx: Int = 0,
+): BookCurlSheetGeometry = bookCurlSheetGeometry(fullWidth, pageWidth, direction, twoPageSpread, spineGapPx)
 
 /**
  * Геометрия кропа ИЗНАНКИ переворачиваемого листа. Одиночная страница — тот же столбец. Разворот:
@@ -194,14 +211,19 @@ internal fun bookCurlBackFaceGeometry(
     pageWidth: Int,
     direction: Int,
     twoPageSpread: Boolean,
+    spineGapPx: Int = 0,
 ): BookCurlSheetGeometry =
     if (!twoPageSpread) {
-        bookCurlSheetGeometry(fullWidth, pageWidth, direction, false)
+        bookCurlSheetGeometry(fullWidth, pageWidth, direction, false, spineGapPx)
     } else {
-        bookCurlSheetGeometry(fullWidth, pageWidth, -direction, true)
+        bookCurlSheetGeometry(fullWidth, pageWidth, -direction, true, spineGapPx)
     }
 
 internal fun bookCurlTargetReveal(progress: Float): Float {
     val t = ((progress.coerceIn(0f, 1f) - 0.42f) / 0.48f).coerceIn(0f, 1f)
     return t * t * (3f - 2f * t)
 }
+
+/** Доля прогресса, на которой оверлей завитка ВПЛЫВАЕТ альфой 0→1 (плавная подмена живой страницы
+ * текстурой на старте свайпа, без рывка цвета в один кадр). */
+private const val APPEAR_FADE_END = 0.12f
