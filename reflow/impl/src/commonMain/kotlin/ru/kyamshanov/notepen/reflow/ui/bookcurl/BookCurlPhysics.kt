@@ -294,16 +294,26 @@ private class MeshBuild(
         vertices3d[idx * 3 + 2] = zc
         // По мере укладки плашмя (shadeFade→0) затенение/приглушение изнанки уходит, и лист
         // выходит на ПОЛНУЮ яркость: лежащая в финале страница освещена нормально, а не тёмно-серая.
-        val lit = diffuse(facingCos)
+        // Доля удаления от корешка (s=0): 0 у корешка (прямо под светом), 1 у внешнего края.
+        val distFromSpine = (worldX / widthPx).coerceIn(0f, 1f)
+        val lit = diffuse(facingCos, distFromSpine)
         light[idx] = lit + (1f - lit) * (1f - shadeFade)
         facing[idx] = facingCos
         maxLift = max(maxLift, zc)
     }
 
     /** Диффуз: ярче там, где поверхность смотрит на свет (лицо/завёрнутая изнанка), темнее на сгибе. */
-    private fun diffuse(facingCos: Float): Float {
+    private fun diffuse(
+        facingCos: Float,
+        distFromSpine: Float,
+    ): Float {
         val lit = (CURL_AMBIENT + CURL_DIFFUSE * abs(facingCos)).coerceIn(0f, 1f)
-        return if (facingCos >= 0f) lit else lit * CURL_BACK_DIM
+        if (facingCos >= 0f) return lit
+        // Изнанка освещена ТОЧЕЧНЫМ светом над корешком: у корешка (под светом) видимая поверхность
+        // смотрит на источник ⇒ полная яркость; к внешнему краю приглушаем до CURL_BACK_DIM. Раньше дим
+        // был плоским ⇒ изнанка темнела даже прямо под светом, что и просили поправить.
+        val backDim = 1f - (1f - CURL_BACK_DIM) * distFromSpine
+        return lit * backDim
     }
 
     fun toMesh(): BookCurlMesh =
@@ -383,6 +393,7 @@ private const val CURL_AMBIENT = 0.55f
 /** Прямой свет: добавка к яркости там, где поверхность смотрит на свет (лицо/завёрнутая изнанка). */
 private const val CURL_DIFFUSE = 0.45f
 
-/** Изнанка листа = приглушённая следующая страница: ощутимо темнее лица (низ листа в полутени),
- * но читаемо. Затемняем через MODULATE-свет (а не alpha) — лист остаётся непрозрачным. */
+/** Приглушение изнанки ВДАЛИ от света (у внешнего края): под светом над корешком изнанка светлая,
+ * к внешнему краю гаснет до этого множителя. Затемняем через MODULATE-свет (не alpha) — лист
+ * остаётся непрозрачным. */
 private const val CURL_BACK_DIM = 0.80f

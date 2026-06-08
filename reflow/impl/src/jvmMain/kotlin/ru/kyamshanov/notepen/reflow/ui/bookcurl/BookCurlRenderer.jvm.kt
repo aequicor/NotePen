@@ -159,24 +159,53 @@ private fun drawCastShadow(
     mesh: BookCurlMesh,
     paint: BookCurlPaint,
 ) {
-    val strength = meshShadow(mesh) * mesh.shadeFade
+    // Сила тени — по фактическому ПОДЪЁМУ цилиндра (meshShadow), БЕЗ множителя shadeFade: shadeFade
+    // (горб светотени лица) гаснет уже с progress=0.55, из-за чего тень от ещё закрученного листа
+    // преждевременно слабела. meshShadow сам = 0 в покое (подъёма нет) и спадает, когда лист лёг плашмя.
+    val strength = meshShadow(mesh)
     if (strength <= 0.02f) return
-    // Тень — силуэт страницы (с изогнутым свободным краем), смещённый и размытый: на открываемом
-    // листе тень повторяет ФОРМУ изгиба края, а не идёт прямым градиентом. Рисуется первой —
-    // страница сверху перекрывает свою тень, остаётся только смещённый «полумесяц» снизу.
-    val lift = mesh.maxLiftPx
+    // Тень ОТ ЦИЛИНДРА на нижнюю (открывающуюся) страницу. ТОЧЕЧНЫЙ свет прямо над корешком: каждую
+    // поднятую (z>порог) вершину проецируем лучом «свет→вершина» на плоскость страницы (тени расходятся
+    // ОТ корешка тем дальше, чем выше вершина); силуэт объединения поднятых треугольников (non-zero
+    // winding ⇒ без двойного затемнения). Рисуется ПЕРВОЙ — поверх under-page, но ДО paperBase/меша:
+    // под самим листом тень перекрыта листом, а на открытую страницу падает видимая тень.
+    val v = mesh.vertices3d
+    val threshold = (mesh.maxLiftPx * SHADOW_LIFT_THRESHOLD).coerceAtLeast(0.5f)
+    val spineX = if (mesh.direction > 0) 0f else mesh.widthPx
+    val lightY = mesh.heightPx * 0.5f
+    val lightZ = (mesh.widthPx * SHADOW_LIGHT_HEIGHT_FRAC).coerceAtLeast(mesh.maxLiftPx + 1f)
+    val builder = PathBuilder()
+    var any = false
+
+    fun shadowT(i: Int): Float = v[i * 3 + 2] / (lightZ - v[i * 3 + 2])
+
+    fun projX(i: Int): Float = v[i * 3].let { vx -> vx + shadowT(i) * (vx - spineX) }
+
+    fun projY(i: Int): Float = v[i * 3 + 1].let { vy -> vy + shadowT(i) * (vy - lightY) }
+
+    fun addTriangle(
+        a: Int,
+        b: Int,
+        c: Int,
+    ) {
+        if ((v[a * 3 + 2] + v[b * 3 + 2] + v[c * 3 + 2]) / 3f <= threshold) return
+        builder.moveTo(projX(a), projY(a)).lineTo(projX(b), projY(b)).lineTo(projX(c), projY(c)).closePath()
+        any = true
+    }
+    for (row in 0 until mesh.rows) {
+        for (col in 0 until mesh.columns) {
+            val p00 = row * (mesh.columns + 1) + col
+            addTriangle(p00, p00 + 1, p00 + mesh.columns + 2)
+            addTriangle(p00, p00 + mesh.columns + 2, p00 + mesh.columns + 1)
+        }
+    }
+    if (!any) return
     val shadowPaint =
         Paint().apply {
             color = paint.shadow.copy(alpha = SHADOW_CAST_ALPHA * strength).toArgb()
-            maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, (lift * SHADOW_CAST_BLUR).coerceAtLeast(1f))
+            maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, (mesh.maxLiftPx * SHADOW_CAST_BLUR).coerceAtLeast(1f))
         }
-    canvas.save()
-    canvas.translate(lift * SHADOW_CAST_OFFSET_X * mesh.direction, lift * SHADOW_CAST_OFFSET_Y)
-    try {
-        canvas.drawPath(mesh.outlinePath(), shadowPaint)
-    } finally {
-        canvas.restore()
-    }
+    canvas.drawPath(builder.detach(), shadowPaint)
 }
 
 private fun drawRimHighlight(
@@ -262,14 +291,14 @@ private fun androidx.compose.ui.graphics.Color.scaleRgb(scale: Float): androidx.
         alpha = 1f,
     )
 
-/** Прозрачность отбрасываемой тени-силуэта. */
-private const val SHADOW_CAST_ALPHA = 0.18f
+/** Прозрачность (на пике подъёма) тени, отбрасываемой цилиндром на нижнюю страницу. */
+private const val SHADOW_CAST_ALPHA = 0.30f
 
-/** Смещение силуэта тени по горизонтали (× подъём, со знаком направления). */
-private const val SHADOW_CAST_OFFSET_X = 0.05f
+/** Высота точечного света над страницей (× ширину листа): ниже свет ⇒ длиннее тени от корешка. */
+private const val SHADOW_LIGHT_HEIGHT_FRAC = 1.0f
 
-/** Смещение силуэта тени вниз (× подъём) — тень ложится под приподнятый лист. */
-private const val SHADOW_CAST_OFFSET_Y = 0.1f
+/** Радиус размытия тени (× подъём цилиндра). */
+private const val SHADOW_CAST_BLUR = 0.06f
 
-/** Радиус размытия тени (× подъём). */
-private const val SHADOW_CAST_BLUR = 0.05f
+/** Порог высоты (× maxLift), выше которого вершина считается «поднятой» и отбрасывает тень. */
+private const val SHADOW_LIFT_THRESHOLD = 0.12f
