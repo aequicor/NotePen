@@ -58,6 +58,19 @@ internal data class BookCurlMesh(
     val shadeFade: Float,
 ) {
     val vertexCount: Int get() = (columns + 1) * (rows + 1)
+
+    // Кэш per-vertex ARGB множителей затенения: чистая функция от light[] (неизменного после
+    // построения), но shadeColors() зовётся дважды за кадр (лицо+изнанка) на каждый меш. Считаем
+    // лениво один раз на экземпляр меша. НЕ в первичном конструкторе ⇒ вне equals/hashCode/copy:
+    // меш используется как remember-ключ по идентичности, лишнее поле туда добавлять нельзя.
+    internal val shadeColorsCache: IntArray by lazy {
+        val out = IntArray(vertexCount)
+        for (i in 0 until vertexCount) {
+            val g = (light[i].coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255)
+            out[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
+        }
+        out
+    }
 }
 
 internal data class BookCurlMeshBuffers(
@@ -336,15 +349,10 @@ private class MeshBuild(
 /**
  * Per-vertex ARGB множители (серый) для MODULATE-затенения текстуры: значение диффуза
  * [BookCurlMesh.light]. На плоской части ≈ белый, на сгибе темнее, на изнанке — освещённая подложка.
+ * Возвращает кэш меша ([BookCurlMesh.shadeColorsCache]): значение считается лениво один раз на
+ * экземпляр и переиспользуется для вызовов лицевой и изнаночной сторон ⇒ без аллокации за кадр.
  */
-internal fun BookCurlMesh.shadeColors(): IntArray {
-    val out = IntArray(vertexCount)
-    for (i in 0 until vertexCount) {
-        val g = (light[i].coerceIn(0f, 1f) * 255f).toInt().coerceIn(0, 255)
-        out[i] = (0xFF shl 24) or (g shl 16) or (g shl 8) or g
-    }
-    return out
-}
+internal fun BookCurlMesh.shadeColors(): IntArray = shadeColorsCache
 
 private const val VERTICES_PER_CELL = 6
 

@@ -21,6 +21,32 @@ import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Shader
 import org.jetbrains.skia.VertexMode
 
+// Кэши уровня файла. Все они трогаются ТОЛЬКО из drawBookCurlNative, которая исполняется
+// исключительно на единственном UI-потоке Compose (кадр перелистывания). Поэтому изменяемое
+// состояние на уровне файла безопасно без синхронизации: одновременных обращений нет. Каждый
+// нативный Skia-ресурс (Image/Shader/MaskFilter) ЗАКРЫВАЕТСЯ close() при вытеснении, иначе утечёт.
+
+// #1: переиспользуемый PathBuilder тени (геометрия заполняется заново каждый кадр) + один Paint;
+// MaskFilter кэшируем и пересоздаём только при смене квантованного (целопиксельного) радиуса.
+// (Skia m144 убрала мутирующий Path API ⇒ строим через PathBuilder.)
+private val shadowCastPathBuilder = PathBuilder()
+private val shadowCastPaint = Paint()
+private var cachedShadowBlurFilter: MaskFilter? = null
+private var cachedShadowBlurRadiusPx = -1
+
+// #2: кэш нативного Skia-Image + его Shader по ИДЕНТИЧНОСТИ ImageBitmap (front/back стабильны на
+// протяжении перетаскивания — приходят из remember в BookCurlOverlay; идентичность меняется только
+// на переворот страницы). Маленький LRU; при вытеснении явно закрываем и Shader, и Image.
+private const val TEXTURED_MESH_CACHE_CAPACITY = 6
+private val texturedMeshShaderCache = linkedMapOf<ImageBitmap, CachedMeshTexture>()
+private val texturedMeshPaint = Paint()
+private val texturedMeshSampling = FilterMipmap(FilterMode.LINEAR, MipmapMode.NONE)
+
+private class CachedMeshTexture(
+    val image: Image,
+    val shader: Shader,
+)
+
 internal actual fun isBookCurlNativeRendererSupported(): Boolean = true
 
 internal actual fun DrawScope.drawBookCurlNative(
@@ -39,12 +65,15 @@ internal actual fun DrawScope.drawBookCurlNative(
             drawCastShadow(canvas = canvas, mesh = mesh, paint = paint)
             drawPaperBase(canvas = canvas, mesh = mesh, paint = paint)
 
+            // ОДИН проход разбивает индексы треугольников на лицо/изнанку (раньше — два полных скана
+            // за кадр с пересозданием массивов). На выходе — точно подогнанные массивы.
+            val (frontIndices, backIndices) = mesh.facingIndices(buffers)
             // Лицевые треугольники — текущая страница (нормальные UV).
             drawTexturedMesh(
                 image = front,
                 mesh = mesh,
                 texCoords = buffers.textureCoordinates,
-                indices = mesh.facingIndices(buffers, keepFront = true),
+                indices = frontIndices,
                 alpha = 1f,
             )
             // Изнанка завернувшегося листа — СЛЕДУЮЩАЯ страница (картинка уже зеркальная, см.
@@ -55,7 +84,7 @@ internal actual fun DrawScope.drawBookCurlNative(
                     image = image,
                     mesh = mesh,
                     texCoords = buffers.textureCoordinates,
-                    indices = mesh.facingIndices(buffers, keepFront = false),
+                    indices = backIndices,
                     alpha = 1f,
                 )
             }
@@ -75,56 +104,81 @@ private fun DrawScope.drawTexturedMesh(
     alpha: Float,
 ) {
     if (indices.isEmpty()) return
+
+    // Достаём Skia-Image+Shader из LRU по идентичности ImageBitmap; создаём только при промахе.
+    // Sampling/tile-modes/Matrix.IDENTITY постоянны ⇒ кэширование байт-идентично прежнему.
+    fun cachedShader(): Shader {
+        texturedMeshShaderCache[image]?.let { existing ->
+            // LRU: освежаем позицию (re-put в конец порядка обхода).
+            texturedMeshShaderCache.remove(image)
+            texturedMeshShaderCache[image] = existing
+            return existing.shader
+        }
+        val skiaImage = Image.makeFromBitmap(image.asSkiaBitmap())
+        val shader =
+            skiaImage.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, texturedMeshSampling, Matrix33.IDENTITY)
+        texturedMeshShaderCache[image] = CachedMeshTexture(image = skiaImage, shader = shader)
+        while (texturedMeshShaderCache.size > TEXTURED_MESH_CACHE_CAPACITY) {
+            val oldestKey = texturedMeshShaderCache.keys.first()
+            // Явно закрываем нативные ресурсы вытесненной записи (не полагаясь на финализатор Shader).
+            texturedMeshShaderCache.remove(oldestKey)?.let { evicted ->
+                evicted.shader.close()
+                evicted.image.close()
+            }
+        }
+        return shader
+    }
+
     drawIntoCanvas { composeCanvas ->
         val canvas = composeCanvas.skiaCanvas
-        val skiaImage = Image.makeFromBitmap(image.asSkiaBitmap())
-        val sampling = FilterMipmap(FilterMode.LINEAR, MipmapMode.NONE)
-        val drawPaint =
-            Paint().apply {
-                this.alpha = (alpha.coerceIn(0f, 1f) * 255).toInt()
-                shader = skiaImage.makeShader(FilterTileMode.CLAMP, FilterTileMode.CLAMP, sampling, Matrix33.IDENTITY)
-            }
-        try {
-            canvas.drawVertices(
-                VertexMode.TRIANGLES,
-                mesh.vertices2d,
-                mesh.shadeColors(),
-                texCoords,
-                indices,
-                BlendMode.MODULATE,
-                drawPaint,
-            )
-        } finally {
-            skiaImage.close()
-        }
+        texturedMeshPaint.alpha = (alpha.coerceIn(0f, 1f) * 255).toInt()
+        texturedMeshPaint.shader = cachedShader()
+        canvas.drawVertices(
+            VertexMode.TRIANGLES,
+            mesh.vertices2d,
+            mesh.shadeColors(),
+            texCoords,
+            indices,
+            BlendMode.MODULATE,
+            texturedMeshPaint,
+        )
     }
 }
 
 /**
- * Индексы треугольников одной стороны: [keepFront]=true — лицевые (facing ≥ 0, текущая страница),
- * false — завернувшаяся изнанка (facing < 0, следующая страница). Делим, т.к. стороны кроем
- * разными текстурами.
+ * За ОДИН проход делит индексы треугольников на лицевые (facing ≥ 0 — текущая страница, .first) и
+ * завернувшуюся изнанку (facing < 0 — следующая страница, .second). Делим, т.к. стороны кроем
+ * разными текстурами. Раньше функция звалась дважды за кадр и каждый раз аллоцировала
+ * ShortArray(all.size) + copyOf(n); теперь — один скан и точно подогнанные массивы.
  */
-private fun BookCurlMesh.facingIndices(
-    buffers: BookCurlMeshBuffers,
-    keepFront: Boolean,
-): ShortArray {
+private fun BookCurlMesh.facingIndices(buffers: BookCurlMeshBuffers): Pair<ShortArray, ShortArray> {
     val all = buffers.triangleIndices
-    val out = ShortArray(all.size)
-    var n = 0
+    // Первый проход: считаем число лицевых треугольников, чтобы выделить массивы точного размера.
+    var frontCount = 0
     var i = 0
     while (i < all.size) {
-        val a = all[i].toInt()
-        val b = all[i + 1].toInt()
-        val c = all[i + 2].toInt()
-        if ((facing[a] + facing[b] + facing[c] >= 0f) == keepFront) {
-            out[n++] = all[i]
-            out[n++] = all[i + 1]
-            out[n++] = all[i + 2]
+        if (facing[all[i].toInt()] + facing[all[i + 1].toInt()] + facing[all[i + 2].toInt()] >= 0f) frontCount += 3
+        i += 3
+    }
+    val frontIndices = ShortArray(frontCount)
+    val backIndices = ShortArray(all.size - frontCount)
+    // Второй проход: раскладываем тройки индексов по лицу/изнанке.
+    var frontPos = 0
+    var backPos = 0
+    i = 0
+    while (i < all.size) {
+        if (facing[all[i].toInt()] + facing[all[i + 1].toInt()] + facing[all[i + 2].toInt()] >= 0f) {
+            frontIndices[frontPos++] = all[i]
+            frontIndices[frontPos++] = all[i + 1]
+            frontIndices[frontPos++] = all[i + 2]
+        } else {
+            backIndices[backPos++] = all[i]
+            backIndices[backPos++] = all[i + 1]
+            backIndices[backPos++] = all[i + 2]
         }
         i += 3
     }
-    return out.copyOf(n)
+    return frontIndices to backIndices
 }
 
 private fun drawPaperBase(
@@ -174,7 +228,10 @@ private fun drawCastShadow(
     val spineX = if (mesh.direction > 0) 0f else mesh.widthPx
     val lightY = mesh.heightPx * 0.5f
     val lightZ = (mesh.widthPx * SHADOW_LIGHT_HEIGHT_FRAC).coerceAtLeast(mesh.maxLiftPx + 1f)
-    val builder = PathBuilder()
+    // #1: переиспользуем file-scoped PathBuilder вместо аллокации нового каждый кадр. ГЕОМЕТРИЯ
+    // строится заново (проекция цилиндра меняется каждый кадр по мере подъёма) — переиспользуем
+    // только ОБЪЕКТ билдера (reset), не его содержимое.
+    shadowCastPathBuilder.reset()
     var any = false
 
     fun shadowT(i: Int): Float = v[i * 3 + 2] / (lightZ - v[i * 3 + 2])
@@ -189,7 +246,7 @@ private fun drawCastShadow(
         c: Int,
     ) {
         if ((v[a * 3 + 2] + v[b * 3 + 2] + v[c * 3 + 2]) / 3f <= threshold) return
-        builder.moveTo(projX(a), projY(a)).lineTo(projX(b), projY(b)).lineTo(projX(c), projY(c)).closePath()
+        shadowCastPathBuilder.moveTo(projX(a), projY(a)).lineTo(projX(b), projY(b)).lineTo(projX(c), projY(c)).closePath()
         any = true
     }
     for (row in 0 until mesh.rows) {
@@ -200,12 +257,26 @@ private fun drawCastShadow(
         }
     }
     if (!any) return
-    val shadowPaint =
-        Paint().apply {
-            color = paint.shadow.copy(alpha = SHADOW_CAST_ALPHA * strength).toArgb()
-            maskFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, (mesh.maxLiftPx * SHADOW_CAST_BLUR).coerceAtLeast(1f))
-        }
-    canvas.drawPath(builder.detach(), shadowPaint)
+    // Радиус размытия — в супер-сэмплированных ПИКСЕЛАХ текстуры; на пике подъёма доходит до 20-30px
+    // (доминирующая стоимость на GPU). Капируем потолком и квантуем до целого пикселя: makeBlur
+    // пересоздаём только при смене квантованного радиуса, иначе переиспользуем кэшированный фильтр.
+    val blurPx = (mesh.maxLiftPx * SHADOW_CAST_BLUR).coerceIn(1f, SHADOW_CAST_BLUR_MAX_PX)
+    val quantizedBlurPx = blurPx.toInt()
+    if (quantizedBlurPx != cachedShadowBlurRadiusPx) {
+        cachedShadowBlurFilter?.close()
+        cachedShadowBlurFilter = MaskFilter.makeBlur(FilterBlurMode.NORMAL, quantizedBlurPx.toFloat())
+        cachedShadowBlurRadiusPx = quantizedBlurPx
+    }
+    shadowCastPaint.color = paint.shadow.copy(alpha = SHADOW_CAST_ALPHA * strength).toArgb()
+    shadowCastPaint.maskFilter = cachedShadowBlurFilter
+    // snapshot() отдаёт Path для отрисовки, НЕ сбрасывая билдер (reset делаем в начале кадра).
+    // Этот Path короткоживущий — закрываем сразу, чтобы не копить нативную память.
+    val shadowPath = shadowCastPathBuilder.snapshot()
+    try {
+        canvas.drawPath(shadowPath, shadowCastPaint)
+    } finally {
+        shadowPath.close()
+    }
 }
 
 private fun drawRimHighlight(
@@ -291,14 +362,20 @@ private fun androidx.compose.ui.graphics.Color.scaleRgb(scale: Float): androidx.
         alpha = 1f,
     )
 
-/** Прозрачность (на пике подъёма) тени, отбрасываемой цилиндром на нижнюю страницу. */
-private const val SHADOW_CAST_ALPHA = 0.30f
+/** Прозрачность (на пике подъёма) тени, отбрасываемой цилиндром на нижнюю страницу. Это главный
+ * сигнал «лист приподнят и разворачивается» (а не просто едет/проявляется) — держим заметным. */
+private const val SHADOW_CAST_ALPHA = 0.40f
 
-/** Высота точечного света над страницей (× ширину листа): ниже свет ⇒ длиннее тени от корешка. */
-private const val SHADOW_LIGHT_HEIGHT_FRAC = 1.0f
+/** Высота точечного света над страницей (× ширину листа): ниже свет ⇒ длиннее тени от корешка ⇒
+ * тень дальше уходит на открывающийся разворот и лучше видна. */
+private const val SHADOW_LIGHT_HEIGHT_FRAC = 0.85f
 
-/** Радиус размытия тени (× подъём цилиндра). */
-private const val SHADOW_CAST_BLUR = 0.06f
+/** Радиус размытия тени (× подъём цилиндра): мягкая тень читается как «парящий» лист, а не край. */
+private const val SHADOW_CAST_BLUR = 0.09f
+
+// Потолок радиуса размытия тени (в супер-сэмплированных пикселах текстуры): ограничивает худший
+// случай стоимости makeBlur на GPU, но даёт тени быть достаточно мягкой для ощущения объёма.
+private const val SHADOW_CAST_BLUR_MAX_PX = 24f
 
 /** Порог высоты (× maxLift), выше которого вершина считается «поднятой» и отбрасывает тень. */
 private const val SHADOW_LIFT_THRESHOLD = 0.12f
