@@ -1,16 +1,21 @@
 package ru.kyamshanov.notepen.reflow.ui.bookcurl
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.ImageComposeScene
 import androidx.compose.ui.InternalComposeUiApi
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asComposeCanvas
 import androidx.compose.ui.graphics.asComposeImageBitmap
+import androidx.compose.ui.platform.LocalFontFamilyResolver
 import androidx.compose.ui.scene.CanvasLayersComposeScene
+import androidx.compose.ui.text.font.createFontFamilyResolver
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.jetbrains.skia.Bitmap
 import org.jetbrains.skia.ColorAlphaType
@@ -19,6 +24,15 @@ import org.jetbrains.skia.ColorSpace
 import org.jetbrains.skia.ColorType
 import org.jetbrains.skia.ImageInfo
 import org.jetbrains.skia.Surface
+
+// Выделенный резолвер шрифтов ТОЛЬКО для закадрового захвата: createFontFamilyResolver() даёт свежий
+// FontCache → свой нативный FontCollection (THashMap familyKey→typefaces). Раскладка текста захвата идёт
+// на Dispatchers.Default параллельно с раскладкой главного потока ридера; FontCollection НЕ
+// потокобезопасен (одновременная вставка/resize THashMap рушит таблицу → SIGSEGV). Свой FontCollection
+// для захвата + сериализация захватов [captureMutex] убирают конкурентную мутацию. Резолвер один на все
+// захваты (его FontCollection остаётся тёплым), а мьютекс не даёт двум захватам трогать его разом.
+private val captureFontFamilyResolver by lazy { createFontFamilyResolver() }
+private val captureMutex = Mutex()
 
 /**
  * Растеризует [content] в [ImageBitmap] ВНЕ основной композиции — текстуру страницы для page-curl.
@@ -39,29 +53,41 @@ internal actual suspend fun captureReflowTexture(
     content: @Composable () -> Unit,
 ): ImageBitmap? {
     if (widthPx <= 0 || heightPx <= 0) return null
+    // Текст захвата раскладываем через ВЫДЕЛЕННЫЙ резолвер шрифтов (свой FontCollection), а сами захваты
+    // сериализуем [captureMutex]. Иначе раскладка на Dispatchers.Default и главный поток ридера мутируют
+    // ОБЩИЙ нативный FontCollection (THashMap, не потокобезопасный) ⇒ параллельный resize рушит таблицу
+    // → SIGSEGV в FontCollection.findTypefaces. Резолвер тот же системный ⇒ текстура визуально идентична.
+    val isolatedContent: @Composable () -> Unit = {
+        CompositionLocalProvider(LocalFontFamilyResolver provides captureFontFamilyResolver) {
+            content()
+        }
+    }
     // Закадровый рендер не на main: сцена держит собственные часы и безопасно работает на отдельном потоке.
     return withContext(Dispatchers.Default) {
-        runCatching {
-            renderToSrgbBitmap(widthPx = widthPx, heightPx = heightPx, density = density, content = content)
-        }.getOrNull()
-            ?: runCatching {
-                // Фолбэк, если низкоуровневый путь сломается на будущей версии Compose: штатный
-                // ImageComposeScene отдаёт untagged Image; перерисовываем его в sRGB-поверхность и
-                // снимаем sRGB-bitmap, чтобы текстура всё равно несла тег (см. KDoc выше).
-                val scene = ImageComposeScene(width = widthPx, height = heightPx, density = density, content = content)
-                try {
-                    val image = scene.render()
-                    val surface = newSrgbSurface(widthPx, heightPx)
-                    try {
-                        surface.canvas.drawImage(image, 0f, 0f)
-                        surface.toSrgbComposeBitmap(widthPx, heightPx)
-                    } finally {
-                        surface.close()
-                    }
-                } finally {
-                    scene.close()
-                }
+        captureMutex.withLock {
+            runCatching {
+                renderToSrgbBitmap(widthPx = widthPx, heightPx = heightPx, density = density, content = isolatedContent)
             }.getOrNull()
+                ?: runCatching {
+                    // Фолбэк, если низкоуровневый путь сломается на будущей версии Compose: штатный
+                    // ImageComposeScene отдаёт untagged Image; перерисовываем его в sRGB-поверхность и
+                    // снимаем sRGB-bitmap, чтобы текстура всё равно несла тег (см. KDoc выше).
+                    val scene =
+                        ImageComposeScene(width = widthPx, height = heightPx, density = density, content = isolatedContent)
+                    try {
+                        val image = scene.render()
+                        val surface = newSrgbSurface(widthPx, heightPx)
+                        try {
+                            surface.canvas.drawImage(image, 0f, 0f)
+                            surface.toSrgbComposeBitmap(widthPx, heightPx)
+                        } finally {
+                            surface.close()
+                        }
+                    } finally {
+                        scene.close()
+                    }
+                }.getOrNull()
+        }
     }
 }
 
