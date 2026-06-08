@@ -159,7 +159,7 @@ private fun drawCastShadow(
     mesh: BookCurlMesh,
     paint: BookCurlPaint,
 ) {
-    val strength = meshShadow(mesh)
+    val strength = meshShadow(mesh) * mesh.shadeFade
     if (strength <= 0.02f) return
     // Тень — силуэт страницы (с изогнутым свободным краем), смещённый и размытый: на открываемом
     // листе тень повторяет ФОРМУ изгиба края, а не идёт прямым градиентом. Рисуется первой —
@@ -185,7 +185,7 @@ private fun drawRimHighlight(
     paint: BookCurlPaint,
 ) {
     val band = liftedBand(mesh) ?: return
-    val strength = meshShadow(mesh)
+    val strength = meshShadow(mesh) * mesh.shadeFade
     if (strength > 0f) {
         val spread = mesh.widthPx * (0.012f + 0.025f * strength)
         val left = (band.centerX - spread * 1.2f).coerceAtLeast(0f)
@@ -263,7 +263,7 @@ private fun androidx.compose.ui.graphics.Color.scaleRgb(scale: Float): androidx.
     )
 
 /** Прозрачность отбрасываемой тени-силуэта. */
-private const val SHADOW_CAST_ALPHA = 0.4f
+private const val SHADOW_CAST_ALPHA = 0.18f
 
 /** Смещение силуэта тени по горизонтали (× подъём, со знаком направления). */
 private const val SHADOW_CAST_OFFSET_X = 0.05f

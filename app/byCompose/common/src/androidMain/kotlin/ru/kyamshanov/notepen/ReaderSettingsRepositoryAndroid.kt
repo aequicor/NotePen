@@ -17,7 +17,14 @@ import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
  */
 class ReaderSettingsRepositoryAndroid(
     private val context: Context,
-    private val json: Json = Json { ignoreUnknownKeys = true },
+    private val json: Json =
+        Json {
+            ignoreUnknownKeys = true
+            // Старые блобы могут хранить упразднённые значения enum (например bookCurlMaterial=OFFICE).
+            // coerceInputValues откатывает такое значение к дефолту свойства, а не роняет весь декод —
+            // иначе catch(Exception) ниже сбросил бы ВСЕ настройки чтения к умолчаниям.
+            coerceInputValues = true
+        },
 ) : ReaderSettingsRepository {
     private val settingsFile get() = java.io.File(context.filesDir, "reader_settings.json")
     private val mutex = Mutex()

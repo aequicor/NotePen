@@ -1,9 +1,11 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -62,7 +64,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -81,6 +82,7 @@ import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -123,17 +125,15 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
-import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlDerived
-import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlMaterial
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlOverlay
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlState
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.PageTurnStyle
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.captureReflowTexture
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.isBookCurlNativeRendererSupported
 import kotlin.math.abs
 import kotlin.math.ceil
-import kotlin.math.hypot
 import kotlin.math.roundToInt
 import kotlin.time.TimeSource
 
@@ -1277,43 +1277,31 @@ private fun PagedReflowContent(
         var curlVelocityX by remember(document) { mutableStateOf(0f) }
         var curlPhase by remember(document) { mutableStateOf(BookCurlPhase.Idle) }
         var curlTargetPage by remember(document) { mutableStateOf<Int?>(null) }
-        // Инерция/оседание зависят от материала: omega (жёсткость/масса) и zeta (демпфирование).
-        // omega/zeta размерно-независимы (физическая ширина страницы фиксирована), поэтому ширина px
-        // здесь не важна.
-        val curlSettle =
+        // Стиль листа (бумага/обложка) задаёт упругость пружины оседания: бумага мягко с лёгким
+        // отскоком, обложка — резко и чётко. Размерно-независимо, поэтому без ширины px.
+        val curlStyle =
             remember(settings.bookCurlMaterial) {
-                BookCurlDerived(BookCurlMaterial.of(settings.bookCurlMaterial), 1f)
+                PageTurnStyle.of(settings.bookCurlMaterial)
             }
 
-        // Оседание после отпускания — затухающий осциллятор (а не линейный ease): лист не «щёлкает»
-        // в позу, а догоняет цель и успокаивается по-разному для разных материалов (газета вяло,
-        // глянец чётко, картон быстро-жёстко). Жёсткий потолок времени гарантирует завершение.
+        // Оседание после отпускания — пружина Compose (а не линейный ease): лист не «щёлкает» в позу,
+        // а догоняет цель и успокаивается. [initialVelocity] (в прогресс/с) продолжает флик пальца.
         suspend fun animateCurlTo(
             targetProgress: Float,
             phase: BookCurlPhase,
+            initialVelocity: Float = 0f,
         ) {
             curlPhase = phase
-            var value = curlProgress
-            var velocity = 0f
-            val omega = curlSettle.omega
-            val zeta = curlSettle.zeta
-            var prevNanos = withFrameNanos { it }
-            val deadline = prevNanos + PAGE_CURL_MAX_SETTLE_NANOS
-            var settled = false
-            while (!settled) {
-                val now = withFrameNanos { it }
-                var remaining = ((now - prevNanos) / NANOS_PER_SECOND).coerceIn(0f, BookCurlPhysics.MAX_FRAME_SECONDS)
-                prevNanos = now
-                while (remaining > MIN_SUBSTEP_SECONDS) {
-                    val dt = minOf(BookCurlPhysics.FIXED_STEP_SECONDS, remaining)
-                    val accel = omega * omega * (targetProgress - value) - 2f * zeta * omega * velocity
-                    velocity += accel * dt
-                    value += velocity * dt
-                    remaining -= dt
-                }
+            Animatable(curlProgress).animateTo(
+                targetValue = targetProgress,
+                animationSpec =
+                    spring(
+                        dampingRatio = curlStyle.settleDampingRatio,
+                        stiffness = curlStyle.settleStiffness,
+                    ),
+                initialVelocity = initialVelocity,
+            ) {
                 curlProgress = value.coerceIn(0f, 1f)
-                val atRest = abs(targetProgress - value) < PAGE_CURL_SETTLE_EPS && abs(velocity) < PAGE_CURL_SETTLE_EPS
-                settled = atRest || now >= deadline
             }
             curlProgress = targetProgress
         }
@@ -1375,8 +1363,10 @@ private fun PagedReflowContent(
                                 return@launch
                             }
                             curlDirection = if (delta > 0) 1 else -1
+                            // Тап/клавиша = симметричный загиб от середины края (без диагонали).
                             curlGripYFraction = PAGE_CURL_DEFAULT_GRIP_Y
-                            curlVelocityX = -curlDirection * PAGE_CURL_SYNTHETIC_VELOCITY
+                            curlFingerYFraction = PAGE_CURL_DEFAULT_GRIP_Y
+                            curlVelocityX = 0f
                             curlPhase = BookCurlPhase.Completing
                             curlTargetPage = target
                             curlProgress = PAGE_CURL_VISIBLE_PROGRESS
@@ -1402,8 +1392,15 @@ private fun PagedReflowContent(
                 if (page < 0 || page > lastPagerPage || pageCurlImages[page] != null) return@forEach
                 // Перекомпонуем страницу закадрово (ImageComposeScene) — GraphicsLayer.toImageBitmap()
                 // на Desktop отдаёт пустой кадр. Локали и фон проставляем, как на экране.
+                // Супер-сэмплинг ×N: рендерим текстуру в N раз крупнее (размер и плотность ×N) — при
+                // натягивании на меш билинейная выборка не «худит» текст; оверлей ужимает обратно в 1/N.
+                val ss = PAGE_CURL_TEXTURE_SUPERSAMPLE
                 val texture =
-                    captureReflowTexture(readerPageSizePx.width, readerPageSizePx.height, density) {
+                    captureReflowTexture(
+                        readerPageSizePx.width * ss,
+                        readerPageSizePx.height * ss,
+                        Density(density.density * ss, density.fontScale),
+                    ) {
                         CompositionLocalProvider(
                             LocalReflowSelectionState provides ReflowSelectionState(),
                             LocalFigureBitmapCache provides figureCache,
@@ -1428,6 +1425,12 @@ private fun PagedReflowContent(
                             }
                         }
                     }
+                        ?: pageCaptureLayers[page]?.let { layer ->
+                            // Android: закадровый ImageComposeScene недоступен (captureReflowTexture == null) —
+                            // берём кадр со страничного GraphicsLayer. На устройстве toImageBitmap() работает;
+                            // пустой он лишь в headless-тестах Desktop, где этот путь не нужен (там texture != null).
+                            runCatching { layer.toImageBitmap() }.getOrNull()
+                        }
                 if (texture != null) pageCurlImages[page] = texture
             }
         }
@@ -1447,9 +1450,9 @@ private fun PagedReflowContent(
                         if (useNativeBookCurl && !scrollLocked) {
                             Modifier.pointerInput(lastPagerPage, pagerState.currentPage) {
                                 var dragActive = false
-                                var totalDragX = 0f
-                                var totalDragY = 0f
+                                var startX = 0f
                                 var targetPage = pagerState.currentPage
+                                val velocityTracker = VelocityTracker()
                                 detectDragGestures(
                                     onDragStart = { offset ->
                                         val fromForwardEdge = offset.x >= size.width * PAGE_CURL_FORWARD_EDGE_FRACTION
@@ -1465,6 +1468,8 @@ private fun PagedReflowContent(
                                         // должно сработать (оверлей сам не рисуется, пока front/back == null).
                                         dragActive = direction != 0 && target != pagerState.currentPage
                                         if (dragActive) {
+                                            velocityTracker.resetTracking()
+                                            startX = offset.x
                                             curlDirection = direction
                                             curlGripYFraction =
                                                 (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
@@ -1473,8 +1478,6 @@ private fun PagedReflowContent(
                                             curlVelocityX = 0f
                                             curlPhase = BookCurlPhase.Dragging
                                             curlProgress = 0f
-                                            totalDragX = 0f
-                                            totalDragY = 0f
                                             targetPage = target
                                         }
                                     },
@@ -1489,48 +1492,53 @@ private fun PagedReflowContent(
                                     },
                                     onDragEnd = {
                                         if (dragActive) {
+                                            // Реальная скорость флика (px/с), а не dragAmount*const.
+                                            val flingX = velocityTracker.calculateVelocity().x
+                                            curlVelocityX = flingX
                                             val complete =
                                                 BookCurlPhysics.shouldComplete(
                                                     BookCurlState(
                                                         direction = curlDirection,
                                                         gripY = curlGripYFraction * size.height,
-                                                        fingerX = 0f,
-                                                        fingerY = curlGripYFraction * size.height,
-                                                        velocityX = curlVelocityX,
-                                                        velocityY = 0f,
+                                                        fingerY = curlFingerYFraction * size.height,
+                                                        velocityX = flingX,
                                                         progress = curlProgress,
                                                         phase = BookCurlPhase.Dragging,
                                                     ),
                                                 )
+                                            // px/с → прогресс/с: пружина оседания продолжает бросок пальца.
+                                            val flingProgress =
+                                                -flingX * curlDirection / size.width.toFloat().coerceAtLeast(1f)
                                             scope.launch {
                                                 if (complete) {
-                                                    animateCurlTo(1f, BookCurlPhase.Completing)
+                                                    animateCurlTo(1f, BookCurlPhase.Completing, flingProgress)
                                                     pagerState.scrollToPage(targetPage)
                                                 } else {
-                                                    animateCurlTo(0f, BookCurlPhase.Returning)
+                                                    animateCurlTo(0f, BookCurlPhase.Returning, flingProgress)
                                                 }
                                                 resetCurl()
                                             }
                                         }
                                         dragActive = false
                                     },
-                                    onDrag = { change, dragAmount ->
+                                    onDrag = { change, _ ->
                                         if (dragActive) {
                                             change.consume()
+                                            velocityTracker.addPosition(change.uptimeMillis, change.position)
                                             curlPhase = BookCurlPhase.Dragging
-                                            totalDragX += dragAmount.x
-                                            totalDragY += dragAmount.y
-                                            curlVelocityX = dragAmount.x * PAGE_CURL_DRAG_VELOCITY_SCALE
+                                            // Палец ведёт захваченный угол 1:1; его вертикаль наклоняет линию
+                                            // сгиба (диагональный dog-ear при косом свайпе).
                                             curlFingerYFraction =
-                                                (curlGripYFraction + totalDragY / size.height.toFloat().coerceAtLeast(1f))
+                                                (change.position.y / size.height.toFloat().coerceAtLeast(1f))
                                                     .coerceIn(0f, 1f)
-                                            // Прогресс по ПОЛНОЙ длине протяжки (с вертикалью), но только в нужную
-                                            // сторону (inward); диагональный свайп тоже долистывает, а не пружинит.
-                                            val inward = (-totalDragX * curlDirection).coerceAtLeast(0f)
-                                            val travel = hypot(inward, totalDragY)
-                                            curlProgress =
-                                                (travel / (size.width * PAGE_CURL_DRAG_DISTANCE_FRACTION))
-                                                    .coerceIn(0f, 1f)
+                                            // Прогресс = путь пальца к корешку. Нормируем на ДОЛЮ ширины,
+                                            // а не на всю ширину окна: иначе чтобы доехать до плашмя пришлось
+                                            // бы протащить угол через всё окно (на широком мониторе нереально —
+                                            // лист застревал гребнем посередине). Комфортный свайп ~60% ширины
+                                            // доводит лист до финальной позиции под пальцем.
+                                            val travelX = (startX - change.position.x) * curlDirection
+                                            val fullTravel = (size.width * PAGE_CURL_DRAG_COMPLETE_FRACTION).coerceAtLeast(1f)
+                                            curlProgress = (travelX / fullTravel).coerceIn(0f, 1f)
                                         }
                                     },
                                 )
@@ -1602,7 +1610,7 @@ private fun PagedReflowContent(
                     phase = curlPhase,
                     twoPageSpread = settings.twoPageSpread,
                     pageWidthPx = with(density) { pageOuterWidth.roundToPx() },
-                    material = BookCurlMaterial.of(settings.bookCurlMaterial),
+                    style = curlStyle,
                     modifier =
                         Modifier
                             .fillMaxSize()
@@ -2744,26 +2752,16 @@ private const val PAGE_CURL_CAPTURE_DELAY_MS = 32L
 private const val PAGE_CURL_CAPTURE_ATTEMPTS = 3
 private const val PAGE_CURL_VISIBLE_PROGRESS = 0.015f
 private const val PAGE_CURL_DEFAULT_GRIP_Y = 0.66f
-private const val PAGE_CURL_SYNTHETIC_VELOCITY = 2200f
-
-/**
- * Потолок длительности перелистывания (нс) — к этому моменту лист уже у цели; остаточные микроколебания
- * осциллятора зажаты в [0,1] и невидимы, поэтому коммитим страницу здесь, не дожидаясь полного покоя.
- */
-private const val PAGE_CURL_MAX_SETTLE_NANOS = 440_000_000L
-
-/** Наносекунд в секунде — перевод dt кадра в секунды для интегратора. */
-private const val NANOS_PER_SECOND = 1_000_000_000f
-
-/** Минимальный остаток субшага интегрирования (с) — ниже не дробим. */
-private const val MIN_SUBSTEP_SECONDS = 1e-4f
-
-/** Порог «осело»: и до цели, и по скорости — лист замер. */
-private const val PAGE_CURL_SETTLE_EPS = 1e-3f
 private const val PAGE_CURL_FORWARD_EDGE_FRACTION = 0.66f
 private const val PAGE_CURL_BACK_EDGE_FRACTION = 0.34f
-private const val PAGE_CURL_DRAG_DISTANCE_FRACTION = 0.50f
-private const val PAGE_CURL_DRAG_VELOCITY_SCALE = 60f
+
+/** Доля ширины, на которую нужно протащить палец, чтобы лист дошёл до плашмя (прогресс 1). Меньше
+ * единицы — иначе на широком экране лист не довернуть рукой; ~0.6 = комфортный свайп доводит до конца. */
+private const val PAGE_CURL_DRAG_COMPLETE_FRACTION = 0.6f
+
+/** Кратность супер-сэмплинга текстуры страницы для завитка: рендерим в N раз крупнее ради чёткого
+ * текста при натягивании на меш (оверлей ужимает обратно). 2× — заметно чётче без большой цены. */
+private const val PAGE_CURL_TEXTURE_SUPERSAMPLE = 2
 
 private const val HEADING_SCALE_1 = 1.6f
 private const val HEADING_SCALE_2 = 1.35f

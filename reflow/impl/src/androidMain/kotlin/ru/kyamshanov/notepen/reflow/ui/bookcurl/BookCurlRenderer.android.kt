@@ -134,7 +134,7 @@ private fun drawCastShadow(
     mesh: BookCurlMesh,
     paint: BookCurlPaint,
 ) {
-    val strength = (mesh.maxLiftPx / (mesh.widthPx * 0.18f).coerceAtLeast(1f)).coerceIn(0f, 1f)
+    val strength = (mesh.maxLiftPx / (mesh.widthPx * 0.18f).coerceAtLeast(1f)).coerceIn(0f, 1f) * mesh.shadeFade
     if (strength <= 0.02f) return
     // Тень — силуэт страницы (с изогнутым краем), смещённый и размытый: повторяет форму изгиба
     // края на открываемом листе. Рисуется первой — страница сверху перекрывает свою тень.
@@ -159,7 +159,7 @@ private fun drawRimHighlight(
     paint: BookCurlPaint,
 ) {
     val band = liftedBand(mesh) ?: return
-    val strength = (mesh.maxLiftPx / (mesh.widthPx * 0.18f).coerceAtLeast(1f)).coerceIn(0f, 1f)
+    val strength = (mesh.maxLiftPx / (mesh.widthPx * 0.18f).coerceAtLeast(1f)).coerceIn(0f, 1f) * mesh.shadeFade
     if (strength > 0f) {
         val spread = mesh.widthPx * (0.012f + 0.025f * strength)
         val left = (band.centerX - spread * 1.2f).coerceAtLeast(0f)
@@ -235,7 +235,7 @@ private fun androidx.compose.ui.graphics.Color.scaleRgb(scale: Float): androidx.
     )
 
 /** Прозрачность отбрасываемой тени-силуэта. */
-private const val SHADOW_CAST_ALPHA = 0.4f
+private const val SHADOW_CAST_ALPHA = 0.18f
 
 /** Смещение силуэта тени по горизонтали (× подъём, со знаком направления). */
 private const val SHADOW_CAST_OFFSET_X = 0.05f

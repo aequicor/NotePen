@@ -140,8 +140,12 @@ class ReaderBookCurlGestureTest {
 
             onRoot().performTouchInput {
                 down(Offset(x = width - EDGE_DRAG_INSET_PX, y = height * GRIP_Y_FRACTION))
-                moveBy(Offset(x = -width * FLING_DRAG_DISTANCE_FRACTION, y = 0f))
-                advanceEventTime(FLING_DRAG_STEP_MS)
+                // Несколько быстрых под-шагов, чтобы VelocityTracker увидел реальную скорость флика
+                // (одиночный moveBy даёт нулевую скорость — нужно >=2 сэмпла с дельтой времени).
+                repeat(FLING_DRAG_STEPS) {
+                    moveBy(Offset(x = -width * FLING_DRAG_DISTANCE_FRACTION / FLING_DRAG_STEPS, y = 0f))
+                    advanceEventTime(FLING_DRAG_STEP_MS)
+                }
                 up()
             }
             waitForIdle()
@@ -221,9 +225,14 @@ private fun androidx.compose.ui.test.ComposeUiTest.setBookReader(
 
 @OptIn(ExperimentalTestApi::class)
 private fun androidx.compose.ui.test.ComposeUiTest.settleReader() {
+    // Пагинация (особенно разворота) идёт через Dispatchers.Default и гоняется с тестовым клоком;
+    // несколько циклов advance+waitForIdle дают ей дойти до конца до начала жеста (иначе разворот
+    // ещё односпредовый и edge-свайп не находит соседнюю страницу — suite-флакость этого класса).
     waitForIdle()
-    mainClock.advanceTimeBy(600)
-    waitForIdle()
+    repeat(4) {
+        mainClock.advanceTimeBy(400)
+        waitForIdle()
+    }
 }
 
 private fun androidx.compose.ui.graphics.PixelMap.averageLuminance(
@@ -264,12 +273,19 @@ private const val EDGE_DRAG_INSET_PX = 8f
 private const val GRIP_Y_FRACTION = 0.62f
 private const val DRAG_DISTANCE_FRACTION = 0.26f
 private const val MIN_READER_CORNER_LUMINANCE = 0.58f
-private const val CANCEL_DRAG_DISTANCE_FRACTION = 0.18f
-private const val COMMIT_DRAG_DISTANCE_FRACTION = 0.46f
-private const val FLING_DRAG_DISTANCE_FRACTION = 0.12f
+private const val CANCEL_DRAG_DISTANCE_FRACTION = 0.12f
+
+// Прогресс теперь = путь угла / ширину (anchor-follows-finger), без прежнего множителя 1/0.34.
+// Тянем заметно за порог COMMIT_PROGRESS=0.45 с запасом на touch-slop, который съедает первые ~px.
+private const val COMMIT_DRAG_DISTANCE_FRACTION = 0.6f
+
+// Флик: прогресс ниже порога (0.25 < 0.45), но скорость высокая. Много быстрых под-шагов, чтобы
+// VelocityTracker набрал реальную скорость (он занижает оценку на малом числе сэмплов).
+private const val FLING_DRAG_DISTANCE_FRACTION = 0.25f
 private const val SLOW_DRAG_STEPS = 8
 private const val COMMIT_DRAG_STEPS = 10
+private const val FLING_DRAG_STEPS = 10
 private const val SLOW_DRAG_STEP_MS = 20L
 private const val COMMIT_DRAG_STEP_MS = 16L
-private const val FLING_DRAG_STEP_MS = 8L
-private const val PAGE_CURL_TEST_SETTLE_MS = 520L
+private const val FLING_DRAG_STEP_MS = 3L
+private const val PAGE_CURL_TEST_SETTLE_MS = 1500L

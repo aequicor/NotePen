@@ -1158,13 +1158,8 @@ private fun transitionName(transition: PageTransition): String =
 
 private fun bookCurlMaterialName(id: BookCurlMaterialId): String =
     when (id) {
-        BookCurlMaterialId.OFFICE -> "Офисная"
-        BookCurlMaterialId.BOOK -> "Книжная"
-        BookCurlMaterialId.NEWSPRINT -> "Газетная"
-        BookCurlMaterialId.COATED -> "Мелованная"
-        BookCurlMaterialId.GLOSSY -> "Глянцевая"
-        BookCurlMaterialId.MATTE -> "Матовая"
-        BookCurlMaterialId.CARDBOARD -> "Картон"
+        BookCurlMaterialId.PAPER -> "Бумага"
+        BookCurlMaterialId.COVER -> "Обложка"
     }
 
 private fun percentText(value: Float): String = "${(value * 100).roundToInt()}%"

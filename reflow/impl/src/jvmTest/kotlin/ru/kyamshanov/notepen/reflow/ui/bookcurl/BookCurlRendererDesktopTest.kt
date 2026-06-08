@@ -211,10 +211,8 @@ class BookCurlRendererDesktopTest {
             BookCurlState(
                 direction = 1,
                 gripY = PAGE_HEIGHT * 0.62f,
-                fingerX = PAGE_WIDTH * (1f - progress),
                 fingerY = PAGE_HEIGHT * 0.62f,
                 velocityX = -1800f,
-                velocityY = 0f,
                 progress = progress,
                 phase = BookCurlPhase.Dragging,
             )

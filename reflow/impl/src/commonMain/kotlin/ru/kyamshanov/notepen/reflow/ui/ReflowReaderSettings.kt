@@ -76,7 +76,7 @@ public data class ReflowReaderSettings(
     public val paged: Boolean = false,
     public val twoPageSpread: Boolean = false,
     public val pageTransition: PageTransition = PageTransition.BOOK,
-    public val bookCurlMaterial: BookCurlMaterialId = BookCurlMaterialId.OFFICE,
+    public val bookCurlMaterial: BookCurlMaterialId = BookCurlMaterialId.PAPER,
     public val pageTurnSound: Boolean = true,
     public val tapToTurn: Boolean = true,
     public val autoHideMs: Long = 0L,

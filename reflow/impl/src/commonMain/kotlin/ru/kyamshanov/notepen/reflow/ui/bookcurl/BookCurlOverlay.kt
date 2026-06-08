@@ -5,8 +5,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
@@ -24,7 +26,7 @@ internal fun BookCurlOverlay(
     phase: BookCurlPhase,
     twoPageSpread: Boolean,
     pageWidthPx: Int,
-    material: BookCurlMaterial = BookCurlMaterial.Default,
+    style: PageTurnStyle = PageTurnStyle.Default,
     modifier: Modifier = Modifier,
 ) {
     if (front == null || progress <= 0.001f || !isBookCurlNativeRendererSupported()) return
@@ -84,22 +86,20 @@ internal fun BookCurlOverlay(
             BookCurlState(
                 direction = direction,
                 gripY = sheet.height * gripYFraction.coerceIn(0f, 1f),
-                fingerX = sheet.width * (1f - progress.coerceIn(0f, 1f)),
                 fingerY = sheet.height * fingerYFraction.coerceIn(0f, 1f),
                 velocityX = velocityX,
-                velocityY = 0f,
                 progress = progress.coerceIn(0f, 1f),
                 phase = phase,
             )
         }
     val mesh =
-        remember(state, profile, sheet.width, sheet.height, material) {
+        remember(state, profile, sheet.width, sheet.height, style) {
             BookCurlPhysics.mesh(
                 state = state,
                 widthPx = sheet.width.toFloat(),
                 heightPx = sheet.height.toFloat(),
                 profile = profile,
-                material = material,
+                style = style,
             )
         }
     val paint =
@@ -111,24 +111,31 @@ internal fun BookCurlOverlay(
             )
         }
     Canvas(modifier.fillMaxSize()) {
-        val underPage = underPageSource
-        if (underPage != null) {
-            drawImage(
-                image = underPage.image,
-                srcOffset = IntOffset.Zero,
-                srcSize = IntSize(underPage.image.width, underPage.image.height),
-                dstOffset = IntOffset(underPage.offsetX.roundToInt(), 0),
-                dstSize = IntSize(underPage.image.width, underPage.image.height),
+        // Текстуры захватываются с супер-сэмплингом (×N) для чёткого текста на завитке. Геометрия и
+        // текст-координаты живут в пикселях ТЕКСТУРЫ (×N), поэтому весь рисунок ужимаем в 1/N до
+        // экранных пикселей. N выводим из отношения высоты текстуры к экранной высоте оверлея (на
+        // Android текстура 1× ⇒ N=1, без масштаба).
+        val texScale = (sheet.height.toFloat() / size.height.coerceAtLeast(1f)).roundToInt().coerceAtLeast(1)
+        scale(scaleX = 1f / texScale, scaleY = 1f / texScale, pivot = Offset.Zero) {
+            val underPage = underPageSource
+            if (underPage != null) {
+                drawImage(
+                    image = underPage.image,
+                    srcOffset = IntOffset.Zero,
+                    srcSize = IntSize(underPage.image.width, underPage.image.height),
+                    dstOffset = IntOffset(underPage.offsetX.roundToInt(), 0),
+                    dstSize = IntSize(underPage.image.width, underPage.image.height),
+                )
+            }
+            drawBookCurlNative(
+                front = sheet,
+                back = backFaceImage,
+                mesh = mesh,
+                buffers = buffers,
+                offsetX = sheetSource.offsetX,
+                paint = paint,
             )
         }
-        drawBookCurlNative(
-            front = sheet,
-            back = backFaceImage,
-            mesh = mesh,
-            buffers = buffers,
-            offsetX = sheetSource.offsetX,
-            paint = paint,
-        )
     }
 }
 
