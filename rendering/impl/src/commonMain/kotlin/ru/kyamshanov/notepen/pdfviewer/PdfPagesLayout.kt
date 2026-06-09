@@ -556,9 +556,17 @@ object PdfViewerMath {
     /**
      * Pan для центрирования **ряда раскладки** по горизонтали и прижатия верха
      * страницы [pageIndex] к верху вьюпорта (используется `fitToWidth` и
-     * `fitToPage`). В развороте центрируется вся пара ([rowWidthPx]); в
-     * одностраничном — PDF-колонка (не слот) — иначе видимая страница «прыгает»
-     * вбок при росте extent.
+     * `fitToPage`). В одностраничном режиме центрируется PDF-колонка (не слот) —
+     * иначе видимая страница «прыгает» вбок при росте extent.
+     *
+     * В развороте ([SpreadMode.SPREAD]):
+     * - Если у левой страницы пары есть вылет влево (`leftExt.left < 0`),
+     *   左边界 ставится точно на `x = 0` вьюпорта: расширенный холст всегда виден
+     *   сразу после переключения режима; пользователь скроллит вправо к парной странице.
+     * - Если у правой страницы пары есть вылет вправо (`rightExt.right > 1`),
+     *   правая граница ставится на `x = viewportWidth`: расширение справа видно с
+     *   места.
+     * - В отсутствие внешних расширений — обычное центрирование ряда `[0, rowWidthPx]`.
      */
     fun panForPageTop(
         layout: PdfPagesLayout,
@@ -566,7 +574,38 @@ object PdfViewerMath {
         zoom: Float,
         viewportWidth: Float,
     ): Offset {
-        val centeringX = (viewportWidth - rowWidthPx(layout) * zoom) / 2f
+        val centeringX =
+            if (layout.spreadMode == SpreadMode.SPREAD) {
+                val leftIdx = spreadLeftPageOf(layout, pageIndex)
+                val leftExt = layout.pageExtents.getOrElse(leftIdx) { PageExtent.Pdf }
+                val rightExt = layout.pageExtents.getOrElse(leftIdx + 1) { PageExtent.Pdf }
+                when {
+                    leftExt.left < 0f ->
+                        // Anchor the outer-left boundary at viewport x=0 so the
+                        // expanded canvas on the left is immediately visible.
+                        -leftExt.left * layout.basePageWidthPx * zoom
+                    leftExt.right > 1f -> {
+                        // Left page extends rightward past its column into the gutter.
+                        // Center the full content span (left col + extension + gutter + right col).
+                        val outerRight =
+                            leftExt.right * layout.basePageWidthPx +
+                                PdfPagesLayout.SPREAD_GUTTER_PX + layout.basePageWidthPx
+                        (viewportWidth - outerRight * zoom) / 2f
+                    }
+                    rightExt.right > 1f -> {
+                        // Anchor the outer-right boundary at the right viewport edge.
+                        val outerRight =
+                            layout.basePageWidthPx + PdfPagesLayout.SPREAD_GUTTER_PX +
+                                rightExt.right * layout.basePageWidthPx
+                        viewportWidth - outerRight * zoom
+                    }
+                    else ->
+                        // No outer extensions — center the row normally.
+                        (viewportWidth - rowWidthPx(layout) * zoom) / 2f
+                }
+            } else {
+                (viewportWidth - rowWidthPx(layout) * zoom) / 2f
+            }
         val panY =
             if (pageIndex in layout.pageHeightsPx.indices) {
                 -layout.pageTopsPx[pageIndex] * zoom

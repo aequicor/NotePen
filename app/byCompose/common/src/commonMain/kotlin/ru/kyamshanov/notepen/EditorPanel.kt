@@ -16,10 +16,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -51,6 +54,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -149,6 +153,7 @@ import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
 import ru.kyamshanov.notepen.tabs.TabBar
 import ru.kyamshanov.notepen.tabs.TabCloseResult
 import ru.kyamshanov.notepen.tabs.TabSession
+import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
 
@@ -492,11 +497,6 @@ fun EditorPanel(
             liveSyncController?.enable(documentId)
         }
     }
-    val hasBroadcastPeer by produceState(false, peerServer, peerClient) {
-        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
-            .collect { value = it }
-    }
-
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
     var showThumbnails by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
@@ -774,22 +774,22 @@ fun EditorPanel(
         documentBroadcastController,
         peerServer,
         documentId,
-        hasBroadcastPeer,
+        anyPeerConnected,
     ) {
         val controller = documentBroadcastController ?: return@produceState
-        if (peerServer == null || !hasBroadcastPeer) return@produceState
+        if (peerServer == null || !anyPeerConnected) return@produceState
         controller.currentFrame.collect { frame ->
             value = broadcastToolModeForDocument(frame, documentId)
         }
     }
 
-    LaunchedEffect(documentBroadcastController, peerServer, isFocused, documentId, hasBroadcastPeer) {
+    LaunchedEffect(documentBroadcastController, peerServer, isFocused, documentId, anyPeerConnected) {
         val controller = documentBroadcastController ?: return@LaunchedEffect
         if (
             !shouldApplyBroadcastFrame(
                 hasPeerServer = peerServer != null,
                 isFocused = isFocused,
-                hasBroadcastConnection = hasBroadcastPeer,
+                hasBroadcastConnection = anyPeerConnected,
             )
         ) {
             return@LaunchedEffect
@@ -2001,6 +2001,167 @@ fun EditorPanel(
                                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
                                     ),
                         )
+                    }
+                }
+            }
+
+            // Page-expansion overlay: border (always) + "+" buttons (pen/marker only)
+            if (!pdfState.readingMode && pages.isNotEmpty()) {
+                val layout = pdfViewerState.layout
+                val pan = pdfViewerState.effectivePan
+                val z = pdfViewerState.effectiveZoom
+                val vh = pdfViewerState.viewportHeightPx
+                val base = layout.basePageWidthPx
+                // Active page = the one with the most visible pixels on screen.
+                // derivedStateOf defers recomposition of the buttons/border to page-index
+                // changes only, instead of every pan/zoom snapshot tick.
+                val active by remember {
+                    derivedStateOf {
+                        val lo = pdfViewerState.layout
+                        val p = pdfViewerState.effectivePan
+                        val zz = pdfViewerState.effectiveZoom
+                        val vhh = pdfViewerState.viewportHeightPx
+                        pages.indices.maxByOrNull { i ->
+                            val pdfH = lo.pdfHeightsPx[i]
+                            val pageTop = lo.pageTopsPx[i]
+                            val ext = lo.pageExtents[i]
+                            val topY = p.y + (pageTop + ext.top * pdfH) * zz
+                            val bottomY = p.y + (pageTop + ext.bottom * pdfH) * zz
+                            maxOf(0f, minOf(bottomY, vhh) - maxOf(topY, 0f))
+                        } ?: 0
+                    }
+                }
+                val localDensity = androidx.compose.ui.platform.LocalDensity.current
+                val halfTouch = with(localDensity) { AppTheme.spacing.touchTarget.toPx() / 2f }
+                val buttonPaddingPx = with(localDensity) { 8.dp.toPx() }
+
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        val extra = pdfViewerState.contentLayerExtraOffset
+                        translationX = extra.x
+                        translationY = extra.y
+                    },
+                ) {
+                    data class PageButton(
+                        val pageIndex: Int,
+                        val showLeft: Boolean,
+                        val showRight: Boolean,
+                    )
+                    val pageButtons =
+                        buildList {
+                            if (layout.spreadMode == ru.kyamshanov.notepen.pdfviewer.SpreadMode.SPREAD) {
+                                // Use spreadLeftPageOf so the left page is always the even-indexed one
+                                val leftPage = PdfViewerMath.spreadLeftPageOf(layout, active)
+                                val rightPage = leftPage + 1
+                                if (leftPage in pages.indices) add(PageButton(leftPage, showLeft = true, showRight = false))
+                                if (rightPage in pages.indices) add(PageButton(rightPage, showLeft = false, showRight = true))
+                            } else {
+                                if (active in pages.indices) {
+                                    add(PageButton(active, showLeft = true, showRight = true))
+                                }
+                            }
+                        }
+
+                    // Border: always for single-page; spread mode only around the outer expansion zone
+                    val expansionBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                    val strokeWidthPx = with(localDensity) { 1.dp.toPx() }
+                    Canvas(Modifier.fillMaxSize()) {
+                        for (pb in pageButtons) {
+                            val pi = pb.pageIndex
+                            if (pi !in layout.pageExtents.indices) continue
+                            val ext = layout.pageExtents[pi]
+                            if (ext == PageExtent.Pdf) continue
+                            val pdfH = layout.pdfHeightsPx[pi]
+                            val pageLeft = layout.pageLeftsPx[pi]
+                            val pageTop = layout.pageTopsPx[pi]
+                            val rawTopY = pan.y + (pageTop + ext.top * pdfH) * z
+                            val rawBottomY = pan.y + (pageTop + ext.bottom * pdfH) * z
+                            // In spread mode draw only the outer expansion strip so the frame
+                            // doesn't visually crowd the neighbour page (the inner PDF edge is
+                            // adjacent to the gutter and must remain visually clear).
+                            val zoneLeft: Float
+                            val zoneRight: Float
+                            if (layout.spreadMode == ru.kyamshanov.notepen.pdfviewer.SpreadMode.SPREAD) {
+                                val isRightPage = pi % 2 == 1
+                                if (isRightPage) {
+                                    zoneLeft = 1.0f
+                                    zoneRight = ext.right
+                                } else {
+                                    zoneLeft = ext.left
+                                    zoneRight = 0.0f
+                                }
+                                if (zoneRight <= zoneLeft) continue
+                            } else {
+                                zoneLeft = ext.left
+                                zoneRight = ext.right
+                            }
+                            val leftX = pan.x + (pageLeft + zoneLeft * base) * z
+                            val rightX = pan.x + (pageLeft + zoneRight * base) * z
+                            drawRect(
+                                color = expansionBorderColor,
+                                topLeft = Offset(leftX, rawTopY),
+                                size = Size(rightX - leftX, rawBottomY - rawTopY),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidthPx),
+                            )
+                        }
+                    }
+
+                    // Buttons: only in pen/marker mode, hidden during transforms/magnifier
+                    if ((toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER) &&
+                        !pdfViewerState.isVisualTransformActive &&
+                        !magnifierState.enabled &&
+                        !quickLoupeArmed.value &&
+                        !openTriggerProvider.value
+                    ) {
+                        for ((pageIndex, showLeft, showRight) in pageButtons) {
+                            if (pageIndex !in layout.pageExtents.indices) continue
+                            val ext = layout.pageExtents[pageIndex]
+                            val pdfH = layout.pdfHeightsPx[pageIndex]
+                            val pageLeft = layout.pageLeftsPx[pageIndex]
+                            val pageTop = layout.pageTopsPx[pageIndex]
+
+                            val topY = pan.y + (pageTop + ext.top * pdfH) * z
+                            val bottomY = pan.y + (pageTop + ext.bottom * pdfH) * z
+                            val visTop = maxOf(topY, 0f)
+                            val visBottom = minOf(bottomY, vh)
+                            if (visTop >= visBottom) continue
+
+                            val centerY = (visTop + visBottom) / 2f
+
+                            if (showLeft) {
+                                val leftEdgeX = pan.x + (pageLeft + ext.left * base) * z
+                                GlassmorphismIconButton(
+                                    icon = Icons.Default.Add,
+                                    contentDescription = "Расширить влево",
+                                    onClick = { pdfState.expandPageLeft(pageIndex) },
+                                    tint = androidx.compose.ui.graphics.Color(0xFF424242),
+                                    modifier =
+                                        Modifier.offset {
+                                            IntOffset(
+                                                (leftEdgeX - halfTouch * 2 - buttonPaddingPx).roundToInt(),
+                                                (centerY - halfTouch).roundToInt(),
+                                            )
+                                        },
+                                )
+                            }
+
+                            if (showRight) {
+                                val rightEdgeX = pan.x + (pageLeft + ext.right * base) * z
+                                GlassmorphismIconButton(
+                                    icon = Icons.Default.Add,
+                                    contentDescription = "Расширить вправо",
+                                    onClick = { pdfState.expandPageRight(pageIndex) },
+                                    tint = androidx.compose.ui.graphics.Color(0xFF424242),
+                                    modifier =
+                                        Modifier.offset {
+                                            IntOffset(
+                                                (rightEdgeX + buttonPaddingPx).roundToInt(),
+                                                (centerY - halfTouch).roundToInt(),
+                                            )
+                                        },
+                                )
+                            }
+                        }
                     }
                 }
             }

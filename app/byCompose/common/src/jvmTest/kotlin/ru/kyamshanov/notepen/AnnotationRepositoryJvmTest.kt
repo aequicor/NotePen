@@ -500,13 +500,13 @@ class AnnotationRepositoryJvmTest {
             // Фон выбран через лёгкий saveViewState.
             repo.saveViewState(
                 pdfPath,
-                AnnotationViewState(scale = 100, backgroundStyle = "canvas", replaceWhiteBackground = true),
+                AnnotationViewState(scale = 100, backgroundStyle = "linen", replaceWhiteBackground = true),
             )
             // Последующий сейв штрихов (save) не передаёт фон — он не должен его затереть.
             repo.save(pdfPath, emptyMap(), scale = 100, currentPage = 1)
 
             val view = repo.loadViewState(pdfPath).getOrThrow()
-            assertEquals("canvas", view?.backgroundStyle)
+            assertEquals("linen", view?.backgroundStyle)
             assertEquals(true, view?.replaceWhiteBackground)
         }
 

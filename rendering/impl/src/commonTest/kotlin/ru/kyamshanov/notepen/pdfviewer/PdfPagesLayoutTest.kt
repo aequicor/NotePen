@@ -635,4 +635,108 @@ class PdfPagesLayoutTest {
             )
         assertTrue(abs(pan.x - (60f + (300f - row) / 2f)) < 1e-3f, "centeringX=${pan.x}")
     }
+
+    // ── RC-PEXP-008 ─────────────────────────────────────────────────────────
+    // panForPageTop в SPREAD якорит/центрирует по внешним extent'ам,
+    // чтобы увеличенная рамка холста оставалась видна после переключения режима.
+
+    @Test
+    fun `panForPageTop spread without extent equals row-width centering`() {
+        // Без расширений поведение должно быть идентично старому (rowWidth/2).
+        val base = 100f
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 1f),
+                basePageWidthPx = base,
+                spreadMode = SpreadMode.SPREAD,
+            )
+        val row = 200f + PdfPagesLayout.SPREAD_GUTTER_PX
+        val vp = 400f
+        val pan = PdfViewerMath.panForPageTop(layout, pageIndex = 0, zoom = 1f, viewportWidth = vp)
+        val expected = (vp - row) / 2f
+        assertTrue(abs(pan.x - expected) < 1e-3f, "pan.x=${pan.x}, expected=$expected")
+    }
+
+    @Test
+    fun `panForPageTop spread with left-page outer extent anchors left boundary at viewport edge`() {
+        // Левая страница расширена влево (ext.left = -0.2): внешний вылет = 20px.
+        // Ожидание: левая граница расширенного холста ровно на x=0 вьюпорта (pan.x = 20).
+        val base = 100f
+        val leftExt = PageExtent(left = -0.2f)
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 1f),
+                basePageWidthPx = base,
+                extents = listOf(leftExt, PageExtent.Pdf),
+                spreadMode = SpreadMode.SPREAD,
+            )
+        val vp = 400f
+        val pan = PdfViewerMath.panForPageTop(layout, pageIndex = 0, zoom = 1f, viewportWidth = vp)
+        // outerLeft = -0.2*100 = -20; pan.x must equal -outerLeft = 20
+        val outerLeft = leftExt.left * base // -20
+        val leftBoundaryViewport = pan.x + outerLeft
+        assertTrue(abs(leftBoundaryViewport) < 1e-3f, "outer left boundary must be at viewport x=0 (was $leftBoundaryViewport)")
+    }
+
+    @Test
+    fun `panForPageTop spread with right-page outer extent anchors right boundary at viewport edge`() {
+        // Правая страница расширена вправо (ext.right = 1.3): внешний вылет = 30px.
+        // Ожидание: правая граница расширенного холста ровно на x=viewportWidth.
+        val base = 100f
+        val rightExt = PageExtent(right = 1.3f)
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 1f),
+                basePageWidthPx = base,
+                extents = listOf(PageExtent.Pdf, rightExt),
+                spreadMode = SpreadMode.SPREAD,
+            )
+        val vp = 500f
+        val pan = PdfViewerMath.panForPageTop(layout, pageIndex = 0, zoom = 1f, viewportWidth = vp)
+        val outerRight = base + PdfPagesLayout.SPREAD_GUTTER_PX + rightExt.right * base
+        val rightBoundaryViewport = pan.x + outerRight
+        assertTrue(
+            abs(rightBoundaryViewport - vp) < 1e-3f,
+            "outer right boundary must be at viewport right=$vp (was $rightBoundaryViewport)",
+        )
+    }
+
+    @Test
+    fun `panForPageTop spread right-page index gives same pan as left-page index`() {
+        // Нечётный pageIndex (правая страница пары) должен давать тот же pan,
+        // что и чётный (левая) — spreadLeftPageOf выравнивает на левую пару.
+        val base = 100f
+        val leftExt = PageExtent(left = -0.1f)
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 1f, 1f, 1f),
+                basePageWidthPx = base,
+                extents = listOf(leftExt, PageExtent.Pdf, PageExtent.Pdf, PageExtent.Pdf),
+                spreadMode = SpreadMode.SPREAD,
+            )
+        val vp = 400f
+        val panLeft = PdfViewerMath.panForPageTop(layout, pageIndex = 0, zoom = 1f, viewportWidth = vp)
+        val panRight = PdfViewerMath.panForPageTop(layout, pageIndex = 1, zoom = 1f, viewportWidth = vp)
+        assertTrue(abs(panLeft.x - panRight.x) < 1e-3f, "page 0 pan=${panLeft.x}, page 1 pan=${panRight.x}")
+    }
+
+    @Test
+    fun `panForPageTop spread with left-page inner-right extent centers full content span`() {
+        // Левая страница пары расширена вправо (leftExt.right > 1).
+        // Pan должен центрировать весь контент: leftExt.right*base + GUTTER + base.
+        val base = 100f
+        val leftExt = PageExtent(right = 1.3f)
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 1f),
+                basePageWidthPx = base,
+                extents = listOf(leftExt, PageExtent.Pdf),
+                spreadMode = SpreadMode.SPREAD,
+            )
+        val vp = 500f
+        val pan = PdfViewerMath.panForPageTop(layout, pageIndex = 0, zoom = 1f, viewportWidth = vp)
+        val outerRight = leftExt.right * base + PdfPagesLayout.SPREAD_GUTTER_PX + base
+        val expected = (vp - outerRight) / 2f
+        assertTrue(abs(pan.x - expected) < 1e-3f, "pan.x=${pan.x} expected=$expected (centered)")
+    }
 }

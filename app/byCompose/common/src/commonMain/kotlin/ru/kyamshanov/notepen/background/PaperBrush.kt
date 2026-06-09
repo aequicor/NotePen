@@ -1,7 +1,11 @@
 package ru.kyamshanov.notepen.background
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -13,6 +17,8 @@ import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.LayoutDirection
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** Сторона процедурной плитки бумаги в пикселях. Степень двойки → дешёвый tiling. */
 private const val TILE_SIZE = 256
@@ -36,8 +42,11 @@ public fun rememberPaperBrush(
     isDark: Boolean,
 ): Brush? {
     val style = PaperBackgrounds.byId(styleId) ?: return null
-    val tile = remember(style.id, isDark) { generatePaperTile(style, isDark) }
-    return remember(tile) { ShaderBrush(ImageShader(tile, TileMode.Repeated, TileMode.Repeated)) }
+    var tile by remember(style.id, isDark) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(style.id, isDark) {
+        tile = withContext(Dispatchers.Default) { generatePaperTile(style, isDark) }
+    }
+    return remember(tile) { tile?.let { ShaderBrush(ImageShader(it, TileMode.Repeated, TileMode.Repeated)) } }
 }
 
 /**
@@ -69,9 +78,9 @@ private fun generatePaperTile(
         drawRect(color = base)
         repeat(grainCount) {
             seed = nextSeed(seed)
-            val x = unit(seed) * TILE_SIZE
+            val x = (unit(seed) * TILE_SIZE).coerceAtMost(TILE_SIZE - 1f)
             seed = nextSeed(seed)
-            val y = unit(seed) * TILE_SIZE
+            val y = (unit(seed) * TILE_SIZE).coerceAtMost(TILE_SIZE - 1f)
             seed = nextSeed(seed)
             val radius = GRAIN_MIN_RADIUS + unit(seed) * GRAIN_RADIUS_SPREAD
             seed = nextSeed(seed)

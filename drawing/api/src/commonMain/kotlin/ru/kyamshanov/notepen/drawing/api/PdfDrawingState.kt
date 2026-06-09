@@ -16,7 +16,6 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.shape.ShapeRecognizer
 import ru.kyamshanov.notepen.annotation.domain.shape.ShapeResampler
 
-private const val EXTENT_GROW_PAD: Float = 0.4f
 private const val MIN_LIVE_POINT_DISTANCE_NORM: Float = 0.00035f
 private const val MIN_LIVE_POINT_DISTANCE_NORM_SQ: Float =
     MIN_LIVE_POINT_DISTANCE_NORM * MIN_LIVE_POINT_DISTANCE_NORM
@@ -77,7 +76,7 @@ public class PdfDrawingState {
      */
     public val historyVersion: MutableState<Int> = mutableStateOf(0)
 
-    /** Расширенная рисуемая область страницы (растёт при выходе пера за пределы PDF). */
+    /** Рисуемая область страницы. Расширяется только явно ([expandLeft]/[expandRight]). */
     public val extent: MutableState<PageExtent> =
         mutableStateOf(PageExtent.Pdf)
 
@@ -98,27 +97,23 @@ public class PdfDrawingState {
         historyVersion.value++
     }
 
-    /**
-     * Расширить [extent], чтобы он включал точку `(x, y)` с запасом.
-     * Возвращает `true`, если extent изменился.
-     */
-    public fun growExtentToInclude(
-        x: Float,
-        y: Float,
-    ): Boolean {
-        val current = extent.value
-        val grown = current.including(x, y, pad = EXTENT_GROW_PAD)
-        if (grown === current) return false
-        extent.value = grown
-        if (currentPaths.isNotEmpty()) markHistoryChanged()
-        return true
-    }
+    private fun clampX(x: Float): Float = x.coerceIn(extent.value.left, extent.value.right)
 
     /** Принудительно установить [extent] (загрузка, sync). */
     public fun setExtent(value: PageExtent) {
         if (extent.value == value) return
         extent.value = value
         markHistoryChanged()
+    }
+
+    /** Расширить рисуемую область на [fraction] ширины влево. */
+    public fun expandLeft(fraction: Float = 1f / 3f) {
+        setExtent(extent.value.expandedLeft(fraction))
+    }
+
+    /** Расширить рисуемую область на [fraction] ширины вправо. */
+    public fun expandRight(fraction: Float = 1f / 3f) {
+        setExtent(extent.value.expandedRight(fraction))
     }
 
     /** Начать новый штрих. */
@@ -135,9 +130,9 @@ public class PdfDrawingState {
         liveToolKind.value = strokeToolKind.value
         liveStrokeWidth.value = normalizedStrokeWidth
         livePoints.clear()
-        val point = DrawingPoint(x, y, isNewPath = true, pressure = pressure, tilt = tilt)
+        val cx = clampX(x)
+        val point = DrawingPoint(cx, y, isNewPath = true, pressure = pressure, tilt = tilt)
         livePoints.add(point)
-        growExtentToInclude(x, y)
         notifyLiveStrokeSample(previous = null, current = point)
     }
 
@@ -149,15 +144,15 @@ public class PdfDrawingState {
         tilt: Float = 0f,
     ) {
         if (isDrawing.value && !gestureSnapped) {
+            val cx = clampX(x)
             val last = livePoints.lastOrNull()
             if (last != null) {
-                val dx = x - last.x
+                val dx = cx - last.x
                 val dy = y - last.y
                 if (dx * dx + dy * dy < MIN_LIVE_POINT_DISTANCE_NORM_SQ) return
             }
-            val point = DrawingPoint(x, y, pressure = pressure, tilt = tilt)
+            val point = DrawingPoint(cx, y, pressure = pressure, tilt = tilt)
             livePoints.add(point)
-            growExtentToInclude(x, y)
             notifyLiveStrokeSample(previous = last, current = point)
         }
     }
@@ -195,7 +190,6 @@ public class PdfDrawingState {
         livePoints.clear()
         livePoints.addAll(replacement)
         gestureSnapped = true
-        for (p in replacement) growExtentToInclude(p.x, p.y)
         markHistoryChanged()
         return true
     }
@@ -232,7 +226,7 @@ public class PdfDrawingState {
         val first = livePoints.first()
         return listOf(
             first,
-            first.copy(x = first.x + DOWN_ONLY_SEGMENT_NORM, isNewPath = false),
+            first.copy(x = clampX(first.x + DOWN_ONLY_SEGMENT_NORM), isNewPath = false),
         )
     }
 
