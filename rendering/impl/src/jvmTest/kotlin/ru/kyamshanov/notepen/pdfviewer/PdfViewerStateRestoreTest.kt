@@ -11,10 +11,11 @@ class PdfViewerStateRestoreTest {
         // Saver passes initialPanX directly to the constructor (not via applyInitialState).
         // When page=0 and offset=0, pendingInitialPage is null, so centeredAndClamped must
         // still be called on first layout to validate the restored pan against the viewport.
-        val state = PdfViewerState(
-            initialZoom = 2f,
-            initialPanX = -350f,
-        )
+        val state =
+            PdfViewerState(
+                initialZoom = 2f,
+                initialPanX = -350f,
+            )
         state.viewportSize = IntSize(width = 1_000, height = 800)
         state.pages = listOf(PdfPageInfo(pageIndex = 0, widthPt = 595f, heightPt = 842f))
 
