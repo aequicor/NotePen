@@ -3,21 +3,38 @@ package ru.kyamshanov.notepen
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
+import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.appsettings.rememberAppSettings
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
+import ru.kyamshanov.notepen.pdfviewer.createPdfViewerState
 import ru.kyamshanov.notepen.qrconnect.ClientQrScanViewModel
 import ru.kyamshanov.notepen.qrconnect.HostDiscoveryViewModel
 import ru.kyamshanov.notepen.qrconnect.HostQrPairingViewModel
 import ru.kyamshanov.notepen.qrconnect.ManualConnectViewModel
+import ru.kyamshanov.notepen.session.createSessionRepository
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
+import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController
 
 @Suppress("unused")
 private val appLogger = KotlinLogging.logger {}
@@ -88,12 +105,47 @@ fun App(
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     /** Редактор публикует сюда открытые вкладки — хост раздаёт их пирам как «открыто на устройстве». */
     openDocumentsSink: ((List<ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo>) -> Unit)? = null,
+    /** Host-side resolver for auto-opening a broadcasted document on the passive desktop viewer. */
+    broadcastDocumentUriFor: (suspend (documentId: String) -> String?)? = null,
+    /** Host-side stream of documents peers currently advertise as open on their device. */
+    remoteOpenDocumentIds: Flow<String?>? = null,
     modifier: Modifier = Modifier.fillMaxSize(),
 ) {
     val appSettings = rememberAppSettings()
+    val appScope = rememberCoroutineScope()
+    val documentBroadcastController =
+        remember(peerServer, peerClient) {
+            if (peerServer == null && peerClient == null) {
+                null
+            } else {
+                DocumentBroadcastController(
+                    incomingMessages =
+                        merge(
+                            peerServer?.incomingMessages?.map { it.message } ?: emptyFlow(),
+                            peerClient?.incomingMessages?.map { it.message } ?: emptyFlow(),
+                        ),
+                    sendFrame = { frame ->
+                        peerServer?.broadcast(frame)
+                        peerClient?.broadcast(frame)
+                    },
+                    scope = appScope,
+                )
+            }
+        }
+    DisposableEffect(documentBroadcastController) {
+        onDispose { documentBroadcastController?.close() }
+    }
+    LaunchedEffect(documentBroadcastController, peerServer, peerClient) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
+            .collect { connected ->
+                if (!connected) controller.clearCurrentFrame()
+            }
+    }
     // Глобальный always-on-display: пока [App] в композиции, экран не гаснет.
     // На десктопе actual — no-op (см. [KeepScreenOn]).
     KeepScreenOn(appSettings.alwaysOnDisplay)
+    EditorColdStartWarmup()
     ComposableAppTheme {
         Surface {
             RootContent(
@@ -116,8 +168,36 @@ fun App(
                 documentIdentityProvider = documentIdentityProvider,
                 hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                 openDocumentsSink = openDocumentsSink,
+                documentBroadcastController = documentBroadcastController,
+                broadcastDocumentUriFor = broadcastDocumentUriFor,
+                remoteOpenDocumentIds = remoteOpenDocumentIds,
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+    }
+}
+
+@Composable
+private fun EditorColdStartWarmup() {
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        launch(Dispatchers.Default) {
+            runCatching {
+                createAnnotationRepository()
+                createSessionRepository()
+                createPdfExporter()
+                createPdfReflowExtractor()
+                createToolPresetsRepository()
+                createReaderSettingsRepository()
+                createPdfViewerState()
+                PdfDrawingState()
+                PenSettings()
+                MarkerSettings()
+                EraserSettings()
+                documentIdFromFilePath("warmup.pdf")
+            }.onFailure { e ->
+                appLogger.warn { "Editor warm-up failed: ${e::class.simpleName}" }
+            }
         }
     }
 }

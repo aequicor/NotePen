@@ -195,30 +195,22 @@ class SyncRuntime(
             val remoteCatalogProvider = buildCatalogProvider(sessionScope, peerServer, syncClient)
             // M5b: re-grant durable librarian peers before any peer connects, so a reconnecting librarian is honoured straight away.
             remoteCatalogProvider.restoreLibrarianGrants()
-            DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider).start(scope = sessionScope)
+            startDocumentTransferHandlers(sessionScope, peerServer, syncClient, remoteCatalogProvider)
 
-            // Librarian-over-LAN (M5a): accept add/remove/replace from peers in the
-            // write allow-set, reassemble + verify uploaded bytes, apply to the host
-            // library. Wired only when a mutation target is provided (desktop host).
-            libraryMutationTarget?.let { target ->
-                HostLibraryMutationHandler(
-                    server = peerServer,
-                    provider = remoteCatalogProvider,
-                    target = target,
-                ).start(scope = sessionScope)
-            }
+            startLibrarianMutationHandler(sessionScope, peerServer, remoteCatalogProvider, libraryMutationTarget)
 
             val hostAnnotationProjection =
                 buildProjection(sessionScope, peerServer, remoteCatalogProvider, syncEngineRegistry)
 
             startCatalogCoordinators(sessionScope, peerServer, syncClient, pendingDeltaQueue)
             val remoteDocumentOpener =
-                RemoteDocumentOpener(
-                    client = syncClient,
-                    catalogs = remoteCatalogCache.catalogs,
-                    destDir = receivedDir,
-                    documentIdRegistry = localDocumentIdRegistry,
-                    onAfterDownload = onAfterRemoteDownload, // M6: trim the LAN cache after a fresh stream-in.
+                buildRemoteDocumentOpener(
+                    syncClient = syncClient,
+                    peerServer = peerServer,
+                    remoteCatalogCache = remoteCatalogCache,
+                    receivedDir = receivedDir,
+                    localDocumentIdRegistry = localDocumentIdRegistry,
+                    onAfterRemoteDownload = onAfterRemoteDownload,
                 )
             wireSession(
                 scope = sessionScope,
@@ -375,7 +367,7 @@ class SyncRuntime(
                 withContext(Dispatchers.IO) {
                     when (state) {
                         is ServerLifecycleState.Running ->
-                            registrar.register(selfInfo.copy(host = state.host, port = state.port), state.code)
+                            registrar.register(selfInfo.copy(host = state.host, port = state.port))
                         is ServerLifecycleState.Idle,
                         is ServerLifecycleState.Stopped,
                         -> registrar.unregister()
@@ -395,6 +387,51 @@ class SyncRuntime(
         }
     }
 }
+
+private fun startDocumentTransferHandlers(
+    scope: CoroutineScope,
+    peerServer: KtorPeerServer,
+    syncClient: KtorSyncClient,
+    remoteCatalogProvider: RemoteCatalogProvider,
+) {
+    DocumentTransferRequestHandler(server = peerServer, provider = remoteCatalogProvider).start(scope = scope)
+    DocumentTransferRequestHandler(client = syncClient, provider = remoteCatalogProvider).start(scope = scope)
+}
+
+private fun startLibrarianMutationHandler(
+    scope: CoroutineScope,
+    peerServer: KtorPeerServer,
+    remoteCatalogProvider: RemoteCatalogProvider,
+    libraryMutationTarget: LibraryMutationTarget?,
+) {
+    // Librarian-over-LAN (M5a): accept add/remove/replace from peers in the
+    // write allow-set, reassemble + verify uploaded bytes, apply to the host
+    // library. Wired only when a mutation target is provided (desktop host).
+    libraryMutationTarget?.let { target ->
+        HostLibraryMutationHandler(
+            server = peerServer,
+            provider = remoteCatalogProvider,
+            target = target,
+        ).start(scope = scope)
+    }
+}
+
+private fun buildRemoteDocumentOpener(
+    syncClient: KtorSyncClient,
+    peerServer: KtorPeerServer,
+    remoteCatalogCache: InMemoryRemoteCatalogCache,
+    receivedDir: String,
+    localDocumentIdRegistry: LocalDocumentIdRegistry,
+    onAfterRemoteDownload: suspend () -> Unit,
+): RemoteDocumentOpener =
+    RemoteDocumentOpener(
+        client = syncClient,
+        server = peerServer,
+        catalogs = remoteCatalogCache.catalogs,
+        destDir = receivedDir,
+        documentIdRegistry = localDocumentIdRegistry,
+        onAfterDownload = onAfterRemoteDownload, // M6: trim the LAN cache after a fresh stream-in.
+    )
 
 private fun createSyncHttpClient(): HttpClient {
     val wsJson = Json { classDiscriminator = "type" }

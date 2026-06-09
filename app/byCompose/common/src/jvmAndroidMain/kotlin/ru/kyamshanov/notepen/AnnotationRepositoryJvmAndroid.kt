@@ -2,6 +2,8 @@ package ru.kyamshanov.notepen
 
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -22,6 +24,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
@@ -74,6 +77,9 @@ private data class MarkerSettingsDto(
 )
 
 @Serializable
+private enum class ToolModeDto { NONE, PEN, MARKER, ERASER, NOTE }
+
+@Serializable
 private data class NormalizedRectDto(
     val l: Float,
     val t: Float,
@@ -118,6 +124,9 @@ private data class AnnotationViewStateDto(
     val scale: Int = 100,
     val currentPage: Int = 0,
     val currentPageOffset: Int = 0,
+    // Горизонтальный pan добавлен позже. null у легаси-сайдкаров означает
+    // прежнее поведение: восстановить страницу/вертикальный offset и центрировать X.
+    val panXPx: Float? = null,
     val readingMode: Boolean = false,
     // Дефолты сохраняют BC с легаси-сайдкарами без reflow-якоря: read даст 0/0,
     // что эквивалентно «открыть с начала» (так же, как для свежего документа).
@@ -139,6 +148,7 @@ private data class AnnotationViewStateDto(
 private data class AnnotationDataDto(
     val pages: Map<String, List<DrawingPathDto>>,
     val scale: Int = 100,
+    val toolMode: ToolModeDto = ToolModeDto.NONE,
     val pen: PenSettingsDto? = null,
     val marker: MarkerSettingsDto? = null,
     val eraser: EraserSettingsDto? = null,
@@ -181,6 +191,24 @@ private fun EraserSettings.toDto() = EraserSettingsDto(shape.toDto(), sizeNormal
 private fun MarkerSettings.toDto() = MarkerSettingsDto(colorArgb, strokeWidth, sticky)
 
 private fun MarkerSettingsDto.toDomain() = MarkerSettings(colorArgb, strokeWidth, sticky)
+
+private fun ToolMode.toDto(): ToolModeDto =
+    when (this) {
+        ToolMode.NONE -> ToolModeDto.NONE
+        ToolMode.PEN -> ToolModeDto.PEN
+        ToolMode.MARKER -> ToolModeDto.MARKER
+        ToolMode.ERASER -> ToolModeDto.ERASER
+        ToolMode.NOTE -> ToolModeDto.NOTE
+    }
+
+private fun ToolModeDto.toDomain(): ToolMode =
+    when (this) {
+        ToolModeDto.NONE -> ToolMode.NONE
+        ToolModeDto.PEN -> ToolMode.PEN
+        ToolModeDto.MARKER -> ToolMode.MARKER
+        ToolModeDto.ERASER -> ToolMode.ERASER
+        ToolModeDto.NOTE -> ToolMode.NOTE
+    }
 
 private fun PageExtentDto.toDomain() = PageExtent(l, t, r, b)
 
@@ -228,15 +256,19 @@ class AnnotationRepositoryJvmAndroid(
             encodeDefaults = false
             ignoreUnknownKeys = true
         }
+    private val fileLocksGuard = Any()
+    private val fileLocks = mutableMapOf<String, Mutex>()
 
     @OptIn(ExperimentalSerializationApi::class)
     override suspend fun save(
         pdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,
         scale: Int,
+        toolMode: ToolMode,
         pen: PenSettings,
         marker: MarkerSettings,
         eraser: EraserSettings,
+        preserveToolSettings: Boolean,
         currentPage: Int,
         currentPageOffset: Int,
         favoritePageIndices: Set<Int>,
@@ -246,67 +278,76 @@ class AnnotationRepositoryJvmAndroid(
     ): Result<Unit> =
         withContext(ioDispatcher) {
             try {
-                val dto =
-                    AnnotationDataDto(
-                        pages =
-                            annotations.mapKeys { it.key.toString() }
-                                .mapValues { (_, paths) -> paths.map { it.toDto() } },
-                        scale = scale,
-                        pen = pen.toDto(),
-                        marker = marker.toDto(),
-                        eraser = eraser.toDto(),
-                        currentPage = currentPage,
-                        currentPageOffset = currentPageOffset,
-                        favoritePageIndices = favoritePageIndices.toList(),
-                        pageExtents =
-                            pageExtents
-                                .filterValues { it != PageExtent.Pdf }
-                                .mapKeys { it.key.toString() }
-                                .mapValues { (_, e) -> e.toDto() },
-                        highlights =
-                            highlights
-                                .filterValues { it.isNotEmpty() }
-                                .mapKeys { it.key.toString() }
-                                .mapValues { (_, hs) -> hs.map { it.toDto() } },
-                        notes =
-                            notes
-                                .filterValues { it.isNotEmpty() }
-                                .mapKeys { it.key.toString() }
-                                .mapValues { (_, ns) -> ns.map { it.toDto() } },
-                    )
                 val file = storeFileFor(pdfPath)
                 file.parentFile?.mkdirs()
-                // Поток + временный файл: не строим гигантскую String в памяти (был OOM при
-                // сотнях тысяч точек), и прерывание записи не оставляет битый JSON.
-                writeAtomically(file) { out ->
-                    writeJson.encodeToStream(AnnotationDataDto.serializer(), dto, out)
-                }
-                // Лёгкий сайдкар с состоянием вида — читается при открытии отдельно и быстро,
-                // чтобы зум/страница восстанавливались до парсинга всех штрихов. readingMode
-                // тут не передаётся (это сейв штрихов) — сохраняем уже записанный, чтобы не
-                // затереть режим чтения; его пишет отдельный saveViewState.
-                val viewFile = viewFileFor(file)
-                val preserved = readPreservedReadingState(viewFile)
-                writeAtomically(viewFile) { out ->
-                    val viewDto =
-                        AnnotationViewStateDto(
+                lockFor(file).withLock {
+                    val preservedTools =
+                        if (preserveToolSettings) {
+                            readPreservedToolState(file)
+                        } else {
+                            PreservedToolState(toolMode.toDto(), pen.toDto(), marker.toDto(), eraser.toDto())
+                        }
+                    val dto =
+                        AnnotationDataDto(
+                            pages =
+                                annotations.mapKeys { it.key.toString() }
+                                    .mapValues { (_, paths) -> paths.map { it.toDto() } },
                             scale = scale,
+                            toolMode = preservedTools.toolMode,
+                            pen = preservedTools.pen,
+                            marker = preservedTools.marker,
+                            eraser = preservedTools.eraser,
                             currentPage = currentPage,
                             currentPageOffset = currentPageOffset,
-                            readingMode = preserved.readingMode,
-                            reflowAnchorBlockIndex = preserved.reflowAnchorBlockIndex,
-                            reflowAnchorCharStart = preserved.reflowAnchorCharStart,
-                            // Поворот принадлежит сайдкару вида (его пишет saveViewState);
-                            // при перезаписи штрихов сохраняем уже записанные повороты.
-                            pageRotations = preserved.pageRotations,
-                            // Разделение разворотов тоже принадлежит сайдкару вида —
-                            // сохраняем уже записанное при перезаписи штрихов.
-                            spreadSplit = preserved.spreadSplit,
-                            // Книжный разворот (FEATURE #5) — тоже поле вида; сохраняем
-                            // явный выбор пользователя при перезаписи штрихов.
-                            spreadViewOverride = preserved.spreadViewOverride,
+                            favoritePageIndices = favoritePageIndices.toList(),
+                            pageExtents =
+                                pageExtents
+                                    .filterValues { it != PageExtent.Pdf }
+                                    .mapKeys { it.key.toString() }
+                                    .mapValues { (_, e) -> e.toDto() },
+                            highlights =
+                                highlights
+                                    .filterValues { it.isNotEmpty() }
+                                    .mapKeys { it.key.toString() }
+                                    .mapValues { (_, hs) -> hs.map { it.toDto() } },
+                            notes =
+                                notes
+                                    .filterValues { it.isNotEmpty() }
+                                    .mapKeys { it.key.toString() }
+                                    .mapValues { (_, ns) -> ns.map { it.toDto() } },
                         )
-                    writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+                    // Поток + временный файл: не строим гигантскую String в памяти (был OOM при
+                    // сотнях тысяч точек), и прерывание записи не оставляет битый JSON.
+                    writeAtomically(file) { out ->
+                        writeJson.encodeToStream(AnnotationDataDto.serializer(), dto, out)
+                    }
+                    // Лёгкий сайдкар с состоянием вида — читается при открытии отдельно и быстро,
+                    // чтобы зум/страница восстанавливались до парсинга всех штрихов. readingMode
+                    // тут не передаётся (это сейв штрихов) — сохраняем уже записанный, чтобы не
+                    // затереть режим чтения; его пишет отдельный saveViewState.
+                    val viewFile = viewFileFor(file)
+                    val preserved = readPreservedReadingState(viewFile)
+                    writeAtomically(viewFile) { out ->
+                        val viewDto =
+                            AnnotationViewStateDto(
+                                scale = scale,
+                                currentPage = currentPage,
+                                currentPageOffset = currentPageOffset,
+                                readingMode = preserved.readingMode,
+                                reflowAnchorBlockIndex = preserved.reflowAnchorBlockIndex,
+                                reflowAnchorCharStart = preserved.reflowAnchorCharStart,
+                                // Поворот принадлежит сайдкару вида (его пишет saveViewState);
+                                // при перезаписи штрихов сохраняем уже записанные повороты.
+                                pageRotations = preserved.pageRotations,
+                                // Разделение разворотов тоже принадлежит сайдкару вида —
+                                // сохраняем уже записанное при перезаписи штрихов.
+                                spreadSplit = preserved.spreadSplit,
+                                // Книжный разворот (FEATURE #5) — тоже поле вида; сохраняем
+                                // явный выбор пользователя при перезаписи штрихов.
+                                spreadViewOverride = preserved.spreadViewOverride,
+                            )
+                        writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+                    }
                 }
                 Result.success(Unit)
             } catch (e: IOException) {
@@ -350,6 +391,7 @@ class AnnotationRepositoryJvmAndroid(
                             highlights = highlights,
                             notes = notes,
                             scale = dto.scale,
+                            toolMode = dto.toolMode.toDomain(),
                             pen = dto.pen?.toDomain() ?: PenSettings(),
                             marker = dto.marker?.toDomain() ?: MarkerSettings(),
                             eraser = dto.eraser?.toDomain() ?: EraserSettings(),
@@ -382,6 +424,7 @@ class AnnotationRepositoryJvmAndroid(
                             scale = dto.scale,
                             currentPage = dto.currentPage,
                             currentPageOffset = dto.currentPageOffset,
+                            panXPx = dto.panXPx,
                             readingMode = dto.readingMode,
                             reflowAnchorBlockIndex = dto.reflowAnchorBlockIndex,
                             reflowAnchorCharStart = dto.reflowAnchorCharStart,
@@ -406,24 +449,28 @@ class AnnotationRepositoryJvmAndroid(
     ): Result<Unit> =
         withContext(ioDispatcher) {
             try {
-                val viewFile = viewFileFor(storeFileFor(pdfPath))
-                writeAtomically(viewFile) { out ->
-                    val viewDto =
-                        AnnotationViewStateDto(
-                            scale = viewState.scale,
-                            currentPage = viewState.currentPage,
-                            currentPageOffset = viewState.currentPageOffset,
-                            readingMode = viewState.readingMode,
-                            reflowAnchorBlockIndex = viewState.reflowAnchorBlockIndex,
-                            reflowAnchorCharStart = viewState.reflowAnchorCharStart,
-                            pageRotations =
-                                viewState.pageRotations
-                                    .filterValues { it != 0 }
-                                    .mapKeys { it.key.toString() },
-                            spreadSplit = viewState.spreadSplit,
-                            spreadViewOverride = viewState.spreadViewOverride,
-                        )
-                    writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+                val annotationFile = storeFileFor(pdfPath)
+                val viewFile = viewFileFor(annotationFile)
+                lockFor(annotationFile).withLock {
+                    writeAtomically(viewFile) { out ->
+                        val viewDto =
+                            AnnotationViewStateDto(
+                                scale = viewState.scale,
+                                currentPage = viewState.currentPage,
+                                currentPageOffset = viewState.currentPageOffset,
+                                panXPx = viewState.panXPx,
+                                readingMode = viewState.readingMode,
+                                reflowAnchorBlockIndex = viewState.reflowAnchorBlockIndex,
+                                reflowAnchorCharStart = viewState.reflowAnchorCharStart,
+                                pageRotations =
+                                    viewState.pageRotations
+                                        .filterValues { it != 0 }
+                                        .mapKeys { it.key.toString() },
+                                spreadSplit = viewState.spreadSplit,
+                                spreadViewOverride = viewState.spreadViewOverride,
+                            )
+                        writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
+                    }
                 }
                 Result.success(Unit)
             } catch (e: IOException) {
@@ -433,6 +480,46 @@ class AnnotationRepositoryJvmAndroid(
 
     /** Имя лёгкого сайдкара состояния вида рядом с основным файлом аннотаций. */
     private fun viewFileFor(annotationFile: File): File = File(annotationFile.parentFile, "${annotationFile.name}.view")
+
+    private fun lockFor(annotationFile: File): Mutex =
+        synchronized(fileLocksGuard) {
+            fileLocks.getOrPut(annotationFile.absolutePath) { Mutex() }
+        }
+
+    @OptIn(ExperimentalSerializationApi::class)
+    private fun readPreservedToolState(file: File): PreservedToolState =
+        if (file.exists()) {
+            runCatching {
+                file.inputStream().buffered().use { input ->
+                    val dto = json.decodeFromStream(AnnotationDataDto.serializer(), input)
+                    PreservedToolState(
+                        toolMode = dto.toolMode,
+                        pen = dto.pen ?: PenSettingsDto(),
+                        marker = dto.marker ?: MarkerSettingsDto(),
+                        eraser = dto.eraser ?: EraserSettingsDto(),
+                    )
+                }
+            }.getOrDefault(PreservedToolState.Default)
+        } else {
+            PreservedToolState.Default
+        }
+
+    private data class PreservedToolState(
+        val toolMode: ToolModeDto,
+        val pen: PenSettingsDto,
+        val marker: MarkerSettingsDto,
+        val eraser: EraserSettingsDto,
+    ) {
+        companion object {
+            val Default =
+                PreservedToolState(
+                    toolMode = ToolModeDto.NONE,
+                    pen = PenSettingsDto(),
+                    marker = MarkerSettingsDto(),
+                    eraser = EraserSettingsDto(),
+                )
+        }
+    }
 
     /**
      * Состояние чтения, которое нужно сохранить при перезаписи [save] (там пишутся

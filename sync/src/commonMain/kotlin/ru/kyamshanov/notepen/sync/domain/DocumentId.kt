@@ -42,18 +42,47 @@ fun bookIdFromRelativePath(relativePath: String): BookId {
  * пути на `_`, чтобы получился безопасный для FS компонент. Используется
  * `RemoteDocumentOpener` / `FileTransferReceiver` для уникального имени
  * кеш-копии при одинаковом `displayName`.
+ *
+ * Both [documentId] and [displayName] are network-supplied, so each is reduced
+ * to a single safe filename component (see [safeFileNameComponent]) before being
+ * combined — a malicious `displayName` like `../../evil` cannot inject path
+ * separators that would let the cache write escape its directory.
  */
 fun documentIdToCacheFileName(
     documentId: String,
     displayName: String,
 ): String {
-    val sanitisedDocId =
-        documentId
-            .replace('#', '_')
-            .replace('/', '_')
-            .replace('\\', '_')
-    return "${sanitisedDocId}__$displayName"
+    val sanitisedDocId = safeFileNameComponent(documentId).replace('#', '_')
+    val sanitisedName = safeFileNameComponent(displayName)
+    return "${sanitisedDocId}__$sanitisedName"
 }
+
+/**
+ * Reduces an arbitrary (possibly network-supplied) [name] to a single filesystem
+ * path component that can never escape its parent directory.
+ *
+ * Strips any leading directory portion (`a/b/c` → `c`, `a\b\c` → `c`), then
+ * replaces remaining path separators and control characters with `_`. Results
+ * that would be empty, `"."` or `".."` map to the safe fallback `"_"`. The return
+ * value is guaranteed to contain no `/` or `\`, to be non-empty, and to never be
+ * `"."` or `".."`.
+ */
+internal fun safeFileNameComponent(name: String): String {
+    val lastComponent = name.substringAfterLast('/').substringAfterLast('\\')
+    val cleaned =
+        buildString(lastComponent.length) {
+            for (ch in lastComponent) {
+                append(if (ch == '/' || ch == '\\' || ch.isFileNameUnsafeControl()) '_' else ch)
+            }
+        }
+    return when (cleaned) {
+        "", ".", ".." -> "_"
+        else -> cleaned
+    }
+}
+
+/** Control characters (including DEL, 0x7F) that have no business in a filename component. */
+private fun Char.isFileNameUnsafeControl(): Boolean = this.code < 0x20 || this.code == 0x7F
 
 /**
  * FNV-1a 32-bit hash, 8 hex chars. Без зависимости от платформенного MessageDigest

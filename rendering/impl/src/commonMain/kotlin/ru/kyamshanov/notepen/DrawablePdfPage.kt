@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -59,11 +60,16 @@ import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayAvailable
 import ru.kyamshanov.notepen.lowlatency.rememberLowLatencyOverlayMaxDimensionPx
 import ru.kyamshanov.notepen.magnifier.MagnifierState
 import ru.kyamshanov.notepen.magnifier.MagnifierTargetOverlay
+import ru.kyamshanov.notepen.pdfviewer.PdfPageLayer
+import ru.kyamshanov.notepen.pdfviewer.PdfTile
+import ru.kyamshanov.notepen.pdfviewer.PdfTilePlaceholder
+import ru.kyamshanov.notepen.pdfviewer.hasVisiblePdfBase
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.PenPointerEventType
 import ru.kyamshanov.notepen.tablet.TabletInputController
 import ru.kyamshanov.notepen.tablet.effectivePressure
 import ru.kyamshanov.notepen.tools.marker.drawMarkerStroke
+import kotlin.math.roundToInt
 
 /** Прозрачность заливки индикатора зоны ластика (AC-12, UI / UX § «Индикатор ластика»). */
 private const val ERASER_INDICATOR_FILL_ALPHA = 0.35f
@@ -102,8 +108,6 @@ private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
  * acceptable degradation only at extreme zoom, where the user is rarely
  * drawing.
  */
-private const val LOW_LATENCY_OVERLAY_MAX_DIM_PX = 2400
-
 private fun cappedLowLatencyOverlaySize(
     pageSize: IntSize,
     maxDimensionPx: Int,
@@ -112,16 +116,12 @@ private fun cappedLowLatencyOverlaySize(
     val h = pageSize.height
     if (w <= 0 || h <= 0) return IntSize.Zero
     val longest = maxOf(w, h)
-    if (longest <= maxDimensionPx) return pageSize
-    return IntSize(
-        width = (w.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
-        height = (h.toLong() * maxDimensionPx / longest).toInt().coerceAtLeast(1),
-    )
+    return if (longest <= maxDimensionPx) pageSize else IntSize.Zero
 }
 
 @Composable
 fun DrawablePdfPage(
-    bitmap: ImageBitmap,
+    pdfLayer: PdfPageLayer,
     pdfDrawingState: PdfDrawingState,
     toolMode: ToolMode,
     penSettings: PenSettings,
@@ -234,6 +234,10 @@ fun DrawablePdfPage(
 
     val inkCacheMaxDimensionPx = completedInkCacheMaxDimensionPx()
     val vectorCompletedInkWhenUpscaled = vectorCompletedInkWhenCacheUpscaled()
+    val nativeImageDrawCache = remember { NativeImageDrawCache() }
+    DisposableEffect(nativeImageDrawCache) {
+        onDispose { nativeImageDrawCache.close() }
+    }
 
     // Bucketed cache dimensions: drops the lowest bits of canvasSize so
     // sub-bucket zoom changes don't invalidate the ink cache. Above the
@@ -349,12 +353,13 @@ fun DrawablePdfPage(
         // и сам растянутый PDF), но штрихи остаются видимыми — это лучше, чем
         // их полное исчезновение на время жеста. После коммита зума кэш
         // ре-растеризуется в резкость.
+        val pdfBaseVisible = pdfLayer.hasVisiblePdfBase()
         Canvas(modifier = Modifier.fillMaxSize()) {
             val ext = pdfDrawingState.extent.value
             val pdfW = if (ext.width > 0f) size.width / ext.width else size.width
             val pdfH = if (ext.height > 0f) size.height / ext.height else size.height
 
-            // PDF page bitmap. Drawn here (not as a sibling composable) so the
+            // PDF page layer. Drawn here (not as a sibling composable) so the
             // marker pass below can multiply against the page's actual pixels.
             // Positioned from `pageExtent` (the layout-pass value) — NOT
             // state.extent — so the page doesn't jitter one frame when extent
@@ -365,13 +370,11 @@ fun DrawablePdfPage(
                     (-pageExtent.top * pdfHeightPx).toInt(),
                 )
             val pdfDstSize = IntSize(pdfWidthPx.toInt(), pdfHeightPx.toInt())
-            drawImage(
-                image = bitmap,
-                srcOffset = IntOffset.Zero,
-                srcSize = IntSize(bitmap.width, bitmap.height),
-                dstOffset = pdfDstOffset,
-                dstSize = pdfDstSize,
-                filterQuality = FilterQuality.High,
+            drawPdfLayer(
+                layer = pdfLayer,
+                nativeImageDrawCache = nativeImageDrawCache,
+                pdfDstOffset = pdfDstOffset,
+                pdfDstSize = pdfDstSize,
             )
             drawRect(
                 color = indicatorColor.copy(alpha = 0.35f),
@@ -380,89 +383,98 @@ fun DrawablePdfPage(
                 style = Stroke(width = 0.5.dp.toPx()),
             )
 
-            // Sticky-marker highlights — filled word-aligned rects over the PDF,
-            // multiply-blended like the marker so text stays readable. Stored geometry
-            // is the source of truth, so this pass never depends on text extraction.
-            for (h in highlights) {
-                val hColor = Color(h.colorArgb.toInt())
-                for (r in h.rects) {
-                    val x0 = (r.left - ext.left) * pdfW
-                    val y0 = (r.top - ext.top) * pdfH
-                    drawRect(
-                        color = hColor,
-                        topLeft = Offset(x0, y0),
-                        size = Size((r.right - r.left) * pdfW, (r.bottom - r.top) * pdfH),
-                        blendMode = BlendMode.Multiply,
-                    )
+            if (pdfBaseVisible) {
+                // Sticky-marker highlights — filled word-aligned rects over the PDF,
+                // multiply-blended like the marker so text stays readable. Stored geometry
+                // is the source of truth, so this pass never depends on text extraction.
+                for (h in highlights) {
+                    val hColor = Color(h.colorArgb.toInt())
+                    for (r in h.rects) {
+                        val x0 = (r.left - ext.left) * pdfW
+                        val y0 = (r.top - ext.top) * pdfH
+                        drawRect(
+                            color = hColor,
+                            topLeft = Offset(x0, y0),
+                            size = Size((r.right - r.left) * pdfW, (r.bottom - r.top) * pdfH),
+                            blendMode = BlendMode.Multiply,
+                        )
+                    }
                 }
-            }
 
-            // Text notes — geometry is the source of truth (like highlights). A faint
-            // multiply-blended fill marks the note's area and a solid underline at the
-            // bottom edge anchors it visually; the tappable badge (below the Canvas)
-            // opens the note body. Never depends on text extraction.
-            for (n in notes) {
-                val nColor = Color(n.colorArgb.toInt())
-                for (r in n.rects) {
-                    val x0 = (r.left - ext.left) * pdfW
-                    val y0 = (r.top - ext.top) * pdfH
-                    val w = (r.right - r.left) * pdfW
-                    val h = (r.bottom - r.top) * pdfH
-                    drawRect(
-                        color = nColor.copy(alpha = NOTE_FILL_ALPHA),
-                        topLeft = Offset(x0, y0),
-                        size = Size(w, h),
-                        blendMode = BlendMode.Multiply,
-                    )
-                    drawRect(
-                        color = nColor,
-                        topLeft = Offset(x0, y0 + h - NOTE_UNDERLINE_PX),
-                        size = Size(w, NOTE_UNDERLINE_PX),
-                    )
+                // Text notes — geometry is the source of truth (like highlights). A faint
+                // multiply-blended fill marks the note's area and a solid underline at the
+                // bottom edge anchors it visually; the tappable badge (below the Canvas)
+                // opens the note body. Never depends on text extraction.
+                for (n in notes) {
+                    val nColor = Color(n.colorArgb.toInt())
+                    for (r in n.rects) {
+                        val x0 = (r.left - ext.left) * pdfW
+                        val y0 = (r.top - ext.top) * pdfH
+                        val w = (r.right - r.left) * pdfW
+                        val h = (r.bottom - r.top) * pdfH
+                        drawRect(
+                            color = nColor.copy(alpha = NOTE_FILL_ALPHA),
+                            topLeft = Offset(x0, y0),
+                            size = Size(w, h),
+                            blendMode = BlendMode.Multiply,
+                        )
+                        drawRect(
+                            color = nColor,
+                            topLeft = Offset(x0, y0 + h - NOTE_UNDERLINE_PX),
+                            size = Size(w, NOTE_UNDERLINE_PX),
+                        )
+                    }
                 }
-            }
 
-            val paths = pdfDrawingState.currentPaths
-            val canvasWidth = size.width.toInt()
-            val canvasHeight = size.height.toInt()
-            val inkSpec = InkRenderSpec(surfaceSize = IntSize(canvasWidth, canvasHeight), extent = ext)
+                val paths = pdfDrawingState.currentPaths
+                val canvasWidth = size.width.toInt()
+                val canvasHeight = size.height.toInt()
+                val inkSpec = InkRenderSpec(surfaceSize = IntSize(canvasWidth, canvasHeight), extent = ext)
 
-            // Completed markers and pen ink use bitmap caches plus anti-flicker
-            // tails while async rebuilds catch up.
-            drawCompletedMarkerInk(paths, completedMarkerInk.value, inkSpec, livePath)
-            drawCompletedPenInk(
-                paths = paths,
-                cached = completedInk.value,
-                spec = inkSpec,
-                scratch = livePath,
-                vectorWhenUpscaled = vectorCompletedInkWhenUpscaled,
-            )
+                // Completed markers and pen ink use bitmap caches plus anti-flicker
+                // tails while async rebuilds catch up.
+                drawCompletedMarkerInk(
+                    paths = paths,
+                    cached = completedMarkerInk.value,
+                    spec = inkSpec,
+                    scratch = livePath,
+                    nativeImageDrawCache = nativeImageDrawCache,
+                )
+                drawCompletedPenInk(
+                    paths = paths,
+                    cached = completedInk.value,
+                    spec = inkSpec,
+                    scratch = livePath,
+                    vectorWhenUpscaled = vectorCompletedInkWhenUpscaled,
+                    nativeImageDrawCache = nativeImageDrawCache,
+                )
 
-            if (magnifierState == null &&
-                !lowLatencyOverlayActive &&
-                pdfDrawingState.isDrawing.value &&
-                pdfDrawingState.livePoints.isNotEmpty()
-            ) {
-                if (pdfDrawingState.liveToolKind.value == ToolKind.MARKER) {
-                    drawMarkerStroke(
-                        points = pdfDrawingState.livePoints,
-                        colorArgb = pdfDrawingState.liveColorArgb.value,
-                        normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                        pdfWidth = pdfW,
-                        pdfHeight = pdfH,
-                        extent = ext,
-                        scratch = livePath,
-                    )
-                } else {
-                    drawLiveStroke(
-                        points = pdfDrawingState.livePoints,
-                        colorArgb = pdfDrawingState.liveColorArgb.value,
-                        normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
-                        pdfWidth = pdfW,
-                        pdfHeight = pdfH,
-                        extent = ext,
-                        scratch = livePath,
-                    )
+                if (magnifierState == null &&
+                    !lowLatencyOverlayActive &&
+                    pdfDrawingState.isDrawing.value &&
+                    pdfDrawingState.livePoints.isNotEmpty()
+                ) {
+                    if (pdfDrawingState.liveToolKind.value == ToolKind.MARKER) {
+                        drawMarkerStroke(
+                            points = pdfDrawingState.livePoints,
+                            colorArgb = pdfDrawingState.liveColorArgb.value,
+                            normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
+                            pdfWidth = pdfW,
+                            pdfHeight = pdfH,
+                            extent = ext,
+                            scratch = livePath,
+                        )
+                    } else {
+                        drawLiveStroke(
+                            points = pdfDrawingState.livePoints,
+                            colorArgb = pdfDrawingState.liveColorArgb.value,
+                            normalizedStrokeWidth = pdfDrawingState.liveStrokeWidth.value,
+                            pdfWidth = pdfW,
+                            pdfHeight = pdfH,
+                            extent = ext,
+                            scratch = livePath,
+                        )
+                    }
                 }
             }
 
@@ -539,7 +551,7 @@ fun DrawablePdfPage(
         // loupe / preview), and placed BEFORE the low-latency overlay so it never
         // steals active stylus-draw events. Keyed by noteId for stable identity
         // under add / remove / sync churn.
-        if (onNoteTapped != null) {
+        if (onNoteTapped != null && pdfBaseVisible) {
             val ext = pageExtent
             for (n in notes) {
                 val r = n.rects.firstOrNull() ?: continue
@@ -569,7 +581,7 @@ fun DrawablePdfPage(
         // layer: Android uses a front-buffered SurfaceView, JVM/Desktop uses a
         // Compose Canvas in the same page tree. Where the overlay is unavailable,
         // the Compose Canvas above renders the live stroke itself.
-        if (lowLatencyOverlayActive) {
+        if (lowLatencyOverlayActive && pdfBaseVisible) {
             val overlayBounds = LocalLowLatencyOverlayBounds.current
             val overlayWidthDp = with(density) { lowLatencyOverlaySize.width.toDp() }
             val overlayHeightDp = with(density) { lowLatencyOverlaySize.height.toDp() }
@@ -629,6 +641,151 @@ fun DrawablePdfPage(
         }
     }
 }
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPdfLayer(
+    layer: PdfPageLayer,
+    nativeImageDrawCache: NativeImageDrawCache,
+    pdfDstOffset: IntOffset,
+    pdfDstSize: IntSize,
+) {
+    when (layer) {
+        is PdfPageLayer.FullBitmap -> drawFullBitmap(nativeImageDrawCache, layer.bitmap, pdfDstOffset, pdfDstSize)
+        is PdfPageLayer.Tiles -> {
+            drawRect(
+                color = Color.White,
+                topLeft = Offset(pdfDstOffset.x.toFloat(), pdfDstOffset.y.toFloat()),
+                size = Size(pdfDstSize.width.toFloat(), pdfDstSize.height.toFloat()),
+            )
+            if (layer.tiles.isEmpty()) {
+                drawFullBitmap(nativeImageDrawCache, layer.lowResPreview, pdfDstOffset, pdfDstSize)
+            } else if (layer.tiles.isNotEmpty()) {
+                for (tile in layer.missingTiles) {
+                    drawPreviewTile(nativeImageDrawCache, layer.lowResPreview, tile, pdfDstOffset, pdfDstSize)
+                }
+            }
+            for (tile in layer.tiles) {
+                drawPdfTile(nativeImageDrawCache, tile, pdfDstOffset, pdfDstSize)
+            }
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFullBitmap(
+    nativeImageDrawCache: NativeImageDrawCache,
+    bitmap: ImageBitmap?,
+    pdfDstOffset: IntOffset,
+    pdfDstSize: IntSize,
+) {
+    if (bitmap == null) return
+    drawNativeCachedImage(
+        cache = nativeImageDrawCache,
+        image = bitmap,
+        srcOffset = IntOffset.Zero,
+        srcSize = IntSize(bitmap.width, bitmap.height),
+        dstOffset = pdfDstOffset,
+        dstSize = pdfDstSize,
+        blendMode = BlendMode.SrcOver,
+        filterQuality = FilterQuality.High,
+    )
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPreviewTile(
+    nativeImageDrawCache: NativeImageDrawCache,
+    bitmap: ImageBitmap?,
+    tile: PdfTilePlaceholder,
+    pdfDstOffset: IntOffset,
+    pdfDstSize: IntSize,
+) {
+    val previewBitmap = bitmap ?: return
+    val invalidBitmap = previewBitmap.width <= 0 || previewBitmap.height <= 0
+    val invalidTile = tile.fullPageWidthPx <= 0 || tile.fullPageHeightPx <= 0
+    if (invalidBitmap || invalidTile) return
+    val srcLeft =
+        (tile.tileLeftPx.toFloat() * previewBitmap.width / tile.fullPageWidthPx)
+            .roundToInt()
+            .coerceIn(0, previewBitmap.width - 1)
+    val srcTop =
+        (tile.tileTopPx.toFloat() * previewBitmap.height / tile.fullPageHeightPx)
+            .roundToInt()
+            .coerceIn(0, previewBitmap.height - 1)
+    val srcRight =
+        ((tile.tileLeftPx + tile.tileWidthPx).toFloat() * previewBitmap.width / tile.fullPageWidthPx)
+            .roundToInt()
+            .coerceIn(srcLeft + 1, previewBitmap.width)
+    val srcBottom =
+        ((tile.tileTopPx + tile.tileHeightPx).toFloat() * previewBitmap.height / tile.fullPageHeightPx)
+            .roundToInt()
+            .coerceIn(srcTop + 1, previewBitmap.height)
+    val bounds = tileDestinationBounds(tile, pdfDstOffset, pdfDstSize)
+    drawNativeCachedImage(
+        cache = nativeImageDrawCache,
+        image = previewBitmap,
+        srcOffset = IntOffset(srcLeft, srcTop),
+        srcSize = IntSize(srcRight - srcLeft, srcBottom - srcTop),
+        dstOffset = IntOffset(bounds.left, bounds.top),
+        dstSize = IntSize((bounds.right - bounds.left).coerceAtLeast(1), (bounds.bottom - bounds.top).coerceAtLeast(1)),
+        blendMode = BlendMode.SrcOver,
+        filterQuality = FilterQuality.Low,
+    )
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPdfTile(
+    nativeImageDrawCache: NativeImageDrawCache,
+    tile: PdfTile,
+    pdfDstOffset: IntOffset,
+    pdfDstSize: IntSize,
+) {
+    val bounds = tileDestinationBounds(tile, pdfDstOffset, pdfDstSize)
+    drawNativeCachedImage(
+        cache = nativeImageDrawCache,
+        image = tile.bitmap,
+        srcOffset = IntOffset.Zero,
+        srcSize = IntSize(tile.bitmap.width, tile.bitmap.height),
+        dstOffset = IntOffset(bounds.left, bounds.top),
+        dstSize = IntSize((bounds.right - bounds.left).coerceAtLeast(1), (bounds.bottom - bounds.top).coerceAtLeast(1)),
+        blendMode = BlendMode.SrcOver,
+        filterQuality = FilterQuality.High,
+    )
+}
+
+private data class TileDestinationBounds(
+    val left: Int,
+    val top: Int,
+    val right: Int,
+    val bottom: Int,
+)
+
+private fun tileDestinationBounds(
+    tile: PdfTilePlaceholder,
+    pdfDstOffset: IntOffset,
+    pdfDstSize: IntSize,
+): TileDestinationBounds =
+    TileDestinationBounds(
+        left = pdfDstOffset.x + tile.tileLeftPx * pdfDstSize.width / tile.fullPageWidthPx,
+        top = pdfDstOffset.y + tile.tileTopPx * pdfDstSize.height / tile.fullPageHeightPx,
+        right =
+            pdfDstOffset.x +
+                (tile.tileLeftPx + tile.tileWidthPx) * pdfDstSize.width / tile.fullPageWidthPx,
+        bottom =
+            pdfDstOffset.y +
+                (tile.tileTopPx + tile.tileHeightPx) * pdfDstSize.height / tile.fullPageHeightPx,
+    )
+
+private fun tileDestinationBounds(
+    tile: PdfTile,
+    pdfDstOffset: IntOffset,
+    pdfDstSize: IntSize,
+): TileDestinationBounds =
+    TileDestinationBounds(
+        left = pdfDstOffset.x + tile.tileLeftPx * pdfDstSize.width / tile.fullPageWidthPx,
+        top = pdfDstOffset.y + tile.tileTopPx * pdfDstSize.height / tile.fullPageHeightPx,
+        right =
+            pdfDstOffset.x +
+                (tile.tileLeftPx + tile.tileWidthPx) * pdfDstSize.width / tile.fullPageWidthPx,
+        bottom =
+            pdfDstOffset.y +
+                (tile.tileTopPx + tile.tileHeightPx) * pdfDstSize.height / tile.fullPageHeightPx,
+    )
 
 suspend fun detectNativePenDrag(
     tablet: TabletInputController,

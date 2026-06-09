@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.resolveDocumentDisplayName
 
 /** Hard cap on simultaneously open panels. */
@@ -161,6 +162,24 @@ class TabSession internal constructor(
         layout = layout.focusPanel(panelId)
     }
 
+    /**
+     * Focuses the first open tab whose sync id matches [documentId].
+     * Returns `false` when the document is not open in this editor session.
+     */
+    fun focusDocument(documentId: String): Boolean =
+        documentId
+            .takeIf { it.isNotBlank() }
+            ?.let { id ->
+                layout.panels.firstNotNullOfOrNull { panel ->
+                    panel.tabs.tabs.firstOrNull { tab -> stateOf(tab).documentId == id }
+                        ?.let { tab -> panel.id to tab.id }
+                }
+            }
+            ?.also { target ->
+                focusPanel(target.first)
+                setActiveTab(target.first, target.second)
+            } != null
+
     /** Templates that would host exactly one more panel than is open now (empty at [MAX_PANELS]). */
     fun availableTemplatesForAdd(): List<LayoutTemplate> {
         val target = layout.panels.size + 1
@@ -298,6 +317,10 @@ class TabSession internal constructor(
     fun disposeAll() {
         documentStatesMap.values.forEach { it.closeDocument() }
     }
+
+    fun detachAllDocuments(): List<PdfDocument> =
+        documentStatesMap.values
+            .mapNotNull { it.detachDocument() }
 
     private fun collectTabIds(layout: WorkspaceLayout): Set<DocumentId> =
         layout.panels.flatMapTo(mutableSetOf()) { panel -> panel.tabs.tabs.map { it.id } }

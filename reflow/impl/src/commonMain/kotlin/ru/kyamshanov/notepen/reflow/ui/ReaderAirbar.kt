@@ -85,6 +85,7 @@ import ru.kyamshanov.notepen.WHEEL_EDGE_BAND_WIDE
 import ru.kyamshanov.notepen.WheelScrollButtons
 import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.fadingEdges
+import ru.kyamshanov.notepen.reflow.api.BookCurlMaterialId
 import ru.kyamshanov.notepen.reflow.api.BuiltinReaderPresets
 import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
@@ -786,12 +787,36 @@ private fun TuneSheet(
                 onSelect = { onChange(settings.copy(paged = it)) },
             )
             LabeledChoice(
+                label = "Страниц",
+                options = listOf(false, true),
+                selected = settings.twoPageSpread,
+                labelOf = { if (it) "Разворот" else "Одна" },
+                textColor = textColor,
+                onSelect = { onChange(settings.copy(twoPageSpread = it, paged = true)) },
+            )
+            LabeledChoice(
                 label = "Переход",
                 options = PageTransition.entries,
                 selected = settings.pageTransition,
                 labelOf = ::transitionName,
                 textColor = textColor,
                 onSelect = { onChange(settings.copy(pageTransition = it)) },
+            )
+            if (settings.pageTransition == PageTransition.BOOK) {
+                LabeledChoice(
+                    label = "Материал листа",
+                    options = BookCurlMaterialId.entries,
+                    selected = settings.bookCurlMaterial,
+                    labelOf = ::bookCurlMaterialName,
+                    textColor = textColor,
+                    onSelect = { onChange(settings.copy(bookCurlMaterial = it)) },
+                )
+            }
+            ToggleRow(
+                label = "Звук страниц",
+                checked = settings.pageTurnSound,
+                textColor = textColor,
+                onChange = { onChange(settings.copy(pageTurnSound = it)) },
             )
             ToggleRow(
                 label = "Тап для листания",
@@ -1125,9 +1150,16 @@ private fun progressName(format: ProgressFormat): String =
 
 private fun transitionName(transition: PageTransition): String =
     when (transition) {
+        PageTransition.BOOK -> "Книга"
         PageTransition.SLIDE -> "Слайд"
         PageTransition.FADE -> "Затухание"
         PageTransition.NONE -> "Нет"
+    }
+
+private fun bookCurlMaterialName(id: BookCurlMaterialId): String =
+    when (id) {
+        BookCurlMaterialId.PAPER -> "Бумага"
+        BookCurlMaterialId.COVER -> "Обложка"
     }
 
 private fun percentText(value: Float): String = "${(value * 100).roundToInt()}%"

@@ -5,13 +5,15 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
+import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.WebSocketFileTransfer
 import kotlin.random.Random
 
 private val logger = KotlinLogging.logger {}
 
 /**
- * Host-side handler for [NetworkMessage.DocumentOpenRequest]s.
+ * Handler for [NetworkMessage.DocumentOpenRequest]s sent by the opposite side of
+ * a paired channel.
  *
  * Workflow per request:
  * 1. Look up the requested `documentId` in [provider]'s per-peer allow-list.
@@ -23,20 +25,42 @@ private val logger = KotlinLogging.logger {}
  * anything not in the snapshot the requesting peer was served is denied,
  * even if a path to it exists on disk.
  *
- * Multi-doc safe: each request runs as an independent coroutine, so the host
+ * Multi-doc safe: each request runs as an independent coroutine, so the device
  * can fan out several transfers in parallel across peers.
  */
-class DocumentTransferRequestHandler(
-    private val server: PeerServer,
+class DocumentTransferRequestHandler private constructor(
+    private val server: PeerServer?,
+    private val client: SyncClient?,
     private val provider: RemoteCatalogProvider,
 ) {
+    constructor(
+        server: PeerServer,
+        provider: RemoteCatalogProvider,
+    ) : this(server = server, client = null, provider = provider)
+
+    constructor(
+        client: SyncClient,
+        provider: RemoteCatalogProvider,
+    ) : this(server = null, client = client, provider = provider)
+
     /** Start listening for requests; runs until [scope] is cancelled. */
     fun start(scope: CoroutineScope) {
-        scope.launch {
-            server.incomingMessages.collect { peerMessage ->
-                val msg = peerMessage.message
-                if (msg !is NetworkMessage.DocumentOpenRequest) return@collect
-                scope.launch { handle(peerMessage.peer.id, msg) }
+        server?.let { peerServer ->
+            scope.launch {
+                peerServer.incomingMessages.collect { peerMessage ->
+                    val msg = peerMessage.message
+                    if (msg !is NetworkMessage.DocumentOpenRequest) return@collect
+                    scope.launch { handle(peerMessage.peer.id, msg) }
+                }
+            }
+        }
+        client?.let { syncClient ->
+            scope.launch {
+                syncClient.incomingMessages.collect { hostMessage ->
+                    val msg = hostMessage.message
+                    if (msg !is NetworkMessage.DocumentOpenRequest) return@collect
+                    scope.launch { handle(hostMessage.host.id, msg) }
+                }
             }
         }
     }
@@ -48,7 +72,7 @@ class DocumentTransferRequestHandler(
         val uri = provider.resolveUri(peerId, request.documentId)
         if (uri == null || !provider.isAllowed(peerId, request.documentId)) {
             logger.warn { "DocumentOpenRequest denied for $peerId: ${request.documentId}" }
-            server.send(
+            send(
                 peerId,
                 NetworkMessage.DocumentNotFound(
                     documentId = request.documentId,
@@ -60,13 +84,18 @@ class DocumentTransferRequestHandler(
         val transferId = "tx-${Random.nextLong().toString(16)}"
         logger.info { "Streaming '$uri' for doc=${request.documentId} to peer=$peerId (transferId=$transferId)" }
         runCatching {
-            WebSocketFileTransfer(server = server, peerId = peerId)
+            WebSocketFileTransfer(
+                server = server,
+                client = client,
+                peerId = peerId.takeIf { server != null },
+                hostId = peerId.takeIf { client != null },
+            )
                 .send(sourcePath = uri, transferId = transferId, documentId = request.documentId)
                 .collect { /* progress ignored on host */ }
         }.onFailure { e ->
             logger.warn { "Stream failed for ${request.documentId}: ${e::class.simpleName}: ${e.message}" }
             runCatching {
-                server.send(
+                send(
                     peerId,
                     NetworkMessage.DocumentNotFound(
                         documentId = request.documentId,
@@ -74,6 +103,16 @@ class DocumentTransferRequestHandler(
                     ),
                 )
             }
+        }
+    }
+
+    private suspend fun send(
+        peerId: String,
+        message: NetworkMessage,
+    ) {
+        when {
+            server != null -> server.send(peerId, message)
+            client != null -> client.send(peerId, message)
         }
     }
 }

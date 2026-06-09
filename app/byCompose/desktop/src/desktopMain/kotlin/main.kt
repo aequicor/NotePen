@@ -22,6 +22,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import notepen.app.bycompose.desktop.generated.resources.Res
 import notepen.app.bycompose.desktop.generated.resources.app_icon
@@ -87,6 +88,7 @@ import ru.kyamshanov.notepen.sync.cloud.infrastructure.GitHubContentsCloudProvid
 import ru.kyamshanov.notepen.sync.domain.CacheEvictor
 import ru.kyamshanov.notepen.sync.domain.LibraryMutationClient
 import ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController
+import ru.kyamshanov.notepen.sync.domain.RemoteDocumentResult
 import ru.kyamshanov.notepen.sync.domain.SharedLibrarySource
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
@@ -444,6 +446,14 @@ fun main(args: Array<String>) {
     // Открытые во вкладках документы — редактор публикует их сюда, а каталог
     // раздаёт пирам как RemoteCatalog.openDocuments («открыто на этом ПК»).
     val openDocumentsRegistry = InMemoryOpenDocumentsRegistry()
+    val remoteOpenDocumentIds =
+        remoteCatalogCache.catalogs.map { catalogs ->
+            catalogs.values
+                .asSequence()
+                .flatMap { it.openDocuments.asSequence() }
+                .firstOrNull()
+                ?.documentId
+        }
     val syncRuntime =
         SyncRuntime(
             selfInfo = selfInfo,
@@ -978,6 +988,20 @@ fun main(args: Array<String>) {
                             { docId -> projection.snapshotDtos(docId).orEmpty() }
                         },
                     openDocumentsSink = openDocumentsRegistry::publish,
+                    broadcastDocumentUriFor =
+                        syncSession?.let { session ->
+                            { docId ->
+                                session.remoteCatalogProvider.resolveUri(docId)
+                                    ?: when (val result = session.remoteDocumentOpener.open(docId)) {
+                                        is RemoteDocumentResult.Success -> result.localPath
+                                        is RemoteDocumentResult.NotFound,
+                                        is RemoteDocumentResult.Timeout,
+                                        is RemoteDocumentResult.Failure,
+                                        -> null
+                                    }
+                            }
+                        },
+                    remoteOpenDocumentIds = remoteOpenDocumentIds,
                 )
             }
         }

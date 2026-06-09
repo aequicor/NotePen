@@ -17,6 +17,12 @@ import ru.kyamshanov.notepen.reflow.api.TextAnchor
 internal data class SelPoint(
     val blockIndex: Int,
     val charOffset: Int,
+    val occurrenceKey: Int,
+)
+
+private data class BlockOccurrence(
+    val blockIndex: Int,
+    val occurrenceKey: Int,
 )
 
 /** Конец выделения, который тянет ручка-курсор: [ANCHOR] — начало, [FOCUS] — конец. */
@@ -38,8 +44,8 @@ internal enum class SelectionEnd { ANCHOR, FOCUS }
  */
 @Stable
 internal class ReflowSelectionState {
-    private val layouts = mutableStateMapOf<Int, TextLayoutResult>()
-    private val blockCoordinates = mutableStateMapOf<Int, LayoutCoordinates>()
+    private val layouts = mutableStateMapOf<BlockOccurrence, TextLayoutResult>()
+    private val blockCoordinates = mutableStateMapOf<BlockOccurrence, LayoutCoordinates>()
 
     /**
      * Раскладка корневого контейнера контента: относительно неё считаются границы блоков
@@ -80,22 +86,28 @@ internal class ReflowSelectionState {
     fun reportCoordinates(
         index: Int,
         coordinates: LayoutCoordinates,
+        occurrenceKey: Int = 0,
     ) {
-        blockCoordinates[index] = coordinates
+        blockCoordinates[BlockOccurrence(index, occurrenceKey)] = coordinates
     }
 
     /** Блок [index] публикует свою раскладку текста (для перевода позиции в смещение). */
     fun reportLayout(
         index: Int,
         layout: TextLayoutResult,
+        occurrenceKey: Int = 0,
     ) {
-        layouts[index] = layout
+        layouts[BlockOccurrence(index, occurrenceKey)] = layout
     }
 
     /** Блок [index] выходит из композиции — убираем его раскладку/координаты. */
-    fun forget(index: Int) {
-        layouts.remove(index)
-        blockCoordinates.remove(index)
+    fun forget(
+        index: Int,
+        occurrenceKey: Int = 0,
+    ) {
+        val occurrence = BlockOccurrence(index, occurrenceKey)
+        layouts.remove(occurrence)
+        blockCoordinates.remove(occurrence)
     }
 
     /**
@@ -168,7 +180,7 @@ internal class ReflowSelectionState {
         val lo = minOf(from, to, COMPARATOR)
         val hi = maxOf(from, to, COMPARATOR)
         val inRange = index in lo.blockIndex..hi.blockIndex
-        val length = if (inRange) layouts[index]?.layoutInput?.text?.length else null
+        val length = if (inRange) layoutForBlock(index)?.layoutInput?.text?.length else null
         if (length == null) return null
         val startOffset = if (index == lo.blockIndex) lo.charOffset else 0
         val endOffset = if (index == hi.blockIndex) hi.charOffset else length
@@ -199,22 +211,34 @@ internal class ReflowSelectionState {
         // Пригодные блоки → их габариты в системе контейнера. Считаем на месте хит-теста,
         // где контейнер заведомо позиционирован; отсоединённые/без раскладки пропускаем.
         val usable =
-            blockCoordinates.mapNotNull { (index, coordinates) ->
-                if (index !in layouts || !coordinates.isAttached) return@mapNotNull null
-                index to container.localBoundingBoxOf(coordinates, clipBounds = false)
+            blockCoordinates.mapNotNull { (occurrence, coordinates) ->
+                if (occurrence !in layouts || !coordinates.isAttached) return@mapNotNull null
+                occurrence to container.localBoundingBoxOf(coordinates, clipBounds = false)
             }
-        val inside = usable.firstOrNull { (_, rect) -> pos.y >= rect.top && pos.y <= rect.bottom }
+        val inside = usable.firstOrNull { (_, rect) -> pos.x in rect.left..rect.right && pos.y in rect.top..rect.bottom }
         val hit =
             inside ?: usable.minByOrNull { (_, rect) ->
-                if (pos.y < rect.top) rect.top - pos.y else pos.y - rect.bottom
+                val dx =
+                    when {
+                        pos.x < rect.left -> rect.left - pos.x
+                        pos.x > rect.right -> pos.x - rect.right
+                        else -> 0f
+                    }
+                val dy =
+                    when {
+                        pos.y < rect.top -> rect.top - pos.y
+                        pos.y > rect.bottom -> pos.y - rect.bottom
+                        else -> 0f
+                    }
+                dx * dx + dy * dy
             }
-        return hit?.let { (index, _) ->
-            val layout = layouts.getValue(index)
-            val coordinates = blockCoordinates[index]?.takeIf { it.isAttached } ?: return@let null
+        return hit?.let { (occurrence, _) ->
+            val layout = layouts.getValue(occurrence)
+            val coordinates = blockCoordinates[occurrence]?.takeIf { it.isAttached } ?: return@let null
             // pos выражена относительно контейнера; localPositionOf переводит её в
             // собственную систему текстового узла — ровно то, что ждёт getOffsetForPosition.
             val local = coordinates.localPositionOf(container, pos)
-            SelPoint(index, layout.getOffsetForPosition(local))
+            SelPoint(occurrence.blockIndex, layout.getOffsetForPosition(local), occurrence.occurrenceKey)
         }
     }
 
@@ -230,8 +254,9 @@ internal class ReflowSelectionState {
     fun endRect(end: SelectionEnd): Rect? {
         val point = if (end == SelectionEnd.ANCHOR) anchor else focus
         val container = containerCoordinates?.takeIf { it.isAttached }
-        val coordinates = point?.let { blockCoordinates[it.blockIndex] }?.takeIf { it.isAttached }
-        val layout = point?.let { layouts[it.blockIndex] }
+        val occurrence = point?.let { BlockOccurrence(it.blockIndex, it.occurrenceKey) }
+        val coordinates = occurrence?.let { blockCoordinates[it] }?.takeIf { it.isAttached }
+        val layout = occurrence?.let { layouts[it] }
         // Единый «успешный» путь по nullable-цепочке — без множественных return-guard'ов
         // (ReturnCount) и без длинного условия (ComplexCondition).
         return point?.let { p ->
@@ -255,6 +280,8 @@ internal class ReflowSelectionState {
         val COMPARATOR: Comparator<SelPoint> =
             compareBy({ it.blockIndex }, { it.charOffset })
     }
+
+    private fun layoutForBlock(blockIndex: Int): TextLayoutResult? = layouts.entries.firstOrNull { it.key.blockIndex == blockIndex }?.value
 }
 
 /**

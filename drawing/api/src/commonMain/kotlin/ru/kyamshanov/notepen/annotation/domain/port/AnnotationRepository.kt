@@ -9,6 +9,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.PageNote
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StickyHighlight
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 
 /** Persistence port for per-document handwritten annotations. */
 interface AnnotationRepository {
@@ -16,9 +17,11 @@ interface AnnotationRepository {
         pdfPath: String,
         annotations: Map<Int, List<DrawingPath>>,
         scale: Int,
+        toolMode: ToolMode = ToolMode.NONE,
         pen: PenSettings = PenSettings(),
         marker: MarkerSettings = MarkerSettings(),
         eraser: EraserSettings = EraserSettings(),
+        preserveToolSettings: Boolean = false,
         currentPage: Int = 0,
         currentPageOffset: Int = 0,
         favoritePageIndices: Set<Int> = emptySet(),

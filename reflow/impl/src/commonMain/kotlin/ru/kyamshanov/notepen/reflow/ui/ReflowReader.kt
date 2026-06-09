@@ -1,9 +1,12 @@
 package ru.kyamshanov.notepen.reflow.ui
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -68,13 +71,20 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -117,7 +127,15 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlOverlay
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlState
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.PageTurnStyle
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.captureReflowTexture
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.isBookCurlNativeRendererSupported
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.roundToInt
 import kotlin.time.TimeSource
 
@@ -913,11 +931,21 @@ private fun PagedReflowContent(
         // Ширина контентной колонки в пикселях. Используется и для бэк-обмера
         // через TextMeasurer, и как ключ дискового layout-кэша (см. LaunchedEffect
         // ниже). Считается из BoxWithConstraints.maxWidth с учётом
-        // maxContentWidth и горизонтального padding'а — той же формулой, что
-        // диктует фактический рендер LazyColumn внутри pager'а.
+        // maxContentWidth, горизонтального padding'а и режима разворота — той же
+        // формулой, что диктует фактический рендер LazyColumn внутри pager'а.
+        val pageOuterWidth =
+            remember(maxWidth, settings.maxContentWidth, settings.contentPadding, settings.twoPageSpread) {
+                val availableForPage =
+                    if (settings.twoPageSpread) {
+                        ((maxWidth - BOOK_SPREAD_GAP) / 2f).coerceAtLeast(1.dp)
+                    } else {
+                        maxWidth
+                    }
+                availableForPage.coerceAtMost(settings.maxContentWidth).coerceAtLeast(settings.contentPadding * 2)
+            }
         val contentWidthPx =
             with(density) {
-                (maxWidth.coerceAtMost(settings.maxContentWidth) - settings.contentPadding * 2)
+                (pageOuterWidth - settings.contentPadding * 2)
                     .roundToPx()
                     .coerceAtLeast(1)
             }
@@ -1115,7 +1143,10 @@ private fun PagedReflowContent(
             }
         if (windows.isEmpty()) return@BoxWithConstraints
 
-        val lastPage = windows.lastIndex
+        val pagesPerSpread = if (settings.twoPageSpread) 2 else 1
+        val lastWindowPage = windows.lastIndex
+        val spreadCount = spreadCount(windows.size, pagesPerSpread)
+        val lastPagerPage = (spreadCount - 1).coerceAtLeast(0)
         val scope = rememberCoroutineScope()
         // Якорь чтения — TextAnchor начала текущей страницы. Durable: переживает
         // ре-пагинацию (смена кегля/полей/ориентации) и переключение страница<->скролл.
@@ -1137,13 +1168,23 @@ private fun PagedReflowContent(
                     density = density,
                 )
             }
-        val pagerState = rememberPagerState(initialPage = initialPage) { windows.size }
+        val initialSpread = windowPageToSpread(initialPage, pagesPerSpread)
+        val pagerState = rememberPagerState(initialPage = initialSpread) { spreadCount }
         // Свежие значения для трекера якоря ниже: он НЕ перезапускается на ре-пагинации
         // (иначе перечитал бы устаревший индекс страницы в новой раскладке и затёр якорь —
         // F-10: место чтения терялось при смене ориентации). См. LaunchedEffect(pagerState).
         val latestWindows = rememberUpdatedState(windows)
         val latestContentWidthPx = rememberUpdatedState(contentWidthPx)
         val latestSettings = rememberUpdatedState(settings)
+        val playPageTurnSound = rememberPageTurnSoundPlayer()
+        val latestPlayPageTurnSound = rememberUpdatedState(playPageTurnSound)
+        var lastSoundPagerPage by remember(document) { mutableStateOf<Int?>(null) }
+        val reducedMotion = isReducedMotionEnabled()
+        val useNativeBookCurl =
+            !reducedMotion &&
+                settings.pageTransition == PageTransition.BOOK &&
+                isBookCurlNativeRendererSupported()
+        val animatePager = !reducedMotion && settings.pageTransition != PageTransition.NONE
         // Ре-пагинация: встаём на страницу, открывающуюся якорным блоком (не на тот же
         // номер) — место чтения сохраняется при смене кегля/полей/ориентации. Тяжёлый measure
         // (до ~50 ms для блока-главы EPUB) уносим на Default, чтобы не блокировать main.
@@ -1152,7 +1193,7 @@ private fun PagedReflowContent(
         LaunchedEffect(windows) {
             val restoreAnchor = anchor
             val base = ReaderPagination.pageForAnchor(windows, restoreAnchor)
-            val newPage =
+            val newWindowPage =
                 withContext(Dispatchers.Default) {
                     refinePageForCharStart(
                         windows = windows,
@@ -1166,14 +1207,20 @@ private fun PagedReflowContent(
                         density = density,
                     )
                 }
-            if (newPage != pagerState.currentPage) pagerState.scrollToPage(newPage)
+            val newSpread = windowPageToSpread(newWindowPage, pagesPerSpread)
+            if (newSpread != pagerState.currentPage) pagerState.scrollToPage(newSpread)
         }
         val pagedBlockTarget by navigateToBlock
-        LaunchedEffect(pagedBlockTarget) {
+        LaunchedEffect(pagedBlockTarget, useNativeBookCurl, animatePager) {
             val block = pagedBlockTarget ?: return@LaunchedEffect
-            val target =
+            val targetWindowPage =
                 windows.indexOfLast { it.firstBlock <= block }.takeIf { it >= 0 } ?: return@LaunchedEffect
-            pagerState.animateScrollToPage(target)
+            val targetSpread = windowPageToSpread(targetWindowPage, pagesPerSpread)
+            if (useNativeBookCurl || !animatePager) {
+                pagerState.scrollToPage(targetSpread)
+            } else {
+                pagerState.animateScrollToPage(targetSpread)
+            }
             navigateToBlock.value = null
         }
         // Первый блок текущей страницы = якорь; публикуем наружу (прогресс + смена режима).
@@ -1183,9 +1230,18 @@ private fun PagedReflowContent(
         // и реагирует лишь на реальные смены страницы (свайп/тап/клавиша/восстановление
         // выше), а не на рестарт из-за смены раскладки. windows/ширину/настройки читаем
         // «вживую» через rememberUpdatedState, чтобы маппинг был по актуальной раскладке.
-        LaunchedEffect(pagerState, document) {
-            snapshotFlow { pagerState.currentPage }.collect { pageIndex ->
-                val window = latestWindows.value.getOrNull(pageIndex)
+        LaunchedEffect(pagerState, document, pagesPerSpread, lastWindowPage) {
+            snapshotFlow { pagerState.currentPage }.collect { pagerPage ->
+                val previousSoundPage = lastSoundPagerPage
+                if (previousSoundPage != null &&
+                    previousSoundPage != pagerPage &&
+                    latestSettings.value.pageTurnSound
+                ) {
+                    latestPlayPageTurnSound.value()
+                }
+                lastSoundPagerPage = pagerPage
+                val windowIndex = (pagerPage * pagesPerSpread).coerceAtMost(lastWindowPage)
+                val window = latestWindows.value.getOrNull(windowIndex)
                 val first = window?.firstBlock ?: 0
                 val charStart =
                     if (window != null && window.firstBlockOffsetPx > 0) {
@@ -1215,13 +1271,139 @@ private fun PagedReflowContent(
 
         // «Листнуть на ±N»: тап-зоны, клавиши и Initial-свайп (при активном маркере) идут
         // через programmatic scroll. NONE и «уменьшить движение» → мгновенно, иначе анимация.
-        val animatePager = !isReducedMotionEnabled() && settings.pageTransition != PageTransition.NONE
+        var curlProgress by remember(document) { mutableStateOf(0f) }
+        var curlDirection by remember(document) { mutableStateOf(1) }
+        var curlGripYFraction by remember(document) { mutableStateOf(PAGE_CURL_DEFAULT_GRIP_Y) }
+        // Текущая вертикаль пальца: при диагональном свайпе ≠ захвату ⇒ ось сгиба наклоняется (загиб «за угол»).
+        var curlFingerYFraction by remember(document) { mutableStateOf(PAGE_CURL_DEFAULT_GRIP_Y) }
+        var curlVelocityX by remember(document) { mutableStateOf(0f) }
+        var curlPhase by remember(document) { mutableStateOf(BookCurlPhase.Idle) }
+        var curlTargetPage by remember(document) { mutableStateOf<Int?>(null) }
+        // Страница, С КОТОРОЙ переворачиваем (лицо завитка). Пиним её отдельно от
+        // pagerState.currentPage: на завершении завитка currentPage перескакивает на цель ДО снятия
+        // оверлея (scrollToPage идёт перед resetCurl). Если брать лицо как pageCurlImages[currentPage],
+        // текстура лица скачком сменится source→target прямо в кадре отдачи — видимый рывок. С пиннингом
+        // лицо остаётся исходной страницей до resetCurl.
+        var curlSourcePage by remember(document) { mutableStateOf<Int?>(null) }
+        // Стиль листа (бумага/обложка) задаёт упругость пружины оседания: бумага мягко с лёгким
+        // отскоком, обложка — резко и чётко. Размерно-независимо, поэтому без ширины px.
+        val curlStyle =
+            remember(settings.bookCurlMaterial) {
+                PageTurnStyle.of(settings.bookCurlMaterial)
+            }
+
+        // Оседание после отпускания — пружина Compose (а не линейный ease): лист не «щёлкает» в позу,
+        // а догоняет цель и успокаивается. [initialVelocity] (в прогресс/с) продолжает флик пальца.
+        suspend fun animateCurlTo(
+            targetProgress: Float,
+            phase: BookCurlPhase,
+            initialVelocity: Float = 0f,
+            // Осознанный переворот без флика (клавиша/тап): катим завиток детерминированным tween'ом
+            // заданной длительности, чтобы он ЗАМЕТНО прокатился, а не «щёлкнул» пружиной. null/0 —
+            // штатная пружина оседания (перетаскивание, возврат).
+            deliberateMs: Int? = null,
+        ) {
+            curlPhase = phase
+            // К ЗАВЕРШЁННОМУ состоянию (target=1) оседаем БЕЗ отскока. Недодемпфированная пружина
+            // (paper dampingRatio=0.75) проскакивает за 1.0 (клампится плашмя) и затем «недокручивает»
+            // обратно под 1.0 — лист на миг разворачивается назад: затенение не снимается до конца
+            // (бледный маркер) и текст прыгает на остаток при передаче живой странице. Критическое
+            // демпфирование (≥1) даёт монотонный доворот строго до плашмя. Отскок «бумаги» оставляем
+            // только на ВОЗВРАТ (target=0), где недокрут до 0 визуально безвреден.
+            val settleDamping =
+                if (targetProgress >= 1f) maxOf(1f, curlStyle.settleDampingRatio) else curlStyle.settleDampingRatio
+            Animatable(curlProgress).animateTo(
+                targetValue = targetProgress,
+                animationSpec =
+                    if (deliberateMs != null && deliberateMs > 0) {
+                        tween(durationMillis = deliberateMs, easing = LinearOutSlowInEasing)
+                    } else {
+                        spring(
+                            dampingRatio = settleDamping,
+                            stiffness = curlStyle.settleStiffness,
+                        )
+                    },
+                initialVelocity = initialVelocity,
+            ) {
+                curlProgress = value.coerceIn(0f, 1f)
+            }
+            curlProgress = targetProgress
+        }
+
+        suspend fun resetCurl() {
+            curlProgress = 0f
+            curlVelocityX = 0f
+            curlPhase = BookCurlPhase.Idle
+            curlTargetPage = null
+            curlSourcePage = null
+        }
+
+        val scrollLocked = LocalReflowSelectionState.current.scrollLocked
+        val pageCaptureLayers = remember(document, measureKey) { mutableStateMapOf<Int, GraphicsLayer>() }
+        val pageCurlImages = remember(document, measureKey) { mutableStateMapOf<Int, ImageBitmap>() }
+        val captureKeys = pageCaptureLayers.keys.toList()
+        // Размер «страницы» пейджера (px) — берём из onSizeChanged; на него рендерим текстуру кёрла.
+        var readerPageSizePx by remember(document, measureKey) { mutableStateOf(IntSize.Zero) }
+        // Общий кэш растров врезок — пробрасываем в закадровую сцену, чтобы картинки попали в текстуру.
+        val figureCache = LocalFigureBitmapCache.current
+
+        suspend fun ensureCurlImage(page: Int): ImageBitmap? {
+            val cached = pageCurlImages[page]
+            val captured =
+                if (cached == null) {
+                    pageCaptureLayers[page]
+                        ?.let { layer -> runCatching { layer.toImageBitmap() }.getOrNull() }
+                        ?.also { pageCurlImages[page] = it }
+                } else {
+                    null
+                }
+            return cached ?: captured
+        }
+
+        suspend fun hasCurlImagesFor(
+            current: Int,
+            target: Int,
+        ): Boolean = ensureCurlImage(current) != null && ensureCurlImage(target) != null
+
+        suspend fun awaitCurlImagesFor(
+            current: Int,
+            target: Int,
+        ): Boolean {
+            repeat(PAGE_CURL_CAPTURE_ATTEMPTS) { attempt ->
+                if (hasCurlImagesFor(current, target)) return true
+                if (attempt < PAGE_CURL_CAPTURE_ATTEMPTS - 1) delay(PAGE_CURL_CAPTURE_DELAY_MS)
+            }
+            return false
+        }
+
         val pageDeltaHandler: (Int) -> Unit =
-            remember(scope, pagerState, lastPage, animatePager) {
+            remember(scope, pagerState, lastPagerPage, animatePager, useNativeBookCurl, pageCaptureLayers, pageCurlImages) {
                 { delta ->
-                    val target = (pagerState.currentPage + delta).coerceIn(0, lastPage)
+                    val target = (pagerState.currentPage + delta).coerceIn(0, lastPagerPage)
                     scope.launch {
-                        if (animatePager) pagerState.animateScrollToPage(target) else pagerState.scrollToPage(target)
+                        if (target == pagerState.currentPage) return@launch
+                        if (useNativeBookCurl) {
+                            if (!awaitCurlImagesFor(pagerState.currentPage, target)) {
+                                pagerState.scrollToPage(target)
+                                return@launch
+                            }
+                            curlDirection = if (delta > 0) 1 else -1
+                            // Тап/клавиша = симметричный загиб от середины края (без диагонали).
+                            curlGripYFraction = PAGE_CURL_DEFAULT_GRIP_Y
+                            curlFingerYFraction = PAGE_CURL_DEFAULT_GRIP_Y
+                            curlVelocityX = 0f
+                            curlPhase = BookCurlPhase.Completing
+                            curlSourcePage = pagerState.currentPage
+                            curlTargetPage = target
+                            curlProgress = PAGE_CURL_VISIBLE_PROGRESS
+                            // Клавиша/тап = осознанный переворот без флика: катим завиток заметным
+                            // tween'ом (длительность от материала листа), а не быстрой пружиной.
+                            animateCurlTo(1f, BookCurlPhase.Completing, deliberateMs = curlStyle.deliberateTurnMs)
+                            pagerState.scrollToPage(target)
+                            resetCurl()
+                        } else {
+                            if (animatePager) pagerState.animateScrollToPage(target) else pagerState.scrollToPage(target)
+                        }
                     }
                 }
             }
@@ -1230,82 +1412,464 @@ private fun PagedReflowContent(
             onDispose { onPageDeltaReady(null) }
         }
 
-        val scrollLocked = LocalReflowSelectionState.current.scrollLocked
+        LaunchedEffect(pagerState.currentPage, readerPageSizePx, useNativeBookCurl) {
+            if (!useNativeBookCurl || readerPageSizePx.width <= 0 || readerPageSizePx.height <= 0) return@LaunchedEffect
+            delay(PAGE_CURL_CAPTURE_DELAY_MS)
+            val pages = (pagerState.currentPage - 1)..(pagerState.currentPage + 1)
+            pages.forEach { page ->
+                if (page < 0 || page > lastPagerPage || pageCurlImages[page] != null) return@forEach
+                // Перекомпонуем страницу закадрово (ImageComposeScene) — GraphicsLayer.toImageBitmap()
+                // на Desktop отдаёт пустой кадр. Локали и фон проставляем, как на экране.
+                // Рендерим в 1× (см. PAGE_CURL_TEXTURE_SUPERSAMPLE): завиток только сжимает текстуру, а
+                // супер-сэмплинг с обратным уменьшением в sRGB делал бы текст блёклым/тонким.
+                val ss = PAGE_CURL_TEXTURE_SUPERSAMPLE
+                val texture =
+                    captureReflowTexture(
+                        readerPageSizePx.width * ss,
+                        readerPageSizePx.height * ss,
+                        Density(density.density * ss, density.fontScale),
+                    ) {
+                        CompositionLocalProvider(
+                            LocalReflowSelectionState provides ReflowSelectionState(),
+                            LocalFigureBitmapCache provides figureCache,
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize().background(settings.background),
+                                contentAlignment = Alignment.TopCenter,
+                            ) {
+                                ReflowSpread(
+                                    pagerPage = page,
+                                    document = document,
+                                    windows = windows,
+                                    pagesPerSpread = pagesPerSpread,
+                                    anchorsByBlock = anchorsByBlock,
+                                    notesByBlock = notesByBlock,
+                                    onNoteTap = onNoteTap,
+                                    settings = settings,
+                                    renderPage = renderPage,
+                                    pageOuterWidth = pageOuterWidth,
+                                    density = density,
+                                )
+                            }
+                        }
+                    }
+                        ?: pageCaptureLayers[page]?.let { layer ->
+                            // Android: закадровый ImageComposeScene недоступен (captureReflowTexture == null) —
+                            // берём кадр со страничного GraphicsLayer. На устройстве toImageBitmap() работает;
+                            // пустой он лишь в headless-тестах Desktop, где этот путь не нужен (там texture != null).
+                            runCatching { layer.toImageBitmap() }.getOrNull()
+                        }
+                if (texture != null) pageCurlImages[page] = texture
+            }
+        }
         HorizontalPager(
             state = pagerState,
             // Соседние страницы не держим скомпонованными: при построчном переносе один блок
             // попадает на две страницы, а двойная регистрация координат ломала бы хит-тест
             // выделения. На свайпе сосед всё равно скомпонуется (выделение тогда заблокировано).
-            beyondViewportPageCount = 0,
-            userScrollEnabled = !scrollLocked,
+            beyondViewportPageCount = if (useNativeBookCurl) 1 else 0,
+            userScrollEnabled = !scrollLocked && !useNativeBookCurl,
             modifier =
                 Modifier
                     .fillMaxSize()
                     .padding(top = settings.topMargin, bottom = settings.bottomMargin)
-                    .clipToBounds(),
-        ) { pageIndex ->
+                    .clipToBounds()
+                    .then(
+                        if (useNativeBookCurl && !scrollLocked) {
+                            Modifier.pointerInput(lastPagerPage, pagerState.currentPage) {
+                                var dragActive = false
+                                var startX = 0f
+                                var targetPage = pagerState.currentPage
+                                val velocityTracker = VelocityTracker()
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        val fromForwardEdge = offset.x >= size.width * PAGE_CURL_FORWARD_EDGE_FRACTION
+                                        val fromBackEdge = offset.x <= size.width * PAGE_CURL_BACK_EDGE_FRACTION
+                                        val direction =
+                                            when {
+                                                fromForwardEdge -> 1
+                                                fromBackEdge -> -1
+                                                else -> 0
+                                            }
+                                        val target = (pagerState.currentPage + direction).coerceIn(0, lastPagerPage)
+                                        // Жест не блокируем готовностью текстур: даже без снимков перелистывание
+                                        // должно сработать (оверлей сам не рисуется, пока front/back == null).
+                                        dragActive = direction != 0 && target != pagerState.currentPage
+                                        if (dragActive) {
+                                            velocityTracker.resetTracking()
+                                            startX = offset.x
+                                            curlDirection = direction
+                                            curlGripYFraction =
+                                                (offset.y / size.height.toFloat().coerceAtLeast(1f)).coerceIn(0f, 1f)
+                                            curlFingerYFraction = curlGripYFraction
+                                            curlSourcePage = pagerState.currentPage
+                                            curlTargetPage = target
+                                            curlVelocityX = 0f
+                                            curlPhase = BookCurlPhase.Dragging
+                                            curlProgress = 0f
+                                            targetPage = target
+                                        }
+                                    },
+                                    onDragCancel = {
+                                        if (dragActive) {
+                                            scope.launch {
+                                                animateCurlTo(0f, BookCurlPhase.Returning)
+                                                resetCurl()
+                                            }
+                                        }
+                                        dragActive = false
+                                    },
+                                    onDragEnd = {
+                                        if (dragActive) {
+                                            // Реальная скорость флика (px/с), а не dragAmount*const.
+                                            val flingX = velocityTracker.calculateVelocity().x
+                                            curlVelocityX = flingX
+                                            val complete =
+                                                BookCurlPhysics.shouldComplete(
+                                                    BookCurlState(
+                                                        direction = curlDirection,
+                                                        gripY = curlGripYFraction * size.height,
+                                                        fingerY = curlFingerYFraction * size.height,
+                                                        velocityX = flingX,
+                                                        progress = curlProgress,
+                                                        phase = BookCurlPhase.Dragging,
+                                                    ),
+                                                )
+                                            // px/с → прогресс/с: пружина оседания продолжает бросок пальца.
+                                            val flingProgress =
+                                                -flingX * curlDirection / size.width.toFloat().coerceAtLeast(1f)
+                                            scope.launch {
+                                                if (complete) {
+                                                    animateCurlTo(1f, BookCurlPhase.Completing, flingProgress)
+                                                    // progress=1 совпадает с целью: коммитим и снимаем
+                                                    // оверлей в ОДИН кадр, без кросс-фейда. Фейд блендил
+                                                    // две почти-одинаковые непрозрачные картинки —
+                                                    // суб-пиксель давал призрак-сдвиг, а усреднение цвета —
+                                                    // бледный маркер. Подмена незаметна (реконструкция = живой).
+                                                    pagerState.scrollToPage(targetPage)
+                                                } else {
+                                                    animateCurlTo(0f, BookCurlPhase.Returning, flingProgress)
+                                                }
+                                                resetCurl()
+                                            }
+                                        }
+                                        dragActive = false
+                                    },
+                                    onDrag = { change, _ ->
+                                        if (dragActive) {
+                                            change.consume()
+                                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+                                            curlPhase = BookCurlPhase.Dragging
+                                            // Палец ведёт захваченный угол 1:1; его вертикаль наклоняет линию
+                                            // сгиба (диагональный dog-ear при косом свайпе).
+                                            curlFingerYFraction =
+                                                (change.position.y / size.height.toFloat().coerceAtLeast(1f))
+                                                    .coerceIn(0f, 1f)
+                                            // Прогресс = путь пальца к корешку. Нормируем на ДОЛЮ ширины,
+                                            // а не на всю ширину окна: иначе чтобы доехать до плашмя пришлось
+                                            // бы протащить угол через всё окно (на широком мониторе нереально —
+                                            // лист застревал гребнем посередине). Комфортный свайп ~60% ширины
+                                            // доводит лист до финальной позиции под пальцем.
+                                            val travelX = (startX - change.position.x) * curlDirection
+                                            val fullTravel = (size.width * PAGE_CURL_DRAG_COMPLETE_FRACTION).coerceAtLeast(1f)
+                                            curlProgress = (travelX / fullTravel).coerceIn(0f, 1f)
+                                        }
+                                    },
+                                )
+                            }
+                        } else {
+                            Modifier
+                        },
+                    ),
+        ) { pagerPage ->
+            val captureLayer = rememberGraphicsLayer()
+            DisposableEffect(pagerPage, captureLayer) {
+                pageCaptureLayers[pagerPage] = captureLayer
+                onDispose {
+                    if (pageCaptureLayers[pagerPage] === captureLayer) pageCaptureLayers.remove(pagerPage)
+                    pageCurlImages.remove(pagerPage)
+                }
+            }
             if (!firstPageLogged.value) {
                 SideEffect {
                     if (!firstPageLogged.value) {
                         firstPageLogged.value = true
                         readerLogger.info {
-                            "PdfReflow: first-page-composed page=$pageIndex windows=${windows.size} " +
+                            "PdfReflow: first-page-composed page=$pagerPage windows=${windows.size} " +
                                 "since-open=${openMark.elapsedNow().inWholeMilliseconds}ms"
                         }
                     }
                 }
             }
-            val pageWindow = windows[pageIndex]
-            // Высота окна обрезана по границе строки: нижняя строка не режется пополам, а внизу
-            // остаётся зазор меньше строки (поле, как в книге), а не целый незаполненный абзац.
-            val windowHeightDp = with(density) { pageWindow.heightPx.toDp() }
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                // Страница — окно в непрерывную колонку: LazyColumn без пользовательского скролла,
-                // спозиционированный на стартовую строку окна. Тот же рендер блоков, что и в
-                // скролл-режиме (виртуализация, выделение, провенанс-спаны работают без изменений).
-                val pageList = rememberLazyListState(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
-                // Держим страницу на её строке при ре-пагинации (смена кегля/полей).
-                LaunchedEffect(pageWindow) {
-                    pageList.scrollToItem(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
-                }
-                LazyColumn(
-                    state = pageList,
-                    userScrollEnabled = false,
+            val pageOffset =
+                ((pagerState.currentPage - pagerPage) + pagerState.currentPageOffsetFraction)
+                    .coerceIn(-1f, 1f)
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pageTransitionLayer(
+                        transition = if (useNativeBookCurl) PageTransition.NONE else settings.pageTransition,
+                        pageOffset = pageOffset,
+                        densityScale = density.density,
+                    ).onSizeChanged { readerPageSizePx = it }
+                    .captureToLayer(captureLayer),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                ReflowSpread(
+                    pagerPage = pagerPage,
+                    document = document,
+                    windows = windows,
+                    pagesPerSpread = pagesPerSpread,
+                    anchorsByBlock = anchorsByBlock,
+                    notesByBlock = notesByBlock,
+                    onNoteTap = onNoteTap,
+                    settings = settings,
+                    renderPage = renderPage,
+                    pageOuterWidth = pageOuterWidth,
+                    density = density,
+                )
+            }
+        }
+        if (useNativeBookCurl && !scrollLocked) {
+            val target = curlTargetPage
+            // Лицо завитка — ИСХОДНАЯ страница (curlSourcePage), а не pagerState.currentPage:
+            // после scrollToPage(target) на завершении currentPage уже = target, и привязка к нему
+            // подменяла бы лицо целевой страницей в кадре отдачи (рывок). До старта завитка
+            // source == currentPage, поэтому фолбэк безопасен.
+            val frontTexture = pageCurlImages[curlSourcePage ?: pagerState.currentPage]
+            if (target != null && frontTexture != null && curlProgress > PAGE_CURL_VISIBLE_PROGRESS) {
+                // Текстура захватывается с супер-сэмплингом (front.width = экранная ширина × N), а
+                // геометрия кропа листа сравнивает pageWidth с front.width — значит pageWidth тоже
+                // обязан быть в пикселях ТЕКСТУРЫ, иначе кропается лишь 1/N (на Desktop ровно половина)
+                // столбца страницы. Масштаб берём из реального отношения текстуры к экрану (Android-
+                // фолбэк рендерит 1×, Desktop — ×N), а не из константы.
+                val textureScale =
+                    if (readerPageSizePx.width > 0) {
+                        frontTexture.width.toFloat() / readerPageSizePx.width
+                    } else {
+                        1f
+                    }
+                BookCurlOverlay(
+                    front = frontTexture,
+                    back = pageCurlImages[target],
+                    progress = curlProgress,
+                    direction = curlDirection,
+                    gripYFraction = curlGripYFraction,
+                    fingerYFraction = curlFingerYFraction,
+                    velocityX = curlVelocityX,
+                    phase = curlPhase,
+                    twoPageSpread = settings.twoPageSpread,
+                    pageWidthPx = with(density) { (pageOuterWidth.roundToPx() * textureScale).roundToInt() },
+                    spineGapPx = with(density) { (BOOK_SPREAD_GAP.roundToPx() * textureScale).roundToInt() },
+                    style = curlStyle,
                     modifier =
                         Modifier
-                            .widthIn(max = settings.maxContentWidth)
-                            .fillMaxWidth()
-                            .height(windowHeightDp)
+                            .fillMaxSize()
+                            .padding(top = settings.topMargin, bottom = settings.bottomMargin)
                             .clipToBounds(),
-                    contentPadding = PaddingValues(horizontal = settings.contentPadding),
-                    verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
-                ) {
-                    itemsIndexed(document.blocks) { index, block ->
-                        // onSizeChanged больше не используется: высоты блоков заданы
-                        // детерминированно (BlockHeightCalculator на фоне +
-                        // figureHeights аналитически), а ре-замер на render-фазе
-                        // — главный источник layout drift'а при возврате на читанную
-                        // страницу (defect b). Если TextMeasurer-обмер расходится
-                        // с BasicText-рендером, корень — в TextStyle (см.
-                        // DeterministicLineHeight / readerPlatformTextStyle), не
-                        // в auto-correction после рендера.
-                        Box(modifier = Modifier.fillMaxWidth()) {
-                            ReflowBlockView(
-                                block,
-                                anchorsByBlock[index].orEmpty(),
-                                settings,
-                                renderPage,
-                                blockIndex = index,
-                                notes = notesByBlock[index].orEmpty(),
-                                onNoteTap = onNoteTap,
-                            )
-                        }
-                    }
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Содержимое одной «страницы» пейджера (разворот или одиночная страница). Вынесено, чтобы
+ * рендерить ОДНИМ кодом и на экране, и в закадровой [captureReflowTexture] для текстуры кёрла —
+ * тогда снимок гарантированно совпадает с тем, что видит пользователь.
+ */
+@Composable
+private fun ReflowSpread(
+    pagerPage: Int,
+    document: ReflowDocument,
+    windows: List<ReaderPagination.PageWindow>,
+    pagesPerSpread: Int,
+    anchorsByBlock: Map<Int, List<TextAnchor>>,
+    notesByBlock: Map<Int, List<NoteAnchor>>,
+    onNoteTap: (PageNote) -> Unit,
+    settings: ReflowReaderSettings,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+    pageOuterWidth: Dp,
+    density: Density,
+) {
+    if (settings.twoPageSpread) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.Top,
+        ) {
+            PageWindowColumn(
+                document = document,
+                pageWindow = windows.getOrNull(pagerPage * pagesPerSpread),
+                pageIndex = pagerPage * pagesPerSpread,
+                anchorsByBlock = anchorsByBlock,
+                notesByBlock = notesByBlock,
+                onNoteTap = onNoteTap,
+                settings = settings,
+                renderPage = renderPage,
+                pageOuterWidth = pageOuterWidth,
+                density = density,
+            )
+            BookSpine(settings)
+            PageWindowColumn(
+                document = document,
+                pageWindow = windows.getOrNull(pagerPage * pagesPerSpread + 1),
+                pageIndex = pagerPage * pagesPerSpread + 1,
+                anchorsByBlock = anchorsByBlock,
+                notesByBlock = notesByBlock,
+                onNoteTap = onNoteTap,
+                settings = settings,
+                renderPage = renderPage,
+                pageOuterWidth = pageOuterWidth,
+                density = density,
+            )
+        }
+    } else {
+        PageWindowColumn(
+            document = document,
+            pageWindow = windows.getOrNull(pagerPage),
+            pageIndex = pagerPage,
+            anchorsByBlock = anchorsByBlock,
+            notesByBlock = notesByBlock,
+            onNoteTap = onNoteTap,
+            settings = settings,
+            renderPage = renderPage,
+            pageOuterWidth = pageOuterWidth,
+            density = density,
+        )
+    }
+}
+
+@Composable
+private fun PageWindowColumn(
+    document: ReflowDocument,
+    pageWindow: ReaderPagination.PageWindow?,
+    pageIndex: Int,
+    anchorsByBlock: Map<Int, List<TextAnchor>>,
+    notesByBlock: Map<Int, List<NoteAnchor>>,
+    onNoteTap: (PageNote) -> Unit,
+    settings: ReflowReaderSettings,
+    renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
+    pageOuterWidth: Dp,
+    density: Density,
+) {
+    if (pageWindow == null) {
+        Box(Modifier.width(pageOuterWidth).fillMaxHeight())
+        return
+    }
+    val windowHeightDp = with(density) { pageWindow.heightPx.toDp() }
+    Box(Modifier.width(pageOuterWidth), contentAlignment = Alignment.TopCenter) {
+        // Страница — окно в непрерывную колонку: LazyColumn без пользовательского скролла,
+        // спозиционированный на стартовую строку окна. Тот же рендер блоков, что и в
+        // скролл-режиме (виртуализация, выделение, провенанс-спаны работают без изменений).
+        val pageList = rememberLazyListState(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
+        // Держим страницу на её строке при ре-пагинации (смена кегля/полей).
+        LaunchedEffect(pageWindow) {
+            pageList.scrollToItem(pageWindow.firstBlock, pageWindow.firstBlockOffsetPx)
+        }
+        LazyColumn(
+            state = pageList,
+            userScrollEnabled = false,
+            modifier =
+                Modifier
+                    .width(pageOuterWidth)
+                    .height(windowHeightDp)
+                    .clipToBounds(),
+            contentPadding = PaddingValues(horizontal = settings.contentPadding),
+            verticalArrangement = Arrangement.spacedBy(settings.blockSpacing),
+        ) {
+            itemsIndexed(document.blocks) { index, block ->
+                // onSizeChanged больше не используется: высоты блоков заданы
+                // детерминированно (BlockHeightCalculator на фоне + figureHeights
+                // аналитически), а ре-замер на render-фазе — главный источник layout
+                // drift'а при возврате на читанную страницу.
+                Box(modifier = Modifier.fillMaxWidth()) {
+                    ReflowBlockView(
+                        block,
+                        anchorsByBlock[index].orEmpty(),
+                        settings,
+                        renderPage,
+                        blockIndex = index,
+                        occurrenceKey = pageIndex,
+                        notes = notesByBlock[index].orEmpty(),
+                        onNoteTap = onNoteTap,
+                    )
                 }
             }
         }
     }
 }
+
+@Composable
+private fun BookSpine(settings: ReflowReaderSettings) {
+    Box(
+        modifier =
+            Modifier
+                .width(BOOK_SPREAD_GAP)
+                .fillMaxHeight()
+                .drawBehind {
+                    val centerX = size.width / 2f
+                    drawLine(
+                        color = settings.textColor.copy(alpha = BOOK_SPINE_ALPHA),
+                        start = Offset(centerX, 0f),
+                        end = Offset(centerX, size.height),
+                        strokeWidth = BOOK_SPINE_WIDTH_PX,
+                    )
+                },
+    )
+}
+
+private fun Modifier.pageTransitionLayer(
+    transition: PageTransition,
+    pageOffset: Float,
+    densityScale: Float,
+): Modifier {
+    val absOffset = abs(pageOffset)
+    return when (transition) {
+        PageTransition.BOOK ->
+            graphicsLayer {
+                cameraDistance = BOOK_CAMERA_DISTANCE * densityScale
+                transformOrigin = TransformOrigin(if (pageOffset > 0f) 1f else 0f, 0.5f)
+                rotationY = pageOffset * BOOK_ROTATION_DEGREES
+                scaleX = 1f - absOffset * BOOK_SCALE_LOSS
+                alpha = 1f - absOffset * BOOK_ALPHA_LOSS
+            }
+        PageTransition.FADE ->
+            graphicsLayer {
+                alpha = 1f - absOffset
+            }
+        PageTransition.SLIDE,
+        PageTransition.NONE,
+        -> this
+    }
+}
+
+private fun Modifier.captureToLayer(layer: GraphicsLayer): Modifier =
+    drawWithContent {
+        val layerSize =
+            IntSize(
+                width = size.width.roundToInt().coerceAtLeast(1),
+                height = size.height.roundToInt().coerceAtLeast(1),
+            )
+        layer.record(
+            density = this,
+            layoutDirection = layoutDirection,
+            size = layerSize,
+        ) {
+            this@drawWithContent.drawContent()
+        }
+        drawContent()
+    }
+
+private fun spreadCount(
+    pageCount: Int,
+    pagesPerSpread: Int,
+): Int = ceil(pageCount / pagesPerSpread.toFloat()).roundToInt().coerceAtLeast(1)
+
+private fun windowPageToSpread(
+    pageIndex: Int,
+    pagesPerSpread: Int,
+): Int = (pageIndex / pagesPerSpread).coerceAtLeast(0)
 
 @Composable
 private fun ReflowBlockView(
@@ -1314,6 +1878,7 @@ private fun ReflowBlockView(
     settings: ReflowReaderSettings,
     renderPage: (suspend (pageIndex: Int) -> ImageBitmap?)?,
     blockIndex: Int,
+    occurrenceKey: Int = 0,
     onLines: ((List<Float>) -> Unit)? = null,
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
@@ -1327,6 +1892,7 @@ private fun ReflowBlockView(
                 style = settings.headingStyle(block.level),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 notes = notes,
                 onNoteTap = onNoteTap,
             )
@@ -1338,6 +1904,7 @@ private fun ReflowBlockView(
                 style = settings.paragraphStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
@@ -1357,6 +1924,7 @@ private fun ReflowBlockView(
                 style = settings.paragraphStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 contentPadding = PaddingValues(start = settings.contentPadding * (block.level + 1)),
                 notes = notes,
@@ -1364,7 +1932,7 @@ private fun ReflowBlockView(
             )
 
         is ReflowBlock.Blockquote ->
-            BlockquoteView(block, anchors, settings, blockIndex, onLines, notes, onNoteTap)
+            BlockquoteView(block, anchors, settings, blockIndex, occurrenceKey, onLines, notes, onNoteTap)
 
         is ReflowBlock.Table -> TableView(block, settings)
 
@@ -1382,6 +1950,7 @@ private fun ReflowBlockView(
                 style = settings.codeStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
@@ -1396,6 +1965,7 @@ private fun ReflowBlockView(
                 style = settings.footnoteStyle(),
                 settings = settings,
                 blockIndex = blockIndex,
+                occurrenceKey = occurrenceKey,
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
@@ -1431,14 +2001,15 @@ private fun SelectableReflowText(
     style: TextStyle,
     settings: ReflowReaderSettings,
     blockIndex: Int,
+    occurrenceKey: Int = 0,
     onLines: ((List<Float>) -> Unit)? = null,
     contentPadding: PaddingValues = PaddingValues(),
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
 ) {
     val selectionState = LocalReflowSelectionState.current
-    DisposableEffect(selectionState, blockIndex) {
-        onDispose { selectionState.forget(blockIndex) }
+    DisposableEffect(selectionState, blockIndex, occurrenceKey) {
+        onDispose { selectionState.forget(blockIndex, occurrenceKey) }
     }
     val liveAnchor = selectionState.selectionAnchorFor(blockIndex)
     val liveAnchors = if (liveAnchor != null) anchors + liveAnchor else anchors
@@ -1454,7 +2025,7 @@ private fun SelectableReflowText(
             style = style,
             onTextLayout = { layout ->
                 textLayout = layout
-                selectionState.reportLayout(blockIndex, layout)
+                selectionState.reportLayout(blockIndex, layout, occurrenceKey)
                 // Нижние границы строк (для построчной раскладки страниц): снимаем только когда
                 // нужно (проход обмера в PagedReflowContent передаёт onLines).
                 onLines?.invoke(List(layout.lineCount) { layout.getLineBottom(it) })
@@ -1467,7 +2038,7 @@ private fun SelectableReflowText(
                 Modifier
                     .padding(contentPadding)
                     .onGloballyPositioned { coordinates ->
-                        selectionState.reportCoordinates(blockIndex, coordinates)
+                        selectionState.reportCoordinates(blockIndex, coordinates, occurrenceKey)
                     },
         )
 
@@ -1505,6 +2076,7 @@ private fun BlockquoteView(
     anchors: List<TextAnchor>,
     settings: ReflowReaderSettings,
     blockIndex: Int,
+    occurrenceKey: Int = 0,
     onLines: ((List<Float>) -> Unit)? = null,
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
@@ -1526,6 +2098,7 @@ private fun BlockquoteView(
             style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic),
             settings = settings,
             blockIndex = blockIndex,
+            occurrenceKey = occurrenceKey,
             onLines = onLines,
             contentPadding = PaddingValues(start = settings.contentPadding),
             notes = notes,
@@ -2106,6 +2679,13 @@ internal fun styledText(
     if (source.isEmpty() && anchors.isEmpty() && !settings.bionic && !needsWordSpacing) {
         return AnnotatedString(text)
     }
+    // Полупрозрачные фоны (подсветка выделений/код) ПРЕДкомпозитим в НЕПРОЗРАЧНЫЙ цвет над фоном
+    // страницы. Полупрозрачное смешивание запекается в закадровой sRGB-текстуре завитка иначе, чем в
+    // живом (color-managed, P3) окне, поэтому подсветка на завитке выходит бледнее/другого оттенка, а
+    // на стыке оверлей→живая страница «меняет оттенок». Непрозрачный цвет color-менеджится одинаково
+    // (как текст и фон, которые уже совпадают). Над фоном страницы результат визуально тот же.
+    val codeBg = settings.codeBackground.compositeOver(settings.background)
+    val highlightBg = settings.highlightColor.compositeOver(settings.background)
     return buildAnnotatedString {
         append(text)
         source.forEach { span ->
@@ -2114,7 +2694,7 @@ internal fun styledText(
             if (start >= end) return@forEach
             if (span.bold) addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, end)
             if (span.monospace) {
-                addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = settings.codeBackground), start, end)
+                addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg), start, end)
             }
         }
         if (needsWordSpacing) {
@@ -2132,7 +2712,7 @@ internal fun styledText(
         anchors.forEach { anchor ->
             val start = anchor.charStart.coerceIn(0, text.length)
             val end = anchor.charEnd.coerceIn(start, text.length)
-            if (start < end) addStyle(SpanStyle(background = settings.highlightColor), start, end)
+            if (start < end) addStyle(SpanStyle(background = highlightBg), start, end)
         }
     }
 }
@@ -2218,6 +2798,32 @@ private const val TAP_ZONE_NEXT_FRACTION = 0.3f
 // Доля ширины, на которую нужно увести горизонтальный свайп, чтобы листнуть страницу
 // (защита от случайных микро-сдвигов).
 private const val SWIPE_TURN_FRACTION = 0.18f
+
+private val BOOK_SPREAD_GAP = 28.dp
+private const val BOOK_SPINE_ALPHA = 0.16f
+private const val BOOK_SPINE_WIDTH_PX = 1.2f
+private const val BOOK_CAMERA_DISTANCE = 32f
+private const val BOOK_ROTATION_DEGREES = 34f
+private const val BOOK_SCALE_LOSS = 0.025f
+private const val BOOK_ALPHA_LOSS = 0.08f
+private const val PAGE_CURL_CAPTURE_DELAY_MS = 32L
+private const val PAGE_CURL_CAPTURE_ATTEMPTS = 3
+private const val PAGE_CURL_VISIBLE_PROGRESS = 0.015f
+private const val PAGE_CURL_DEFAULT_GRIP_Y = 0.66f
+private const val PAGE_CURL_FORWARD_EDGE_FRACTION = 0.66f
+private const val PAGE_CURL_BACK_EDGE_FRACTION = 0.34f
+
+/** Доля ширины, на которую нужно протащить палец, чтобы лист дошёл до плашмя (прогресс 1). Меньше
+ * единицы — иначе на широком экране лист не довернуть рукой; ~0.6 = комфортный свайп доводит до конца. */
+private const val PAGE_CURL_DRAG_COMPLETE_FRACTION = 0.6f
+
+/** Кратность супер-сэмплинга текстуры страницы для завитка. ДОЛЖНА быть 1: цилиндрический завиток
+ * только СЖИМАЕТ лист по горизонтали (никогда не увеличивает текстуру сверх плоского размера), поэтому
+ * супер-сэмплинг не добавляет чёткости — но при N>1 меш ужимает текстуру обратно в 1/N, а Skia делает
+ * это уменьшение в sRGB-пространстве (не в линейном). Сглаженные края чёрного текста на белом при этом
+ * «светлеют» — на завитке текст выглядит тоньше и блёклее живой страницы (которая растеризуется один раз
+ * в 1× с хинтингом). N=1 ⇒ текстура совпадает с экраном пиксель-в-пиксель, текст идентичен живому. */
+private const val PAGE_CURL_TEXTURE_SUPERSAMPLE = 1
 
 private const val HEADING_SCALE_1 = 1.6f
 private const val HEADING_SCALE_2 = 1.35f

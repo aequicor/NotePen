@@ -104,6 +104,9 @@ public enum class ProgressFormat {
  */
 @Serializable
 public enum class PageTransition {
+    /** Книжное перелистывание: страница поворачивается от корешка с лёгкой тенью. */
+    BOOK,
+
     /** Книжный горизонтальный слайд: вперёд страница уезжает влево. */
     SLIDE,
 
@@ -112,6 +115,24 @@ public enum class PageTransition {
 
     /** Без анимации: мгновенная смена страницы. */
     NONE,
+}
+
+/**
+ * Стиль листа для книжного перелистывания ([PageTransition.BOOK]). Намеренно всего два пресета —
+ * выбор между «как лист бумаги» и «как обложка»; слой отображения (`reflow/impl`) выводит из них
+ * радиус завитка, тень и упругость оседания (без ручных ползунков веса/жёсткости).
+ *
+ * Персистится по ИМЕНИ. Старые блобы могли хранить отсутствующие ныне значения (OFFICE/NEWSPRINT/…) —
+ * декодер настроек включает `coerceInputValues`, поэтому неизвестное значение откатывается к дефолту
+ * ([PAPER]), не роняя остальные настройки.
+ */
+@Serializable
+public enum class BookCurlMaterialId {
+    /** Бумага — мягкий лист романа: крупный мягкий завиток, лёгкий отскок. Дефолт. */
+    PAPER,
+
+    /** Обложка — жёсткий лист: тугой мелкий завиток, быстрый чёткий отскок. */
+    COVER,
 }
 
 /**
@@ -137,7 +158,11 @@ public enum class PageTransition {
  * @property brightness внутренняя яркость `[MIN_BRIGHTNESS]..1` (1 — без затемнения)
  * @property sunsetWarm плавно теплеть после захода солнца (по локальному времени)
  * @property paged страничный режим (по умолчанию) вместо непрерывного скролла
+ * @property twoPageSpread показывать страничный режим разворотом: две текстовые
+ *   страницы рядом, как раскрытая книга
  * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property bookCurlMaterial материал листа при книжном перелистывании (физический пресет)
+ * @property pageTurnSound короткий звук перелистывания при смене страницы/разворота
  * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право); при `false`
  *   тап в любом месте лишь показывает/прячет панель — защита от случайных перелистываний
  * @property autoHideSec автоскрытие панелей через N секунд (0 — не скрывать)
@@ -165,7 +190,10 @@ public data class ReaderSettings(
     public val brightness: Float = 1f,
     public val sunsetWarm: Boolean = false,
     public val paged: Boolean = true,
-    public val pageTransition: PageTransition = PageTransition.SLIDE,
+    public val twoPageSpread: Boolean = false,
+    public val pageTransition: PageTransition = PageTransition.BOOK,
+    public val bookCurlMaterial: BookCurlMaterialId = BookCurlMaterialId.PAPER,
+    public val pageTurnSound: Boolean = true,
     public val tapToTurn: Boolean = true,
     public val autoHideSec: Int = 0,
     public val progress: ProgressFormat = ProgressFormat.PERCENT,

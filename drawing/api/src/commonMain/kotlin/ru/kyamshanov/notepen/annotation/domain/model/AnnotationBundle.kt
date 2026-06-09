@@ -1,5 +1,7 @@
 package ru.kyamshanov.notepen.annotation.domain.model
 
+import ru.kyamshanov.notepen.drawing.api.ToolMode
+
 /** In-memory result of loading annotations for a document. */
 data class AnnotationBundle(
     val pages: Map<Int, List<DrawingPath>> = emptyMap(),
@@ -8,6 +10,8 @@ data class AnnotationBundle(
     /** Text notes per zero-based page index, keyed exactly like [highlights] (see [PageNote]). */
     val notes: Map<Int, List<PageNote>> = emptyMap(),
     val scale: Int = 100,
+    /** Last active editor tool for this document. */
+    val toolMode: ToolMode = ToolMode.NONE,
     val pen: PenSettings = PenSettings(),
     val marker: MarkerSettings = MarkerSettings(),
     val eraser: EraserSettings = EraserSettings(),

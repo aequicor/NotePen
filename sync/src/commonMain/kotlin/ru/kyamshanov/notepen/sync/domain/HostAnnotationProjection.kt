@@ -183,6 +183,7 @@ class HostAnnotationProjection(
                 pen = state.pen,
                 marker = state.marker,
                 eraser = state.eraser,
+                preserveToolSettings = true,
                 currentPage = state.currentPage,
                 currentPageOffset = state.currentPageOffset,
                 favoritePageIndices = state.favoritePageIndices,

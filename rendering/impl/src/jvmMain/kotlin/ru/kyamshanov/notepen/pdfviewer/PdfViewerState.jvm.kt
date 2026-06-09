@@ -82,6 +82,12 @@ actual class PdfViewerState internal constructor(
     var viewportSize: IntSize by mutableStateOf(IntSize.Zero)
         internal set
 
+    actual val viewportWidthPx: Float
+        get() = viewportSize.width.toFloat()
+
+    actual val viewportHeightPx: Float
+        get() = viewportSize.height.toFloat()
+
     /** Текущий список страниц документа. Устанавливается извне. */
     var pages: List<PdfPageInfo> by mutableStateOf(emptyList())
         internal set
@@ -153,6 +159,7 @@ actual class PdfViewerState internal constructor(
     private var pendingInitialPage: Int? = initialPageIndex.takeIf { it > 0 || initialPageOffsetPx > 0 }
     private var pendingInitialOffset: Int = initialPageOffsetPx
     private var pendingInitialScalePercent: Int? = null
+    private var pendingInitialPanXPx: Float? = null
     private var hasInitialCentered: Boolean = false
 
     /** Отложенная перецентровка (см. [requestRecenter]). */
@@ -171,30 +178,41 @@ actual class PdfViewerState internal constructor(
         if (!hasInitialCentered && viewportSize.width > 0 && pages.isNotEmpty()) {
             // Центрируем по обеим осям: по X — всегда, по Y — когда документ
             // короче вьюпорта (одностраничный PDF / изображение), иначе верх
-            // прижат к кромке.
-            pan = centeredAndClamped(Offset.Zero)
+            // прижат к кромке. При восстановлении из Saver pan уже содержит
+            // сохранённые координаты — clamp валидирует их против вьюпорта.
+            pan = centeredAndClamped(pan)
             hasInitialCentered = true
         }
         val page = pendingInitialPage ?: return
         if (viewportSize.width <= 0 || pages.isEmpty()) return
         scrollToPage(page.coerceIn(0, pages.lastIndex), pendingInitialOffset)
+        applyInitialPanX(pendingInitialPanXPx)
         pendingInitialPage = null
         pendingInitialOffset = 0
+        pendingInitialPanXPx = null
     }
 
     actual fun applyInitialState(
         scalePercent: Int,
         pageIndex: Int,
         pageOffsetPx: Int,
+        panXPx: Float?,
     ) {
         if (viewportSize.width > 0 && pages.isNotEmpty()) {
             setScalePercent(scalePercent)
             scrollToPage(pageIndex, pageOffsetPx)
+            applyInitialPanX(panXPx)
         } else {
             pendingInitialScalePercent = scalePercent
             pendingInitialPage = pageIndex
             pendingInitialOffset = pageOffsetPx
+            pendingInitialPanXPx = panXPx
         }
+    }
+
+    private fun applyInitialPanX(panXPx: Float?) {
+        panXPx ?: return
+        pan = centeredAndClamped(Offset(panXPx, pan.y))
     }
 
     actual val firstVisiblePageIndex: Int by derivedStateOf {
@@ -347,6 +365,18 @@ actual class PdfViewerState internal constructor(
             )
     }
 
+    internal fun transientPanBy(delta: Offset) {
+        val current = pan + gestureTranslation
+        val candidate = current + delta
+        val c = clamped(candidate)
+        val next =
+            Offset(
+                x = if (delta.x == 0f) current.x else c.x,
+                y = if (delta.y == 0f) current.y else c.y,
+            )
+        gestureTranslation = next - pan
+    }
+
     // ===== Overscroll =====
     // [pan] всегда жёстко кламплен; «перелёт» за край показывается отдельным
     // визуальным смещением контента [overscrollOffset] (GPU-трансляция во
@@ -395,6 +425,11 @@ actual class PdfViewerState internal constructor(
         overscrollHeld = true
     }
 
+    internal fun beginTransientPanGesture() {
+        dragRawPan = pan + gestureTranslation
+        overscrollHeld = true
+    }
+
     /**
      * Drag-сдвиг: [pan] жёстко кламплен, а «перелёт» пальца за окно clamp'а
      * демпфируется [softDampOverscroll] и пишется в [overscrollOffset] — контент
@@ -417,6 +452,27 @@ actual class PdfViewerState internal constructor(
                 x = if (delta.x == 0f) pan.x else c.x,
                 y = if (delta.y == 0f) pan.y else c.y,
             )
+        overscrollOffset =
+            Offset(
+                x = if (delta.x == 0f) overscrollOffset.x else softDampOverscroll(dragRawPan.x - c.x),
+                y = if (delta.y == 0f) overscrollOffset.y else softDampOverscroll(dragRawPan.y - c.y),
+            )
+    }
+
+    internal fun transientPanGestureBy(delta: Offset) {
+        dragRawPan =
+            Offset(
+                x = if (delta.x == 0f) dragRawPan.x else dragRawPan.x + delta.x,
+                y = if (delta.y == 0f) dragRawPan.y else dragRawPan.y + delta.y,
+            )
+        val c = clampedFree(dragRawPan)
+        val current = pan + gestureTranslation
+        val next =
+            Offset(
+                x = if (delta.x == 0f) current.x else c.x,
+                y = if (delta.y == 0f) current.y else c.y,
+            )
+        gestureTranslation = next - pan
         overscrollOffset =
             Offset(
                 x = if (delta.x == 0f) overscrollOffset.x else softDampOverscroll(dragRawPan.x - c.x),
@@ -450,6 +506,24 @@ actual class PdfViewerState internal constructor(
                 x = if (delta.x == 0f) pan.x else c.x,
                 y = if (delta.y == 0f) pan.y else c.y,
             )
+        val unX = if (delta.x == 0f) 0f else candidate.x - c.x
+        val unY = if (delta.y == 0f) 0f else candidate.y - c.y
+        if (unX != 0f || unY != 0f) {
+            pendingWheelOverscroll += Offset(unX, unY)
+        }
+    }
+
+    internal fun transientWheelScrollBy(delta: Offset) {
+        overscrollHeld = false
+        val current = pan + gestureTranslation
+        val candidate = current + delta
+        val c = clamped(candidate)
+        val next =
+            Offset(
+                x = if (delta.x == 0f) current.x else c.x,
+                y = if (delta.y == 0f) current.y else c.y,
+            )
+        gestureTranslation = next - pan
         val unX = if (delta.x == 0f) 0f else candidate.x - c.x
         val unY = if (delta.y == 0f) 0f else candidate.y - c.y
         if (unX != 0f || unY != 0f) {
@@ -717,6 +791,7 @@ actual class PdfViewerState internal constructor(
                         s.zoom.toDouble(),
                         s.firstVisiblePageIndex,
                         s.firstVisiblePageOffsetPx,
+                        s.pan.x.toDouble(),
                     )
                 },
                 restore = { saved: List<Any?> ->
@@ -724,6 +799,7 @@ actual class PdfViewerState internal constructor(
                         initialZoom = (saved[0] as Number).toFloat(),
                         initialPageIndex = (saved[1] as Number).toInt(),
                         initialPageOffsetPx = (saved[2] as Number).toInt(),
+                        initialPanX = (saved.getOrNull(3) as? Number)?.toFloat() ?: 0f,
                     )
                 },
             )

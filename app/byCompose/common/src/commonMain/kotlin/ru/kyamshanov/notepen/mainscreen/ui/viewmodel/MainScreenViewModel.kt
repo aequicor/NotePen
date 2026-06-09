@@ -6,6 +6,7 @@ import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -103,6 +104,7 @@ class MainScreenViewModel(
      * `LibraryFolder`: одна локальная библиотека на desktop, тот же список книг.
      */
     private val libraryRegistry: LibraryRegistry? = null,
+    private val onOpenEditor: ((uri: String, lastPageIndex: Int) -> Unit)? = null,
     private val nowMillis: () -> Long = { currentTimeMillis() },
 ) {
     private val logger = KotlinLogging.logger {}
@@ -160,6 +162,8 @@ class MainScreenViewModel(
 
     /** Семафор, ограничивающий параллельную генерацию миниатюр (CC-13). */
     private val thumbnailSemaphore = Semaphore(4)
+
+    private val thumbnailJobs = mutableMapOf<String, Job>()
 
     /**
      * Принять интент от UI.
@@ -433,7 +437,14 @@ class MainScreenViewModel(
     }
 
     private suspend fun loadInitialData() {
-        _state.update { it.copy(isLoading = true) }
+        val hasVisibleContent =
+            _state.value.recentFiles.isNotEmpty() ||
+                _state.value.folders.isNotEmpty() ||
+                _state.value.peers.isNotEmpty() ||
+                !_state.value.libraries.isNullOrEmpty()
+        if (!hasVisibleContent) {
+            _state.update { it.copy(isLoading = true) }
+        }
         try {
             val files = withTimeout(5_000) { historyRepository.getAll() }
             // Главный экран показывает только папки верхнего уровня; вложенные
@@ -482,28 +493,40 @@ class MainScreenViewModel(
 
     private fun launchThumbnailGeneration(files: List<RecentFile>) {
         files.forEach { file ->
-            scope.launch {
-                thumbnailSemaphore.withPermit {
-                    val cached = thumbnailRepository.get(file.uri, file.fileMtime)
-                    if (cached != null) {
-                        updateThumbnail(file.id, ThumbnailState.Ready(cached))
-                        return@withPermit
+            thumbnailJobs[file.id]?.cancel()
+            thumbnailJobs[file.id] =
+                scope.launch {
+                    thumbnailSemaphore.withPermit {
+                        val cached = thumbnailRepository.get(file.uri, file.fileMtime)
+                        if (cached != null) {
+                            updateThumbnail(file.id, ThumbnailState.Ready(cached))
+                            return@withPermit
+                        }
+                        updateThumbnail(file.id, ThumbnailState.Loading)
+                        val result = thumbnailGenerator.generate(file.uri, widthPx = 280, heightPx = 400)
+                        result.fold(
+                            onSuccess = { data ->
+                                thumbnailRepository.put(file.uri, data, file.fileMtime)
+                                updateThumbnail(file.id, ThumbnailState.Ready(data))
+                            },
+                            onFailure = { cause ->
+                                logger.warn {
+                                    "Thumbnail generation failed for ${file.id}: " +
+                                        (cause.cause?.message ?: cause.message ?: cause::class.simpleName)
+                                }
+                                updateThumbnail(file.id, ThumbnailState.Error)
+                            },
+                        )
                     }
-                    updateThumbnail(file.id, ThumbnailState.Loading)
-                    val result = thumbnailGenerator.generate(file.uri, widthPx = 280, heightPx = 400)
-                    result.fold(
-                        onSuccess = { data ->
-                            thumbnailRepository.put(file.uri, data, file.fileMtime)
-                            updateThumbnail(file.id, ThumbnailState.Ready(data))
-                        },
-                        onFailure = { cause ->
-                            logger.warn(cause) { "Thumbnail generation failed for ${file.id}" }
-                            updateThumbnail(file.id, ThumbnailState.Error)
-                        },
-                    )
+                }.also { job ->
+                    job.invokeOnCompletion { thumbnailJobs.remove(file.id, job) }
                 }
-            }
         }
+    }
+
+    private fun cancelThumbnailGeneration() {
+        thumbnailJobs.values.forEach { it.cancel() }
+        thumbnailJobs.clear()
     }
 
     private fun updateThumbnail(
@@ -521,6 +544,7 @@ class MainScreenViewModel(
     }
 
     private fun openFilePicker() {
+        cancelThumbnailGeneration()
         _state.update { it.copy(navigationTarget = NavigationTarget.FilePicker) }
     }
 
@@ -590,8 +614,17 @@ class MainScreenViewModel(
             _state.update { it.copy(errorEvent = blockingError) }
         } else {
             isNavigating = true
+            cancelThumbnailGeneration()
             val uri = record.uri
-            _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, record.lastPageIndex)) }
+            if (onOpenEditor != null) {
+                try {
+                    onOpenEditor.invoke(uri, record.lastPageIndex)
+                } finally {
+                    isNavigating = false
+                }
+            } else {
+                _state.update { it.copy(navigationTarget = NavigationTarget.Editor(uri, record.lastPageIndex)) }
+            }
             scope.launch {
                 refreshOpenedRecentFile(record)
             }

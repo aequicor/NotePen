@@ -1,17 +1,15 @@
 package ru.kyamshanov.notepen
 
-import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Modifier
 import com.arkivanov.decompose.extensions.compose.stack.Children
-import com.arkivanov.decompose.extensions.compose.stack.animation.fade
-import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import ru.kyamshanov.notepen.appsettings.SettingsComponentImpl
 import ru.kyamshanov.notepen.appsettings.SettingsContent
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
@@ -36,8 +34,7 @@ import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
-
-private const val ROOT_STACK_FADE_MS = 90
+import ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController
 
 @Composable
 fun RootContent(
@@ -78,16 +75,52 @@ fun RootContent(
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     /** Forwarded to [DetailsContent]: editor publishes open tabs for peer «open on device» advertising. */
     openDocumentsSink: ((List<ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo>) -> Unit)? = null,
+    /** Broadcasts tablet viewport/tool state and receives it on passive desktop viewers. */
+    documentBroadcastController: DocumentBroadcastController? = null,
+    /** Host-side resolver for opening a broadcasted document when no editor is active. */
+    broadcastDocumentUriFor: (suspend (documentId: String) -> String?)? = null,
+    /** Host-side stream of documents peers currently advertise as open on their device. */
+    remoteOpenDocumentIds: Flow<String?>? = null,
     modifier: Modifier = Modifier,
 ) {
     val childStack by component.stack.subscribeAsState()
+    val activeChild = childStack.active.instance
+    val hasBroadcastPeer by produceState(false, peerServer, peerClient) {
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
+            .collect { value = it }
+    }
+    LaunchedEffect(documentBroadcastController, broadcastDocumentUriFor, activeChild, hasBroadcastPeer) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        val resolver = broadcastDocumentUriFor ?: return@LaunchedEffect
+        if (!hasBroadcastPeer || activeChild is RootComponent.Child.DetailsChild) return@LaunchedEffect
+        controller.currentFrame.collect { frame ->
+            val documentId = broadcastDocumentId(frame) ?: return@collect
+            val uri = resolver(documentId) ?: return@collect
+            when (val action = broadcastDocumentOpenAction(frame, documentAlreadyOpen = false, resolvedUri = uri)) {
+                is BroadcastDocumentOpenAction.OpenResolved -> component.openDetailsExternally(action.uri)
+                BroadcastDocumentOpenAction.Ignore,
+                is BroadcastDocumentOpenAction.FocusExisting,
+                -> Unit
+            }
+        }
+    }
+    LaunchedEffect(remoteOpenDocumentIds, broadcastDocumentUriFor, activeChild, hasBroadcastPeer) {
+        val openDocumentIds = remoteOpenDocumentIds ?: return@LaunchedEffect
+        val resolver = broadcastDocumentUriFor ?: return@LaunchedEffect
+        if (!hasBroadcastPeer || activeChild is RootComponent.Child.DetailsChild) return@LaunchedEffect
+        openDocumentIds.distinctUntilChanged().collect { documentId ->
+            if (documentId.isNullOrBlank()) return@collect
+            if (component.stack.value.active.instance is RootComponent.Child.DetailsChild) return@collect
+            val uri = resolver(documentId) ?: return@collect
+            component.openDetailsExternally(uri)
+        }
+    }
     // Библиотека, открытая поверх документа (кнопкой «+»), не является корнем
     // стека — тогда показываем кнопку «назад» для возврата к документу.
     val libraryHasBack = childStack.backStack.isNotEmpty()
     Children(
         stack = component.stack,
         modifier = modifier,
-        animation = stackAnimation(fade(animationSpec = tween(ROOT_STACK_FADE_MS))),
     ) {
         when (val child = it.instance) {
             is RootComponent.Child.MainChild -> {
@@ -101,7 +134,6 @@ fun RootContent(
                 LaunchedEffect(state.navigationTarget) {
                     when (val target = state.navigationTarget) {
                         is NavigationTarget.Editor -> {
-                            withFrameNanos { }
                             mainScreenComponent.onOpenEditor(target.uri, target.lastPageIndex)
                             mainScreenComponent.viewModel.onNavigationHandled()
                         }
@@ -160,7 +192,7 @@ fun RootContent(
                     modifier = modifier,
                 )
             }
-            is RootComponent.Child.DetailsChild ->
+            is RootComponent.Child.DetailsChild -> {
                 DetailsContent(
                     component = child.component,
                     loader = pdfDocumentLoader,
@@ -181,8 +213,11 @@ fun RootContent(
                     documentIdentityProvider = documentIdentityProvider,
                     hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
                     openDocumentsSink = openDocumentsSink,
+                    documentBroadcastController = documentBroadcastController,
+                    broadcastDocumentUriFor = broadcastDocumentUriFor,
                     modifier = modifier,
                 )
+            }
             is RootComponent.Child.PeerCatalogChild -> {
                 val impl =
                     child.component as? PeerCatalogComponentImpl

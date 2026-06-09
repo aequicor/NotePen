@@ -8,8 +8,22 @@ import kotlinx.coroutines.flow.transform
 import ru.kyamshanov.notepen.sync.domain.documentIdToCacheFileName
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.port.TransferProgress
+import ru.kyamshanov.notepen.sync.domain.safeFileNameComponent
 
 private val logger = KotlinLogging.logger {}
+
+/**
+ * Hard ceiling on an accepted transfer's declared size. The sender is a remote
+ * peer, so [NetworkMessage.FileTransferStart.totalSize] is untrusted — without a
+ * bound an attacker could declare a multi-gigabyte (or negative, once cast to
+ * `Int`) size and force an out-of-memory / `NegativeArraySizeException` crash
+ * before a single byte is verified. 512 MiB comfortably exceeds any real
+ * PDF/EPUB while keeping the reassembly buffer allocatable.
+ */
+private const val MAX_FILE_BYTES: Long = 512L * 1024 * 1024
+
+/** Upper bound on the declared chunk count; guards the reassembly loop and map. */
+private const val MAX_CHUNKS: Int = 100_000
 
 /**
  * Result returned by [FileTransferReceiver.awaitFile] when a transfer completes.
@@ -66,6 +80,7 @@ class FileTransferReceiver(
                 when (msg) {
                     is NetworkMessage.FileTransferStart -> {
                         if (header == null) {
+                            validateHeader(msg)
                             header = msg
                             buffers.clear()
                             logger.info {
@@ -77,8 +92,16 @@ class FileTransferReceiver(
                     is NetworkMessage.FileChunk -> {
                         val h = header ?: return@transform
                         if (msg.transferId != h.transferId) return@transform
-                        buffers[msg.chunkIndex] = decodeBase64(msg.dataBase64)
+                        require(msg.chunkIndex in 0 until h.totalChunks) {
+                            "FileTransferReceiver: chunk index ${msg.chunkIndex} out of " +
+                                "range 0..<${h.totalChunks}"
+                        }
+                        val chunk = decodeBase64(msg.dataBase64)
+                        buffers[msg.chunkIndex] = chunk
                         val received = buffers.values.sumOf { it.size }.toLong()
+                        require(received <= h.totalSize) {
+                            "FileTransferReceiver: received $received bytes exceeds declared ${h.totalSize}"
+                        }
                         onProgress(TransferProgress(transferred = received, total = h.totalSize))
                         if (buffers.size == h.totalChunks) {
                             val assembled = assemble(h, buffers)
@@ -116,12 +139,52 @@ class FileTransferReceiver(
     // Имя кеш-файла включает hash(documentId) — два файла с одинаковым `fileName`,
     // но разными documentId (`book.pdf#a` и `book.pdf#b`) больше не затирают друг
     // друга. Для legacy-вызовов (пустой documentId) поведение не меняется.
-    private fun cacheNameFor(header: NetworkMessage.FileTransferStart): String =
-        if (header.documentId.isNotEmpty()) {
-            documentIdToCacheFileName(header.documentId, header.fileName)
-        } else {
-            header.fileName
-        }
+    //
+    // Both `documentId` and `fileName` are network-supplied, so the derived name is
+    // reduced to a single safe path component (no separators) and then asserted —
+    // a hostile `fileName` like `../../evil` can never escape [destDir].
+    private fun cacheNameFor(header: NetworkMessage.FileTransferStart): String {
+        val name =
+            if (header.documentId.isNotEmpty()) {
+                documentIdToCacheFileName(header.documentId, header.fileName)
+            } else {
+                safeFileNameComponent(header.fileName)
+            }
+        return name.requireSafeCacheName()
+    }
+}
+
+/**
+ * Rejects a transfer header whose declared sizing is missing, negative, or large
+ * enough to be a denial-of-service vector — *before* any buffer is allocated.
+ */
+private fun validateHeader(header: NetworkMessage.FileTransferStart) {
+    require(header.totalSize in 0..MAX_FILE_BYTES) {
+        "FileTransferReceiver: totalSize ${header.totalSize} out of range 0..$MAX_FILE_BYTES"
+    }
+    require(header.totalSize <= Int.MAX_VALUE.toLong()) {
+        "FileTransferReceiver: totalSize ${header.totalSize} does not fit in Int"
+    }
+    require(header.totalChunks in 1..MAX_CHUNKS) {
+        "FileTransferReceiver: totalChunks ${header.totalChunks} out of range 1..$MAX_CHUNKS"
+    }
+}
+
+/**
+ * Final guard that a derived cache name is a single, non-escaping filename
+ * component. The producing helpers already strip separators; this turns any
+ * future regression into a failed transfer (thrown [IllegalArgumentException])
+ * rather than an arbitrary-path write.
+ */
+private fun String.requireSafeCacheName(): String {
+    require(isNotEmpty()) { "FileTransferReceiver: empty cache file name" }
+    require(!contains('/') && !contains('\\')) {
+        "FileTransferReceiver: cache file name '$this' contains a path separator"
+    }
+    require(this != "." && this != "..") {
+        "FileTransferReceiver: cache file name '$this' is a directory reference"
+    }
+    return this
 }
 
 private fun joinPath(

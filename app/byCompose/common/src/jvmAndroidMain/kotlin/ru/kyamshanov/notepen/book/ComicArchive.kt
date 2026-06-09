@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.book
 import com.github.junrar.Archive
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.OutputStream
 import java.util.zip.ZipInputStream
 
 /**
@@ -31,10 +32,25 @@ internal object ComicArchive {
 
     private fun extractZip(bytes: ByteArray): List<ByteArray> {
         val pages = mutableListOf<Pair<String, ByteArray>>()
+        var totalBytes = 0L
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             var entry = zip.nextEntry
             while (entry != null) {
-                if (!entry.isDirectory && isImage(entry.name)) pages.add(entry.name to zip.readBytes())
+                if (!entry.isDirectory && isImage(entry.name)) {
+                    if (pages.size >= BookLimits.MAX_COMIC_IMAGES) {
+                        throw DocumentTooLargeException(
+                            "Comic has more than ${BookLimits.MAX_COMIC_IMAGES} images",
+                        )
+                    }
+                    val image = zip.readEntryBounded(entry.name)
+                    totalBytes += image.size
+                    if (totalBytes > BookLimits.MAX_TOTAL_BYTES) {
+                        throw DocumentTooLargeException(
+                            "Comic inflated size exceeds ${BookLimits.MAX_TOTAL_BYTES} bytes",
+                        )
+                    }
+                    pages.add(entry.name to image)
+                }
                 zip.closeEntry()
                 entry = zip.nextEntry
             }
@@ -44,15 +60,28 @@ internal object ComicArchive {
 
     private fun extractRar(bytes: ByteArray): List<ByteArray> {
         val pages = mutableListOf<Pair<String, ByteArray>>()
+        var totalBytes = 0L
         Archive(ByteArrayInputStream(bytes)).use { archive ->
             while (true) {
                 val header = archive.nextFileHeader() ?: break
                 if (header.isDirectory) continue
                 val name = header.fileName
                 if (!isImage(name)) continue
-                val out = ByteArrayOutputStream()
+                if (pages.size >= BookLimits.MAX_COMIC_IMAGES) {
+                    throw DocumentTooLargeException(
+                        "Comic has more than ${BookLimits.MAX_COMIC_IMAGES} images",
+                    )
+                }
+                val out = BoundedOutputStream(name, BookLimits.MAX_ENTRY_BYTES)
                 archive.extractFile(header, out)
-                pages.add(name to out.toByteArray())
+                val image = out.toByteArray()
+                totalBytes += image.size
+                if (totalBytes > BookLimits.MAX_TOTAL_BYTES) {
+                    throw DocumentTooLargeException(
+                        "Comic inflated size exceeds ${BookLimits.MAX_TOTAL_BYTES} bytes",
+                    )
+                }
+                pages.add(name to image)
             }
         }
         return pages.sortedByPageName()
@@ -94,4 +123,42 @@ private fun naturalCompare(
         }
     }
     return (a.length - i) - (b.length - j)
+}
+
+/**
+ * Буфер в память, прерывающий запись [DocumentTooLargeException], как только
+ * накопленный размер превышает [maxBytes]. Нужен для распаковки RAR-записей,
+ * где junrar пишет в произвольный [OutputStream] и заранее не сообщает размер.
+ */
+private class BoundedOutputStream(
+    private val entryName: String,
+    private val maxBytes: Long,
+) : OutputStream() {
+    private val buffer = ByteArrayOutputStream()
+    private var total = 0L
+
+    override fun write(b: Int) {
+        ensureCapacity(1)
+        buffer.write(b)
+    }
+
+    override fun write(
+        b: ByteArray,
+        off: Int,
+        len: Int,
+    ) {
+        ensureCapacity(len.toLong())
+        buffer.write(b, off, len)
+    }
+
+    private fun ensureCapacity(extra: Long) {
+        total += extra
+        if (total > maxBytes) {
+            throw DocumentTooLargeException(
+                "Comic image '$entryName' exceeds $maxBytes bytes when inflated",
+            )
+        }
+    }
+
+    fun toByteArray(): ByteArray = buffer.toByteArray()
 }

@@ -2,6 +2,12 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>ComplexCondition:BroadcastPresentation.kt:!centerX.isFinite() || viewportWidthPx &lt;= 0f || rowWidthPx &lt;= 0f || !scale.isFinite() || scale &lt;= 0f</ID>
+    <ID>ComplexCondition:BroadcastPresentation.kt:!centerY.isFinite() || centerY &lt; 0f || viewportHeightPx &lt;= 0f || !scale.isFinite() || scale &lt;= 0f</ID>
+    <ID>ComplexCondition:BroadcastPresentation.kt:!panX.isFinite() || viewportWidthPx &lt;= 0f || rowWidthPx &lt;= 0f || !zoom.isFinite() || zoom &lt;= 0f</ID>
+    <ID>ComplexCondition:BroadcastPresentation.kt:!panY.isFinite() || viewportHeightPx &lt;= 0f || !zoom.isFinite() || zoom &lt;= 0f</ID>
+    <ID>ComplexCondition:EditorPanel.kt:deltaX.isFinite() &amp;&amp; deltaY.isFinite() &amp;&amp; (deltaX &gt; 0.5f || deltaX &lt; -0.5f || deltaY &gt; 0.5f || deltaY &lt; -0.5f)</ID>
+    <ID>CyclomaticComplexMethod:BroadcastPresentation.kt:internal fun broadcastViewportCommandForDocument: BroadcastViewportCommand?</ID>
     <ID>CyclomaticComplexMethod:ClientPairingPanel.android.kt:@Composable actual fun CameraScanSlot</ID>
     <ID>CyclomaticComplexMethod:DetailsContent.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun DetailsContent</ID>
     <ID>CyclomaticComplexMethod:EditorPanel.kt:@OptIn(ExperimentalComposeUiApi::class) @Composable fun EditorPanel</ID>
@@ -16,6 +22,7 @@
     <ID>CyclomaticComplexMethod:TabBar.kt:@Composable fun TabBar</ID>
     <ID>CyclomaticComplexMethod:TabBar.kt:@OptIn(ExperimentalFoundationApi::class) @Composable private fun TabChip</ID>
     <ID>LargeClass:MainScreenViewModel.kt:MainScreenViewModel</ID>
+    <ID>LongMethod:BroadcastPresentation.kt:internal fun broadcastViewportCommandForDocument: BroadcastViewportCommand?</ID>
     <ID>LongMethod:ToolRail.kt:internal fun systemControlEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LongMethod:ToolRail.kt:internal fun unifiedToolWheelEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LongMethod:ToolSettingsFloatingPanel.kt:internal fun toolPresetEntries: List&lt;WheelEntry&gt;</ID>
@@ -28,6 +35,9 @@
     <ID>MatchingDeclarationName:PeerCatalogComponent.kt:PeerCatalogComponentImpl : PeerCatalogComponentComponentContext</ID>
     <ID>MatchingDeclarationName:ReflowSourceStat.kt:SourceStat</ID>
     <ID>ReturnCount:BookFileTypes.kt:fun detectBookFormat: BookFormat?</ID>
+    <ID>ReturnCount:BroadcastPresentation.kt:internal fun viewportCenterY: Float?</ID>
+    <ID>ReturnCount:BroadcastPresentation.kt:private fun NetworkMessage.ProjectionFrame.remoteHorizontalChangeFrom: Boolean?</ID>
+    <ID>ReturnCount:BroadcastPresentation.kt:private fun panYForViewportCenter: Float?</ID>
     <ID>ReturnCount:EditorPanel.kt:fun bindingActive: Boolean</ID>
     <ID>ReturnCount:EditorPanel.kt:fun routedOnDown</ID>
     <ID>ReturnCount:FilePicker.jvm.kt:private fun pickDocumentWithAwtDialog: String?</ID>
@@ -50,11 +60,13 @@
     <ID>TooGenericExceptionCaught:ThumbnailRepositoryAndroid.kt:ThumbnailRepositoryAndroid$e: Exception</ID>
     <ID>TooGenericExceptionCaught:ThumbnailRepositoryDesktop.kt:ThumbnailRepositoryDesktop$e: Exception</ID>
     <ID>TooManyFunctions:AndroidBookPdfRenderer.kt:AndroidBookPdfRenderer$PageComposer</ID>
+    <ID>TooManyFunctions:BroadcastPresentation.kt:ru.kyamshanov.notepen.BroadcastPresentation.kt</ID>
     <ID>TooManyFunctions:FolderContentsViewModel.kt:FolderContentsViewModel</ID>
     <ID>TooManyFunctions:FolderRepositoryAndroid.kt:FolderRepositoryAndroid : FolderRepository</ID>
     <ID>TooManyFunctions:FolderRepositoryDesktop.kt:FolderRepositoryDesktop : FolderRepository</ID>
     <ID>TooManyFunctions:GridContainer.kt:ru.kyamshanov.notepen.tabs.GridContainer.kt</ID>
     <ID>TooManyFunctions:JvmBookPdfRenderer.kt:JvmBookPdfRenderer$PageComposer</ID>
+    <ID>TooManyFunctions:JvmLibraryConnectionStore.kt:JvmLibraryConnectionStore : LibraryConnectionStore</ID>
     <ID>TooManyFunctions:MainScreenViewModel.kt:MainScreenViewModel</ID>
     <ID>TooManyFunctions:SessionRepositoryDesktop.kt:SessionRepositoryDesktop : SessionRepository</ID>
     <ID>TooManyFunctions:TabSession.kt:TabSession</ID>

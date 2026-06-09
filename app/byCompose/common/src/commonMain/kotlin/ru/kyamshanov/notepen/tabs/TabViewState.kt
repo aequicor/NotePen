@@ -15,10 +15,13 @@ import kotlinx.serialization.Serializable
  * @property scalePercent zoom level as a percentage (100 = fit/native scale).
  * @property pageIndex 0-based index of the page in view.
  * @property pageOffsetPx vertical scroll offset within [pageIndex], in pixels.
+ * @property panXPx horizontal document pan in viewport pixels. `null` means a
+ *   legacy snapshot that did not persist horizontal pan.
  */
 @Serializable
 data class TabViewState(
     val scalePercent: Int = 100,
     val pageIndex: Int = 0,
     val pageOffsetPx: Int = 0,
+    val panXPx: Float? = null,
 )

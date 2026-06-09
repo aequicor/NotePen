@@ -81,5 +81,6 @@ class MainScreenComponent(
             remoteCatalogsFlow = remoteCatalogsFlow,
             onlinePeerIdsFlow = onlinePeerIdsFlow,
             libraryRegistry = libraryRegistry,
+            onOpenEditor = onOpenEditor,
         )
 }

@@ -5,6 +5,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ru.kyamshanov.notepen.reflow.api.BookCurlMaterialId
 import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
@@ -40,7 +41,10 @@ import ru.kyamshanov.notepen.reflow.api.ReaderTheme
  * @property highlightColor цвет подсветки выделений
  * @property codeBackground фон inline-кода
  * @property paged страничный режим вместо скролла
+ * @property twoPageSpread показывать страничный режим разворотом из двух страниц
  * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property bookCurlMaterial материал листа при книжном перелистывании (физический пресет)
+ * @property pageTurnSound звук перелистывания при смене страницы/разворота
  * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право)
  * @property autoHideMs автоскрытие панелей через N мс (0 — не скрывать)
  * @property progress формат индикатора прогресса
@@ -70,7 +74,10 @@ public data class ReflowReaderSettings(
     public val highlightColor: Color = Color(0x59FFD24D),
     public val codeBackground: Color = Color(0x14000000),
     public val paged: Boolean = false,
-    public val pageTransition: PageTransition = PageTransition.SLIDE,
+    public val twoPageSpread: Boolean = false,
+    public val pageTransition: PageTransition = PageTransition.BOOK,
+    public val bookCurlMaterial: BookCurlMaterialId = BookCurlMaterialId.PAPER,
+    public val pageTurnSound: Boolean = true,
     public val tapToTurn: Boolean = true,
     public val autoHideMs: Long = 0L,
     public val progress: ProgressFormat = ProgressFormat.PERCENT,
@@ -145,7 +152,10 @@ public fun ReaderSettings.toRenderSettings(): ReflowReaderSettings {
         highlightColor = palette.highlight,
         codeBackground = palette.code,
         paged = s.paged,
+        twoPageSpread = s.twoPageSpread,
         pageTransition = s.pageTransition,
+        bookCurlMaterial = s.bookCurlMaterial,
+        pageTurnSound = s.pageTurnSound,
         tapToTurn = s.tapToTurn,
         autoHideMs = s.autoHideSec * 1000L,
         progress = s.progress,

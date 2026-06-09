@@ -33,6 +33,7 @@ vault/
 │   └── retro.md                      ← optional, accumulates bug retros
 │
 ├── reference/common/architecture.md  ← архитектура проекта (модули, слои, зависимости)
+├── kd/<module>/<topic>.md            ← короткие карточки знания: где код-источник правды и какие инварианты сохранить
 ├── guidelines/<module>/<topic>.md    ← coding patterns (optional, project-specific)
 ├── guidelines/libs/<lib>-<version>.md ← cached external API documentation
 │
@@ -70,6 +71,7 @@ v4 used five Diátaxis subtrees (one file per concern → 7–10 files per featu
 - Test: `./gradlew :[module]:test`
 - Lint: `./gradlew detekt ktlintCheck`
 - Architecture: `reference/common/architecture.md`
+- КД: `kd/<module>/<topic>.md`
 - **PDF Editor Roadmap (M1–M8):** `concepts/common/plans/pdf-editor-roadmap.md`
 - **ADR-001 — PDF rendering strategy:** `reference/shared/spec/adr-001-pdf-rendering.md`
 - **M1 smoke-test report:** `guidelines/common/reports/test-runs/m1-pdf-infrastructure-run-01.md`

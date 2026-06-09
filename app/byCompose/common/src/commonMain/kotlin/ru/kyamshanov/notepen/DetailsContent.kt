@@ -73,9 +73,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
@@ -101,13 +103,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
@@ -138,14 +145,17 @@ import ru.kyamshanov.notepen.shortcuts.rememberShortcutsSettings
 import ru.kyamshanov.notepen.sync.domain.SyncEngine
 import ru.kyamshanov.notepen.sync.domain.documentIdFromFilePath
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo
 import ru.kyamshanov.notepen.sync.domain.model.PairingState
 import ru.kyamshanov.notepen.sync.domain.model.ServerLifecycleState
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tabs.DIVIDER_HIT
 import ru.kyamshanov.notepen.tabs.DocumentId
+import ru.kyamshanov.notepen.tabs.DocumentTab
 import ru.kyamshanov.notepen.tabs.GridContainer
 import ru.kyamshanov.notepen.tabs.LayoutPickerOverlay
 import ru.kyamshanov.notepen.tabs.LayoutTemplate
@@ -159,6 +169,10 @@ import ru.kyamshanov.notepen.tabs.toSnapshot
 import kotlin.math.roundToInt
 
 private val logger = KotlinLogging.logger {}
+
+// App-lifetime background work for editor shutdown paths. Keep PDF close/save off the UI thread
+// so the first navigation back from a cold editor is not delayed by PDFBox or disk I/O.
+private val editorBackgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
 private const val MARKER_WIDTH_SCAN_DELAY_AFTER_OPEN_MS = 1_500L
 
@@ -182,6 +196,24 @@ private data class ToolStateSnapshot(
     val eraserSettings: EraserSettings,
     val markerWidthPinned: Boolean,
 )
+
+internal fun openDocumentInfosForBroadcast(
+    layout: WorkspaceLayout,
+    stateOf: (DocumentTab) -> PdfDocumentState,
+    receivedPdfDir: String?,
+): List<OpenDocumentInfo> =
+    layout.panels
+        .flatMap { panel -> panel.tabs.tabs }
+        .filterNot { tab -> receivedPdfDir != null && tab.filePath.startsWith(receivedPdfDir) }
+        .map { tab ->
+            val state = stateOf(tab)
+            OpenDocumentInfo(
+                documentId = state.documentId,
+                displayName = tab.displayName,
+                absolutePath = tab.filePath,
+            )
+        }.filter { it.documentId.isNotBlank() }
+        .distinctBy { it.documentId }
 
 /**
  * Editor screen: a unified toolbar plus a grid of 1–[ru.kyamshanov.notepen.tabs.MAX_PANELS]
@@ -211,6 +243,8 @@ fun DetailsContent(
     documentIdentityProvider: ru.kyamshanov.notepen.document.domain.port.DocumentIdentityProvider? = null,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)? = null,
     openDocumentsSink: ((List<ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo>) -> Unit)? = null,
+    documentBroadcastController: DocumentBroadcastController? = null,
+    broadcastDocumentUriFor: (suspend (documentId: String) -> String?)? = null,
     modifier: Modifier = Modifier,
 ) {
     // Размер окна редактора берём из достоверного для платформы источника
@@ -224,6 +258,19 @@ fun DetailsContent(
     val density = LocalDensity.current
     val model by component.model.subscribeAsState()
     val initialFilePath = remember(model.title) { model.title }
+    var editorBodyReady by remember(initialFilePath) { mutableStateOf(false) }
+    LaunchedEffect(initialFilePath) {
+        withFrameNanos { }
+        editorBodyReady = true
+    }
+    if (!editorBodyReady) {
+        EditorStartupFrame(
+            title = resolveDocumentDisplayName(initialFilePath) ?: initialFilePath,
+            onBack = component::onBack,
+            modifier = modifier,
+        )
+        return
+    }
 
     // Resolves the sync wire id for a local file path. Order of preference:
     //   1. remote-cached files → the host's id from the registry (must match the
@@ -301,6 +348,42 @@ fun DetailsContent(
         component.onPendingTabHandled()
     }
 
+    val hasBroadcastPeer by produceState(false, peerServer, peerClient) {
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
+            .collect { value = it }
+    }
+
+    LaunchedEffect(
+        documentBroadcastController,
+        peerServer,
+        broadcastDocumentUriFor,
+        workspaceRestored,
+        hasBroadcastPeer,
+        tabSession,
+    ) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        val resolver = broadcastDocumentUriFor ?: return@LaunchedEffect
+        if (peerServer == null || !hasBroadcastPeer || !workspaceRestored) return@LaunchedEffect
+        controller.currentFrame.collect { frame ->
+            val documentId = broadcastDocumentId(frame) ?: return@collect
+            val existingFocused = tabSession.focusDocument(documentId)
+            val uri = if (existingFocused) null else resolver(documentId)
+            val action =
+                broadcastDocumentOpenAction(
+                    frame = frame,
+                    documentAlreadyOpen = existingFocused,
+                    resolvedUri = uri,
+                )
+            if (action is BroadcastDocumentOpenAction.FocusExisting) return@collect
+            if (action !is BroadcastDocumentOpenAction.OpenResolved) return@collect
+            tabSession.openTab(
+                panelId = tabSession.layout.focusedPanelId,
+                filePath = action.uri,
+                displayName = resolveDocumentDisplayName(action.uri),
+            )
+        }
+    }
+
     // Warm the content-addressed wire id for every open document so the
     // synchronous [syncDocumentIdFor] resolves to the canonical id instead of
     // the legacy fallback. Remote-cached files are skipped — their id comes from
@@ -325,29 +408,31 @@ fun DetailsContent(
 
     // Публикуем открытые во вкладках документы, чтобы хост раздал их пирам
     // (раздел «Открыто на устройстве» в каталоге пира). Remote-кешированные файлы
-    // пропускаем — их documentId принадлежит чужому хосту. Wire-id берём тем же
-    // [syncDocumentIdFor], что и для синхронизации, чтобы пир попал в тот же документ.
+    // пропускаем — их documentId принадлежит чужому хосту. Wire-id берём из уже
+    // созданного [PdfDocumentState], чтобы каталог, sync engine и ProjectionFrame
+    // не разошлись, если content-addressed identity cache прогрелся после создания
+    // вкладки.
     if (openDocumentsSink != null) {
-        LaunchedEffect(tabSession, openDocumentsSink, receivedPdfDir, syncDocumentIdFor) {
+        LaunchedEffect(tabSession, openDocumentsSink, receivedPdfDir) {
             snapshotFlow {
-                tabSession.layout.panels
-                    .flatMap { panel -> panel.tabs.tabs }
-                    .filterNot { tab -> receivedPdfDir != null && tab.filePath.startsWith(receivedPdfDir) }
-                    .map { tab ->
-                        ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo(
-                            documentId = syncDocumentIdFor(tab.filePath),
-                            displayName = tab.displayName,
-                            absolutePath = tab.filePath,
-                        )
-                    }.filter { it.documentId.isNotBlank() }
-                    .distinctBy { it.documentId }
+                openDocumentInfosForBroadcast(
+                    layout = tabSession.layout,
+                    stateOf = tabSession::stateOf,
+                    receivedPdfDir = receivedPdfDir,
+                )
             }.collect { openDocumentsSink(it) }
         }
     }
 
     DisposableEffect(tabSession) {
         onDispose {
-            tabSession.disposeAll()
+            val documents = tabSession.detachAllDocuments()
+            editorBackgroundScope.launch {
+                documents.forEach { document ->
+                    runCatching { document.close() }
+                        .onFailure { logger.warn { "PDF close failed: ${it::class.simpleName}" } }
+                }
+            }
             // Редактор закрыт — больше нечего «отдавать как открытое».
             openDocumentsSink?.invoke(emptyList())
         }
@@ -384,22 +469,27 @@ fun DetailsContent(
     // tabs of the same file share it. A restore suppresses the preset effect below
     // so the document's saved settings aren't overwritten by a preset.
     val documentToolStates = remember { mutableStateMapOf<String, ToolStateSnapshot>() }
+    val currentToolSnapshot: () -> ToolStateSnapshot = {
+        ToolStateSnapshot(
+            toolMode = toolMode,
+            penSettings = penSettings,
+            markerSettings = markerSettings,
+            eraserSettings = eraserSettings,
+            markerWidthPinned = markerWidthPinned,
+        )
+    }
+    val checkpointFocusedToolState: () -> Unit = {
+        tabSession.focusedActiveState?.filePath?.let { filePath ->
+            documentToolStates[filePath] = currentToolSnapshot()
+        }
+    }
     LaunchedEffect(tabSession) {
         var previousFilePath = tabSession.focusedActiveState?.filePath
         snapshotFlow { tabSession.focusedActiveState?.filePath }
             .distinctUntilChanged()
             .drop(1)
             .collect { newFilePath ->
-                previousFilePath?.let { prev ->
-                    documentToolStates[prev] =
-                        ToolStateSnapshot(
-                            toolMode = toolMode,
-                            penSettings = penSettings,
-                            markerSettings = markerSettings,
-                            eraserSettings = eraserSettings,
-                            markerWidthPinned = markerWidthPinned,
-                        )
-                }
+                previousFilePath?.let { prev -> documentToolStates[prev] = currentToolSnapshot() }
                 previousFilePath = newFilePath
                 val restored = newFilePath?.let { documentToolStates[it] }
                 if (restored != null) {
@@ -440,6 +530,24 @@ fun DetailsContent(
             1 in shortcutsSettings.loupeClose.penButtons ||
             1 in shortcutsSettings.penPan.penButtons
     val eraserOverride = (barrelPressed && !barrelBoundToShortcut) || eraserTipActive
+    val focusedDocumentId by remember(tabSession) {
+        derivedStateOf { tabSession.focusedActiveState?.documentId }
+    }
+    val broadcastToolbarToolMode by produceState<ToolMode?>(
+        null,
+        documentBroadcastController,
+        peerServer,
+        focusedDocumentId,
+        hasBroadcastPeer,
+    ) {
+        val controller = documentBroadcastController ?: return@produceState
+        val documentId = focusedDocumentId?.takeIf { it.isNotBlank() } ?: return@produceState
+        if (peerServer == null || !hasBroadcastPeer) return@produceState
+        controller.currentFrame.collect { frame ->
+            value = broadcastToolModeForDocument(frame, documentId)
+        }
+    }
+    val toolbarToolMode = displayedToolMode(localToolMode = toolMode, broadcastToolMode = broadcastToolbarToolMode)
 
     LaunchedEffect(stylusEverSeen, pencilModeManuallyTouched) {
         if (pencilModeManuallyTouched) return@LaunchedEffect
@@ -478,6 +586,13 @@ fun DetailsContent(
             .distinctUntilChanged()
             .debounce(SESSION_AUTOSAVE_DEBOUNCE_MS)
             .collect { sessionRepository.saveAutosave(it) }
+    }
+    DisposableEffect(tabSession, sessionRepository) {
+        onDispose {
+            editorBackgroundScope.launch(NonCancellable) {
+                sessionRepository.saveAutosave(tabSession.captureSession())
+            }
+        }
     }
     val pdfExporter = remember { createPdfExporter() }
     val reflowExtractor = remember { createPdfReflowExtractor() }
@@ -586,6 +701,7 @@ fun DetailsContent(
     val controls = focusedControls
     val totalPages = controls?.totalPages ?: 0
     val currentPage = controls?.currentPage ?: 1
+    val latestCurrentPageForFinalSave by rememberUpdatedState(currentPage)
     val scale = controls?.scalePercent ?: 100
     val hasAnnotations = controls?.hasAnnotations ?: false
     val isExporting = controls?.isExporting ?: false
@@ -684,32 +800,49 @@ fun DetailsContent(
     val saveTab: suspend (PdfDocumentState) -> Unit = { state ->
         val annotations = state.drawingStates.mapValues { (_, s) -> s.currentPaths.toList() }
         val extents = state.drawingStates.mapValues { (_, s) -> s.extent.value }
+        val tools = documentToolStates[state.filePath] ?: currentToolSnapshot()
         annotationRepository
             .save(
                 pdfPath = state.filePath,
                 annotations = annotations,
                 scale = state.pdfViewerState.scalePercent,
-                pen = penSettings,
-                marker = markerSettings,
-                eraser = eraserSettings,
+                toolMode = tools.toolMode,
+                pen = tools.penSettings,
+                marker = tools.markerSettings,
+                eraser = tools.eraserSettings,
                 currentPage = state.pdfViewerState.firstVisiblePageIndex,
                 currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
                 favoritePageIndices = state.favoritePageIndices.toSet(),
                 pageExtents = extents,
+                highlights = state.highlights.toMap(),
+                notes = state.notes.toMap(),
             ).onFailure { e -> logger.warn { "Save failed for ${state.filePath}: ${e::class.simpleName}" } }
     }
     val saveAllOpenTabs: suspend () -> Unit = {
+        checkpointFocusedToolState()
         tabSession.layout.panels
             .flatMap { it.tabs.tabs }
             .distinctBy { it.id }
             .forEach { saveTab(tabSession.stateOf(it)) }
     }
-    val onBackWithSave: () -> Unit = {
-        coroutineScope.launch {
-            saveAllOpenTabs()
-            component.saveLastPageIndex(currentPage - 1)
-            component.onBack()
+    val latestSaveAllOpenTabs by rememberUpdatedState(saveAllOpenTabs)
+    DisposableEffect(tabSession, annotationRepository) {
+        onDispose {
+            editorBackgroundScope.launch(NonCancellable) {
+                latestSaveAllOpenTabs()
+                component.saveLastPageIndex(latestCurrentPageForFinalSave - 1)
+            }
         }
+    }
+    val onBackWithSave: () -> Unit = {
+        // Pop the editor immediately; persistence can finish after the UI has returned to main.
+        editorBackgroundScope.launch {
+            withContext(NonCancellable) {
+                saveAllOpenTabs()
+                component.saveLastPageIndex(currentPage - 1)
+            }
+        }
+        component.onBack()
     }
     val onOpenLibrary: () -> Unit = {
         coroutineScope.launch {
@@ -949,7 +1082,7 @@ fun DetailsContent(
                         loader = loader,
                         renderer = renderer,
                         outlineProvider = outlineProvider,
-                        toolMode = toolMode,
+                        toolMode = toolbarToolMode,
                         penSettings = penSettings,
                         markerSettings = markerSettings,
                         eraserSettings = eraserSettings,
@@ -976,25 +1109,31 @@ fun DetailsContent(
                         openDocumentRegistry = openDocumentRegistry,
                         liveSyncController = liveSyncController,
                         hostAnnotationSnapshotFor = hostAnnotationSnapshotFor,
+                        documentBroadcastController = documentBroadcastController,
                         showSnackbar = { msg -> coroutineScope.launch { snackbarHostState.showSnackbar(msg) } },
-                        onRestoreToolSettings = { pen, marker, eraser ->
-                            penSettings = pen
-                            markerSettings = marker
-                            // A restored width is the user's own choice — don't override it.
-                            markerWidthPinned = true
-                            eraserSettings = eraser
+                        onRestoreToolSettings = { restoredToolMode, pen, marker, eraser ->
+                            val restoredFilePath = panel.tabs.activeTab?.filePath
                             // Seed this document's tool checkpoint with its just-loaded
                             // settings (keyed by file path), so switching away and back
                             // restores them.
-                            panel.tabs.activeTab?.filePath?.let { filePath ->
+                            restoredFilePath?.let { filePath ->
                                 documentToolStates[filePath] =
                                     ToolStateSnapshot(
-                                        toolMode = toolMode,
+                                        toolMode = restoredToolMode,
                                         penSettings = pen,
                                         markerSettings = marker,
                                         eraserSettings = eraser,
                                         markerWidthPinned = true,
                                     )
+                            }
+                            if (restoredFilePath == tabSession.focusedActiveState?.filePath) {
+                                if (restoredToolMode != toolMode) suppressNextPresetApply = true
+                                toolMode = restoredToolMode
+                                penSettings = pen
+                                markerSettings = marker
+                                // A restored width is the user's own choice — don't override it.
+                                markerWidthPinned = true
+                                eraserSettings = eraser
                             }
                         },
                         onAddTab = { onAddTabToPanel(panel.id) },
@@ -1116,7 +1255,7 @@ fun DetailsContent(
                             LandscapeToolRail(
                                 tools =
                                     ToolRailTools(
-                                        toolMode = toolMode,
+                                        toolMode = toolbarToolMode,
                                         onToolModeChange = { toolMode = it },
                                         penSettings = penSettings,
                                         onPenSettingsChange = { penSettings = it },
@@ -1264,7 +1403,7 @@ fun DetailsContent(
                                 currentPage = currentPage,
                                 totalPages = totalPages,
                                 onNavigateToPage = { controls?.navigateToPage?.invoke(it) },
-                                toolMode = toolMode,
+                                toolMode = toolbarToolMode,
                                 onToolModeChange = { toolMode = it },
                                 penSettings = penSettings,
                                 onPenSettingsChange = { penSettings = it },
@@ -1529,6 +1668,47 @@ fun DetailsContent(
 
 private val SyncConnectedGreen = Color(0xFF2E7D32)
 private val SyncUnstableYellow = Color(0xFFF9A825)
+
+@Composable
+private fun EditorStartupFrame(
+    title: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
+        Column(Modifier.fillMaxSize()) {
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .padding(horizontal = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = BACK_CONTENT_DESCRIPTION,
+                    )
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.18f)),
+            )
+        }
+    }
+}
 
 /**
  * Tint for the sync button in the quick-actions airbar, signalling connection

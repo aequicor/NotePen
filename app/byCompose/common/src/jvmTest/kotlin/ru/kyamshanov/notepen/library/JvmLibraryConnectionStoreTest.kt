@@ -92,4 +92,51 @@ class JvmLibraryConnectionStoreTest {
             Files.writeString(dataDir.resolve("library_connections.json"), "{ this is not json")
             assertTrue(store().load().isEmpty(), "corrupt file degrades to empty, not a crash")
         }
+
+    @Test
+    fun save_encryptsAtRest_secretNotInPlaintext_butRoundTrips() =
+        runTest {
+            val secret = "ghp_super_secret_pat_value"
+            val connections = listOf(LibraryConnection.GitHub(repo = "owner/name", token = secret))
+            store().save(connections)
+
+            val bytes = Files.readAllBytes(dataDir.resolve("library_connections.json"))
+            assertFalse(
+                bytes.decodeToString().contains(secret),
+                "the persisted token must not appear in plaintext on disk",
+            )
+            assertFalse(
+                bytes.decodeToString().trimStart().startsWith("["),
+                "the persisted file is an encrypted blob, not a bare JSON array",
+            )
+            assertEquals(connections, store().load(), "a fresh store decrypts the same list back")
+        }
+
+    @Test
+    fun load_migratesLegacyPlaintextFile_thenReEncryptsIt() =
+        runTest {
+            // A pre-encryption plaintext file: a bare JSON array, exactly as older versions wrote it.
+            val legacy =
+                """
+                [
+                  { "type": "github", "repo": "owner/name", "token": "legacy_token" }
+                ]
+                """.trimIndent()
+            val target = dataDir.resolve("library_connections.json")
+            Files.writeString(target, legacy)
+
+            val loaded = store().load()
+            assertEquals(
+                listOf(LibraryConnection.GitHub(repo = "owner/name", token = "legacy_token")),
+                loaded,
+                "a legacy plaintext file still loads (migration is transparent)",
+            )
+
+            val afterMigration = Files.readAllBytes(target).decodeToString()
+            assertFalse(
+                afterMigration.contains("legacy_token"),
+                "load() re-encrypts the migrated file so the secret is no longer plaintext on disk",
+            )
+            assertEquals(loaded, store().load(), "the re-encrypted file decrypts back to the same list")
+        }
 }

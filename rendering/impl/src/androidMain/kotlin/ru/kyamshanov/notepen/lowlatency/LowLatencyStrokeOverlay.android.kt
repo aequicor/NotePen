@@ -32,16 +32,12 @@ import kotlinx.coroutines.launch
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPoint
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
+import ru.kyamshanov.notepen.drawing.api.LiveStrokeSample
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
+import ru.kyamshanov.notepen.rendering.api.RenderingConstants
+import ru.kyamshanov.notepen.rendering.api.computeSegmentWidth
 import kotlin.math.cos
 import kotlin.math.sin
-
-/**
- * Width modulation factor applied per tilt unit, mirroring the gain used in
- * the Compose-rendered live stroke so the visual width matches when the
- * overlay hands off to the cached bitmap on lift-off.
- */
-private const val TILT_WIDTH_GAIN = 0.5f
 
 private const val HANDOFF_FALLBACK_MS = 250L
 private const val HANDOFF_FRAME_DELAY = 2
@@ -63,7 +59,6 @@ private data class StrokeSegment(
 
 private data class OverlayState(
     val drawing: Boolean,
-    val livePointCount: Int,
     val pathCount: Int,
     val completedStrokeCount: Int,
 )
@@ -211,13 +206,49 @@ actual fun LowLatencyStrokeOverlay(
         }
     }
 
-    // Drive the renderer from `drawingState`. We track `lastIndex` so we only
-    // submit each new sample once.
-    //
-    // Lift-off handoff: commit the front-buffer samples, then clear immediately.
-    // The committed path is already in `currentPaths`, so Compose renders it.
+    // Feed accepted pen samples straight into the front buffer. This bypasses
+    // snapshotFlow/recomposition batching, which otherwise adds at least one
+    // frame of latency on Android tablets.
+    DisposableEffect(drawingState, rendererHolder.value, surfaceViewHolder.value) {
+        val renderer = rendererHolder.value
+        val surfaceView = surfaceViewHolder.value
+        if (renderer == null) {
+            onDispose { }
+        } else {
+            if (drawingState.isDrawing.value && drawingState.livePoints.isNotEmpty()) {
+                surfaceView?.alpha = VISIBLE_ALPHA
+                drawingState.livePoints.forEachIndexed { index, point ->
+                    val previous =
+                        if (index > 0 && !point.isNewPath) {
+                            drawingState.livePoints[index - 1]
+                        } else {
+                            null
+                        }
+                    renderer.renderFrontBufferedLayer(
+                        LiveStrokeSample(
+                            previous = previous,
+                            current = point,
+                            colorArgb = drawingState.liveColorArgb.value,
+                            normalizedStrokeWidth = drawingState.liveStrokeWidth.value,
+                            toolKind = drawingState.liveToolKind.value,
+                            extent = drawingState.extent.value,
+                        ).toStrokeSegment(surfaceView?.width ?: 0),
+                    )
+                }
+            }
+            val unregister =
+                drawingState.addLiveStrokeListener { sample ->
+                    surfaceView?.alpha = VISIBLE_ALPHA
+                    renderer.renderFrontBufferedLayer(sample.toStrokeSegment(surfaceView?.width ?: 0))
+                }
+            onDispose { unregister() }
+        }
+    }
+
+    // Lift-off handoff: commit the front-buffer samples, then clear after the
+    // completed path is visible in Compose.
     LaunchedEffect(drawingState, rendererHolder.value) {
-        var lastIndex = -1
+        var committedTargetPathCount: Int? = null
         var handoffTargetPathCount: Int? = null
         var clearJob: kotlinx.coroutines.Job? = null
 
@@ -231,7 +262,6 @@ actual fun LowLatencyStrokeOverlay(
         snapshotFlow {
             OverlayState(
                 drawing = drawingState.isDrawing.value,
-                livePointCount = drawingState.livePoints.size,
                 pathCount = drawingState.currentPaths.size,
                 completedStrokeCount = completedStrokeCountState.value,
             )
@@ -239,11 +269,17 @@ actual fun LowLatencyStrokeOverlay(
             val renderer = rendererHolder.value ?: return@collect
             val surfaceView = surfaceViewHolder.value
             if (!state.drawing) {
-                if (lastIndex >= 0) {
+                val target =
+                    state.pathCount.takeIf { it > 0 }
+                        ?: run {
+                            renderer.clear()
+                            surfaceView?.alpha = HIDDEN_ALPHA
+                            return@collect
+                        }
+                if (committedTargetPathCount != target) {
                     renderer.commit()
-                    lastIndex = -1
+                    committedTargetPathCount = target
                 }
-                val target = state.pathCount.takeIf { it > 0 } ?: return@collect
                 if (handoffTargetPathCount != target) {
                     handoffTargetPathCount = target
                     clearJob?.cancel()
@@ -267,62 +303,37 @@ actual fun LowLatencyStrokeOverlay(
             }
             clearJob?.cancel()
             clearJob = null
+            committedTargetPathCount = null
             handoffTargetPathCount = null
             surfaceView?.alpha = VISIBLE_ALPHA
-            val ext = drawingState.extent.value
-            val slotW = surfaceView?.width ?: 0
-            // liveStrokeWidth нормализован относительно ширины PDF, не слота.
-            // pdfW = slotW / extent.width, поэтому widthPx = liveW * pdfW.
-            val widthPx =
-                if (ext.width > 0f) {
-                    drawingState.liveStrokeWidth.value * slotW / ext.width
-                } else {
-                    0f
-                }
-            val colorArgb = drawingState.liveColorArgb.value.toInt()
-            val toolKind = drawingState.liveToolKind.value
-            // Detect a new stroke that started while the collector was busy
-            // (e.g. because snapshotFlow conflated the `isDrawing=false` edge).
-            // `startDrawing()` calls `livePoints.clear()` so `size` drops back
-            // to 1; without this reset, `lastIndex` would still point past the
-            // new list end and the loop below would never run, leaving the
-            // start of the new stroke unrendered — or, worse, a subsequent
-            // append would render a segment between `livePoints[lastIndex]`
-            // and the new point, producing a stray line across the page.
-            if (lastIndex >= state.livePointCount) {
-                lastIndex = -1
-            }
-            // Submit every new sample since the previous tick. snapshotFlow
-            // coalesces updates per frame, so a burst of 4 samples emits once.
-            while (lastIndex + 1 < state.livePointCount) {
-                lastIndex++
-                val curr = drawingState.livePoints[lastIndex]
-                val prev =
-                    if (lastIndex > 0 && !curr.isNewPath) {
-                        drawingState.livePoints[lastIndex - 1]
-                    } else {
-                        null
-                    }
-                renderer.renderFrontBufferedLayer(
-                    StrokeSegment(
-                        prev = prev,
-                        curr = curr,
-                        colorArgb = colorArgb,
-                        widthPx = widthPx,
-                        extent = ext,
-                        toolKind = toolKind,
-                    ),
-                )
-            }
         }
     }
+}
+
+private fun LiveStrokeSample.toStrokeSegment(slotWidthPx: Int): StrokeSegment {
+    // liveStrokeWidth нормализован относительно ширины PDF, не слота.
+    // pdfW = slotW / extent.width, поэтому widthPx = liveW * pdfW.
+    val widthPx =
+        if (extent.width > 0f) {
+            normalizedStrokeWidth * slotWidthPx / extent.width
+        } else {
+            0f
+        }
+    return StrokeSegment(
+        prev = previous,
+        curr = current,
+        colorArgb = colorArgb.toInt(),
+        widthPx = widthPx,
+        extent = extent,
+        toolKind = toolKind,
+    )
 }
 
 @Composable
 actual fun rememberLowLatencyOverlayAvailable(): Boolean = remember { Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q }
 
 @Composable
-actual fun rememberLowLatencyOverlayMaxDimensionPx(): Int = remember { 2400 }
+actual fun rememberLowLatencyOverlayMaxDimensionPx(): Int = remember { RenderingConstants.LOW_LATENCY_OVERLAY_MAX_DIM_PX }
 
 private const val HIDDEN_ALPHA = 0f
 private const val VISIBLE_ALPHA = 1f
@@ -388,8 +399,7 @@ private fun drawSegment(
     }
 
     penPaint.color = segment.colorArgb
-    val tiltBoost = 1f + TILT_WIDTH_GAIN * curr.tilt
-    penPaint.strokeWidth = (segment.widthPx * curr.pressure * tiltBoost).coerceAtLeast(1f)
+    penPaint.strokeWidth = computeSegmentWidth(segment.widthPx, curr.pressure, curr.tilt)
     if (prev == null) {
         canvas.drawCircle(x, y, penPaint.strokeWidth * 0.5f, penPaint)
     } else {

@@ -13,8 +13,11 @@
         android:name="android.hardware.camera"
         android:required="false" />
 
+    <!-- allowBackup disabled: keeps the plaintext LAN connections file, sync DB, and
+         cached documents out of cloud/adb backups. Tradeoff: app data is not carried
+         over by Android's device-migration / auto-backup. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:name="ru.kyamshanov.notepen.App"

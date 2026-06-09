@@ -1,11 +1,13 @@
 package ru.kyamshanov.notepen.sync.domain
 
 import io.github.oshai.kotlinlogging.KotlinLogging
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -14,7 +16,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.RemoteCatalog
+import ru.kyamshanov.notepen.sync.domain.model.RemoteEntry
 import ru.kyamshanov.notepen.sync.domain.port.LocalDocumentIdRegistry
+import ru.kyamshanov.notepen.sync.domain.port.PeerServer
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import ru.kyamshanov.notepen.sync.infrastructure.FileTransferReceiver
 import ru.kyamshanov.notepen.sync.infrastructure.okio_exists
@@ -44,15 +48,16 @@ sealed class RemoteDocumentResult {
 }
 
 /**
- * Tablet-side coordinator that converts a tap on a Remote-section tile into
- * a local PDF file ready to open in the editor.
+ * Peer-side coordinator that converts a remote catalog entry into a local PDF
+ * file ready to open in the editor.
  *
  * Multi-host aware: when more than one host is connected, the opener picks
  * the host whose latest catalog snapshot includes the requested `documentId`.
  * Ties (multiple hosts with the same document) are resolved by iteration
  * order of the [catalogs] map; this is deterministic but not user-driven.
  *
- * @param client peer client used to send the request and receive chunks.
+ * @param client peer client used to send requests to connected hosts.
+ * @param server peer server used to send requests to connected clients.
  * @param catalogs per-host catalog snapshots — drives host selection.
  * @param destDir directory where received files are written.
  * @param requestTimeoutMs upper bound on the whole open flow.
@@ -61,7 +66,8 @@ sealed class RemoteDocumentResult {
  *   DI layer. Defaults to a no-op so the domain stays decoupled from eviction.
  */
 class RemoteDocumentOpener(
-    private val client: SyncClient,
+    private val client: SyncClient? = null,
+    private val server: PeerServer? = null,
     private val catalogs: Flow<Map<DeviceInfo, RemoteCatalog>>,
     private val destDir: String,
     /** Реестр, в котором запоминаем `localPath → documentId`. Null отключает запись. */
@@ -69,6 +75,12 @@ class RemoteDocumentOpener(
     private val requestTimeoutMs: Long = 60_000L,
     private val onAfterDownload: suspend () -> Unit = {},
 ) {
+    init {
+        require(client != null || server != null) {
+            "At least one of client or server must be provided"
+        }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     suspend fun open(
         documentId: String,
@@ -84,35 +96,36 @@ class RemoteDocumentOpener(
                 return RemoteDocumentResult.Success(documentId, cachedPath)
             }
         }
-        val host =
-            pickHost(documentId) ?: return RemoteDocumentResult.NotFound(
+        val location =
+            withTimeoutOrNull(requestTimeoutMs) {
+                pickHost(documentId)
+            } ?: return RemoteDocumentResult.NotFound(
                 documentId = documentId,
                 reason = "No connected host has this document",
             )
-        logger.info { "Requesting $documentId from host=${host.name}" }
-        val sendResult =
-            runCatching {
-                client.send(host.id, NetworkMessage.DocumentOpenRequest(documentId = documentId))
-            }
-        if (sendResult.isFailure) {
-            return RemoteDocumentResult.Failure(documentId, sendResult.exceptionOrNull()!!)
+        val catalogDisplayName = location.entry.displayName
+        val catalogCachedPath = joinPath(destDir, documentIdToCacheFileName(documentId, catalogDisplayName))
+        if (okio_exists(catalogCachedPath)) {
+            logger.info { "Opening cached copy of $documentId at $catalogCachedPath" }
+            documentIdRegistry?.register(catalogCachedPath, documentId)
+            return RemoteDocumentResult.Success(documentId, catalogCachedPath)
         }
+        val host = location.host
+        logger.info { "Requesting $documentId from host=${host.name}" }
 
         val outcome: RemoteDocumentResult? =
             withTimeoutOrNull(requestTimeoutMs) {
                 coroutineScope {
                     val fromThisHost =
-                        client.incomingMessages
-                            .filter { it.host.id == host.id }
-                            .map { it.message }
+                        incomingFrom(host.id)
                     val notFound =
-                        async {
+                        async(start = CoroutineStart.UNDISPATCHED) {
                             fromThisHost
                                 .filter { it is NetworkMessage.DocumentNotFound && it.documentId == documentId }
                                 .first()
                         }
                     val received =
-                        async {
+                        async(start = CoroutineStart.UNDISPATCHED) {
                             val incoming =
                                 merge(
                                     fromThisHost
@@ -122,6 +135,15 @@ class RemoteDocumentOpener(
                                 )
                             FileTransferReceiver(incoming = incoming, destDir = destDir).awaitFile()
                         }
+                    val sendResult =
+                        runCatching {
+                            send(host.id, NetworkMessage.DocumentOpenRequest(documentId = documentId))
+                        }
+                    if (sendResult.isFailure) {
+                        notFound.cancel()
+                        received.cancel()
+                        return@coroutineScope RemoteDocumentResult.Failure(documentId, sendResult.exceptionOrNull()!!)
+                    }
                     val winner: RemoteDocumentResult =
                         select {
                             notFound.onAwait { msg ->
@@ -145,16 +167,66 @@ class RemoteDocumentOpener(
         }
     }
 
-    private suspend fun pickHost(documentId: String): DeviceInfo? {
-        val snapshot = catalogs.first()
-        return snapshot.entries
-            .firstOrNull { entry ->
-                val catalog = entry.value
-                catalog.recent.any { it.documentId == documentId } ||
-                    catalog.openDocuments.any { it.documentId == documentId }
-            }?.key
+    private suspend fun send(
+        hostId: String,
+        message: NetworkMessage,
+    ) {
+        val syncClient = client
+        val peerServer = server
+        val clientHasHost = syncClient?.connectedHosts?.first()?.any { it.id == hostId } == true
+        val serverHasPeer = peerServer?.connectedPeers?.first()?.any { it.id == hostId } == true
+        when {
+            clientHasHost -> syncClient.send(hostId, message)
+            serverHasPeer -> peerServer.send(hostId, message)
+            syncClient != null && peerServer == null -> syncClient.send(hostId, message)
+            peerServer != null && syncClient == null -> peerServer.send(hostId, message)
+            else -> {
+                syncClient?.send(hostId, message)
+                peerServer?.send(hostId, message)
+            }
+        }
     }
+
+    private fun incomingFrom(hostId: String): Flow<NetworkMessage> {
+        val clientIncoming =
+            client
+                ?.incomingMessages
+                ?.filter { it.host.id == hostId }
+                ?.map { it.message }
+        val serverIncoming =
+            server
+                ?.incomingMessages
+                ?.filter { it.peer.id == hostId }
+                ?.map { it.message }
+        return when {
+            clientIncoming != null && serverIncoming != null -> merge(clientIncoming, serverIncoming)
+            clientIncoming != null -> clientIncoming
+            serverIncoming != null -> serverIncoming
+            else -> error("RemoteDocumentOpener has no incoming transport")
+        }
+    }
+
+    private suspend fun pickHost(documentId: String): RemoteDocumentLocation =
+        catalogs
+            .map { snapshot ->
+                snapshot.entries
+                    .firstNotNullOfOrNull { entry ->
+                        val catalog = entry.value
+                        val remoteEntry =
+                            catalog.openDocuments.firstOrNull { it.documentId == documentId }
+                                ?: catalog.recent.firstOrNull { it.documentId == documentId }
+                                ?: return@firstNotNullOfOrNull null
+                        RemoteDocumentLocation(host = entry.key, entry = remoteEntry)
+                    }
+            }
+            .filterNotNull()
+            .first()
 }
+
+private data class RemoteDocumentLocation(
+    val host: DeviceInfo,
+    val entry: RemoteEntry,
+)
 
 private fun joinPath(
     dir: String,

@@ -46,6 +46,7 @@ class JvmPdfReflowExtractor(
     override suspend fun extract(path: String): ReflowDocument =
         withContext(ioDispatcher) {
             openDocument(path).use { document ->
+                PdfReflowLimits.requirePageCount(document.numberOfPages)
                 val rawPages = (0 until document.numberOfPages).map { extractPage(document, it) }
                 val assembled = ReflowAssembler.assemble(rawPages)
                 // Vector-path Lattice работает без растеризации: если PDF
@@ -66,6 +67,7 @@ class JvmPdfReflowExtractor(
     ): ReflowDocument =
         withContext(ioDispatcher) {
             openDocument(path).use { document ->
+                PdfReflowLimits.requirePageCount(document.numberOfPages)
                 // RawPage'и держим до конца, чтобы Lattice мог их переиспользовать
                 // (мап глифов в ячейки по их координатам). Второй проход extract
                 // дороже, чем разовое удержание ~10–100 КБ RawPage в памяти.
@@ -113,6 +115,7 @@ class JvmPdfReflowExtractor(
     ): RawPage {
         val page = document.getPage(pageIndex)
         val box = page.mediaBox
+        PdfReflowLimits.requirePageDimensions(pageIndex, box.width, box.height)
         val glyphs = mutableListOf<RawGlyph>()
         val stripper =
             object : PDFTextStripper() {

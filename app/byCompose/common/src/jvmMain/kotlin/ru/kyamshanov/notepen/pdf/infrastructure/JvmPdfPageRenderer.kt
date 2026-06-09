@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.pdf.infrastructure
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
 import org.apache.pdfbox.rendering.ImageType
+import org.apache.pdfbox.rendering.RenderDestination
 import org.apache.pdfbox.text.PDFTextStripper
 import org.apache.pdfbox.text.TextPosition
 import ru.kyamshanov.notepen.annotation.domain.model.PageRotation
@@ -12,6 +13,7 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.withJvmBufferedImage
 import java.awt.RenderingHints
 import java.awt.image.BufferedImage
+import java.awt.Color as AwtColor
 
 /**
  * JVM-реализация [PdfPageRenderer] поверх Apache PDFBox.
@@ -81,6 +83,113 @@ class JvmPdfPageRenderer(
             val image = scaleToTarget(oriented, widthPx, heightPx)
             val pixels = image.getRGB(0, 0, widthPx, heightPx, null, 0, widthPx)
             PdfPageData(widthPx = widthPx, heightPx = heightPx, pixels = pixels)
+                .withJvmBufferedImage(image)
+        }
+
+    override suspend fun renderTile(
+        document: PdfDocument,
+        pageIndex: Int,
+        fullPageWidthPx: Int,
+        fullPageHeightPx: Int,
+        tileLeftPx: Int,
+        tileTopPx: Int,
+        tileWidthPx: Int,
+        tileHeightPx: Int,
+        rotationQuarters: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
+    ): PdfPageData =
+        if (PageRotation.normalizeQuarters(rotationQuarters) != 0) {
+            super.renderTile(
+                document = document,
+                pageIndex = pageIndex,
+                fullPageWidthPx = fullPageWidthPx,
+                fullPageHeightPx = fullPageHeightPx,
+                tileLeftPx = tileLeftPx,
+                tileTopPx = tileTopPx,
+                tileWidthPx = tileWidthPx,
+                tileHeightPx = tileHeightPx,
+                rotationQuarters = rotationQuarters,
+                cropLeftN = cropLeftN,
+                cropTopN = cropTopN,
+                cropRightN = cropRightN,
+                cropBottomN = cropBottomN,
+            )
+        } else {
+            renderTileDirect(
+                document = document,
+                pageIndex = pageIndex,
+                fullPageWidthPx = fullPageWidthPx,
+                fullPageHeightPx = fullPageHeightPx,
+                tileLeftPx = tileLeftPx,
+                tileTopPx = tileTopPx,
+                tileWidthPx = tileWidthPx,
+                tileHeightPx = tileHeightPx,
+                cropLeftN = cropLeftN,
+                cropTopN = cropTopN,
+                cropRightN = cropRightN,
+                cropBottomN = cropBottomN,
+            )
+        }
+
+    private suspend fun renderTileDirect(
+        document: PdfDocument,
+        pageIndex: Int,
+        fullPageWidthPx: Int,
+        fullPageHeightPx: Int,
+        tileLeftPx: Int,
+        tileTopPx: Int,
+        tileWidthPx: Int,
+        tileHeightPx: Int,
+        cropLeftN: Float,
+        cropTopN: Float,
+        cropRightN: Float,
+        cropBottomN: Float,
+    ): PdfPageData =
+        withContext(ioDispatcher) {
+            val jvmDoc =
+                requireNotNull(document as? JvmPdfDocument) {
+                    "JvmPdfPageRenderer requires a document opened by JvmPdfDocumentLoader"
+                }
+            if (pageIndex < 0 || pageIndex >= document.info.pageCount) {
+                throw IndexOutOfBoundsException(
+                    "pageIndex $pageIndex out of [0, ${document.info.pageCount})",
+                )
+            }
+
+            val pageInfo = document.info.pages[pageIndex]
+            val cropW = (cropRightN - cropLeftN).coerceIn(0f, 1f).takeIf { it > 0f } ?: 1f
+            val cropH = (cropBottomN - cropTopN).coerceIn(0f, 1f).takeIf { it > 0f } ?: 1f
+            val fullSourceW = (fullPageWidthPx / cropW).coerceAtLeast(1f)
+            val fullSourceH = (fullPageHeightPx / cropH).coerceAtLeast(1f)
+            val effectiveW = if (pageInfo.rotation == 90 || pageInfo.rotation == 270) pageInfo.heightPt else pageInfo.widthPt
+            val effectiveH = if (pageInfo.rotation == 90 || pageInfo.rotation == 270) pageInfo.widthPt else pageInfo.heightPt
+            val scaleX = fullSourceW / effectiveW
+            val scaleY = fullSourceH / effectiveH
+            val tileW = tileWidthPx.coerceIn(1, fullPageWidthPx)
+            val tileH = tileHeightPx.coerceIn(1, fullPageHeightPx)
+            val image = BufferedImage(tileW, tileH, BufferedImage.TYPE_INT_RGB)
+            val g = image.createGraphics()
+            try {
+                g.background = AwtColor.WHITE
+                g.color = AwtColor.WHITE
+                g.fillRect(0, 0, tileW, tileH)
+                g.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY)
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g.translate(
+                    -(cropLeftN.coerceIn(0f, 1f) * fullSourceW + tileLeftPx).toDouble(),
+                    -(cropTopN.coerceIn(0f, 1f) * fullSourceH + tileTopPx).toDouble(),
+                )
+                jvmDoc.useRenderer { renderer ->
+                    renderer.renderPageToGraphics(pageIndex, g, scaleX, scaleY, RenderDestination.VIEW)
+                }
+            } finally {
+                g.dispose()
+            }
+            val pixels = image.getRGB(0, 0, tileW, tileH, null, 0, tileW)
+            PdfPageData(widthPx = tileW, heightPx = tileH, pixels = pixels)
                 .withJvmBufferedImage(image)
         }
 

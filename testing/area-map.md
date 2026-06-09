@@ -102,6 +102,9 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReaderAirbar.kt` | READER | RC-READER-002, RC-READER-019, RC-READER-022, RC-READER-023, RC-READER-027, RC-READER-028, AV-READER-02, AV-READER-08, +more | ai-vision AV-READER-02 |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReflowReader.kt` | REFLOW | RC-REFLOW-010, RC-REFLOW-011, RC-VIEWER-007, RC-VIEWER-008, RC-UX-005, RC-UX-006, RC-UX-008, AV-REFLOW-01, +more | ai-vision AV-REFLOW-01 |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReflowSelectionState.kt` | VIEWER | RC-VIEWER-007, RC-VIEWER-008, AV-VIEWER-03 | ./gradlew :reflow:impl:test |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/bookcurl/BookCurlImageCropper.kt` | REFLOW | RC-REFLOW-012 | ./gradlew :reflow:impl:jvmTest |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/bookcurl/BookCurlOverlay.kt` | REFLOW | RC-REFLOW-012 | ./gradlew :reflow:impl:jvmTest |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/bookcurl/PageTurnStyle.kt` | REFLOW | RC-REFLOW-012 | ./gradlew :reflow:impl:jvmTest |
 | `reflow/impl/src/jvmMain/kotlin/ru/kyamshanov/notepen/reflow/JvmPdfReflowExtractor.kt` | READER | RC-READER-006 | ./gradlew :reflow:impl:jvmTest |
 | `rendering/impl/src/androidMain/kotlin/ru/kyamshanov/notepen/lowlatency/LowLatencyStrokeOverlay.android.kt` | MARKER | RC-MARKER-002, AV-MARKER-02 | ai-vision AV-MARKER-02 |
 | `rendering/impl/src/androidMain/kotlin/ru/kyamshanov/notepen/pdf/infrastructure/AndroidPdfPageRenderer.kt` | VIEWER | RC-VIEWER-004, AV-VIEWER-02 | ai-vision AV-VIEWER-02 |
@@ -145,7 +148,7 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 - MARKER — 3 cases (3 RC, 3 AV) — modules: `rendering/impl` (DrawablePdfPage, lowlatency, MagnifierInputPanel), `tools/marker`
 - PDF — 8 cases (8 RC, 4 AV) — modules: `app/byCompose/common` (pdf/infrastructure, pdfviewer, build), `rendering/impl`, `gradle`
 - READER — 28 cases (28 RC, 17 AV) — modules: `app/byCompose/common` (ToolRail, DetailsContent, EditorPanel, PageIndicatorAirbar), `reflow/impl` (ReaderAirbar, ReflowReader), `reflow/api`
-- REFLOW — 11 cases (11 RC, 2 AV) — modules: `reflow/impl` (ReflowAssembler, TableNoiseGuard, lattice, ReflowReader), `reflow/api`, `app/byCompose/common` (reflow)
+- REFLOW — 12 cases (12 RC, 2 AV) — modules: `reflow/impl` (ReflowAssembler, TableNoiseGuard, lattice, ReflowReader, bookcurl), `reflow/api`, `app/byCompose/common` (reflow)
 - RENDER — 12 cases (12 RC, 6 AV) — modules: `rendering/impl` (PdfPagesLayout, PdfViewerState, DrawablePdfPage, pdfviewer), `app/byCompose/common`
 - SESSION — 4 cases (4 RC, 4 AV) — modules: `app/byCompose/common` (SessionsMenu, SessionsDialog, DetailsContent, EditorPanel, tabs/TabBar)
 - SIDEBAR — 1 case (1 RC, 1 AV) — modules: `app/byCompose/common` (PageThumbnailsSidebar)

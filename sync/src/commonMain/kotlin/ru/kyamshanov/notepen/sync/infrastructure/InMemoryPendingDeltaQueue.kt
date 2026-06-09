@@ -1,5 +1,6 @@
 package ru.kyamshanov.notepen.sync.infrastructure
 
+import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -8,6 +9,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.port.PendingDeltaQueue
+
+private val logger = KotlinLogging.logger {}
 
 /**
  * In-memory [PendingDeltaQueue] for Phase 4.
@@ -19,8 +22,19 @@ import ru.kyamshanov.notepen.sync.domain.port.PendingDeltaQueue
  * Thread-safety: a single [Mutex] guards both the per-document deque and the
  * aggregated count map. Operations are cheap (list append / prefix drop) so
  * coarse locking is fine for the expected stroke-rate.
+ *
+ * Bounded memory: a runaway peer (long disconnect, delta flood) could otherwise
+ * grow the queue without limit and exhaust the heap. [maxPerDocument] caps each
+ * document's deque and [maxTotal] caps the sum across all documents; on overflow
+ * the **oldest** delta is dropped (FIFO) so the newest edits — the ones a peer
+ * most wants on reconnect — always survive. Dropping a pending delta only loses
+ * a not-yet-replayed local edit; LWW convergence on the surviving deltas is
+ * unaffected.
  */
-class InMemoryPendingDeltaQueue : PendingDeltaQueue {
+class InMemoryPendingDeltaQueue(
+    private val maxPerDocument: Int = MAX_PER_DOCUMENT,
+    private val maxTotal: Int = MAX_TOTAL,
+) : PendingDeltaQueue {
     private val mutex = Mutex()
     private val queues = mutableMapOf<String, ArrayDeque<StrokeDelta>>()
     private val _counts = MutableStateFlow<Map<String, Int>>(emptyMap())
@@ -30,7 +44,29 @@ class InMemoryPendingDeltaQueue : PendingDeltaQueue {
         delta: StrokeDelta,
     ) {
         mutex.withLock {
-            queues.getOrPut(documentId) { ArrayDeque() }.addLast(delta)
+            val deque = queues.getOrPut(documentId) { ArrayDeque() }
+            // Per-document cap: drop the oldest delta(s) for this document before appending.
+            while (deque.size >= maxPerDocument) {
+                deque.removeFirst()
+                logger.debug {
+                    "Pending queue per-document cap ($maxPerDocument) reached for doc=$documentId; dropped oldest delta"
+                }
+            }
+            // Global cap: prefer dropping from other documents, but fall back to the current
+            // document when it is the only queue with data. The newest edit is appended after
+            // eviction, so it still lands while the total cap remains strict.
+            while (totalSizeLocked() >= maxTotal) {
+                val victim =
+                    oldestEvictableQueueLocked(except = documentId)
+                        ?: oldestEvictableQueueLocked(except = null)
+                        ?: break
+                victim.value.removeFirst()
+                if (victim.value.isEmpty()) queues.remove(victim.key)
+                logger.debug {
+                    "Pending queue global cap ($maxTotal) reached; dropped oldest delta from doc=${victim.key}"
+                }
+            }
+            deque.addLast(delta)
             publishCountsLocked()
         }
     }
@@ -59,5 +95,26 @@ class InMemoryPendingDeltaQueue : PendingDeltaQueue {
         // Snapshot under the same lock so observers never see a torn map.
         val snapshot = queues.mapValues { it.value.size }
         _counts.update { snapshot }
+    }
+
+    /** Total number of pending deltas across all documents. Caller holds [mutex]. */
+    private fun totalSizeLocked(): Int = queues.values.sumOf { it.size }
+
+    /**
+     * The non-empty queue (other than [except], when present) whose head delta is the oldest by
+     * `clock` — the global FIFO eviction victim. `null` when no matching document has
+     * anything to drop. Caller holds [mutex].
+     */
+    private fun oldestEvictableQueueLocked(except: String?): Map.Entry<String, ArrayDeque<StrokeDelta>>? =
+        queues.entries
+            .filter { it.key != except && it.value.isNotEmpty() }
+            .minByOrNull { it.value.first().clock }
+
+    companion object {
+        /** Default per-document delta cap before the oldest entry is dropped. */
+        const val MAX_PER_DOCUMENT: Int = 50_000
+
+        /** Default total delta cap across all documents before the oldest entry is dropped. */
+        const val MAX_TOTAL: Int = 200_000
     }
 }

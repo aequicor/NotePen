@@ -23,6 +23,26 @@ class PdfDrawingStateUndoTest {
     }
 
     @Test
+    fun `live stroke listener receives only accepted samples`() {
+        val state = PdfDrawingState()
+        val samples = mutableListOf<LiveStrokeSample>()
+        val unregister = state.addLiveStrokeListener { samples += it }
+
+        state.startDrawing(x = 0.1f, y = 0.1f, normalizedStrokeWidth = 0.003f)
+        state.addPoint(x = 0.1001f, y = 0.1001f)
+        state.addPoint(x = 0.101f, y = 0.101f)
+        unregister()
+        state.addPoint(x = 0.102f, y = 0.102f)
+
+        assertEquals(2, samples.size)
+        assertEquals(null, samples.first().previous)
+        assertEquals(0.1f, samples.first().current.x)
+        assertEquals(0.003f, samples.first().normalizedStrokeWidth)
+        assertEquals(samples.first().current, samples.last().previous)
+        assertEquals(0.101f, samples.last().current.x)
+    }
+
+    @Test
     fun `finishDrawing commits down-only stroke as short segment`() {
         val state = PdfDrawingState()
 

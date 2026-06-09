@@ -63,18 +63,22 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import ru.kyamshanov.notepen.annotation.domain.model.AnnotationViewState
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
@@ -99,6 +103,7 @@ import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
+import ru.kyamshanov.notepen.pdfviewer.PdfViewerMath
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.pdfviewer.ScrollMode
 import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
@@ -130,6 +135,7 @@ import ru.kyamshanov.notepen.sync.domain.model.StrokeDelta
 import ru.kyamshanov.notepen.sync.domain.model.toDomain
 import ru.kyamshanov.notepen.sync.domain.model.toDto
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
+import ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController
 import ru.kyamshanov.notepen.tablet.LocalTabletInputController
 import ru.kyamshanov.notepen.tablet.PenPointerEventType
 import ru.kyamshanov.notepen.tablet.stylusEventSink
@@ -157,6 +163,7 @@ private const val FIGURE_PAGE_RENDER_WIDTH_PX = 1600
 private const val PANEL_SIDEBAR_ANIM_MS = 220
 private const val REFLOW_PROBE_DELAY_AFTER_OPEN_MS = 750L
 private const val NATIVE_PEN_FALLBACK_SUPPRESS_MS = 500L
+private const val BROADCAST_ZOOM_SETTLE_DELAY_MS = 90L
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
@@ -165,6 +172,49 @@ private val PREPARING_INDICATOR_SPACING = 12.dp
 private val NOTE_POPOVER_WIDTH = 320.dp
 private val NOTE_POPOVER_PADDING = 16.dp
 private val NOTE_POPOVER_ELEVATION = 6.dp
+
+private data class DocumentBroadcastSnapshot(
+    val documentId: String,
+    val page: Int,
+    val pageOffsetPx: Int,
+    val panX: Float,
+    val zoom: Float,
+    val viewportCenterX: Float?,
+    val viewportCenterY: Float?,
+    val toolMode: ToolMode,
+)
+
+private fun PdfViewerState.applyBroadcastViewportCommand(command: BroadcastViewportCommand) {
+    command.targetScalePercent?.let { scalePercent ->
+        setScalePercent(scalePercent)
+    }
+    if (command.shouldScroll) {
+        scrollToPage(command.page, command.pageOffsetPx)
+    }
+    val deltaX = command.targetPanX?.let { it - pan.x } ?: 0f
+    val deltaY = command.targetPanY?.let { it - pan.y } ?: 0f
+    if (
+        deltaX.isFinite() &&
+        deltaY.isFinite() &&
+        (deltaX > 0.5f || deltaX < -0.5f || deltaY > 0.5f || deltaY < -0.5f)
+    ) {
+        beginPanGesture()
+        try {
+            panGestureBy(Offset(deltaX, deltaY))
+        } finally {
+            endPanGesture()
+        }
+    }
+}
+
+private fun ToolMode.broadcastLabel(): String =
+    when (this) {
+        ToolMode.NONE -> "рука"
+        ToolMode.PEN -> "перо"
+        ToolMode.MARKER -> "маркер"
+        ToolMode.ERASER -> "ластик"
+        ToolMode.NOTE -> "заметка"
+    }
 
 /**
  * Per-panel actions and read-outs the unified toolbar drives for the focused
@@ -303,8 +353,9 @@ fun EditorPanel(
      */
     liveSyncController: ru.kyamshanov.notepen.sync.domain.LiveDocumentSyncController?,
     hostAnnotationSnapshotFor: (suspend (documentId: String) -> List<StrokeDelta.Added>)?,
+    documentBroadcastController: DocumentBroadcastController?,
     showSnackbar: (String) -> Unit,
-    onRestoreToolSettings: (PenSettings, MarkerSettings, EraserSettings) -> Unit,
+    onRestoreToolSettings: (ToolMode, PenSettings, MarkerSettings, EraserSettings) -> Unit,
     onAddTab: () -> Unit,
     onAllTabsClosed: () -> Unit,
     onOpenPanelPicker: ((DocumentId) -> Unit)?,
@@ -318,6 +369,7 @@ fun EditorPanel(
     sessionsMenu: @Composable (expanded: Boolean, onDismiss: () -> Unit) -> Unit,
     fitWidthStartInset: androidx.compose.ui.unit.Dp = 0.dp,
     fitWidthTopInset: androidx.compose.ui.unit.Dp = 0.dp,
+    bitmapConversionDispatcher: CoroutineDispatcher = Dispatchers.Default,
     modifier: Modifier = Modifier,
 ) {
     val openDocs = panel.tabs
@@ -394,9 +446,9 @@ fun EditorPanel(
     val tabletController = LocalTabletInputController.current
     val syncEngine = remember(syncEngineFor, documentId) { syncEngineFor?.invoke(documentId) }
 
-    // Per-document live-sync toggle (M4). Default OFF: bind pauses this document's
-    // engine on open so merely opening it never starts broadcasting. The toolbar
-    // reflects [liveSyncEnabled].
+    // Per-document live-sync toggle (M4). `bind` starts from the persisted/manual
+    // state, then a connected peer auto-enables live sync unless the user has
+    // explicitly paused this document. The toolbar reflects [liveSyncEnabled].
     //
     // On close (onDispose) we `disable` the document: that flips the toggle OFF,
     // pauses broadcasting, AND releases the CONTROLLER's enable-time pin (the
@@ -411,9 +463,7 @@ fun EditorPanel(
     }
     // Есть ли хотя бы один подключённый пир (как хост, так и клиент).
     val anyPeerConnected by produceState(false, peerClient, peerServer) {
-        val hosts = peerClient?.connectedHosts ?: flowOf(emptySet())
-        val peers = peerServer?.connectedPeers ?: flowOf(emptySet())
-        combine(hosts, peers) { h, p -> h.isNotEmpty() || p.isNotEmpty() }
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
             .collect { value = it }
     }
     DisposableEffect(liveSyncController, documentId) {
@@ -430,7 +480,13 @@ fun EditorPanel(
     // синхронизирует надписи без ручного тумблера. Если пользователь явно поставил
     // документ на паузу, авто-включение не срабатывает даже при переподключении.
     LaunchedEffect(liveSyncController, documentId, anyPeerConnected, userPausedSync) {
-        if (anyPeerConnected && !userPausedSync) liveSyncController?.enable(documentId)
+        if (shouldAutoEnableLiveSync(hasBroadcastConnection = anyPeerConnected, userPausedSync = userPausedSync)) {
+            liveSyncController?.enable(documentId)
+        }
+    }
+    val hasBroadcastPeer by produceState(false, peerServer, peerClient) {
+        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
+            .collect { value = it }
     }
 
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
@@ -463,7 +519,11 @@ fun EditorPanel(
         val info = doc.info.pages.getOrNull(pageIndex) ?: return@renderFig null
         val width = FIGURE_PAGE_RENDER_WIDTH_PX
         val height = (width / (info.aspectRatio.takeIf { it > 0f } ?: 1f)).toInt().coerceAtLeast(1)
-        runCatching { renderer.renderPage(doc, pageIndex, width, height).toImageBitmap() }
+        runCatching {
+            withContext(bitmapConversionDispatcher) {
+                renderer.renderPage(doc, pageIndex, width, height).toImageBitmap()
+            }
+        }
             .getOrNull()
             ?.also { figurePageCache[pageIndex] = it }
     }
@@ -605,6 +665,158 @@ fun EditorPanel(
     val firstVisiblePage by remember(pdfState) { derivedStateOf { pdfViewerState.firstVisiblePageIndex } }
     val currentScalePercent by remember(pdfState) { derivedStateOf { pdfViewerState.scalePercent } }
     val currentPageOffsetPx by remember(pdfState) { derivedStateOf { pdfViewerState.firstVisiblePageOffsetPx } }
+    val currentViewState: () -> AnnotationViewState = {
+        AnnotationViewState(
+            scale = pdfViewerState.scalePercent,
+            currentPage = pdfViewerState.firstVisiblePageIndex,
+            currentPageOffset = pdfViewerState.firstVisiblePageOffsetPx,
+            panXPx = pdfViewerState.pan.x,
+            readingMode = pdfState.readingMode,
+            reflowAnchorBlockIndex = currentReadingAnchor.blockIndex,
+            reflowAnchorCharStart = currentReadingAnchor.charStart,
+            pageRotations = pageRotations.toMap(),
+            spreadSplit = pdfState.spreadSplit,
+            spreadViewOverride = pdfState.spreadViewOverride,
+        )
+    }
+    val canPersistLiveViewState: () -> Boolean = {
+        pages.isNotEmpty() && pdfViewerState.basePageWidthPx > 0f
+    }
+
+    LaunchedEffect(
+        documentBroadcastController,
+        peerClient,
+        peerServer,
+        isFocused,
+        liveSyncEnabled,
+        documentId,
+        toolMode,
+    ) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        if (
+            !shouldPublishBroadcastFrame(
+                hasPeerClient = peerClient != null,
+                hasPeerServer = peerServer != null,
+                isFocused = isFocused,
+                liveSyncEnabled = liveSyncEnabled,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        snapshotFlow {
+            val layout = pdfViewerState.layout
+            val pan = pdfViewerState.effectivePan
+            val zoom = pdfViewerState.effectiveZoom
+            val page = PdfViewerMath.firstVisiblePageIndex(layout, pan.y, zoom)
+            DocumentBroadcastSnapshot(
+                documentId = documentId,
+                page = page,
+                pageOffsetPx = PdfViewerMath.pageScrollOffsetPx(layout, page, pan.y, zoom),
+                panX = pan.x,
+                zoom = zoom,
+                viewportCenterX =
+                    viewportCenterX(
+                        panX = pan.x,
+                        viewportWidthPx = pdfViewerState.viewportWidthPx,
+                        rowWidthPx = PdfViewerMath.rowWidthPx(layout),
+                        zoom = zoom,
+                    ),
+                viewportCenterY =
+                    viewportCenterY(
+                        panY = pan.y,
+                        viewportHeightPx = pdfViewerState.viewportHeightPx,
+                        pageTopsPx = layout.pageTopsPx,
+                        pageHeightsPx = layout.pageHeightsPx,
+                        zoom = zoom,
+                    ),
+                toolMode = projectedToolMode(toolMode, eraserOverride),
+            )
+        }
+            .distinctUntilChanged()
+            .collect { snapshot ->
+                controller.updateFrame(
+                    documentId = snapshot.documentId,
+                    page = snapshot.page,
+                    viewportOffsetX = snapshot.panX,
+                    viewportOffsetY = snapshot.pageOffsetPx.toFloat(),
+                    viewportScale = snapshot.zoom,
+                    viewportCenterX = snapshot.viewportCenterX,
+                    viewportCenterY = snapshot.viewportCenterY,
+                    toolMode = snapshot.toolMode,
+                )
+            }
+    }
+
+    val remoteBroadcastToolMode by produceState<ToolMode?>(
+        null,
+        documentBroadcastController,
+        peerServer,
+        documentId,
+        hasBroadcastPeer,
+    ) {
+        val controller = documentBroadcastController ?: return@produceState
+        if (peerServer == null || !hasBroadcastPeer) return@produceState
+        controller.currentFrame.collect { frame ->
+            value = broadcastToolModeForDocument(frame, documentId)
+        }
+    }
+
+    LaunchedEffect(documentBroadcastController, peerServer, isFocused, documentId, hasBroadcastPeer) {
+        val controller = documentBroadcastController ?: return@LaunchedEffect
+        if (
+            !shouldApplyBroadcastFrame(
+                hasPeerServer = peerServer != null,
+                isFocused = isFocused,
+                hasBroadcastConnection = hasBroadcastPeer,
+            )
+        ) {
+            return@LaunchedEffect
+        }
+        var previousFrame: NetworkMessage.ProjectionFrame? = null
+        controller.currentFrame.collectLatest { frame ->
+            val matchingPreviousFrame = previousFrame?.takeIf { it.documentId == frame?.documentId }
+            previousFrame = frame?.takeIf { it.documentId == documentId }
+            val command =
+                broadcastViewportCommandForDocument(
+                    frame = frame,
+                    documentId = documentId,
+                    previousFrame = matchingPreviousFrame,
+                    currentPage = pdfViewerState.firstVisiblePageIndex,
+                    currentPageOffsetPx = pdfViewerState.firstVisiblePageOffsetPx,
+                    currentScalePercent = pdfViewerState.scalePercent,
+                    currentPanX = pdfViewerState.pan.x,
+                    currentPanY = pdfViewerState.pan.y,
+                    currentViewportWidthPx = pdfViewerState.viewportWidthPx,
+                    currentViewportHeightPx = pdfViewerState.viewportHeightPx,
+                    currentRowWidthPx = PdfViewerMath.rowWidthPx(pdfViewerState.layout),
+                    currentPageTopsPx = pdfViewerState.layout.pageTopsPx,
+                    currentPageHeightsPx = pdfViewerState.layout.pageHeightsPx,
+                ) ?: return@collectLatest
+            if (command.targetScalePercent != null) {
+                delay(BROADCAST_ZOOM_SETTLE_DELAY_MS)
+                val settledCommand =
+                    broadcastViewportCommandForDocument(
+                        frame = frame,
+                        documentId = documentId,
+                        previousFrame = frame,
+                        currentPage = pdfViewerState.firstVisiblePageIndex,
+                        currentPageOffsetPx = pdfViewerState.firstVisiblePageOffsetPx,
+                        currentScalePercent = pdfViewerState.scalePercent,
+                        currentPanX = pdfViewerState.pan.x,
+                        currentPanY = pdfViewerState.pan.y,
+                        currentViewportWidthPx = pdfViewerState.viewportWidthPx,
+                        currentViewportHeightPx = pdfViewerState.viewportHeightPx,
+                        currentRowWidthPx = PdfViewerMath.rowWidthPx(pdfViewerState.layout),
+                        currentPageTopsPx = pdfViewerState.layout.pageTopsPx,
+                        currentPageHeightsPx = pdfViewerState.layout.pageHeightsPx,
+                        applyPanDuringScaleChange = true,
+                    ) ?: return@collectLatest
+                pdfViewerState.applyBroadcastViewportCommand(settledCommand)
+            } else {
+                pdfViewerState.applyBroadcastViewportCommand(command)
+            }
+        }
+    }
 
     // ---- High-res magnifier render ---------------------------------------
     val magnifierPageIndices = magnifierState.segments.map { it.pageIndex }
@@ -627,19 +839,21 @@ fun EditorPanel(
                 }
             launch {
                 runCatching {
-                    val data =
-                        renderer.renderPage(
-                            document = doc,
-                            pageIndex = src.sourceIndex,
-                            widthPx = w,
-                            heightPx = h,
-                            rotationQuarters = userRotationOf(pageIndex),
-                            cropLeftN = src.cropLeftN,
-                            cropTopN = src.cropTopN,
-                            cropRightN = src.cropRightN,
-                            cropBottomN = src.cropBottomN,
-                        )
-                    magnifierState.updateHighResBitmap(pageIndex, data.toImageBitmap())
+                    val bitmap =
+                        withContext(bitmapConversionDispatcher) {
+                            renderer.renderPage(
+                                document = doc,
+                                pageIndex = src.sourceIndex,
+                                widthPx = w,
+                                heightPx = h,
+                                rotationQuarters = userRotationOf(pageIndex),
+                                cropLeftN = src.cropLeftN,
+                                cropTopN = src.cropTopN,
+                                cropRightN = src.cropRightN,
+                                cropBottomN = src.cropBottomN,
+                            ).toImageBitmap()
+                        }
+                    magnifierState.updateHighResBitmap(pageIndex, bitmap)
                 }.onFailure { e ->
                     panelLogger.warn { "Magnifier high-res render failed for page $pageIndex: ${e::class.simpleName}" }
                 }
@@ -739,6 +953,7 @@ fun EditorPanel(
                 pdfPath = filePath,
                 annotations = annotations,
                 scale = currentScalePercent,
+                toolMode = toolMode,
                 pen = penSettings,
                 marker = markerSettings,
                 eraser = eraserSettings,
@@ -893,6 +1108,7 @@ fun EditorPanel(
                 scalePercent = viewOverride.scalePercent,
                 pageIndex = viewOverride.pageIndex,
                 pageOffsetPx = viewOverride.pageOffsetPx,
+                panXPx = viewOverride.panXPx,
             )
         }
         if (pdfState.annotationsLoaded) return@LaunchedEffect
@@ -904,6 +1120,7 @@ fun EditorPanel(
                         scalePercent = view.scale,
                         pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
                         pageOffsetPx = if (pdfState.skipPageRestore) 0 else view.currentPageOffset,
+                        panXPx = if (pdfState.skipPageRestore) null else view.panXPx,
                     )
                 }
                 // Вторичный таб того же файла открываем в обычном (не reading) режиме —
@@ -955,9 +1172,11 @@ fun EditorPanel(
                     scalePercent = bundle.scale,
                     pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,
                     pageOffsetPx = if (pdfState.skipPageRestore) 0 else bundle.currentPageOffset,
+                    panXPx = null,
                 )
             }
             onRestoreToolSettings(
+                bundle.toolMode,
                 bundle.pen.sanitizedForCurrentScheme(),
                 bundle.marker.sanitizedForCurrentScheme(),
                 bundle.eraser,
@@ -1002,9 +1221,7 @@ fun EditorPanel(
                 pdfPath = state.filePath,
                 annotations = annotations,
                 scale = state.pdfViewerState.scalePercent,
-                pen = penSettings,
-                marker = markerSettings,
-                eraser = eraserSettings,
+                preserveToolSettings = true,
                 currentPage = state.pdfViewerState.firstVisiblePageIndex,
                 currentPageOffset = state.pdfViewerState.firstVisiblePageOffsetPx,
                 favoritePageIndices = state.favoritePageIndices.toSet(),
@@ -1050,19 +1267,7 @@ fun EditorPanel(
     // «убийство приложения»: навигация успевает сохраниться по ходу сессии,
     // а не только на «назад»/«в библиотеку».
     LaunchedEffect(pdfState) {
-        snapshotFlow {
-            AnnotationViewState(
-                scale = pdfViewerState.scalePercent,
-                currentPage = pdfViewerState.firstVisiblePageIndex,
-                currentPageOffset = pdfViewerState.firstVisiblePageOffsetPx,
-                readingMode = pdfState.readingMode,
-                reflowAnchorBlockIndex = currentReadingAnchor.blockIndex,
-                reflowAnchorCharStart = currentReadingAnchor.charStart,
-                pageRotations = pageRotations.toMap(),
-                spreadSplit = pdfState.spreadSplit,
-                spreadViewOverride = pdfState.spreadViewOverride,
-            )
-        }.drop(1)
+        snapshotFlow { currentViewState() }.drop(1)
             .distinctUntilChanged()
             .debounce(PANEL_AUTOSAVE_DEBOUNCE)
             .collect { view ->
@@ -1070,6 +1275,17 @@ fun EditorPanel(
                     panelLogger.warn { "View-state save failed for $filePath: ${e::class.simpleName}" }
                 }
             }
+    }
+    DisposableEffect(pdfState, annotationRepository, filePath) {
+        onDispose {
+            if (canPersistLiveViewState()) {
+                runBlocking(NonCancellable) {
+                    annotationRepository.saveViewState(filePath, currentViewState()).onFailure { e ->
+                        panelLogger.warn { "Final view-state save failed for $filePath: ${e::class.simpleName}" }
+                    }
+                }
+            }
+        }
     }
 
     // ---- Gesture pipeline -------------------------------------------------
@@ -1711,8 +1927,9 @@ fun EditorPanel(
                     ),
             ) {
                 val bm = bitmap
+                val layer = pdfLayer
                 Box(modifier = Modifier.fillMaxSize()) {
-                    if (bm != null) {
+                    if (layer != null) {
                         val pdfDrawingState =
                             remember(pageIndex) {
                                 drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
@@ -1721,10 +1938,10 @@ fun EditorPanel(
                             magnifierState.enabled &&
                                 magnifierState.segments.any { it.pageIndex == pageIndex }
                         if (isMagnifierPage) {
-                            SideEffect { magnifierState.updatePageBitmap(pageIndex, bm) }
+                            bm?.let { bitmap -> SideEffect { magnifierState.updatePageBitmap(pageIndex, bitmap) } }
                         }
                         DrawablePdfPage(
-                            bitmap = bm,
+                            pdfLayer = layer,
                             pdfDrawingState = pdfDrawingState,
                             toolMode = toolMode,
                             penSettings = penSettings,
@@ -1756,6 +1973,25 @@ fun EditorPanel(
                                     ),
                         )
                     }
+                }
+            }
+
+            remoteBroadcastToolMode?.let { mode ->
+                Surface(
+                    modifier =
+                        Modifier
+                            .align(Alignment.TopStart)
+                            .padding(12.dp),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    tonalElevation = 2.dp,
+                ) {
+                    Text(
+                        text = "Планшет: ${mode.broadcastLabel()}",
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                    )
                 }
             }
 

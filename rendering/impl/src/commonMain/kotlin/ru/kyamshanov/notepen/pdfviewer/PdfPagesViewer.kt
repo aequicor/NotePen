@@ -160,6 +160,7 @@ expect class PdfViewerState {
         scalePercent: Int,
         pageIndex: Int,
         pageOffsetPx: Int,
+        panXPx: Float? = null,
     )
 
     /**
@@ -222,6 +223,12 @@ expect class PdfViewerState {
     /** Текущий зум (1.0 = 100%). */
     var zoom: Float
         private set
+
+    /** Ширина области просмотра в физических пикселях. */
+    val viewportWidthPx: Float
+
+    /** Высота области просмотра в физических пикселях. */
+    val viewportHeightPx: Float
 
     /**
      * Транзитный коэффициент масштаба, применяемый поверх [zoom] во время

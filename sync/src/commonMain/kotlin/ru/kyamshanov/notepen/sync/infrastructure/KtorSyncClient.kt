@@ -2,10 +2,13 @@ package ru.kyamshanov.notepen.sync.infrastructure
 
 import io.github.oshai.kotlinlogging.KotlinLogging
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.receiveDeserialized
 import io.ktor.client.plugins.websocket.sendSerialized
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.websocket.Frame
+import io.ktor.websocket.WebSocketSession
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +26,9 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.serialization.json.Json
+import ru.kyamshanov.notepen.sync.domain.Direction
+import ru.kyamshanov.notepen.sync.domain.SessionCipher
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.HostMessage
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
@@ -35,6 +41,22 @@ private val logger = KotlinLogging.logger {}
 
 private const val RECONNECT_DEADLINE_MS = 10_000L
 private const val RECONNECT_RETRY_INTERVAL_MS = 1_000L
+
+/**
+ * Upper bound, in bytes, for a single WebSocket frame on the sync channel — a DoS
+ * guard so a hostile peer (or host) can't force unbounded buffering with one giant
+ * frame. Ktor's default is effectively unlimited, so this must be set explicitly on
+ * **every** sync WebSocket install: the `KtorPeerServer` server side and each
+ * client-side `install(WebSockets)` that backs a [KtorSyncClient].
+ *
+ * Sizing: file transfers travel as frames, so this must stay comfortably above the
+ * largest legitimate frame. The biggest frame is a [NetworkMessage.FileChunk], whose
+ * payload is `CHUNK_SIZE_BYTES` (64 KiB) of raw bytes Base64-encoded (~4/3 inflation
+ * ≈ 88 KiB) plus a small JSON envelope. 8 MiB leaves ~90x headroom, so it never
+ * truncates a chunk; if `CHUNK_SIZE_BYTES` is ever raised, keep this well above
+ * `CHUNK_SIZE_BYTES * 4/3` to avoid breaking transfer.
+ */
+public const val MAX_WS_FRAME_SIZE_BYTES: Long = 8L * 1024 * 1024
 
 /**
  * [SyncClient] backed by Ktor WebSocket — supports multiple concurrent host
@@ -193,6 +215,10 @@ private class HostSession(
     private val outgoingChannel = Channel<NetworkMessage>(Channel.BUFFERED)
     private val firstPairingResult = CompletableDeferred<Result<DeviceInfo>>()
 
+    // Manual (de)serialization is used for the encrypted post-handshake frames, so we
+    // need our own Json with the same `type` discriminator the cleartext converter uses.
+    private val json = Json { classDiscriminator = "type" }
+
     @Volatile var peer: DeviceInfo? = null
         private set
 
@@ -261,58 +287,45 @@ private class HostSession(
 
     private suspend fun runSession(firstAttempt: Boolean): SessionOutcome {
         var outcome: SessionOutcome = SessionOutcome.Disconnected
+        // Fresh per-session client nonce so every (re)connection derives a distinct
+        // AEAD key from the long-lived pairing code, and so the key-confirmation
+        // hello is bound to this specific session.
+        val clientNonce = SecureChannel.newNonce()
         try {
             httpClient.webSocket(host = server.host, port = server.port, path = "/ws") {
-                sendSerialized<NetworkMessage>(NetworkMessage.PairRequest(code = pairingCode, device = selfInfo))
-                when (val reply = receiveDeserialized<NetworkMessage>()) {
-                    is NetworkMessage.PairAccepted -> {
-                        peer = reply.serverDevice
-                        connectedFlag = true
-                        onStateChange(server.id, PairingState.Connected(reply.serverDevice))
-                        outcome = SessionOutcome.Paired(reply.serverDevice)
-                        logger.info { "Paired with ${reply.serverDevice.name} (host=${server.id})" }
-                    }
-                    is NetworkMessage.PairRejected -> {
-                        onStateChange(server.id, PairingState.Error("Pairing rejected: ${reply.reason}"))
-                        return@webSocket Unit.also {
-                            outcome =
-                                if (firstAttempt) {
-                                    SessionOutcome.PairingFailed(reply.reason)
-                                } else {
-                                    SessionOutcome.Disconnected
-                                }
-                        }
-                    }
-                    else -> {
-                        onStateChange(server.id, PairingState.Error("Unexpected reply: $reply"))
-                        outcome = SessionOutcome.PairingFailed("unexpected reply")
+                sendSerialized<NetworkMessage>(
+                    NetworkMessage.PairRequest(code = pairingCode, device = selfInfo, clientNonce = clientNonce),
+                )
+                val pairReply = receivePairReply(firstAttempt)
+                outcome = pairReply.outcome
+                val accepted = pairReply.accepted ?: return@webSocket
+
+                // Authenticated-encryption upgrade (F2/F3): derive the session cipher
+                // from the pairing code + both nonces and confirm the host holds the
+                // same key BEFORE treating the link as paired. A host (or MITM) that
+                // lacks the code cannot produce a hello that opens, so we fail closed
+                // and never expose this client's data on the channel.
+                val cipher =
+                    confirmKeysOrFail(this, accepted, clientNonce) ?: run {
+                        outcome = SessionOutcome.PairingFailed("secure channel setup failed")
                         return@webSocket
                     }
+
+                // Confirmed: now we are genuinely paired with an authenticated host.
+                peer = accepted.serverDevice
+                connectedFlag = true
+                onStateChange(server.id, PairingState.Connected(accepted.serverDevice))
+                outcome = SessionOutcome.Paired(accepted.serverDevice)
+                if (firstAttempt) {
+                    firstPairingResult.complete(Result.success(accepted.serverDevice))
                 }
+                logger.info { "Paired with ${accepted.serverDevice.name} (host=${server.id})" }
 
                 val session = this
-                val forwarder =
-                    launch {
-                        try {
-                            while (true) {
-                                val msg = outgoingChannel.receive()
-                                session.sendSerialized<NetworkMessage>(msg)
-                            }
-                        } catch (_: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
-                            // Channel closed by [HostSession.cancel] — normal shutdown path.
-                        }
-                    }
+                val forwarder = launchForwarder(sessionScope = this, session = session, cipher = cipher)
                 try {
                     val hostPeer = peer ?: server
-                    while (true) {
-                        val msg = receiveDeserialized<NetworkMessage>()
-                        if (msg is NetworkMessage.Disconnect) {
-                            // Host deliberately closed us — terminal, do not reconnect.
-                            outcome = SessionOutcome.RemoteClosed
-                            break
-                        }
-                        incomingFlow.emit(HostMessage(hostPeer, msg))
-                    }
+                    outcome = consumeEncryptedIncoming(session, cipher, hostPeer)
                 } finally {
                     forwarder.cancel()
                     connectedFlag = false
@@ -325,6 +338,102 @@ private class HostSession(
             connectedFlag = false
         }
         return outcome
+    }
+
+    private suspend fun DefaultClientWebSocketSession.receivePairReply(firstAttempt: Boolean): PairReply =
+        when (val reply = receiveDeserialized<NetworkMessage>()) {
+            is NetworkMessage.PairAccepted -> PairReply(accepted = reply, outcome = SessionOutcome.Paired(reply.serverDevice))
+            is NetworkMessage.PairRejected -> {
+                onStateChange(server.id, PairingState.Error("Pairing rejected: ${reply.reason}"))
+                PairReply(
+                    accepted = null,
+                    outcome =
+                        if (firstAttempt) {
+                            SessionOutcome.PairingFailed(reply.reason)
+                        } else {
+                            SessionOutcome.Disconnected
+                        },
+                )
+            }
+            else -> {
+                onStateChange(server.id, PairingState.Error("Unexpected reply: $reply"))
+                PairReply(accepted = null, outcome = SessionOutcome.PairingFailed("unexpected reply"))
+            }
+        }
+
+    private suspend fun confirmKeysOrFail(
+        session: WebSocketSession,
+        accepted: NetworkMessage.PairAccepted,
+        clientNonce: String,
+    ): SessionCipher? =
+        runCatching {
+            confirmKeys(session = session, accepted = accepted, clientNonce = clientNonce)
+        }.getOrElse {
+            logger.warn { "Key confirmation with ${server.id} failed: ${it.message}" }
+            onStateChange(server.id, PairingState.Error("Secure channel setup failed"))
+            null
+        }
+
+    private fun launchForwarder(
+        sessionScope: CoroutineScope,
+        session: WebSocketSession,
+        cipher: SessionCipher,
+    ): Job =
+        sessionScope.launch {
+            try {
+                while (true) {
+                    val msg = outgoingChannel.receive()
+                    SecureChannel.sendEncrypted(session, cipher, Direction.CLIENT_TO_SERVER, json, msg)
+                }
+            } catch (_: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
+                // Channel closed by [HostSession.cancel] — normal shutdown path.
+            }
+        }
+
+    private suspend fun consumeEncryptedIncoming(
+        session: WebSocketSession,
+        cipher: SessionCipher,
+        hostPeer: DeviceInfo,
+    ): SessionOutcome {
+        var outcome: SessionOutcome = SessionOutcome.Paired(hostPeer)
+        var running = true
+        while (running) {
+            // Inbound application frames are encrypted (server→client). null =
+            // socket closed; a thrown SessionCipherException = forged/tampered
+            // frame, caught by the outer handler which ends the session.
+            val msg = SecureChannel.receiveEncrypted(session, cipher, Direction.SERVER_TO_CLIENT, json)
+            when {
+                msg == null -> running = false
+                msg is NetworkMessage.Disconnect -> {
+                    // Host deliberately closed us — terminal, do not reconnect.
+                    outcome = SessionOutcome.RemoteClosed
+                    running = false
+                }
+                else -> incomingFlow.emit(HostMessage(hostPeer, msg))
+            }
+        }
+        return outcome
+    }
+
+    /**
+     * Runs the client side of the key-confirmation handshake on an open [session].
+     *
+     * Derives the [SessionCipher] from [pairingCode] + the two nonces, reads the
+     * host's encrypted hello and verifies it echoes [NetworkMessage.PairAccepted.serverNonce]
+     * (proves the host holds the key — i.e. knows the pairing code), then sends this
+     * client's encrypted hello-ack echoing [clientNonce]. Throws on any
+     * derivation/decrypt/marker/nonce failure so the caller fails the session closed.
+     */
+    private suspend fun confirmKeys(
+        session: WebSocketSession,
+        accepted: NetworkMessage.PairAccepted,
+        clientNonce: String,
+    ): SessionCipher {
+        val cipher = SecureChannel.deriveCipher(pairingCode, clientNonce = clientNonce, serverNonce = accepted.serverNonce)
+        val helloFrame = SecureChannel.nextBinaryFrame(session) ?: error("connection closed before encrypted hello")
+        SecureChannel.verifyHello(cipher, Direction.SERVER_TO_CLIENT, helloFrame, expectedPeerNonce = accepted.serverNonce)
+        session.send(Frame.Binary(fin = true, data = SecureChannel.buildHello(cipher, Direction.CLIENT_TO_SERVER, clientNonce)))
+        return cipher
     }
 
     private suspend fun attemptReconnect(): Boolean {
@@ -347,6 +456,11 @@ private class HostSession(
         return false
     }
 }
+
+private data class PairReply(
+    val accepted: NetworkMessage.PairAccepted?,
+    val outcome: SessionOutcome,
+)
 
 private sealed class SessionOutcome {
     data class Paired(

@@ -1,2 +1,7 @@
 approval_policy = "never"
 sandbox_mode = "danger-full-access"
+default_permissions = ":danger-full-access"
+
+# Project note for Codex agents:
+# AGENTS.md defines automatic Russian КД creation/update rules.
+# КД template: vault/_templates/kd.md

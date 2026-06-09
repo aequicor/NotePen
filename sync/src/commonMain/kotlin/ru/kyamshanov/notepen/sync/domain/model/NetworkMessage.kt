@@ -2,6 +2,7 @@ package ru.kyamshanov.notepen.sync.domain.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import ru.kyamshanov.notepen.drawing.api.ToolMode
 
 /**
  * Typed WebSocket protocol for peer-to-peer communication.
@@ -11,19 +12,40 @@ import kotlinx.serialization.Serializable
  */
 @Serializable
 sealed class NetworkMessage {
-    /** Sent by a client immediately after WebSocket upgrade to initiate pairing. */
+    /**
+     * Sent by a client immediately after WebSocket upgrade to initiate pairing.
+     *
+     * [clientNonce] is a fresh, base64-encoded random value the client mixes into
+     * the per-session key derivation (alongside the server's nonce). It is **not**
+     * a secret — it travels in the cleartext handshake — and exists only so the
+     * same long-lived pairing code yields a different AEAD key on every session
+     * and to bind the encrypted key-confirmation to this specific connection. The
+     * pairing [code] itself is the shared secret and is never used as key material
+     * directly on the wire beyond the existing rate-limited validation. Empty for
+     * peers predating the encrypted channel (such a peer fails key confirmation).
+     */
     @Serializable
     @SerialName("pair_request")
     data class PairRequest(
         val code: String,
         val device: DeviceInfo,
+        val clientNonce: String = "",
     ) : NetworkMessage()
 
-    /** Sent by the server when the pairing code is accepted. */
+    /**
+     * Sent by the server when the pairing code is accepted.
+     *
+     * [serverNonce] mirrors [PairRequest.clientNonce]: a fresh, base64-encoded,
+     * non-secret random value the server contributes to the session key
+     * derivation. Both nonces are combined into the HKDF salt so neither side
+     * alone fixes the derived key. Empty for peers predating the encrypted
+     * channel.
+     */
     @Serializable
     @SerialName("pair_accepted")
     data class PairAccepted(
         val serverDevice: DeviceInfo,
+        val serverNonce: String = "",
     ) : NetworkMessage()
 
     /** Sent by the server when the pairing code is rejected or expired. */
@@ -86,9 +108,11 @@ sealed class NetworkMessage {
     ) : NetworkMessage()
 
     /**
-     * Broadcast from host to viewer: current viewport and optional pointer position.
+     * Broadcast from the controlling device to passive viewers: current document,
+     * viewport, selected tool and optional pointer position.
      *
-     * Sent at ≤30 fps via `conflate()` to avoid flooding the WebSocket.
+     * Sent by [ru.kyamshanov.notepen.sync.domain.projection.DocumentBroadcastController]
+     * with pacing + `conflate()` to avoid flooding the WebSocket.
      * [pointerX] / [pointerY] are normalised [0..1] within the page, or null if
      * the pointer is not active.
      */
@@ -100,6 +124,11 @@ sealed class NetworkMessage {
         val viewportScale: Float,
         val pointerX: Float? = null,
         val pointerY: Float? = null,
+        val documentId: String = "",
+        val viewportOffsetX: Float = 0f,
+        val toolMode: ToolMode = ToolMode.NONE,
+        val viewportCenterX: Float? = null,
+        val viewportCenterY: Float? = null,
     ) : NetworkMessage()
 
     /** Viewer sends this to request detaching from the host's viewport ("free scroll"). */
