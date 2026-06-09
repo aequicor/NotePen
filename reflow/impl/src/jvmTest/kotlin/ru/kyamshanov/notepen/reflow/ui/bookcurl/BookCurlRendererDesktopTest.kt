@@ -16,6 +16,7 @@ import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.fail
 
@@ -26,6 +27,64 @@ class BookCurlRendererDesktopTest {
             renderCurlFrame(progress = progress).writePng(File(PREVIEW_DIR, "curl-${(progress * 100).toInt()}.png"))
             renderOverlayFrame(progress = progress).writePng(File(PREVIEW_DIR, "overlay-${(progress * 100).toInt()}.png"))
         }
+    }
+
+    @Test
+    fun singlePageBackFaceMirrorsNextPageColumn() {
+        // Требование: в ОДНОСТРАНИЧНОМ режиме изнанка переворачиваемого листа показывает СЛЕДУЮЩУЮ
+        // страницу, отзеркаленную по горизонтали. Воспроизводим точную цепочку BookCurlOverlay:
+        // crop(центральная колонка следующей страницы) → mirror — и проверяем, что метки колонки
+        // действительно меняются местами (лево↔право), т.е. изнанка = зеркало следующей страницы.
+        val windowWidth = 260
+        val pageWidth = 120
+        val columnLeft = (windowWidth - pageWidth) / 2 // 70 — центрированная колонка контента
+
+        // «Следующая страница»: КРАСНАЯ метка у ЛЕВОГО края колонки, ЗЕЛЁНАЯ — у ПРАВОГО.
+        val nextPage = ImageBitmap(windowWidth, PAGE_HEIGHT)
+        CanvasDrawScope().draw(
+            density = Density(1f),
+            layoutDirection = LayoutDirection.Ltr,
+            canvas = Canvas(nextPage),
+            size = Size(windowWidth.toFloat(), PAGE_HEIGHT.toFloat()),
+        ) {
+            drawRect(Color.White)
+            drawRect(Color.Red, topLeft = Offset(columnLeft.toFloat(), 0f), size = Size(20f, PAGE_HEIGHT.toFloat()))
+            drawRect(
+                Color.Green,
+                topLeft = Offset((columnLeft + pageWidth - 20).toFloat(), 0f),
+                size = Size(20f, PAGE_HEIGHT.toFloat()),
+            )
+        }
+
+        val geo =
+            bookCurlBackFaceGeometry(
+                fullWidth = nextPage.width,
+                pageWidth = pageWidth,
+                direction = 1,
+                twoPageSpread = false,
+                spineGapPx = 0,
+            )
+        // Изнанка кропится из ЦЕНТРАЛЬНОЙ колонки следующей страницы (та же геометрия, что у лица).
+        assertEquals(columnLeft, geo.sourceX, "back face must crop the centered content column of the next page")
+        assertEquals(pageWidth, geo.width, "back face crop width must equal the page column width")
+
+        val backFace = mirrorBookCurlImageHorizontally(cropBookCurlImage(image = nextPage, sourceX = geo.sourceX, width = geo.width))
+        assertEquals(pageWidth, backFace.width, "back face must keep the page column width")
+
+        val pixels = backFace.toPixelMap()
+        val midY = PAGE_HEIGHT / 2
+        val leftEdge = pixels[4, midY]
+        val rightEdge = pixels[backFace.width - 5, midY]
+
+        // До зеркала: красное слева, зелёное справа. После зеркала метки меняются местами.
+        assertTrue(
+            leftEdge.green > leftEdge.red && leftEdge.green > leftEdge.blue,
+            "after mirror the next-page RIGHT (green) marker must land on the LEFT edge: $leftEdge",
+        )
+        assertTrue(
+            rightEdge.red > rightEdge.green && rightEdge.red > rightEdge.blue,
+            "after mirror the next-page LEFT (red) marker must land on the RIGHT edge: $rightEdge",
+        )
     }
 
     @Test

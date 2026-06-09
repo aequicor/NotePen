@@ -198,6 +198,7 @@ Status: PEND · PASS · FAIL · SKIP — Severity: 🔴 critical · 🟠 regress
 | RC-REFLOW-009 | 🔴 | 1 | unit | Дисковый кэш reflow инвалидируется при смене версии парсера даже при неизменных size/mtime | A cache entry parsed by a prior parser version is treated stale: read returns null and the file is deleted. | 64ea785 | app/byCompose/common/src/jvmTest/kotlin/ru/kyamshanov/notepen/reflow/FileSystemReflowDocumentDiskCacheTest.kt | PEND |
 | RC-REFLOW-010 | 🟡 | 2 | visual | TableView красит фон по row.isHeader (а не rowIndex==0) | Header shading follows row.isHeader: the merged header row is shaded; a non-header row 0 is transparent. | 0f4579d | → AV-REFLOW-01 | PEND |
 | RC-REFLOW-011 | 🟠 | 2 | gesture | Reading-позиция сохраняется при смене ориентации (тот же ПАССАЖ, а не индекс страницы) | The anchored passage stays on screen across portrait↔landscape; only the page number adapts. | aca2211 | → AV-REFLOW-02 | PEND |
+| RC-REFLOW-012 | 🟡 | 1 | unit | Одностраничный book-curl: изнанка переворачиваемого листа = центральная колонка СЛЕДУЮЩЕЙ страницы, отзеркаленная по горизонтали | In single-page mode the back face crops the next page's centered content column and mirrors it horizontally — the column's left/right markers swap sides. | pending | reflow/impl/src/jvmTest/kotlin/ru/kyamshanov/notepen/reflow/ui/bookcurl/BookCurlRendererDesktopTest.kt:33 | PASS |
 
 ### RENDER — Rendering pipeline
 

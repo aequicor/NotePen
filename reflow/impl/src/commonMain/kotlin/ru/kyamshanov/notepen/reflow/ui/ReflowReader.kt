@@ -1,6 +1,7 @@
 package ru.kyamshanov.notepen.reflow.ui
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -126,8 +127,8 @@ import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.SourceSpan
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
-import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlOverlay
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhase
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlState
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.PageTurnStyle
@@ -1297,6 +1298,10 @@ private fun PagedReflowContent(
             targetProgress: Float,
             phase: BookCurlPhase,
             initialVelocity: Float = 0f,
+            // Осознанный переворот без флика (клавиша/тап): катим завиток детерминированным tween'ом
+            // заданной длительности, чтобы он ЗАМЕТНО прокатился, а не «щёлкнул» пружиной. null/0 —
+            // штатная пружина оседания (перетаскивание, возврат).
+            deliberateMs: Int? = null,
         ) {
             curlPhase = phase
             // К ЗАВЕРШЁННОМУ состоянию (target=1) оседаем БЕЗ отскока. Недодемпфированная пружина
@@ -1310,10 +1315,14 @@ private fun PagedReflowContent(
             Animatable(curlProgress).animateTo(
                 targetValue = targetProgress,
                 animationSpec =
-                    spring(
-                        dampingRatio = settleDamping,
-                        stiffness = curlStyle.settleStiffness,
-                    ),
+                    if (deliberateMs != null && deliberateMs > 0) {
+                        tween(durationMillis = deliberateMs, easing = LinearOutSlowInEasing)
+                    } else {
+                        spring(
+                            dampingRatio = settleDamping,
+                            stiffness = curlStyle.settleStiffness,
+                        )
+                    },
                 initialVelocity = initialVelocity,
             ) {
                 curlProgress = value.coerceIn(0f, 1f)
@@ -1387,7 +1396,9 @@ private fun PagedReflowContent(
                             curlSourcePage = pagerState.currentPage
                             curlTargetPage = target
                             curlProgress = PAGE_CURL_VISIBLE_PROGRESS
-                            animateCurlTo(1f, BookCurlPhase.Completing)
+                            // Клавиша/тап = осознанный переворот без флика: катим завиток заметным
+                            // tween'ом (длительность от материала листа), а не быстрой пружиной.
+                            animateCurlTo(1f, BookCurlPhase.Completing, deliberateMs = curlStyle.deliberateTurnMs)
                             pagerState.scrollToPage(target)
                             resetCurl()
                         } else {
