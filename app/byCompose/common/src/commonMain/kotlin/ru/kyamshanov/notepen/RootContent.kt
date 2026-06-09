@@ -110,6 +110,7 @@ fun RootContent(
         if (!hasBroadcastPeer || activeChild is RootComponent.Child.DetailsChild) return@LaunchedEffect
         openDocumentIds.distinctUntilChanged().collect { documentId ->
             if (documentId.isNullOrBlank()) return@collect
+            if (component.stack.value.active.instance is RootComponent.Child.DetailsChild) return@collect
             val uri = resolver(documentId) ?: return@collect
             component.openDetailsExternally(uri)
         }

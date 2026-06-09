@@ -160,7 +160,7 @@ actual class PdfViewerState internal constructor(
     private var pendingInitialOffset: Int = initialPageOffsetPx
     private var pendingInitialScalePercent: Int? = null
     private var pendingInitialPanXPx: Float? = null
-    private var hasInitialCentered: Boolean = initialPanX != 0f || initialPanY != 0f
+    private var hasInitialCentered: Boolean = false
 
     /** Отложенная перецентровка (см. [requestRecenter]). */
     private var pendingRecenterPage: Int? = null
@@ -178,8 +178,9 @@ actual class PdfViewerState internal constructor(
         if (!hasInitialCentered && viewportSize.width > 0 && pages.isNotEmpty()) {
             // Центрируем по обеим осям: по X — всегда, по Y — когда документ
             // короче вьюпорта (одностраничный PDF / изображение), иначе верх
-            // прижат к кромке.
-            pan = centeredAndClamped(Offset.Zero)
+            // прижат к кромке. При восстановлении из Saver pan уже содержит
+            // сохранённые координаты — clamp валидирует их против вьюпорта.
+            pan = centeredAndClamped(pan)
             hasInitialCentered = true
         }
         val page = pendingInitialPage ?: return

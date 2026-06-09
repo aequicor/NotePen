@@ -114,7 +114,6 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import ru.kyamshanov.notepen.annotation.domain.model.BuiltinToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
@@ -590,7 +589,7 @@ fun DetailsContent(
     }
     DisposableEffect(tabSession, sessionRepository) {
         onDispose {
-            runBlocking(NonCancellable) {
+            editorBackgroundScope.launch(NonCancellable) {
                 sessionRepository.saveAutosave(tabSession.captureSession())
             }
         }
@@ -829,7 +828,7 @@ fun DetailsContent(
     val latestSaveAllOpenTabs by rememberUpdatedState(saveAllOpenTabs)
     DisposableEffect(tabSession, annotationRepository) {
         onDispose {
-            runBlocking(NonCancellable) {
+            editorBackgroundScope.launch(NonCancellable) {
                 latestSaveAllOpenTabs()
                 component.saveLastPageIndex(latestCurrentPageForFinalSave - 1)
             }
