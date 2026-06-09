@@ -51,6 +51,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -93,6 +94,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
+import ru.kyamshanov.notepen.background.DocumentBackgroundSettingsSheet
+import ru.kyamshanov.notepen.background.rememberPaperBrush
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
@@ -164,6 +167,9 @@ private const val PANEL_SIDEBAR_ANIM_MS = 220
 private const val REFLOW_PROBE_DELAY_AFTER_OPEN_MS = 750L
 private const val NATIVE_PEN_FALLBACK_SUPPRESS_MS = 500L
 private const val BROADCAST_ZOOM_SETTLE_DELAY_MS = 90L
+
+/** Порог светимости фона темы, ниже которого выбираем тёмный вариант бумажной текстуры. */
+private const val DARK_THEME_LUMINANCE = 0.5f
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
@@ -287,6 +293,8 @@ class PanelControls(
     val liveSyncEnabled: Boolean,
     /** Переключает живую синхронизацию документа (PC ↔ планшет правки в реальном времени). */
     val toggleLiveSync: () -> Unit,
+    /** Открывает лист настроек фона документа («текстурированная бумага»). */
+    val onOpenBackgroundSettings: () -> Unit,
 )
 
 /**
@@ -536,6 +544,9 @@ fun EditorPanel(
     // редакторе или по маркеру заметки в ридере). null — поповер скрыт. Сбрасывается
     // при смене документа.
     var editingNote by remember(pdfState) { mutableStateOf<PageNote?>(null) }
+    // Открыт ли лист настроек фона документа («текстурированная бумага»). Открывается из
+    // тулбара редактора (PanelControls.onOpenBackgroundSettings) и из панели ридера.
+    var showBackgroundSheet by remember(pdfState) { mutableStateOf(false) }
     // Якорь чтения уровня документа: «валюта» позиции в reflow-режиме (см. TextAnchor).
     // Живёт здесь, а не в ReflowReader: переживает закрытие/открытие reader-mode в сессии
     // и пишется в .view-сайдкар (autosave ниже), чтобы при следующем открытии документа
@@ -677,11 +688,22 @@ fun EditorPanel(
             pageRotations = pageRotations.toMap(),
             spreadSplit = pdfState.spreadSplit,
             spreadViewOverride = pdfState.spreadViewOverride,
+            backgroundStyle = pdfState.backgroundStyle,
+            replaceWhiteBackground = pdfState.replaceWhiteBackground,
         )
     }
     val canPersistLiveViewState: () -> Boolean = {
         pages.isNotEmpty() && pdfViewerState.basePageWidthPx > 0f
     }
+
+    // Бумажная текстура фона документа («текстурированная бумага»). Кисть строится в
+    // app-слое (каталог + плитка) и передаётся ВНИЗ во вьювер/ридер — :rendering:impl /
+    // :reflow:impl про каталог ресурсов не знают. `null` для стиля "plain".
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < DARK_THEME_LUMINANCE
+    val paperBrush = rememberPaperBrush(pdfState.backgroundStyle, isDarkTheme)
+    // Замена белого фона PDF-страницы включается отдельным переключателем документа;
+    // иначе страница остаётся белой, а бумага видна только на холсте вокруг страниц.
+    val pageBackgroundBrush = if (pdfState.replaceWhiteBackground) paperBrush else null
 
     LaunchedEffect(
         documentBroadcastController,
@@ -1144,6 +1166,10 @@ fun EditorPanel(
                     // Книжный разворот (FEATURE #5): восстанавливаем ЯВНЫЙ выбор
                     // пользователя (null = авто-по-ширине). Отдельно от #4 и reflow.
                     pdfState.spreadViewOverride = view.spreadViewOverride
+                    // Фон документа («текстурированная бумага») — поле вида, shared между
+                    // вкладками одного файла, поэтому заполняем один раз первой вкладкой.
+                    pdfState.backgroundStyle = view.backgroundStyle
+                    pdfState.replaceWhiteBackground = view.replaceWhiteBackground
                 }
                 // Пользовательский поворот страниц персистентен — восстанавливаем
                 // (штрихи на диске уже в повёрнутой/разделённой системе координат,
@@ -1824,6 +1850,7 @@ fun EditorPanel(
                         userPausedSync = liveSyncEnabled
                         liveSyncController?.toggle(documentId)
                     },
+                    onOpenBackgroundSettings = { showBackgroundSheet = true },
                 ),
             )
         }
@@ -1858,6 +1885,7 @@ fun EditorPanel(
                 renderer = renderer,
                 userRotationQuarters = userRotationOf,
                 pageSource = pageSourceOf,
+                canvasBackground = paperBrush,
                 modifier =
                     Modifier
                         .fillMaxSize()
@@ -1958,6 +1986,7 @@ fun EditorPanel(
                             isMagnifierGrabbing = isMagnifierPage && magnifierTargetGestureController.isActive,
                             lowLatencyViewportScale = pdfViewerState.residualScale,
                             isZooming = { pdfViewerState.isVisualTransformActive },
+                            pageBackground = pageBackgroundBrush,
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -2277,6 +2306,11 @@ fun EditorPanel(
                             // уходил под него (Defect C). Те же инсеты, что использует PDF-путь.
                             topInset = fitWidthTopInset,
                             startInset = fitWidthStartInset,
+                            // Бумажная текстура страницы чтения: показывается при любом
+                            // непустом стиле фона (в reflow нет белого PDF, поэтому
+                            // переключатель «заменять белый» здесь не участвует).
+                            pageBackground = paperBrush,
+                            onOpenBackgroundSettings = { showBackgroundSheet = true },
                         )
                     }
                 } else {
@@ -2377,6 +2411,18 @@ fun EditorPanel(
                     handlePanelNoteRemoved(pdfState.notes, note, syncEngineProvider.value)
                     editingNote = null
                 },
+            )
+        }
+        if (showBackgroundSheet) {
+            // Запись в pdfState поднимает snapshotFlow { currentViewState() } → автосейв
+            // .view-сайдкара (см. view-state autosave выше), отдельная персистенция не нужна.
+            DocumentBackgroundSettingsSheet(
+                currentStyle = pdfState.backgroundStyle,
+                replaceWhiteBackground = pdfState.replaceWhiteBackground,
+                isDark = isDarkTheme,
+                onStyleChange = { pdfState.backgroundStyle = it },
+                onReplaceWhiteChange = { pdfState.replaceWhiteBackground = it },
+                onDismiss = { showBackgroundSheet = false },
             )
         }
     }

@@ -55,6 +55,39 @@ class ReaderSnapshotTest {
         }
 
     /**
+     * Скролл-режим с бумажной текстурой фона («текстурированная бумага»): [pageBackground]
+     * тайлится поверх цвета темы (Multiply), так что тема тонирует текстуру, а текст
+     * остаётся читаемым. Кисть строим прямо в тесте (каталог текстур живёт в app-слое,
+     * `:reflow:impl` про него не знает) — проверяем именно путь `paperBackground` в
+     * скролл-режиме (единственный headless-проверяемый; curl-захват см. live).
+     */
+    @Test
+    fun scrollModeRendersTexturedBackground() =
+        runDesktopComposeUiTest {
+            mainClock.autoAdvance = false
+            val doc = sampleDoc()
+            setContent {
+                ReflowReader(
+                    document = doc,
+                    stored = StoredReaderSettings(current = ReaderSettings(paged = false)),
+                    onStoredChange = {},
+                    barVisible = false,
+                    onBarVisibleChange = {},
+                    newPresetIdProvider = { "preset" },
+                    pageBackground =
+                        androidx.compose.ui.graphics.Brush.linearGradient(
+                            listOf(
+                                androidx.compose.ui.graphics.Color(0xFFFFFFFF),
+                                androidx.compose.ui.graphics.Color(0xFFE7DCC4),
+                            ),
+                        ),
+                )
+            }
+            settle()
+            onRoot().captureRoboImage("snapshots/scroll_textured_background.png")
+        }
+
+    /**
      * Страничный режим: при смене типографики (компактный → долгое чтение, крупнее) высоты
      * блоков пересчитываются, поэтому низ страницы не обрезается. Без переснятия высот текст
      * пропадал бы между страницами (см. PagedReflowContent.measureKey).

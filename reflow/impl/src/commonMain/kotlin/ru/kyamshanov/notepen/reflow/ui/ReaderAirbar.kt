@@ -132,6 +132,7 @@ internal fun ReaderAirbar(
     autoHideMs: Long,
     maxVerticalMarginDp: Float,
     onRequestHide: () -> Unit,
+    onOpenBackgroundSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -186,6 +187,7 @@ internal fun ReaderAirbar(
                     onChange = ::emit,
                     textColor = textColor,
                     maxVerticalMarginDp = maxVerticalMarginDp,
+                    onOpenBackgroundSettings = onOpenBackgroundSettings,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -661,6 +663,7 @@ private fun TuneSheet(
     onChange: (ReaderSettings) -> Unit,
     textColor: Color,
     maxVerticalMarginDp: Float,
+    onOpenBackgroundSettings: (() -> Unit)? = null,
 ) {
     Column(
         modifier =
@@ -776,6 +779,12 @@ private fun TuneSheet(
                 textColor = textColor,
                 onChange = { onChange(settings.copy(sunsetWarm = it)) },
             )
+            // Фон документа («текстурированная бумага») — per-document, поэтому открываем
+            // ОБЩИЙ лист настроек (а не пишем в глобальный stored ридера). Пункт виден,
+            // только когда родитель прокинул колбэк (в редакторе он есть; в тестах нет).
+            if (onOpenBackgroundSettings != null) {
+                ActionRow(label = "Фон документа…", textColor = textColor, onClick = onOpenBackgroundSettings)
+            }
         }
         Group("Поведение", textColor) {
             LabeledChoice(
@@ -1053,6 +1062,28 @@ private fun ToggleRow(
     ) {
         BasicText(label, style = TextStyle(color = textColor.copy(alpha = 0.85f), fontSize = 13.sp))
         ReaderSwitch(checked = checked, tint = textColor)
+    }
+}
+
+/** Строка-действие (как [ToggleRow], но открывает экран): подпись + шеврон, по тапу [onClick]. */
+@Composable
+private fun ActionRow(
+    label: String,
+    textColor: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onClick() }
+                .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        BasicText(label, style = TextStyle(color = textColor.copy(alpha = 0.85f), fontSize = 13.sp))
+        BasicText("›", style = TextStyle(color = textColor.copy(alpha = 0.55f), fontSize = 16.sp))
     }
 }
 

@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SyncAlt
+import androidx.compose.material.icons.filled.Texture
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.filled.ZoomOut
 import androidx.compose.material3.CircularProgressIndicator
@@ -238,6 +239,7 @@ internal fun unifiedToolWheelEntries(
     liveSyncEnabled: Boolean,
     onToggleLiveSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
+    onOpenBackgroundSettings: () -> Unit,
     onRotatePage: () -> Unit,
     spreadSplitEnabled: Boolean,
     onToggleSpreadSplit: () -> Unit,
@@ -316,6 +318,7 @@ internal fun unifiedToolWheelEntries(
             liveSyncEnabled = liveSyncEnabled,
             onToggleLiveSync = onToggleLiveSync,
             onOpenShortcutsSettings = onOpenShortcutsSettings,
+            onOpenBackgroundSettings = onOpenBackgroundSettings,
             onRotatePage = onRotatePage,
             spreadSplitEnabled = spreadSplitEnabled,
             onToggleSpreadSplit = onToggleSpreadSplit,
@@ -471,6 +474,7 @@ internal fun systemControlEntries(
     liveSyncEnabled: Boolean,
     onToggleLiveSync: () -> Unit,
     onOpenShortcutsSettings: () -> Unit,
+    onOpenBackgroundSettings: () -> Unit,
     onRotatePage: () -> Unit,
     spreadSplitEnabled: Boolean,
     onToggleSpreadSplit: () -> Unit,
@@ -540,6 +544,17 @@ internal fun systemControlEntries(
                 Icon(
                     imageVector = Icons.Default.Settings,
                     contentDescription = "Шорткаты",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+    val backgroundButton: @Composable () -> Unit = {
+        Tooltip("Фон документа") {
+            IconButton(onClick = onOpenBackgroundSettings, modifier = Modifier.size(RAIL_BUTTON_SIZE)) {
+                Icon(
+                    imageVector = Icons.Default.Texture,
+                    contentDescription = "Фон документа",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
@@ -674,6 +689,9 @@ internal fun systemControlEntries(
         // (liveSyncAvailable) — оба гейтятся одним sync-стеком; собираем их одним
         // хелпером, чтобы ветвление не раздувало CyclomaticComplexity этой функции.
         addAll(syncWheelEntries(showSyncButton, liveSyncAvailable, syncButton, liveSyncButton))
+        // Фон документа («текстурированная бумага») — доступен и в PDF-, и в reader-режиме
+        // (один и тот же лист настроек), поэтому без гарда readingModeEnabled.
+        add(WheelEntry("sys_background") { backgroundButton() })
         add(WheelEntry("sys_shortcuts") { shortcutsButton() })
         if (!readingModeEnabled) add(WheelEntry("sys_export") { exportButton() })
         // В режиме чтения масштаб страницы не применяется (reflow-поток с
@@ -793,6 +811,8 @@ data class ToolRailSystem(
     /** Переключает живую синхронизацию документа (PC ↔ планшет правки в реальном времени). */
     val onToggleLiveSync: () -> Unit,
     val onOpenShortcutsSettings: () -> Unit,
+    /** Открывает лист настроек фона документа («текстурированная бумага»). */
+    val onOpenBackgroundSettings: () -> Unit,
     /** Поворачивает текущую страницу на +90° CW (кумулятивно). */
     val onRotatePage: () -> Unit,
     /** Включено ли разделение разворотов (FEATURE #4). */
@@ -1004,6 +1024,7 @@ private fun landscapeWheelEntries(
         liveSyncEnabled = system.liveSyncEnabled,
         onToggleLiveSync = system.onToggleLiveSync,
         onOpenShortcutsSettings = system.onOpenShortcutsSettings,
+        onOpenBackgroundSettings = system.onOpenBackgroundSettings,
         onRotatePage = system.onRotatePage,
         spreadSplitEnabled = system.spreadSplitEnabled,
         onToggleSpreadSplit = system.onToggleSpreadSplit,

@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.pdfviewer
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
@@ -72,6 +73,14 @@ expect fun PdfPagesViewer(
      * слотов берётся из «эффективных» [pages] (см. `EditorPanel`).
      */
     pageSource: (logicalIndex: Int) -> PageSourceSpec = { PageSourceSpec(it) },
+    /**
+     * Бумажная текстура фона бесконечного холста (область вокруг/между страницами).
+     * `null` (по умолчанию) — поведение как раньше: холст красится фоном родителя.
+     * Когда задана, тайлится через `drawBehind` под страницами. Кисть строит app-слой
+     * ([ru.kyamshanov.notepen.background.rememberPaperBrush]); вьювер про каталог
+     * текстур не знает.
+     */
+    canvasBackground: Brush? = null,
     pageContent: PdfPageContent,
 )
 

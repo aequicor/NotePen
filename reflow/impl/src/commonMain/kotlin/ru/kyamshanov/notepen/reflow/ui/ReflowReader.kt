@@ -74,6 +74,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
@@ -229,6 +231,20 @@ public fun ReflowReader(
     onReadingAnchorChange: (TextAnchor) -> Unit = {},
     topInset: Dp = 0.dp,
     startInset: Dp = 0.dp,
+    /**
+     * Бумажная текстура фона страницы чтения («текстурированная бумага»). `null`
+     * (по умолчанию) — сплошной цвет темы, как раньше. Когда задана, тайлится поверх
+     * цвета темы с [BlendMode.Multiply], так что тема (включая `warmShift`/яркость) её
+     * тонирует. Per-document: кисть строит app-слой из [StoredReaderSettings]-независимого
+     * выбора документа и передаёт сюда параметром (не из глобального `stored`).
+     */
+    pageBackground: Brush? = null,
+    /**
+     * Открывает общий лист настроек фона документа из панели ридера («Цвет» → «Фон
+     * документа»). `null` — пункт не показываем (standalone-вызовы/тесты). Лист хостит
+     * `EditorPanel`, поэтому он один и тот же для PDF- и reader-режима.
+     */
+    onOpenBackgroundSettings: (() -> Unit)? = null,
 ) {
     // Высота вьюпорта ридера в px — нужна и для зажима вертикальных полей (ниже), и для
     // шага «листнуть страницу» в скролл-режиме. Меряем корневой Box (см. onSizeChanged).
@@ -421,7 +437,7 @@ public fun ReflowReader(
                 // плавающим хромом. Иначе резерв оставался незакрашенным и сквозь него
                 // просвечивал фон родителя (без тёплого сдвига заката) — это и были «полосы»
                 // сверху и слева на стыке с контентом.
-                .background(effectiveBackground)
+                .paperBackground(effectiveBackground, pageBackground)
                 // Резерв под плавающий хром редактора (верхний бар/чип, боковой tool-rail).
                 // После background/перед onSizeChanged: вьюпорт ридера (LazyColumn/пейджер)
                 // ужимается под резерв и тап-зоны считаются от нового размера, а фон под
@@ -518,7 +534,7 @@ public fun ReflowReader(
                         // panels sample a solid page (like PDF mode) instead of transparent gaps
                         // between text lines — otherwise the reader panels read as effect-less.
                         .glassSource()
-                        .background(effectiveBackground)
+                        .paperBackground(effectiveBackground, pageBackground)
                         .onGloballyPositioned { selectionState.containerCoordinates = it }
                         .reflowSelectionDrag(
                             immediate = selection.immediate,
@@ -555,6 +571,7 @@ public fun ReflowReader(
                         },
                         onPageDeltaReady = setPageDelta,
                         navigateToBlock = navigateToBlock,
+                        pageBackground = pageBackground,
                     )
                 } else {
                     ScrollReflowContent(
@@ -651,6 +668,7 @@ public fun ReflowReader(
                 autoHideMs = settings.autoHideMs,
                 maxVerticalMarginDp = maxVerticalMarginDp,
                 onRequestHide = { onBarVisibleChange(false) },
+                onOpenBackgroundSettings = onOpenBackgroundSettings,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -879,6 +897,7 @@ private fun PagedReflowContent(
     onVisibleAnchorChange: (TextAnchor) -> Unit,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit,
     navigateToBlock: MutableState<Int?>,
+    pageBackground: Brush? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -1434,7 +1453,7 @@ private fun PagedReflowContent(
                             LocalFigureBitmapCache provides figureCache,
                         ) {
                             Box(
-                                modifier = Modifier.fillMaxSize().background(settings.background),
+                                modifier = Modifier.fillMaxSize().paperBackground(settings.background, pageBackground),
                                 contentAlignment = Alignment.TopCenter,
                             ) {
                                 ReflowSpread(
@@ -2915,3 +2934,17 @@ internal val BLOCKQUOTE_BAR_WIDTH = 3.dp
 private const val BLOCKQUOTE_BAR_ALPHA = 0.3f
 private const val DIVIDER_LINE_FRACTION = 0.2f
 private const val DIVIDER_LINE_ALPHA = 0.25f
+
+/**
+ * Красит фон страницы чтения: сплошной [color] (как `Modifier.background`), а если задана
+ * [brush] — поверх тайлится бумажная текстура с [BlendMode.Multiply], чтобы цвет темы
+ * (включая `warmShift`/яркость) её тонировал. `null`-кисть эквивалентна прежнему поведению.
+ */
+private fun Modifier.paperBackground(
+    color: Color,
+    brush: Brush?,
+): Modifier =
+    drawBehind {
+        drawRect(color = color)
+        brush?.let { drawRect(brush = it, blendMode = BlendMode.Multiply) }
+    }

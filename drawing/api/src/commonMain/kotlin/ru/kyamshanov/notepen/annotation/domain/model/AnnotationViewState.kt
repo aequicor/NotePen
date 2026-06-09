@@ -47,6 +47,15 @@ package ru.kyamshanov.notepen.annotation.domain.model
  *   [readingMode] (reflow) — это три разных независимых переключателя. Штрихи на
  *   диске НЕ зависят от разворота (он чисто визуальный: пейринг логических
  *   страниц по X), поэтому миграции координат тут нет.
+ * @property backgroundStyle идентификатор стиля фона документа («текстурированная
+ *   бумага»). `"plain"` — обычный фон (как раньше). Прочие значения резолвятся
+ *   каталогом текстур в app-слое в плиточную кисть. Хранится плоской строкой —
+ *   `:drawing:api` не должен зависеть от каталога ресурсов/`:reflow:api`; неизвестный
+ *   id мягко откатывается к `"plain"`.
+ * @property replaceWhiteBackground заменять ли белый фон PDF-страницы на текстуру
+ *   (через draw-time Multiply поверх бумажной подложки). Влияет ТОЛЬКО на поверхность
+ *   PDF-страницы в редакторе; на reflow-режим и фон вокруг страниц не влияет.
+ *   По умолчанию `false` — белый фон PDF не трогаем (сканы/цветные страницы).
  */
 data class AnnotationViewState(
     val scale: Int = 100,
@@ -59,4 +68,6 @@ data class AnnotationViewState(
     val pageRotations: Map<Int, Int> = emptyMap(),
     val spreadSplit: Boolean = false,
     val spreadViewOverride: Boolean? = null,
+    val backgroundStyle: String = "plain",
+    val replaceWhiteBackground: Boolean = false,
 )

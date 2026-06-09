@@ -142,6 +142,12 @@ private data class AnnotationViewStateDto(
     // (по ширине экрана), true/false — принудительно. Отсутствие у легаси-сайдкаров
     // даёт null = авто, что эквивалентно поведению до появления фичи.
     val spreadViewOverride: Boolean? = null,
+    // Стиль фона документа («текстурированная бумага»). Отсутствие у легаси-сайдкаров
+    // даёт "plain" — обычный фон, как было до фичи.
+    val backgroundStyle: String = "plain",
+    // Заменять ли белый фон PDF на текстуру. Отсутствие у легаси-сайдкаров даёт false —
+    // белый фон не трогаем.
+    val replaceWhiteBackground: Boolean = false,
 )
 
 @Serializable
@@ -345,6 +351,10 @@ class AnnotationRepositoryJvmAndroid(
                                 // Книжный разворот (FEATURE #5) — тоже поле вида; сохраняем
                                 // явный выбор пользователя при перезаписи штрихов.
                                 spreadViewOverride = preserved.spreadViewOverride,
+                                // Фон документа — поле вида (его пишет saveViewState);
+                                // при перезаписи штрихов сохраняем уже записанный выбор.
+                                backgroundStyle = preserved.backgroundStyle,
+                                replaceWhiteBackground = preserved.replaceWhiteBackground,
                             )
                         writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
                     }
@@ -434,6 +444,8 @@ class AnnotationRepositoryJvmAndroid(
                                 }.toMap(),
                             spreadSplit = dto.spreadSplit,
                             spreadViewOverride = dto.spreadViewOverride,
+                            backgroundStyle = dto.backgroundStyle,
+                            replaceWhiteBackground = dto.replaceWhiteBackground,
                         ),
                     )
                 }
@@ -468,6 +480,8 @@ class AnnotationRepositoryJvmAndroid(
                                         .mapKeys { it.key.toString() },
                                 spreadSplit = viewState.spreadSplit,
                                 spreadViewOverride = viewState.spreadViewOverride,
+                                backgroundStyle = viewState.backgroundStyle,
+                                replaceWhiteBackground = viewState.replaceWhiteBackground,
                             )
                         writeJson.encodeToStream(AnnotationViewStateDto.serializer(), viewDto, out)
                     }
@@ -539,6 +553,8 @@ class AnnotationRepositoryJvmAndroid(
                         pageRotations = dto.pageRotations,
                         spreadSplit = dto.spreadSplit,
                         spreadViewOverride = dto.spreadViewOverride,
+                        backgroundStyle = dto.backgroundStyle,
+                        replaceWhiteBackground = dto.replaceWhiteBackground,
                     )
                 }
             }.getOrDefault(PreservedReadingState.Empty)
@@ -553,9 +569,11 @@ class AnnotationRepositoryJvmAndroid(
         val pageRotations: Map<String, Int>,
         val spreadSplit: Boolean,
         val spreadViewOverride: Boolean?,
+        val backgroundStyle: String,
+        val replaceWhiteBackground: Boolean,
     ) {
         companion object {
-            val Empty = PreservedReadingState(false, 0, 0, emptyMap(), false, null)
+            val Empty = PreservedReadingState(false, 0, 0, emptyMap(), false, null, "plain", false)
         }
     }
 
