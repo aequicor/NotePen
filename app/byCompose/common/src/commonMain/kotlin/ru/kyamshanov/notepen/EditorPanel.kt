@@ -2021,7 +2021,7 @@ fun EditorPanel(
                         val p = pdfViewerState.effectivePan
                         val zz = pdfViewerState.effectiveZoom
                         val vhh = pdfViewerState.viewportHeightPx
-                        pages.indices.maxByOrNull { i ->
+                        lo.pdfHeightsPx.indices.maxByOrNull { i ->
                             val pdfH = lo.pdfHeightsPx[i]
                             val pageTop = lo.pageTopsPx[i]
                             val ext = lo.pageExtents[i]

@@ -739,4 +739,34 @@ class PdfPagesLayoutTest {
         val expected = (vp - outerRight) / 2f
         assertTrue(abs(pan.x - expected) < 1e-3f, "pan.x=${pan.x} expected=$expected (centered)")
     }
+
+    // ── RC-PEXP-009 ─────────────────────────────────────────────────────────
+    // Правая страница разворота не перекрывает расширенную зону левой страницы.
+
+    @Test
+    fun `spread right page starts past left page extended right boundary`() {
+        // Левая страница расширена вправо (right = 4/3 ≈ 1.33).
+        // Правая страница должна начинаться за правым краем слота левой (+GUTTER),
+        // а не за базовой шириной PDF-колонки.
+        val base = 100f
+        val leftExt = PageExtent.Pdf.expandedRight(1f / 3f) // right = 4/3
+        val layout =
+            PdfPagesLayout.build(
+                pages(1f, 1f),
+                basePageWidthPx = base,
+                extents = listOf(leftExt, PageExtent.Pdf),
+                spreadMode = SpreadMode.SPREAD,
+            )
+        val expected = leftExt.right * base + PdfPagesLayout.SPREAD_GUTTER_PX
+        assertTrue(
+            abs(layout.pageLeftsPx[1] - expected) < 1e-3f,
+            "pageLeftsPx[1]=${layout.pageLeftsPx[1]} expected=$expected",
+        )
+        // Правый край слота левой страницы не должен перекрывать левый край правой.
+        val leftSlotRight = leftExt.right * base
+        assertTrue(
+            layout.pageLeftsPx[1] >= leftSlotRight,
+            "right page must not overlap left page slot: pageLeftsPx[1]=${layout.pageLeftsPx[1]} leftSlotRight=$leftSlotRight",
+        )
+    }
 }

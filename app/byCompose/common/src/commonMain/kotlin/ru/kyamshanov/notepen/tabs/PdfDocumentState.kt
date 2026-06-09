@@ -591,6 +591,22 @@ class PdfDocumentState internal constructor(
     )
 
     /**
+     * Расширяет рисуемую область страницы [pageIndex] влево на 1/3 текущей ширины.
+     * Не undoable (как поворот/split), но не чистит undo-стек: штрихи остаются
+     * валидными в той же системе координат.
+     */
+    fun expandPageLeft(pageIndex: Int) {
+        drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.expandLeft()
+    }
+
+    /**
+     * Расширяет рисуемую область страницы [pageIndex] вправо на 1/3 текущей ширины.
+     */
+    fun expandPageRight(pageIndex: Int) {
+        drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.expandRight()
+    }
+
+    /**
      * Closes the underlying [PdfDocument] (if any) and clears the
      * holder. Called by [TabSession] when this tab is closed or when
      * the editor is dismissed.

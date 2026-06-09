@@ -264,6 +264,14 @@ expect class PdfViewerState {
     /** True while the viewer content is visually transformed but not committed to [zoom] / [pan]. */
     val isVisualTransformActive: Boolean
 
+    /**
+     * Extra visual translation applied to the content layer beyond what [effectivePan] captures.
+     * On JVM this equals the spring-back overscroll offset; on Android it is always [Offset.Zero].
+     * Add this to any overlay coordinate derived from [effectivePan] to keep it aligned with the
+     * page during overscroll.
+     */
+    val contentLayerExtraOffset: Offset
+
     /** Starts a drag-pan gesture; platforms may use it to hold overscroll state. */
     fun beginPanGesture()
 

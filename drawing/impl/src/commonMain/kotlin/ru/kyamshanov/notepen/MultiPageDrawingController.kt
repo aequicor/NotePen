@@ -7,6 +7,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
+import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
 
@@ -70,6 +71,9 @@ class MultiPageDrawingController(
      */
     private var lastViewportPos: Offset = Offset.Zero
 
+    private fun extentFor(pageIndex: Int): PageExtent =
+        drawingStates[pageIndex]?.extent?.value ?: PageExtent.Pdf
+
     fun onDown(
         viewportPos: Offset,
         pressure: Float,
@@ -77,7 +81,10 @@ class MultiPageDrawingController(
     ) {
         session.cancel()
         val hit = hitTest(viewportPos) ?: return
-        val (pageIndex, nx, ny) = hit
+        val (pageIndex, rawNx, rawNy) = hit
+        val ext = extentFor(pageIndex)
+        val nx = rawNx.coerceIn(ext.left, ext.right)
+        val ny = rawNy.coerceIn(ext.top, ext.bottom)
         val tool = toolMode()
         lastViewportPos = viewportPos
         val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
@@ -95,12 +102,15 @@ class MultiPageDrawingController(
     ) {
         if (session.activeMode == DrawingGestureMode.NONE) return
         val hit = hitTest(viewportPos) ?: return
-        val (pageIndex, nx, ny) = hit
+        val (pageIndex, rawNx, rawNy) = hit
         if (pageIndex != session.activePageIndex) {
-            handBoundary(viewportPos, pageIndex, nx, ny, pressure, tilt)
+            handBoundary(viewportPos, pageIndex, rawNx, rawNy, pressure, tilt)
             lastViewportPos = viewportPos
             return
         }
+        val ext = extentFor(pageIndex)
+        val nx = rawNx.coerceIn(ext.left, ext.right)
+        val ny = rawNy.coerceIn(ext.top, ext.bottom)
         val state = drawingStates[pageIndex] ?: return
         when (session.activeMode) {
             DrawingGestureMode.DRAW -> session.addPoint(pageIndex, state, nx, ny, pressure, tilt)
@@ -260,16 +270,17 @@ class MultiPageDrawingController(
     }
 
     /**
-     * Возвращает `true`, если [viewportPos] попадает внутрь видимой PDF-страницы
-     * (nx ∈ [0..1], ny ∈ [0..1] в нормализованных page-координатах).
+     * Возвращает `true`, если [viewportPos] попадает внутрь рисуемой области страницы
+     * (nx ∈ [extent.left..extent.right], ny ∈ [extent.top..extent.bottom]).
      *
-     * Annotation-зона (extent) снаружи [0..1] не считается «внутри PDF».
      * Используется в `captureGesture`-гейте: когда pencil mode выключен и
-     * инструмент активен, палец рисует внутри страницы, но скроллит снаружи.
+     * инструмент активен, палец рисует внутри рисуемой области, но скроллит снаружи.
+     * Учитывает расширения extent кнопками «+».
      */
     fun isInsidePdfPage(viewportPos: Offset): Boolean {
-        val (_, nx, ny) = hitTest(viewportPos) ?: return false
-        return nx in 0f..1f && ny in 0f..1f
+        val (pageIndex, nx, ny) = hitTest(viewportPos) ?: return false
+        val ext = extentFor(pageIndex)
+        return nx in ext.left..ext.right && ny in ext.top..ext.bottom
     }
 
     /**

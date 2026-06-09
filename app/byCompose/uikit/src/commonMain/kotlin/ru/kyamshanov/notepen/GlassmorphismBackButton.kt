@@ -44,13 +44,16 @@ private val ArrowBackVector: ImageVector =
     }.build()
 
 /**
- * Circular back-navigation button styled with glassmorphism (semi-transparent overlay + border).
+ * Reusable icon button styled with glassmorphism (semi-transparent overlay + border).
  * Uses [AppTheme.shapes.component] for shape and [AppTheme.spacing.touchTarget] for size.
  */
 @Composable
-fun GlassmorphismBackButton(
+fun GlassmorphismIconButton(
+    icon: ImageVector,
+    contentDescription: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    tint: Color = Color.White,
 ) {
     val shape = AppTheme.shapes.component
     val size = AppTheme.spacing.touchTarget
@@ -59,15 +62,32 @@ fun GlassmorphismBackButton(
             modifier
                 .size(size)
                 .clip(shape)
-                .background(Color.White.copy(alpha = GlassBackgroundAlpha))
-                .border(GlassBorderWidth, Color.White.copy(alpha = GlassBorderAlpha), shape)
+                .background(tint.copy(alpha = GlassBackgroundAlpha))
+                .border(GlassBorderWidth, tint.copy(alpha = GlassBorderAlpha), shape)
                 .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         Icon(
-            imageVector = ArrowBackVector,
-            contentDescription = "Navigate back",
-            tint = Color.White,
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
         )
     }
+}
+
+/**
+ * Circular back-navigation button styled with glassmorphism (semi-transparent overlay + border).
+ * Uses [AppTheme.shapes.component] for shape and [AppTheme.spacing.touchTarget] for size.
+ */
+@Composable
+fun GlassmorphismBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    GlassmorphismIconButton(
+        icon = ArrowBackVector,
+        contentDescription = "Navigate back",
+        onClick = onClick,
+        modifier = modifier,
+    )
 }

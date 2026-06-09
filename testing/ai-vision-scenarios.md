@@ -1762,13 +1762,30 @@ UI strings to drive: `Открыть` (Open), `+folder`, themes `Бумага / 
 - **Pass/Fail:** PASS if pages re-rasterise to crisp during motion (within ~100ms). FAIL if pages remain blurry/blank until scrolling halts (debounce regression).
 - **Severity if broken:** 🟠
 
+### Page expansion (PEXP)
+
+#### AV-PEXP-01 — "+" buttons outside page boundary; expansion border visible (pexp-button-position-border)
+- **Area:** pexp · **Platform(s):** desktop
+- **Fixture/precondition:** `book (2).pdf` open in editor (PDF page mode, no reading mode, no magnifier). Default extent (no prior expansion).
+- **Source:** release/1.0.17 · guards RC-PEXP-004
+- **Steps:**
+  1. computer-use `screenshot` — locate the left and right "+" overlay buttons.
+  2. `zoom` on the left-button region: confirm the button is entirely in the grey canvas area, with its **right edge at or left of the page's left edge**.
+  3. `zoom` on the right-button region: confirm the button is entirely in the grey canvas area, with its **left edge at or right of the page's right edge**.
+  4. Verify no rectangular border overlay is visible on the page (default extent → no border).
+  5. computer-use `left_click` the right "+" button. `screenshot`.
+  6. `zoom` on the full page top area: confirm a thin grey rectangular outline now surrounds the expanded page extent; confirm the expanded area has the same paper background as the original page; confirm buttons have shifted to the new extent boundaries (both still outside page).
+- **Expected:** (2–3) both buttons fully outside the page white area, not straddling the edge. (4) no border when default extent. (6) after expansion: visible thin rectangular border at extent bounds; expanded margin has paper background matching the rest of the page; buttons shifted and still outside.
+- **Pass/Fail:** PASS if all six checks hold. FAIL if a button overlaps the page, the border is absent after expansion, the border appears when extent is default, or the expanded background is a different color from the page.
+- **Severity if broken:** 🟡
+
 ---
 
 ## How to add a scenario
 
 Field shape, ID scheme, and the tier rule are governed by [`TEST-CASE-STANDARD.md`](TEST-CASE-STANDARD.md) — read it first. In short:
 
-1. Pick the next free ID in the area prefix (`AV-<AREA>-NN`, area codes per the standard § 2: `LIB PDF DRAW MARKER MAG REFLOW READER GEST RENDER EDITOR VIEWER TABS SESSION SYNC QR CONV UI UIKIT DESKTOP ANDROID INPUT STARTUP ANNOT`). New area → new section + prefix.
+1. Pick the next free ID in the area prefix (`AV-<AREA>-NN`, area codes per the standard § 2: `LIB PDF DRAW MARKER MAG REFLOW READER GEST RENDER EDITOR VIEWER TABS SESSION SYNC QR CONV UI UIKIT DESKTOP ANDROID INPUT STARTUP ANNOT PEXP`). New area → new section + prefix.
 2. Justify Tier 2: confirm the behavior **cannot** be asserted deterministically in Tier 1 (standard § 1). If a Roborazzi golden could cover it, add it there instead and do **not** put it here.
 3. Write the block with the standard's fields (ID, Area, Platform(s), Fixture/precondition, Source, Steps, Capture, Expected, Pass/Fail, Severity). Steps + Capture must use only the real harness verbs in the Harness reference above and real fixtures in the Fixtures table — invent no tools, tasks, or paths.
 4. Prefer committed fixtures (`thesis-pdf`, `article-fb2`, `article-pdf`) so the scenario runs without the not-committed personal books; mark personal-book scenarios `skip` if absent.
@@ -1779,3 +1796,4 @@ Field shape, ID scheme, and the tier rule are governed by [`TEST-CASE-STANDARD.m
 
 - **v1** (2026-05-30) — initial catalog: 16 scenarios across 9 areas (library/open, PDF render, drawing, magnifier, reflow, gestures, EPUB/FB2 conversion, LAN sync, QR/peer), seeded from the `.claude/ux-reports/` runs `20260529-124456 / -1547 / -1821-allplatforms`.
 - v2 (2026-05-30) — +109 regression scenarios mined from shipped fixes (RC-* cross-referenced).
+- v3 (2026-06-09) — +AV-PEXP-01: page-expansion button positioning outside boundary + expansion border.

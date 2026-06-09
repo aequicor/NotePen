@@ -107,6 +107,6 @@ class ClientQrPairingCoordinator(
         }
 
     companion object {
-        val DEFAULT_CONNECT_TIMEOUT: Duration = 12.seconds
+        val DEFAULT_CONNECT_TIMEOUT: Duration = 60.seconds
     }
 }
