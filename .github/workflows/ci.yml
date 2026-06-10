@@ -1,11 +1,17 @@
 # Tier 1 — Automated / deterministic CI gate (see /TESTING.md).
 #
 # This is the hard merge gate for NotePen: on every push to master and every PR
-# it runs `./gradlew check` = build + all JVM unit/logic tests + the Roborazzi
-# golden screenshots (:reflow:impl) + ktlintCheck + detekt (auto-applied to every
-# module, per-module detekt-baseline.xml honored). All tests are commonTest/jvmTest
-# on the JVM; there is no instrumented androidTest source set, so a single Linux job
-# covers the whole deterministic tier.
+# it runs `./gradlew check` = build + all JVM unit/logic tests + ktlintCheck +
+# detekt (auto-applied to every module, per-module detekt-baseline.xml honored).
+# All tests are commonTest/jvmTest on the JVM; there is no instrumented androidTest
+# source set, so a single Linux job covers the whole deterministic tier.
+#
+# NOTE: `check` does NOT verify the :reflow:impl Roborazzi goldens. Roborazzi only
+# compares when a roborazzi.test.{record,compare,verify} mode is set; plain jvmTest
+# makes captureRoboImage a no-op, so screenshot drift is not caught here. The goldens
+# are also not portable yet (reader uses system fonts -> macOS != Linux rasterization;
+# Baranovskaya needs a local uncommitted PDF). They are advisory/local until that is
+# fixed (bundled font via an isolated FontFamily.Resolver + record-on-CI). See TESTING.md.
 #
 # Out of CI scope on purpose:
 #   - Tier 2 (AI-vision): non-deterministic, token-costly live-app checks on real
@@ -67,8 +73,9 @@ jobs:
           echo "JBR toolchain home: $home"
           "$home/bin/java" -version
 
-      # Full deterministic gate per CLAUDE.md (= build + tests + ktlintCheck + detekt,
-      # incl. Roborazzi goldens). The Android SDK is preinstalled on ubuntu-latest.
+      # Full deterministic gate per CLAUDE.md (= build + tests + ktlintCheck + detekt).
+      # Does NOT compare Roborazzi goldens (see note at top of file). The Android SDK is
+      # preinstalled on ubuntu-latest.
       - name: Verify (Tier 1)
         run: ./gradlew check
 

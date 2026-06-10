@@ -6,8 +6,8 @@ import kotlinx.coroutines.CoroutineScope
 import ru.kyamshanov.notepen.annotation.domain.model.DrawingPath
 import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
-import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
+import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.drawing.api.PdfDrawingState
 import ru.kyamshanov.notepen.drawing.api.ToolMode
 
@@ -71,8 +71,7 @@ class MultiPageDrawingController(
      */
     private var lastViewportPos: Offset = Offset.Zero
 
-    private fun extentFor(pageIndex: Int): PageExtent =
-        drawingStates[pageIndex]?.extent?.value ?: PageExtent.Pdf
+    private fun extentFor(pageIndex: Int): PageExtent = drawingStates[pageIndex]?.extent?.value ?: PageExtent.Pdf
 
     fun onDown(
         viewportPos: Offset,
@@ -271,7 +270,7 @@ class MultiPageDrawingController(
 
     /**
      * Возвращает `true`, если [viewportPos] попадает внутрь рисуемой области страницы
-     * (nx ∈ [extent.left..extent.right], ny ∈ [extent.top..extent.bottom]).
+     * (`nx` в диапазоне `extent.left..extent.right`, `ny` — `extent.top..extent.bottom`).
      *
      * Используется в `captureGesture`-гейте: когда pencil mode выключен и
      * инструмент активен, палец рисует внутри рисуемой области, но скроллит снаружи.

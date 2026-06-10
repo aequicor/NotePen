@@ -128,7 +128,9 @@ class MultiPageDrawingControllerClampTest {
         override val isSpread: Boolean = false
 
         override fun pageTopPx(index: Int): Float = index * 100f
+
         override fun pageLeftPx(index: Int): Float = 0f
+
         override fun pdfHeightPx(index: Int): Float = 100f
     }
 }
