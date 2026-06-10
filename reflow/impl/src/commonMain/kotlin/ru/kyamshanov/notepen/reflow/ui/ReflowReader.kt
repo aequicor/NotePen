@@ -76,12 +76,14 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -135,6 +137,7 @@ import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlState
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.PageTurnStyle
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.captureReflowTexture
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.snapshotBookCurlLayer
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.isBookCurlNativeRendererSupported
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -571,6 +574,9 @@ public fun ReflowReader(
                         },
                         onPageDeltaReady = setPageDelta,
                         navigateToBlock = navigateToBlock,
+                        // effectiveBackground, а не settings.background: вечерний warmShift обязан
+                        // попасть и в кёрл-текстуры, иначе лист холоднее живой страницы.
+                        paperColor = effectiveBackground,
                         pageBackground = pageBackground,
                     )
                 } else {
@@ -897,6 +903,7 @@ private fun PagedReflowContent(
     onVisibleAnchorChange: (TextAnchor) -> Unit,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit,
     navigateToBlock: MutableState<Int?>,
+    paperColor: Color,
     pageBackground: Brush? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -1365,14 +1372,22 @@ private fun PagedReflowContent(
         var readerPageSizePx by remember(document, measureKey) { mutableStateOf(IntSize.Zero) }
         // Общий кэш растров врезок — пробрасываем в закадровую сцену, чтобы картинки попали в текстуру.
         val figureCache = LocalFigureBitmapCache.current
+        // Через rememberUpdatedState: ensureCurlImage живёт в замыкании pageDeltaHandler'а, который
+        // remember'ится по другим ключам — прямой захват paperColor/pageBackground заморозил бы
+        // значения первой композиции (фон/тёплый сдвиг из прошлого попадал бы в текстуры).
+        val latestPaperColor = rememberUpdatedState(paperColor)
+        val latestPageBrush = rememberUpdatedState(pageBackground)
 
         suspend fun ensureCurlImage(page: Int): ImageBitmap? {
             val cached = pageCurlImages[page]
             val captured =
                 if (cached == null) {
                     pageCaptureLayers[page]
-                        ?.let { layer -> runCatching { layer.toImageBitmap() }.getOrNull() }
-                        ?.also { pageCurlImages[page] = it }
+                        ?.let { layer ->
+                            snapshotBookCurlLayer(layer) {
+                                drawPaperBackground(latestPaperColor.value, latestPageBrush.value)
+                            }
+                        }?.also { pageCurlImages[page] = it }
                 } else {
                     null
                 }
@@ -1437,8 +1452,10 @@ private fun PagedReflowContent(
             val pages = (pagerState.currentPage - 1)..(pagerState.currentPage + 1)
             pages.forEach { page ->
                 if (page < 0 || page > lastPagerPage || pageCurlImages[page] != null) return@forEach
-                // Перекомпонуем страницу закадрово (ImageComposeScene) — GraphicsLayer.toImageBitmap()
-                // на Desktop отдаёт пустой кадр. Локали и фон проставляем, как на экране.
+                // Перекомпонуем страницу закадрово (ImageComposeScene): закадровая сцена даёт
+                // sRGB-тегированную текстуру со свежим (без выделения) состоянием и фоном — это
+                // эталонный путь на Desktop; слой пейджера остаётся фолбэком (см. ниже).
+                // Локали и фон проставляем, как на экране.
                 // Рендерим в 1× (см. PAGE_CURL_TEXTURE_SUPERSAMPLE): завиток только сжимает текстуру, а
                 // супер-сэмплинг с обратным уменьшением в sRGB делал бы текст блёклым/тонким.
                 val ss = PAGE_CURL_TEXTURE_SUPERSAMPLE
@@ -1453,7 +1470,8 @@ private fun PagedReflowContent(
                             LocalFigureBitmapCache provides figureCache,
                         ) {
                             Box(
-                                modifier = Modifier.fillMaxSize().paperBackground(settings.background, pageBackground),
+                                modifier =
+                                    Modifier.fillMaxSize().paperBackground(latestPaperColor.value, latestPageBrush.value),
                                 contentAlignment = Alignment.TopCenter,
                             ) {
                                 ReflowSpread(
@@ -1474,9 +1492,11 @@ private fun PagedReflowContent(
                     }
                         ?: pageCaptureLayers[page]?.let { layer ->
                             // Android: закадровый ImageComposeScene недоступен (captureReflowTexture == null) —
-                            // берём кадр со страничного GraphicsLayer. На устройстве toImageBitmap() работает;
-                            // пустой он лишь в headless-тестах Desktop, где этот путь не нужен (там texture != null).
-                            runCatching { layer.toImageBitmap() }.getOrNull()
+                            // снимаем кадр со страничного GraphicsLayer (на Android — софтверная отрисовка
+                            // записанного слоя, см. BookCurlLayerSnapshot.android.kt).
+                            snapshotBookCurlLayer(layer) {
+                                drawPaperBackground(latestPaperColor.value, latestPageBrush.value)
+                            }
                         }
                 if (texture != null) pageCurlImages[page] = texture
             }
@@ -1863,6 +1883,13 @@ private fun Modifier.pageTransitionLayer(
     }
 }
 
+// Строго scoped-перегрузка record (без density/layoutDirection!) + drawLayer, как в документации:
+// сырая member-перегрузка захватывает drawContent() в блок, который НЕЛЬЗЯ переисполнять вне
+// draw-пасса — когда Android (HWUI) сбрасывает display list (trim-memory) и Compose тихо
+// пере-записывает слой, блок бросает, слой навсегда фиксируется ПУСТЫМ, и кёрл получал «матовый
+// лист» без текста. Scoped-перегрузка делает блок законно переисполняемым (и для софтверного
+// снапшота в snapshotBookCurlLayer), а drawLayer вместо второго drawContent() держит RenderNode
+// слоя в дереве рендера окна — иначе он сирота и не синкается.
 private fun Modifier.captureToLayer(layer: GraphicsLayer): Modifier =
     drawWithContent {
         val layerSize =
@@ -1870,14 +1897,10 @@ private fun Modifier.captureToLayer(layer: GraphicsLayer): Modifier =
                 width = size.width.roundToInt().coerceAtLeast(1),
                 height = size.height.roundToInt().coerceAtLeast(1),
             )
-        layer.record(
-            density = this,
-            layoutDirection = layoutDirection,
-            size = layerSize,
-        ) {
+        layer.record(size = layerSize) {
             this@drawWithContent.drawContent()
         }
-        drawContent()
+        drawLayer(layer)
     }
 
 private fun spreadCount(
@@ -2943,8 +2966,13 @@ private const val DIVIDER_LINE_ALPHA = 0.25f
 private fun Modifier.paperBackground(
     color: Color,
     brush: Brush?,
-): Modifier =
-    drawBehind {
-        drawRect(color = color)
-        brush?.let { drawRect(brush = it, blendMode = BlendMode.Multiply) }
-    }
+): Modifier = drawBehind { drawPaperBackground(color, brush) }
+
+/** Та же бумага как draw-функция — для подкладки под снимок страничного слоя в кёрл-текстуру. */
+private fun DrawScope.drawPaperBackground(
+    color: Color,
+    brush: Brush?,
+) {
+    drawRect(color = color)
+    brush?.let { drawRect(brush = it, blendMode = BlendMode.Multiply) }
+}
