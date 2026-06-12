@@ -28,6 +28,9 @@ import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.ScreenLockLandscape
+import androidx.compose.material.icons.filled.ScreenLockPortrait
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.filled.SyncAlt
@@ -67,6 +70,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
+import ru.kyamshanov.notepen.appsettings.domain.model.ScreenOrientationMode
 import ru.kyamshanov.notepen.blur.GlassSurface
 import kotlin.math.roundToInt
 
@@ -245,6 +249,8 @@ internal fun unifiedToolWheelEntries(
     onToggleSpreadSplit: () -> Unit,
     bookSpreadEnabled: Boolean,
     onToggleBookSpread: () -> Unit,
+    editorOrientation: ScreenOrientationMode,
+    onCycleEditorOrientation: () -> Unit,
     expandedButtonModifier: Modifier = Modifier,
 ): List<WheelEntry> {
     // В режиме чтения свободное рисование пером бессмысленно, но выделять текст
@@ -324,6 +330,8 @@ internal fun unifiedToolWheelEntries(
             onToggleSpreadSplit = onToggleSpreadSplit,
             bookSpreadEnabled = bookSpreadEnabled,
             onToggleBookSpread = onToggleBookSpread,
+            editorOrientation = editorOrientation,
+            onCycleEditorOrientation = onCycleEditorOrientation,
         )
     return buildList {
         // В чтении перо скрыто, но маркер/ластик остаются (см. includePen).
@@ -480,6 +488,8 @@ internal fun systemControlEntries(
     onToggleSpreadSplit: () -> Unit,
     bookSpreadEnabled: Boolean,
     onToggleBookSpread: () -> Unit,
+    editorOrientation: ScreenOrientationMode,
+    onCycleEditorOrientation: () -> Unit,
 ): List<WheelEntry> {
     val pencilModeButton: @Composable () -> Unit = {
         if (showPencilModeButton) {
@@ -607,6 +617,9 @@ internal fun systemControlEntries(
             }
         }
     }
+    val orientationButton: @Composable () -> Unit = {
+        OrientationToolButton(mode = editorOrientation, onCycle = onCycleEditorOrientation)
+    }
     val spreadSplitButton: @Composable () -> Unit = {
         ToolToggleButton(
             icon = NotePenIcons.SplitSpreads,
@@ -674,6 +687,9 @@ internal fun systemControlEntries(
         // прячем (один общий гард — чтобы не плодить ветви Cyclomatic Complexity).
         if (!readingModeEnabled) {
             add(WheelEntry("sys_magnifier") { magnifierButton() })
+            // Блокировка ориентации экрана осмысленна только там, где он физически
+            // поворачивается (Android); на десктопе кнопка скрыта (no-op).
+            if (SupportsScreenOrientation) add(WheelEntry("sys_orientation") { orientationButton() })
             add(WheelEntry("sys_rotate") { rotatePageButton() })
             add(WheelEntry("sys_split") { spreadSplitButton() })
             // Книжный разворот «Две страницы» (FEATURE #5). В режиме чтения скрыт
@@ -702,6 +718,37 @@ internal fun systemControlEntries(
             add(WheelEntry("sys_zoom_out") { zoomOutButton() })
         }
     }
+}
+
+/**
+ * Кнопка-циклер ориентации экрана редактора: тап циклит
+ * AUTO → LANDSCAPE → PORTRAIT → AUTO ([onCycle]). Глиф и подпись отражают текущий
+ * [mode]; вне AUTO кнопка подсвечена как активная — видно, что экран залочен.
+ * Ориентация НЕ зависит от физического поворота устройства (удобно читать лёжа);
+ * отличается от «Повернуть страницу» (поворот растра PDF). Вынесена из
+ * [systemControlEntries], чтобы её `when`-ветвления не раздували там сложность.
+ */
+@Composable
+private fun OrientationToolButton(
+    mode: ScreenOrientationMode,
+    onCycle: () -> Unit,
+) {
+    ToolToggleButton(
+        icon =
+            when (mode) {
+                ScreenOrientationMode.AUTO -> Icons.Default.ScreenRotation
+                ScreenOrientationMode.LANDSCAPE -> Icons.Default.ScreenLockLandscape
+                ScreenOrientationMode.PORTRAIT -> Icons.Default.ScreenLockPortrait
+            },
+        contentDescription =
+            when (mode) {
+                ScreenOrientationMode.AUTO -> "Ориентация: Авто"
+                ScreenOrientationMode.LANDSCAPE -> "Ориентация: Горизонтальная"
+                ScreenOrientationMode.PORTRAIT -> "Ориентация: Вертикальная"
+            },
+        selected = mode != ScreenOrientationMode.AUTO,
+        onClick = onCycle,
+    )
 }
 
 /**
@@ -823,6 +870,10 @@ data class ToolRailSystem(
     val bookSpreadEnabled: Boolean,
     /** Переключает книжный разворот (две страницы рядом) вкл/выкл. */
     val onToggleBookSpread: () -> Unit,
+    /** Текущая ориентация экрана редактора (глобальная настройка). */
+    val editorOrientation: ScreenOrientationMode,
+    /** Циклит ориентацию AUTO → LANDSCAPE → PORTRAIT → AUTO и сохраняет её. */
+    val onCycleEditorOrientation: () -> Unit,
 )
 
 /**
@@ -1030,6 +1081,8 @@ private fun landscapeWheelEntries(
         onToggleSpreadSplit = system.onToggleSpreadSplit,
         bookSpreadEnabled = system.bookSpreadEnabled,
         onToggleBookSpread = system.onToggleBookSpread,
+        editorOrientation = system.editorOrientation,
+        onCycleEditorOrientation = system.onCycleEditorOrientation,
         expandedButtonModifier = expandedButtonModifier,
     )
 

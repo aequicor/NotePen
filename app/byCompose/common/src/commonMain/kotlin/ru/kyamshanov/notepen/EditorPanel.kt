@@ -98,6 +98,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
+import ru.kyamshanov.notepen.appsettings.domain.model.ScreenOrientationMode
+import ru.kyamshanov.notepen.appsettings.rememberAppSettings
 import ru.kyamshanov.notepen.background.DocumentBackgroundSettingsSheet
 import ru.kyamshanov.notepen.background.rememberPaperBrush
 import ru.kyamshanov.notepen.blur.glassSource
@@ -122,6 +124,7 @@ import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PageRaster
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
+import ru.kyamshanov.notepen.reflow.api.ReaderOrientation
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
@@ -413,6 +416,24 @@ fun EditorPanel(
     val spreadViewOverride = pdfState.spreadViewOverride
     val bookSpreadEnabled =
         !pdfState.readingMode && (spreadViewOverride ?: false)
+
+    // Ориентация экрана НЕ зависит от физического поворота устройства. В режиме
+    // чтения берём ориентацию из настроек ридера (ReaderSettings.orientation),
+    // иначе — глобальную настройку редактора (AppSettings.orientation, кнопка в
+    // тулбаре). Эффект применяется, пока открыт редактор; выход из Details снимает
+    // лок (ApplyScreenOrientation восстанавливает прежнее значение). На десктопе — no-op.
+    val editorOrientation = rememberAppSettings().orientation
+    val screenOrientation =
+        if (pdfState.readingMode) {
+            when (readerStored.current.orientation) {
+                ReaderOrientation.AUTO -> ScreenOrientationMode.AUTO
+                ReaderOrientation.LANDSCAPE -> ScreenOrientationMode.LANDSCAPE
+                ReaderOrientation.PORTRAIT -> ScreenOrientationMode.PORTRAIT
+            }
+        } else {
+            editorOrientation
+        }
+    ApplyScreenOrientation(screenOrientation)
 
     // Пользовательский поворот страницы по ЛОГИЧЕСКОМУ индексу (читает наблюдаемую
     // карту, поэтому смена дёргает релэйаут/ре-рендер). Передаётся и в рендерер

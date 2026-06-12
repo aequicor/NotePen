@@ -91,6 +91,7 @@ import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
 import ru.kyamshanov.notepen.reflow.api.ReaderFontFamily
+import ru.kyamshanov.notepen.reflow.api.ReaderOrientation
 import ru.kyamshanov.notepen.reflow.api.ReaderPreset
 import ru.kyamshanov.notepen.reflow.api.ReaderSettings
 import ru.kyamshanov.notepen.reflow.api.ReaderSettingsReducer
@@ -811,6 +812,18 @@ private fun TuneSheet(
                 textColor = textColor,
                 onSelect = { onChange(settings.copy(pageTransition = it)) },
             )
+            // Блокировка ориентации осмысленна только там, где экран физически
+            // поворачивается (Android); на десктопе селектор скрыт (no-op).
+            if (SupportsReaderOrientation) {
+                LabeledChoice(
+                    label = "Ориентация",
+                    options = ReaderOrientation.entries,
+                    selected = settings.orientation,
+                    labelOf = ::orientationName,
+                    textColor = textColor,
+                    onSelect = { onChange(settings.copy(orientation = it)) },
+                )
+            }
             if (settings.pageTransition == PageTransition.BOOK) {
                 LabeledChoice(
                     label = "Материал листа",
@@ -1185,6 +1198,13 @@ private fun transitionName(transition: PageTransition): String =
         PageTransition.SLIDE -> "Слайд"
         PageTransition.FADE -> "Затухание"
         PageTransition.NONE -> "Нет"
+    }
+
+private fun orientationName(orientation: ReaderOrientation): String =
+    when (orientation) {
+        ReaderOrientation.AUTO -> "Авто"
+        ReaderOrientation.LANDSCAPE -> "Гориз."
+        ReaderOrientation.PORTRAIT -> "Портрет"
     }
 
 private fun bookCurlMaterialName(id: BookCurlMaterialId): String =

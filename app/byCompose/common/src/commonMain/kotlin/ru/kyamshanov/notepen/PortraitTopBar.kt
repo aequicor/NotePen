@@ -55,6 +55,7 @@ import ru.kyamshanov.notepen.annotation.domain.model.EraserSettings
 import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
+import ru.kyamshanov.notepen.appsettings.domain.model.ScreenOrientationMode
 import ru.kyamshanov.notepen.blur.GlassSurface
 
 /**
@@ -121,6 +122,8 @@ fun PortraitTopBar(
     onToggleSpreadSplit: () -> Unit,
     bookSpreadEnabled: Boolean,
     onToggleBookSpread: () -> Unit,
+    editorOrientation: ScreenOrientationMode,
+    onCycleEditorOrientation: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /** Фон активной темы ридера для стекла бара; `null` — цвет [MaterialTheme]. */
@@ -256,6 +259,8 @@ fun PortraitTopBar(
                         onToggleSpreadSplit = onToggleSpreadSplit,
                         bookSpreadEnabled = bookSpreadEnabled,
                         onToggleBookSpread = onToggleBookSpread,
+                        editorOrientation = editorOrientation,
+                        onCycleEditorOrientation = onCycleEditorOrientation,
                     )
                 // `weight` снимаем в RowScope; [MaterialTheme] не создаёт layout-узел,
                 // поэтому вес доходит до Row и сквозь обёртку перекраски. Ширину колеса
