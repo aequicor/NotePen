@@ -68,6 +68,14 @@ class JustifyShyBreakDiagnosticTest {
     @Test
     fun justifyStretchesLinesToFullWidth() =
         runDesktopComposeUiTest {
+            // Шрифто-зависимо: ширину выключенной строки задают метрики СИСТЕМНОГО шрифта (skiko
+            // резолвит его из ОС), поэтому на Linux CI результат недетерминирован — как и снапшоты
+            // ридера, тест локально-advisory и в CI-гейт не входит (ср. BaranovskayaSnapshotTest).
+            // D1 (точки разрыва) и D3 (stdout) шрифто-устойчивы и в CI остаются.
+            if (System.getenv("CI") != null) {
+                println("[justify] CI — пропуск шрифто-зависимого теста ширины выключки")
+                return@runDesktopComposeUiTest
+            }
             val hyph = readerHyphenation(PROSE, true)
 
             // (right, есть ли пробел в строке) по строкам; счётчик слоговых строк полной ширины.
