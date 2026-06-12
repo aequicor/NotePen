@@ -116,6 +116,19 @@ class PdfDocumentState internal constructor(
      */
     sharedSpreadViewOverride: MutableState<Boolean?> = mutableStateOf(null),
     /**
+     * Стиль фона документа («текстурированная бумага»): `"plain"` — обычный фон,
+     * прочие id резолвятся каталогом текстур app-слоя. Обёрнут в [MutableState] и
+     * shared между вкладками одного файла (как [sharedSpreadSplit]) — фон принадлежит
+     * документу, а не вкладке. Персистится в сайдкаре вида.
+     */
+    sharedBackgroundStyle: MutableState<String> = mutableStateOf("plain"),
+    /**
+     * Заменять ли белый фон PDF-страницы на текстуру (Multiply поверх бумажной
+     * подложки). Влияет только на поверхность PDF-страницы в редакторе. Shared между
+     * вкладками одного файла; персистится в сайдкаре вида.
+     */
+    sharedReplaceWhiteBackground: MutableState<Boolean> = mutableStateOf(false),
+    /**
      * Snapshot-observable counter bumped on every [undoStack] / [redoStack]
      * mutation so Compose-derived `canUndo` / `canRedo` (the toolbar button
      * enabled flags) recompute — the deques themselves are plain (not
@@ -159,6 +172,34 @@ class PdfDocumentState internal constructor(
         get() = spreadViewOverrideState.value
         set(value) {
             spreadViewOverrideState.value = value
+        }
+
+    private val backgroundStyleState: MutableState<String> = sharedBackgroundStyle
+
+    /**
+     * Стиль фона документа («текстурированная бумага»): `"plain"` — обычный фон (как
+     * раньше), прочие id app-слой резолвит в плиточную кисть. Shared между вкладками
+     * одного файла; персистится в сайдкаре вида. Наблюдаемое: смена перерисует фон
+     * вокруг страниц и сам растр.
+     */
+    var backgroundStyle: String
+        get() = backgroundStyleState.value
+        set(value) {
+            backgroundStyleState.value = value
+        }
+
+    private val replaceWhiteBackgroundState: MutableState<Boolean> = sharedReplaceWhiteBackground
+
+    /**
+     * Заменять ли белый фон PDF-страницы на текстуру (draw-time Multiply поверх
+     * бумажной подложки). Влияет только на поверхность PDF-страницы в редакторе;
+     * на reflow и фон вокруг страниц не влияет. Shared между вкладками; персистится
+     * в сайдкаре вида. Наблюдаемое.
+     */
+    var replaceWhiteBackground: Boolean
+        get() = replaceWhiteBackgroundState.value
+        set(value) {
+            replaceWhiteBackgroundState.value = value
         }
 
     /**
@@ -550,6 +591,22 @@ class PdfDocumentState internal constructor(
     )
 
     /**
+     * Расширяет рисуемую область страницы [pageIndex] влево на 1/3 текущей ширины.
+     * Не undoable (как поворот/split), но не чистит undo-стек: штрихи остаются
+     * валидными в той же системе координат.
+     */
+    fun expandPageLeft(pageIndex: Int) {
+        drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.expandLeft()
+    }
+
+    /**
+     * Расширяет рисуемую область страницы [pageIndex] вправо на 1/3 текущей ширины.
+     */
+    fun expandPageRight(pageIndex: Int) {
+        drawingStates.getOrPut(pageIndex) { PdfDrawingState() }.expandRight()
+    }
+
+    /**
      * Closes the underlying [PdfDocument] (if any) and clears the
      * holder. Called by [TabSession] when this tab is closed or when
      * the editor is dismissed.
@@ -612,6 +669,8 @@ class PdfDocumentState internal constructor(
                 sharedPageRotations = from.pageRotations,
                 sharedSpreadSplit = from.spreadSplitState,
                 sharedSpreadViewOverride = from.spreadViewOverrideState,
+                sharedBackgroundStyle = from.backgroundStyleState,
+                sharedReplaceWhiteBackground = from.replaceWhiteBackgroundState,
                 sharedUndoVersion = from.undoVersionState,
             ).also { it.skipPageRestore = true }
     }

@@ -15,7 +15,8 @@ The single source of truth for how NotePen is tested. Three tiers, one governing
 
 | Tier | What | Determinism / trust | Cost / flakiness | Gate? |
 |---|---|---|---|---|
-| **1** | JVM logic + Roborazzi goldens | high | low | hard merge gate |
+| **1** | JVM logic tests (`check`) | high | low | hard merge gate |
+| **1*** | Roborazzi goldens | not yet portable | low | **advisory only today** — see caveats below |
 | **2** | AI-vision on the live app | non-deterministic | token-costly | advisory |
 | **3** | Manual on real hardware | human-judged | slow, hardware-bound | release sign-off |
 
@@ -23,7 +24,7 @@ The single source of truth for how NotePen is tested. Three tiers, one governing
 
 ## Tier 1 — Automated / deterministic (the CI gate)
 
-Pure-JVM unit & logic tests plus **Roborazzi golden screenshots** (deterministic, headless Compose-Desktop UI tests — they live here, not in Tier 2). Everything runs on the JVM via `commonTest`/`jvmTest`; there is **no instrumented `androidTest` source set anywhere**, so the Android-specific actuals (PdfRenderer, stylus, low-latency overlay) have no automated tests.
+Pure-JVM unit & logic tests are the hard merge gate (`./gradlew check`). The **Roborazzi golden screenshots** (headless Compose-Desktop UI tests) *aspire* to be Tier 1 but are **not gated today** — `check` does not compare them and they are not portable across machines yet (see the Roborazzi section below). Everything runs on the JVM via `commonTest`/`jvmTest`; there is **no instrumented `androidTest` source set anywhere**, so the Android-specific actuals (PdfRenderer, stylus, low-latency overlay) have no automated tests.
 
 ### What's covered (per-module inventory)
 
@@ -60,16 +61,23 @@ detekt and ktlint are auto-applied to every module; per-module `detekt-baseline.
 Module `:reflow:impl`, source set `jvmTest` (Compose Desktop UI test, no emulator). Two test classes produce **9 committed PNGs** in `reflow/impl/snapshots/`:
 
 - `reflow/impl/src/jvmTest/.../reflow/ui/ReaderSnapshotTest.kt` — 3 goldens (`scroll_bar_hidden.png`, `paged_compact.png`, `paged_enlarged.png`); synthetic doc, scroll vs paged reader, typography remeasure.
-- `reflow/impl/src/jvmTest/.../reflow/fixtures/BaranovskayaSnapshotTest.kt` — 6 goldens off a real PDF fixture (`baranovskaya_intro`, `intro_long`, `heading_hierarchy`, `list`, `table`, `exercises`); **gracefully skips if the fixture PDF is absent**.
+- `reflow/impl/src/jvmTest/.../reflow/fixtures/BaranovskayaSnapshotTest.kt` — 6 goldens off a real PDF fixture (`baranovskaya_intro`, `intro_long`, `heading_hierarchy`, `list`, `table`, `exercises`); **gracefully skips if the fixture PDF is absent** (path via `NOTEPEN_BARANOVSKAYA_PDF`, else a local default — the PDF is a copyrighted book, never committed).
+
+> ⚠️ **These goldens are advisory/local today, NOT a merge gate.** Two gaps:
+> 1. **The comparison is off in `check`/`jvmTest`.** Roborazzi only compares when a `roborazzi.test.{record,compare,verify}` mode is set; otherwise `captureRoboImage` is a **no-op**. Plain `jvmTest` (what `check` runs) records/compares nothing, so drift passes silently. Use the dedicated tasks below to actually compare.
+> 2. **Not deterministic across machines.** The reader uses system font families (`FontFamily.Serif` …), which skiko resolves from OS fonts → macOS and the Linux CI runner rasterize differently; the Baranovskaya extraction is also not guaranteed byte-stable run-to-run. So goldens recorded on one machine fail `verify` on another. Making them gate-able needs a bundled font forced through an **isolated `FontFamily.Resolver`** (a naive bundle hits the skiko `TypefaceFontProvider::registerTypeface` SIGSEGV — same thread-unsafety as the book-curl capture) plus recording on the CI environment.
+
+Until that lands, record and verify **by hand on one machine** with the dedicated Roborazzi tasks:
 
 | Flow | Command |
 |---|---|
-| Verify against committed goldens | `./gradlew :reflow:impl:jvmTest` |
-| Record / update goldens | `./gradlew :reflow:impl:jvmTest -Proborazzi.test.record=true` |
+| Verify against committed goldens | `./gradlew :reflow:impl:verifyRoborazziJvm` |
+| Record / update goldens | `./gradlew :reflow:impl:recordRoborazziJvm` |
+| Narrow to one class | add `--tests "*ReaderSnapshotTest"` (synthetic) or `"*BaranovskayaSnapshotTest"` (local PDF) |
 
 ### CI
 
-Tier 1 is the merge gate, run on every push and PR by [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`ubuntu-latest`, provisions **jbrsdk 25**, runs `./gradlew check` incl. Roborazzi). Because `app:byCompose:desktop` resolves a `JETBRAINS`-vendor `languageVersion 25` toolchain eagerly at configuration time, any root invocation (`check`/`test`/`detekt`) fails unless a matching **jbrsdk 25** is registered as a Gradle toolchain — foojay cannot provision JetBrains, so the path is injected into `gradle.properties` (as in `release.yml`, but bumped to jbrsdk-25). Android SDK is preinstalled on `ubuntu-latest`; caching via `gradle/actions/setup-gradle@v4`.
+Tier 1 is the merge gate, run on every push and PR by [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (`ubuntu-latest`, provisions **jbrsdk 25**, runs `./gradlew check`). Note: `check` does **not** verify the Roborazzi goldens (the comparison is a no-op without a `roborazzi.test.*` mode), so the screenshot drift is not caught by CI today — see the caveats in the Roborazzi section above. Because `app:byCompose:desktop` resolves a `JETBRAINS`-vendor `languageVersion 25` toolchain eagerly at configuration time, any root invocation (`check`/`test`/`detekt`) fails unless a matching **jbrsdk 25** is registered as a Gradle toolchain — foojay cannot provision JetBrains, so the path is injected into `gradle.properties` (as in `release.yml`, but bumped to jbrsdk-25). Android SDK is preinstalled on `ubuntu-latest`; caching via `gradle/actions/setup-gradle@v4`.
 
 ---
 
@@ -121,7 +129,7 @@ Only what neither automated tier can reach. Required before tagging a release; f
 
 | Event | Required |
 |---|---|
-| **PR / push** | **Tier 1 green** (`./gradlew check`, incl. Roborazzi) — hard merge gate |
+| **PR / push** | **Tier 1 green** (`./gradlew check` — JVM logic/unit tests, ktlint, detekt) — hard merge gate. Roborazzi goldens are **not** part of this gate yet (advisory/local). |
 | **Pre-release / nightly** | Tier 2 AI-vision run + Roborazzi goldens — advisory, surfaces regressions, does **not** block |
 | **Release** | Tier 3 hardware checklist signed off — required before tagging |
 

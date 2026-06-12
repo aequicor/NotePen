@@ -16,10 +16,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -51,6 +54,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -93,6 +98,10 @@ import ru.kyamshanov.notepen.annotation.domain.model.ToolKind
 import ru.kyamshanov.notepen.annotation.domain.model.sanitizedForCurrentScheme
 import ru.kyamshanov.notepen.annotation.domain.port.AnnotationRepository
 import ru.kyamshanov.notepen.annotation.domain.port.PdfExporter
+import ru.kyamshanov.notepen.appsettings.domain.model.ScreenOrientationMode
+import ru.kyamshanov.notepen.appsettings.rememberAppSettings
+import ru.kyamshanov.notepen.background.DocumentBackgroundSettingsSheet
+import ru.kyamshanov.notepen.background.rememberPaperBrush
 import ru.kyamshanov.notepen.blur.glassSource
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
 import ru.kyamshanov.notepen.magnifier.LoupeSelectionController
@@ -115,6 +124,7 @@ import ru.kyamshanov.notepen.reflow.api.PageBitmapProvider
 import ru.kyamshanov.notepen.reflow.api.PageRaster
 import ru.kyamshanov.notepen.reflow.api.PdfContentKind
 import ru.kyamshanov.notepen.reflow.api.PdfReflowExtractor
+import ru.kyamshanov.notepen.reflow.api.ReaderOrientation
 import ru.kyamshanov.notepen.reflow.api.ReflowDocument
 import ru.kyamshanov.notepen.reflow.api.StoredReaderSettings
 import ru.kyamshanov.notepen.reflow.api.TextAnchor
@@ -146,6 +156,7 @@ import ru.kyamshanov.notepen.tabs.TAB_BAR_HEIGHT
 import ru.kyamshanov.notepen.tabs.TabBar
 import ru.kyamshanov.notepen.tabs.TabCloseResult
 import ru.kyamshanov.notepen.tabs.TabSession
+import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
 
@@ -164,6 +175,9 @@ private const val PANEL_SIDEBAR_ANIM_MS = 220
 private const val REFLOW_PROBE_DELAY_AFTER_OPEN_MS = 750L
 private const val NATIVE_PEN_FALLBACK_SUPPRESS_MS = 500L
 private const val BROADCAST_ZOOM_SETTLE_DELAY_MS = 90L
+
+/** Порог светимости фона темы, ниже которого выбираем тёмный вариант бумажной текстуры. */
+private const val DARK_THEME_LUMINANCE = 0.5f
 
 /** Вертикальный зазор между спиннером и подписью в плейсхолдере «Открываем книгу…». */
 private val PREPARING_INDICATOR_SPACING = 12.dp
@@ -287,6 +301,8 @@ class PanelControls(
     val liveSyncEnabled: Boolean,
     /** Переключает живую синхронизацию документа (PC ↔ планшет правки в реальном времени). */
     val toggleLiveSync: () -> Unit,
+    /** Открывает лист настроек фона документа («текстурированная бумага»). */
+    val onOpenBackgroundSettings: () -> Unit,
 )
 
 /**
@@ -401,6 +417,24 @@ fun EditorPanel(
     val bookSpreadEnabled =
         !pdfState.readingMode && (spreadViewOverride ?: false)
 
+    // Ориентация экрана НЕ зависит от физического поворота устройства. В режиме
+    // чтения берём ориентацию из настроек ридера (ReaderSettings.orientation),
+    // иначе — глобальную настройку редактора (AppSettings.orientation, кнопка в
+    // тулбаре). Эффект применяется, пока открыт редактор; выход из Details снимает
+    // лок (ApplyScreenOrientation восстанавливает прежнее значение). На десктопе — no-op.
+    val editorOrientation = rememberAppSettings().orientation
+    val screenOrientation =
+        if (pdfState.readingMode) {
+            when (readerStored.current.orientation) {
+                ReaderOrientation.AUTO -> ScreenOrientationMode.AUTO
+                ReaderOrientation.LANDSCAPE -> ScreenOrientationMode.LANDSCAPE
+                ReaderOrientation.PORTRAIT -> ScreenOrientationMode.PORTRAIT
+            }
+        } else {
+            editorOrientation
+        }
+    ApplyScreenOrientation(screenOrientation)
+
     // Пользовательский поворот страницы по ЛОГИЧЕСКОМУ индексу (читает наблюдаемую
     // карту, поэтому смена дёргает релэйаут/ре-рендер). Передаётся и в рендерер
     // растра, и в раскладку (через «эффективные» pages ниже).
@@ -484,11 +518,6 @@ fun EditorPanel(
             liveSyncController?.enable(documentId)
         }
     }
-    val hasBroadcastPeer by produceState(false, peerServer, peerClient) {
-        activeBroadcastConnection(peerServer = peerServer, peerClient = peerClient)
-            .collect { value = it }
-    }
-
     var panelSizePx by remember { mutableStateOf(IntSize.Zero) }
     var showThumbnails by remember { mutableStateOf(false) }
     var showToc by remember { mutableStateOf(false) }
@@ -536,6 +565,9 @@ fun EditorPanel(
     // редакторе или по маркеру заметки в ридере). null — поповер скрыт. Сбрасывается
     // при смене документа.
     var editingNote by remember(pdfState) { mutableStateOf<PageNote?>(null) }
+    // Открыт ли лист настроек фона документа («текстурированная бумага»). Открывается из
+    // тулбара редактора (PanelControls.onOpenBackgroundSettings) и из панели ридера.
+    var showBackgroundSheet by remember(pdfState) { mutableStateOf(false) }
     // Якорь чтения уровня документа: «валюта» позиции в reflow-режиме (см. TextAnchor).
     // Живёт здесь, а не в ReflowReader: переживает закрытие/открытие reader-mode в сессии
     // и пишется в .view-сайдкар (autosave ниже), чтобы при следующем открытии документа
@@ -677,11 +709,22 @@ fun EditorPanel(
             pageRotations = pageRotations.toMap(),
             spreadSplit = pdfState.spreadSplit,
             spreadViewOverride = pdfState.spreadViewOverride,
+            backgroundStyle = pdfState.backgroundStyle,
+            replaceWhiteBackground = pdfState.replaceWhiteBackground,
         )
     }
     val canPersistLiveViewState: () -> Boolean = {
         pages.isNotEmpty() && pdfViewerState.basePageWidthPx > 0f
     }
+
+    // Бумажная текстура фона документа («текстурированная бумага»). Кисть строится в
+    // app-слое (каталог + плитка) и передаётся ВНИЗ во вьювер/ридер — :rendering:impl /
+    // :reflow:impl про каталог ресурсов не знают. `null` для стиля "plain".
+    val isDarkTheme = MaterialTheme.colorScheme.background.luminance() < DARK_THEME_LUMINANCE
+    val paperBrush = rememberPaperBrush(pdfState.backgroundStyle, isDarkTheme)
+    // Замена белого фона PDF-страницы включается отдельным переключателем документа;
+    // иначе страница остаётся белой, а бумага видна только на холсте вокруг страниц.
+    val pageBackgroundBrush = if (pdfState.replaceWhiteBackground) paperBrush else null
 
     LaunchedEffect(
         documentBroadcastController,
@@ -752,22 +795,22 @@ fun EditorPanel(
         documentBroadcastController,
         peerServer,
         documentId,
-        hasBroadcastPeer,
+        anyPeerConnected,
     ) {
         val controller = documentBroadcastController ?: return@produceState
-        if (peerServer == null || !hasBroadcastPeer) return@produceState
+        if (peerServer == null || !anyPeerConnected) return@produceState
         controller.currentFrame.collect { frame ->
             value = broadcastToolModeForDocument(frame, documentId)
         }
     }
 
-    LaunchedEffect(documentBroadcastController, peerServer, isFocused, documentId, hasBroadcastPeer) {
+    LaunchedEffect(documentBroadcastController, peerServer, isFocused, documentId, anyPeerConnected) {
         val controller = documentBroadcastController ?: return@LaunchedEffect
         if (
             !shouldApplyBroadcastFrame(
                 hasPeerServer = peerServer != null,
                 isFocused = isFocused,
-                hasBroadcastConnection = hasBroadcastPeer,
+                hasBroadcastConnection = anyPeerConnected,
             )
         ) {
             return@LaunchedEffect
@@ -1144,6 +1187,10 @@ fun EditorPanel(
                     // Книжный разворот (FEATURE #5): восстанавливаем ЯВНЫЙ выбор
                     // пользователя (null = авто-по-ширине). Отдельно от #4 и reflow.
                     pdfState.spreadViewOverride = view.spreadViewOverride
+                    // Фон документа («текстурированная бумага») — поле вида, shared между
+                    // вкладками одного файла, поэтому заполняем один раз первой вкладкой.
+                    pdfState.backgroundStyle = view.backgroundStyle
+                    pdfState.replaceWhiteBackground = view.replaceWhiteBackground
                 }
                 // Пользовательский поворот страниц персистентен — восстанавливаем
                 // (штрихи на диске уже в повёрнутой/разделённой системе координат,
@@ -1824,6 +1871,7 @@ fun EditorPanel(
                         userPausedSync = liveSyncEnabled
                         liveSyncController?.toggle(documentId)
                     },
+                    onOpenBackgroundSettings = { showBackgroundSheet = true },
                 ),
             )
         }
@@ -1858,6 +1906,7 @@ fun EditorPanel(
                 renderer = renderer,
                 userRotationQuarters = userRotationOf,
                 pageSource = pageSourceOf,
+                canvasBackground = paperBrush,
                 modifier =
                     Modifier
                         .fillMaxSize()
@@ -1958,6 +2007,7 @@ fun EditorPanel(
                             isMagnifierGrabbing = isMagnifierPage && magnifierTargetGestureController.isActive,
                             lowLatencyViewportScale = pdfViewerState.residualScale,
                             isZooming = { pdfViewerState.isVisualTransformActive },
+                            pageBackground = pageBackgroundBrush,
                             modifier = Modifier.fillMaxSize(),
                         )
                     } else {
@@ -1972,6 +2022,167 @@ fun EditorPanel(
                                         color = MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
                                     ),
                         )
+                    }
+                }
+            }
+
+            // Page-expansion overlay: border (always) + "+" buttons (pen/marker only)
+            if (!pdfState.readingMode && pages.isNotEmpty()) {
+                val layout = pdfViewerState.layout
+                val pan = pdfViewerState.effectivePan
+                val z = pdfViewerState.effectiveZoom
+                val vh = pdfViewerState.viewportHeightPx
+                val base = layout.basePageWidthPx
+                // Active page = the one with the most visible pixels on screen.
+                // derivedStateOf defers recomposition of the buttons/border to page-index
+                // changes only, instead of every pan/zoom snapshot tick.
+                val active by remember {
+                    derivedStateOf {
+                        val lo = pdfViewerState.layout
+                        val p = pdfViewerState.effectivePan
+                        val zz = pdfViewerState.effectiveZoom
+                        val vhh = pdfViewerState.viewportHeightPx
+                        lo.pdfHeightsPx.indices.maxByOrNull { i ->
+                            val pdfH = lo.pdfHeightsPx[i]
+                            val pageTop = lo.pageTopsPx[i]
+                            val ext = lo.pageExtents[i]
+                            val topY = p.y + (pageTop + ext.top * pdfH) * zz
+                            val bottomY = p.y + (pageTop + ext.bottom * pdfH) * zz
+                            maxOf(0f, minOf(bottomY, vhh) - maxOf(topY, 0f))
+                        } ?: 0
+                    }
+                }
+                val localDensity = androidx.compose.ui.platform.LocalDensity.current
+                val halfTouch = with(localDensity) { AppTheme.spacing.touchTarget.toPx() / 2f }
+                val buttonPaddingPx = with(localDensity) { 8.dp.toPx() }
+
+                Box(
+                    Modifier.fillMaxSize().graphicsLayer {
+                        val extra = pdfViewerState.contentLayerExtraOffset
+                        translationX = extra.x
+                        translationY = extra.y
+                    },
+                ) {
+                    data class PageButton(
+                        val pageIndex: Int,
+                        val showLeft: Boolean,
+                        val showRight: Boolean,
+                    )
+                    val pageButtons =
+                        buildList {
+                            if (layout.spreadMode == ru.kyamshanov.notepen.pdfviewer.SpreadMode.SPREAD) {
+                                // Use spreadLeftPageOf so the left page is always the even-indexed one
+                                val leftPage = PdfViewerMath.spreadLeftPageOf(layout, active)
+                                val rightPage = leftPage + 1
+                                if (leftPage in pages.indices) add(PageButton(leftPage, showLeft = true, showRight = false))
+                                if (rightPage in pages.indices) add(PageButton(rightPage, showLeft = false, showRight = true))
+                            } else {
+                                if (active in pages.indices) {
+                                    add(PageButton(active, showLeft = true, showRight = true))
+                                }
+                            }
+                        }
+
+                    // Border: always for single-page; spread mode only around the outer expansion zone
+                    val expansionBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
+                    val strokeWidthPx = with(localDensity) { 1.dp.toPx() }
+                    Canvas(Modifier.fillMaxSize()) {
+                        for (pb in pageButtons) {
+                            val pi = pb.pageIndex
+                            if (pi !in layout.pageExtents.indices) continue
+                            val ext = layout.pageExtents[pi]
+                            if (ext == PageExtent.Pdf) continue
+                            val pdfH = layout.pdfHeightsPx[pi]
+                            val pageLeft = layout.pageLeftsPx[pi]
+                            val pageTop = layout.pageTopsPx[pi]
+                            val rawTopY = pan.y + (pageTop + ext.top * pdfH) * z
+                            val rawBottomY = pan.y + (pageTop + ext.bottom * pdfH) * z
+                            // In spread mode draw only the outer expansion strip so the frame
+                            // doesn't visually crowd the neighbour page (the inner PDF edge is
+                            // adjacent to the gutter and must remain visually clear).
+                            val zoneLeft: Float
+                            val zoneRight: Float
+                            if (layout.spreadMode == ru.kyamshanov.notepen.pdfviewer.SpreadMode.SPREAD) {
+                                val isRightPage = pi % 2 == 1
+                                if (isRightPage) {
+                                    zoneLeft = 1.0f
+                                    zoneRight = ext.right
+                                } else {
+                                    zoneLeft = ext.left
+                                    zoneRight = 0.0f
+                                }
+                                if (zoneRight <= zoneLeft) continue
+                            } else {
+                                zoneLeft = ext.left
+                                zoneRight = ext.right
+                            }
+                            val leftX = pan.x + (pageLeft + zoneLeft * base) * z
+                            val rightX = pan.x + (pageLeft + zoneRight * base) * z
+                            drawRect(
+                                color = expansionBorderColor,
+                                topLeft = Offset(leftX, rawTopY),
+                                size = Size(rightX - leftX, rawBottomY - rawTopY),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = strokeWidthPx),
+                            )
+                        }
+                    }
+
+                    // Buttons: only in pen/marker mode, hidden during transforms/magnifier
+                    if ((toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER) &&
+                        !pdfViewerState.isVisualTransformActive &&
+                        !magnifierState.enabled &&
+                        !quickLoupeArmed.value &&
+                        !openTriggerProvider.value
+                    ) {
+                        for ((pageIndex, showLeft, showRight) in pageButtons) {
+                            if (pageIndex !in layout.pageExtents.indices) continue
+                            val ext = layout.pageExtents[pageIndex]
+                            val pdfH = layout.pdfHeightsPx[pageIndex]
+                            val pageLeft = layout.pageLeftsPx[pageIndex]
+                            val pageTop = layout.pageTopsPx[pageIndex]
+
+                            val topY = pan.y + (pageTop + ext.top * pdfH) * z
+                            val bottomY = pan.y + (pageTop + ext.bottom * pdfH) * z
+                            val visTop = maxOf(topY, 0f)
+                            val visBottom = minOf(bottomY, vh)
+                            if (visTop >= visBottom) continue
+
+                            val centerY = (visTop + visBottom) / 2f
+
+                            if (showLeft) {
+                                val leftEdgeX = pan.x + (pageLeft + ext.left * base) * z
+                                GlassmorphismIconButton(
+                                    icon = Icons.Default.Add,
+                                    contentDescription = "Расширить влево",
+                                    onClick = { pdfState.expandPageLeft(pageIndex) },
+                                    tint = androidx.compose.ui.graphics.Color(0xFF424242),
+                                    modifier =
+                                        Modifier.offset {
+                                            IntOffset(
+                                                (leftEdgeX - halfTouch * 2 - buttonPaddingPx).roundToInt(),
+                                                (centerY - halfTouch).roundToInt(),
+                                            )
+                                        },
+                                )
+                            }
+
+                            if (showRight) {
+                                val rightEdgeX = pan.x + (pageLeft + ext.right * base) * z
+                                GlassmorphismIconButton(
+                                    icon = Icons.Default.Add,
+                                    contentDescription = "Расширить вправо",
+                                    onClick = { pdfState.expandPageRight(pageIndex) },
+                                    tint = androidx.compose.ui.graphics.Color(0xFF424242),
+                                    modifier =
+                                        Modifier.offset {
+                                            IntOffset(
+                                                (rightEdgeX + buttonPaddingPx).roundToInt(),
+                                                (centerY - halfTouch).roundToInt(),
+                                            )
+                                        },
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -2277,6 +2488,11 @@ fun EditorPanel(
                             // уходил под него (Defect C). Те же инсеты, что использует PDF-путь.
                             topInset = fitWidthTopInset,
                             startInset = fitWidthStartInset,
+                            // Бумажная текстура страницы чтения: показывается при любом
+                            // непустом стиле фона (в reflow нет белого PDF, поэтому
+                            // переключатель «заменять белый» здесь не участвует).
+                            pageBackground = paperBrush,
+                            onOpenBackgroundSettings = { showBackgroundSheet = true },
                         )
                     }
                 } else {
@@ -2377,6 +2593,18 @@ fun EditorPanel(
                     handlePanelNoteRemoved(pdfState.notes, note, syncEngineProvider.value)
                     editingNote = null
                 },
+            )
+        }
+        if (showBackgroundSheet) {
+            // Запись в pdfState поднимает snapshotFlow { currentViewState() } → автосейв
+            // .view-сайдкара (см. view-state autosave выше), отдельная персистенция не нужна.
+            DocumentBackgroundSettingsSheet(
+                currentStyle = pdfState.backgroundStyle,
+                replaceWhiteBackground = pdfState.replaceWhiteBackground,
+                isDark = isDarkTheme,
+                onStyleChange = { pdfState.backgroundStyle = it },
+                onReplaceWhiteChange = { pdfState.replaceWhiteBackground = it },
+                onDismiss = { showBackgroundSheet = false },
             )
         }
     }

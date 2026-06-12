@@ -20,9 +20,14 @@ import kotlin.test.Test
  * Документ извлекается один раз и кэшируется в companion'е; в каждом тесте делаем
  * sub-document из среза блоков и рендерим через [ReflowReader].
  *
- * Тесты gracefully skip'ают, если фикстура отсутствует. Для записи golden'ов:
- *   `./gradlew :reflow:impl:jvmTest -Proborazzi.test.record=true`
- * Без флага — verify против записанного golden'а.
+ * **LOCAL-ONLY:** фикстура — копирайтный учебник, в репозиторий не коммитится, поэтому в CI
+ * эти тесты graceful-skip'ают (PDF отсутствует) и НЕ входят в пиксельный гейт. Путь к PDF берётся
+ * из `NOTEPEN_BARANOVSKAYA_PDF` (env или `-D`-проперти), иначе — из дефолтного локального пути.
+ * Это dev-aid, а не детерминированный гейт: ридер рендерит СИСТЕМНЫМИ шрифтами (skiko резолвит из
+ * шрифтов ОС), плюс извлечение PDF не гарантирует побайтовую повторяемость — goldens записываются и
+ * сверяются вручную на одной машине. Запись/сверка:
+ *   `./gradlew :reflow:impl:recordRoborazziJvm` / `:verifyRoborazziJvm`
+ *   (узкий прогон: `--tests "*BaranovskayaSnapshotTest"`).
  *
  * Срезы выбраны под характерные кейсы:
  *  - **intro**: первые ~30 блоков, обычно заголовок-серия + intro-параграфы.
@@ -192,20 +197,29 @@ class BaranovskayaSnapshotTest {
     }
 
     private fun loadDoc(): ReflowDocument? {
-        val file = File(BARANOVSKAYA_PATH)
+        val path = baranovskayaPath()
+        val file = File(path)
         if (!file.exists() || !file.canRead()) {
-            println("[snapshot] Baranovskaya fixture not found — skipping snapshot tests")
+            println("[snapshot] Baranovskaya fixture not found ($path) — skipping snapshot tests")
             return null
         }
         cached?.let { return it }
         val extractor = JvmPdfReflowExtractor(Dispatchers.IO)
-        val doc = runBlocking { extractor.extract(BARANOVSKAYA_PATH) }
+        val doc = runBlocking { extractor.extract(path) }
         cached = doc
         return doc
     }
 
     companion object {
-        private const val BARANOVSKAYA_PATH =
+        /** Путь к (некоммитной) фикстуре: env/`-D` `NOTEPEN_BARANOVSKAYA_PDF`, иначе локальный дефолт. */
+        private fun baranovskayaPath(): String =
+            System.getProperty(BARANOVSKAYA_PATH_PROP)
+                ?: System.getenv(BARANOVSKAYA_PATH_PROP)
+                ?: DEFAULT_BARANOVSKAYA_PATH
+
+        private const val BARANOVSKAYA_PATH_PROP = "NOTEPEN_BARANOVSKAYA_PDF"
+
+        private const val DEFAULT_BARANOVSKAYA_PATH =
             "/Users/kruz18/Documents/english/Барановская_Грамматика_англ_языка_202509160919_58958.pdf"
 
         /** Минимум рядов таблицы для snapshot — отсекает маленькие 2×3 grids. */

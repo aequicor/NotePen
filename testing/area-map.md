@@ -41,7 +41,7 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/DetailsContent.kt` | COMMON | RC-COMMON-002, RC-COMMON-004, RC-INPUT-001, RC-PDF-006, RC-MAG-011, RC-READER-021, RC-SESSION-001, RC-UX-002, +more | ./gradlew :app:byCompose:common:test |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/DocumentName.kt` | ANNOT | RC-ANNOT-003, RC-UX-007, AV-ANNOT-02 | ./gradlew :app:byCompose:common:test |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/EditorBackHandler.kt` | ANNOT | RC-ANNOT-004, AV-ANNOT-03 | ./gradlew :app:byCompose:common:test |
-| `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/EditorPanel.kt` | MAG | RC-MAG-008, RC-MAG-009, RC-MAG-010, RC-EDITOR-006, RC-READER-018, RC-RENDER-008, RC-SESSION-002, RC-UX-006, +more | ./gradlew :app:byCompose:common:test |
+| `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/EditorPanel.kt` | PEXP | RC-MAG-008, RC-MAG-009, RC-MAG-010, RC-PEXP-003, RC-EDITOR-006, RC-READER-018, RC-RENDER-008, RC-SESSION-002, RC-UX-006, +more | ./gradlew :app:byCompose:common:jvmTest |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/LiquidGlassTopBar.kt` | UI | RC-UI-007, AV-UI-06 | ai-vision AV-UI-06 |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/PageIndicatorAirbar.kt` | READER | RC-READER-011, AV-READER-05 | ai-vision AV-READER-05 |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/PageThumbnailsSidebar.kt` | UI | RC-UI-008, RC-UI-009, RC-UI-010, RC-SIDEBAR-001, RC-VIEWER-011, AV-UI-07, AV-UI-08, AV-UI-09, +more | ./gradlew :app:byCompose:common:test |
@@ -61,7 +61,7 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/mainscreen/ui/viewmodel/MainScreenViewModel.kt` | UX | RC-UX-007 | ./gradlew :app:byCompose:common:test |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/pdfviewer/PdfDesktopPagesViewer.kt` | DESKTOP | RC-DESKTOP-005, RC-DESKTOP-006, RC-DESKTOP-017, RC-DESKTOP-018, AV-DESKTOP-02, AV-DESKTOP-05 | ./gradlew :app:byCompose:common:test |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/qrconnect/HostQrPairingViewModel.kt` | SYNC | RC-SYNC-005 | ./gradlew :app:byCompose:common:test |
-| `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/tabs/PdfDocumentState.kt` | UX | RC-UX-001, RC-UX-009, RC-RENDER-005, RC-VIEWER-004, AV-RENDER-02, AV-VIEWER-02 | ./gradlew :app:byCompose:common:test |
+| `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/tabs/PdfDocumentState.kt` | PEXP | RC-UX-001, RC-UX-009, RC-PEXP-002, RC-RENDER-005, RC-VIEWER-004, AV-RENDER-02, AV-VIEWER-02 | ./gradlew :app:byCompose:common:jvmTest |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/tabs/TabBar.kt` | TABS | RC-TABS-001, RC-TABS-002, RC-TABS-004, RC-READER-011, RC-SESSION-002, RC-SESSION-004, AV-TABS-01, AV-TABS-02, +more | ai-vision AV-TABS-01 |
 | `app/byCompose/common/src/commonMain/kotlin/ru/kyamshanov/notepen/tabs/TabSession.kt` | TABS | RC-TABS-003, RC-ANNOT-003, AV-TABS-03, AV-ANNOT-02 | ai-vision AV-TABS-03 |
 | `app/byCompose/common/src/jvmAndroidMain/kotlin/ru/kyamshanov/notepen/AnnotationRepositoryJvmAndroid.kt` | ANNOT | RC-ANNOT-001, RC-ANNOT-002, RC-ANNOT-007, RC-ANNOT-009, RC-EDITOR-004, RC-EDITOR-005, RC-SYNC-011, AV-ANNOT-01, +more | ./gradlew :app:byCompose:common:test |
@@ -80,14 +80,16 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 | `app/byCompose/desktop/build.gradle.kts` | DESKTOP | RC-DESKTOP-020, RC-DESKTOP-022, RC-DESKTOP-023 | release-checklist |
 | `app/byCompose/desktop/proguard-rules.pro` | DESKTOP | RC-DESKTOP-019, RC-DESKTOP-020, RC-DESKTOP-021 | release-checklist |
 | `app/byCompose/desktop/src/desktopMain/kotlin/main.kt` | DESKTOP | RC-DESKTOP-001, RC-DESKTOP-003, RC-STARTUP-003, RC-STARTUP-004, RC-SYNC-006, AV-DESKTOP-01, AV-STARTUP-01, AV-SYNC-01 | release-checklist |
+| `app/byCompose/uikit/src/commonMain/kotlin/ru/kyamshanov/notepen/GlassmorphismBackButton.kt` | PEXP | RC-PEXP-003 | ./gradlew :drawing:api:jvmTest |
 | `app/byCompose/uikit/src/commonMain/kotlin/ru/kyamshanov/notepen/WheelCarousel.kt` | UI | RC-UI-001, RC-UI-002, RC-UIKIT-001, RC-UIKIT-002, RC-UIKIT-003, RC-UIKIT-004, RC-READER-019, RC-READER-026, +more | ./gradlew :app:byCompose:uikit:test |
+| `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/annotation/domain/model/PageExtent.kt` | PEXP | RC-PEXP-001 | ./gradlew :drawing:api:jvmTest |
 | `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/annotation/domain/StrokeSimplifier.kt` | ANNOT | RC-ANNOT-008 | ./gradlew :drawing:api:test |
 | `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/annotation/domain/model/AnnotationViewState.kt` | ANNOT | RC-ANNOT-009, RC-EDITOR-004 | ./gradlew :drawing:api:test |
 | `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/annotation/domain/model/PageRotation.kt` | VIEWER | RC-VIEWER-003 | ./gradlew :drawing:api:test |
 | `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/annotation/domain/model/SpreadSplit.kt` | VIEWER | RC-VIEWER-005 | ./gradlew :drawing:api:test |
 | `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/annotation/domain/port/AnnotationRepository.kt` | ANNOT | RC-ANNOT-009, RC-EDITOR-004 | ./gradlew :drawing:api:test |
-| `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/drawing/api/PdfDrawingState.kt` | ANNOT | RC-ANNOT-008 | ./gradlew :drawing:api:test |
-| `drawing/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/MultiPageDrawingController.kt` | MAG | RC-MAG-008, AV-MAG-07 | ./gradlew :drawing:impl:test |
+| `drawing/api/src/commonMain/kotlin/ru/kyamshanov/notepen/drawing/api/PdfDrawingState.kt` | PEXP | RC-ANNOT-008, RC-PEXP-002 | ./gradlew :drawing:api:jvmTest |
+| `drawing/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/MultiPageDrawingController.kt` | PEXP | RC-MAG-008, RC-PEXP-003, AV-MAG-07 | ./gradlew :drawing:impl:jvmTest |
 | `drawing/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/magnifier/**` | VIEWER | RC-VIEWER-001, RC-VIEWER-002, RC-MAG-002, AV-VIEWER-01, AV-MAG-01 | ./gradlew :drawing:impl:test |
 | `library/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/library/impl/DefaultLibraryRegistry.kt` | LIBRARY | RC-LIBRARY-001 | ./gradlew :library:impl:test |
 | `library/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/library/impl/GitHubLibrary.kt` | LIBRARY | RC-LIBRARY-004 | ./gradlew :library:impl:test |
@@ -98,10 +100,15 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ReflowAssembler.kt` | READER | RC-READER-004, RC-READER-005, RC-READER-013, RC-READER-014, RC-READER-015, RC-REFLOW-001, RC-REFLOW-002, RC-REFLOW-003, +more | ./gradlew :reflow:impl:test |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/TableNoiseGuard.kt` | REFLOW | RC-REFLOW-005, RC-REFLOW-006, RC-REFLOW-007 | ./gradlew :reflow:impl:test |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/lattice/LatticeTableRefiner.kt` | REFLOW | RC-REFLOW-006 | ./gradlew :reflow:impl:test |
-| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/BlockHeightCalculator.kt` | UX | RC-UX-008 | ./gradlew :reflow:impl:test |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/BlockHeightCalculator.kt` | UX | RC-UX-008, RC-REFLOW-020 | ./gradlew :reflow:impl:jvmTest |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReaderAirbar.kt` | READER | RC-READER-002, RC-READER-019, RC-READER-022, RC-READER-023, RC-READER-027, RC-READER-028, AV-READER-02, AV-READER-08, +more | ai-vision AV-READER-02 |
-| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReflowReader.kt` | REFLOW | RC-REFLOW-010, RC-REFLOW-011, RC-VIEWER-007, RC-VIEWER-008, RC-UX-005, RC-UX-006, RC-UX-008, AV-REFLOW-01, +more | ai-vision AV-REFLOW-01 |
-| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReflowSelectionState.kt` | VIEWER | RC-VIEWER-007, RC-VIEWER-008, AV-VIEWER-03 | ./gradlew :reflow:impl:test |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReflowReader.kt` | REFLOW | RC-REFLOW-010, RC-REFLOW-011, RC-REFLOW-013, RC-VIEWER-007, RC-VIEWER-008, RC-UX-005, RC-UX-006, RC-UX-008, AV-REFLOW-01, +more | ai-vision AV-REFLOW-01 |
+| `app/byCompose/common/src/jvmAndroidMain/kotlin/ru/kyamshanov/notepen/reflow/ReflowLayoutBinaryFormat.kt` | REFLOW | RC-REFLOW-013 | ./gradlew :app:byCompose:common:jvmTest |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReflowSelectionState.kt` | VIEWER | RC-VIEWER-007, RC-VIEWER-008, RC-REFLOW-015, AV-VIEWER-03 | ./gradlew :reflow:impl:test |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/LiangHyphenator.kt` | REFLOW | RC-REFLOW-014, RC-REFLOW-017 | ./gradlew :reflow:impl:test |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReaderHyphenation.kt` | REFLOW | RC-REFLOW-015, RC-REFLOW-013, RC-REFLOW-018 | ./gradlew :reflow:impl:jvmTest |
+| `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReaderHyphenPromotion.kt` | REFLOW | RC-REFLOW-018, RC-REFLOW-019, RC-REFLOW-020, RC-REFLOW-021 | ./gradlew :reflow:impl:jvmTest |
+| `reflow/impl/src/jvmMain/kotlin/ru/kyamshanov/notepen/reflow/ui/ReaderHyphenation.jvm.kt` | REFLOW | RC-REFLOW-017, RC-REFLOW-019 | ./gradlew :reflow:impl:jvmTest |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/bookcurl/BookCurlImageCropper.kt` | REFLOW | RC-REFLOW-012 | ./gradlew :reflow:impl:jvmTest |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/bookcurl/BookCurlOverlay.kt` | REFLOW | RC-REFLOW-012 | ./gradlew :reflow:impl:jvmTest |
 | `reflow/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/reflow/ui/bookcurl/PageTurnStyle.kt` | REFLOW | RC-REFLOW-012 | ./gradlew :reflow:impl:jvmTest |
@@ -115,7 +122,7 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 | `rendering/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/magnifier/MagnifierState.kt` | MAG | RC-MAG-001, RC-MAG-002, RC-MAG-005, RC-MAG-015, AV-MAG-01, AV-MAG-04, AV-MAG-12 | ./gradlew :rendering:impl:test |
 | `rendering/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/magnifier/MagnifierTargetGestureController.kt` | MAG | RC-MAG-015, AV-MAG-12 | ai-vision AV-MAG-12 |
 | `rendering/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/pdfviewer/PdfBitmapCache.kt` | DESKTOP | RC-DESKTOP-017, RC-DESKTOP-018, AV-DESKTOP-05 | ./gradlew :rendering:impl:test |
-| `rendering/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/pdfviewer/PdfPagesLayout.kt` | RENDER | RC-RENDER-001, RC-RENDER-002, RC-RENDER-003, RC-RENDER-009, RC-RENDER-010, RC-RENDER-013, RC-RENDER-014, RC-DESKTOP-007, RC-VIEWER-006, RC-VIEWER-010, +more | ./gradlew :rendering:impl:test |
+| `rendering/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/pdfviewer/PdfPagesLayout.kt` | RENDER | RC-RENDER-001, RC-RENDER-002, RC-RENDER-003, RC-RENDER-009, RC-RENDER-010, RC-RENDER-013, RC-RENDER-014, RC-DESKTOP-007, RC-VIEWER-006, RC-VIEWER-010, RC-PEXP-008, RC-PEXP-009, RC-PEXP-011, +more | ./gradlew :rendering:impl:test |
 | `rendering/impl/src/commonMain/kotlin/ru/kyamshanov/notepen/pdfviewer/PdfViewerState.kt` | DESKTOP | RC-DESKTOP-005, RC-DESKTOP-006, RC-DESKTOP-008, AV-DESKTOP-02 | ./gradlew :rendering:impl:test |
 | `rendering/impl/src/jvmMain/kotlin/ru/kyamshanov/notepen/pdf/infrastructure/JvmPdfPageRenderer.kt` | VIEWER | RC-VIEWER-004, AV-VIEWER-02 | ai-vision AV-VIEWER-02 |
 | `rendering/impl/src/jvmMain/kotlin/ru/kyamshanov/notepen/pdfviewer/PdfPagesViewer.jvm.kt` | DESKTOP | RC-DESKTOP-009, RC-DESKTOP-010, RC-DESKTOP-011, RC-DESKTOP-016, RC-PDF-001, RC-MAG-005, RC-RENDER-004, RC-RENDER-015, AV-DESKTOP-03, +more | ./gradlew :rendering:impl:jvmTest |
@@ -130,7 +137,9 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 | `sync/src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/RemoteCatalogProvider.kt` | SYNC | RC-SYNC-010 | ./gradlew :sync:jvmTest |
 | `sync/src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/model/StrokeDelta.kt` | SYNC | RC-SYNC-003 | ./gradlew :sync:jvmTest |
 | `sync/src/commonMain/kotlin/ru/kyamshanov/notepen/sync/domain/port/CacheFileStore.kt` | LIBRARY | RC-LIBRARY-003 | ./gradlew :sync:jvmTest |
-| `sync/src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/KtorSyncClient.kt` | SYNC | RC-SYNC-001 | ./gradlew :sync:jvmTest |
+| `sync/src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/KtorSyncClient.kt` | SYNC | RC-SYNC-001, RC-SYNC-013 | ./gradlew :sync:jvmTest |
+| `sync/src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/ConnectFailureClassifier.kt` | SYNC | RC-SYNC-013 | ./gradlew :sync:jvmTest |
+| `qr-connect/src/commonMain/kotlin/ru/kyamshanov/notepen/qrconnect/application/ConnectFailureMessages.kt` | SYNC | RC-SYNC-013 | ./gradlew :qr-connect:jvmTest |
 | `sync/src/commonMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/SqlDelightPendingDeltaQueue.kt` | STARTUP | RC-STARTUP-001, RC-STARTUP-002 | ./gradlew :sync:jvmTest |
 | `sync/src/jvmMain/kotlin/ru/kyamshanov/notepen/sync/infrastructure/KtorPeerServer.kt` | SYNC | RC-SYNC-002, RC-SYNC-004 | ./gradlew :sync:jvmTest |
 | `tools/marker/src/commonMain/kotlin/ru/kyamshanov/notepen/tools/marker/MarkerRenderer.kt` | MARKER | RC-MARKER-001, AV-MARKER-01 | ai-vision AV-MARKER-01 |
@@ -147,8 +156,9 @@ This file maps source paths to the area and its regression (RC-*) and AI-vision 
 - MAG — 15 cases (15 RC, 12 AV) — modules: `rendering/impl` (magnifier), `drawing/impl` (magnifier), `app/byCompose/common` (EditorPanel)
 - MARKER — 3 cases (3 RC, 3 AV) — modules: `rendering/impl` (DrawablePdfPage, lowlatency, MagnifierInputPanel), `tools/marker`
 - PDF — 8 cases (8 RC, 4 AV) — modules: `app/byCompose/common` (pdf/infrastructure, pdfviewer, build), `rendering/impl`, `gradle`
+- PEXP — 7 cases (6 RC, 1 AV) — modules: `drawing/api` (PageExtent, PdfDrawingState), `drawing/impl` (MultiPageDrawingController), `app/byCompose/common` (EditorPanel, PdfDocumentState), `app/byCompose/uikit` (GlassmorphismBackButton), `rendering/impl` (PdfViewerState — contentLayerExtraOffset)
 - READER — 28 cases (28 RC, 17 AV) — modules: `app/byCompose/common` (ToolRail, DetailsContent, EditorPanel, PageIndicatorAirbar), `reflow/impl` (ReaderAirbar, ReflowReader), `reflow/api`
-- REFLOW — 12 cases (12 RC, 2 AV) — modules: `reflow/impl` (ReflowAssembler, TableNoiseGuard, lattice, ReflowReader, bookcurl), `reflow/api`, `app/byCompose/common` (reflow)
+- REFLOW — 20 cases (20 RC, 2 AV; RC-REFLOW-016 retired) — modules: `reflow/impl` (ReflowAssembler, TableNoiseGuard, lattice, ReflowReader, ReaderHyphenation/ReaderHyphenPromotion, bookcurl), `reflow/api`, `app/byCompose/common` (reflow)
 - RENDER — 12 cases (12 RC, 6 AV) — modules: `rendering/impl` (PdfPagesLayout, PdfViewerState, DrawablePdfPage, pdfviewer), `app/byCompose/common`
 - SESSION — 4 cases (4 RC, 4 AV) — modules: `app/byCompose/common` (SessionsMenu, SessionsDialog, DetailsContent, EditorPanel, tabs/TabBar)
 - SIDEBAR — 1 case (1 RC, 1 AV) — modules: `app/byCompose/common` (PageThumbnailsSidebar)

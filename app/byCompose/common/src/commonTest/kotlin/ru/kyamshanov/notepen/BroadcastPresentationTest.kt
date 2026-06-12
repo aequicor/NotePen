@@ -17,6 +17,7 @@ import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -121,6 +122,37 @@ class BroadcastPresentationTest {
             ),
             command,
         )
+    }
+
+    @Test
+    fun `broadcast viewport command with empty page layout does not crash on viewport center y`() {
+        val frame =
+            NetworkMessage.ProjectionFrame(
+                documentId = "doc-1",
+                page = 1,
+                viewportOffsetY = 0f,
+                viewportScale = 1f,
+                viewportCenterY = 1.5f, // between pages -> fractional center
+            )
+
+        val command =
+            broadcastViewportCommandForDocument(
+                frame = frame,
+                documentId = "doc-1",
+                currentPage = 0,
+                currentPageOffsetPx = 0,
+                currentScalePercent = 100,
+                currentPanX = 0f,
+                currentPanY = 0f,
+                currentViewportWidthPx = 1200f,
+                currentViewportHeightPx = 900f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = floatArrayOf(), // empty layout: the crash trigger
+                currentPageHeightsPx = floatArrayOf(),
+            )
+
+        assertNotNull(command)
+        assertNull(command.targetPanY) // no center-Y pan; falls back to scroll
     }
 
     @Test

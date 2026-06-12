@@ -458,6 +458,58 @@ class AnnotationRepositoryJvmTest {
             assertTrue(bundle.marker.sticky, "legacy marker without sticky field must default to true")
         }
 
+    @Test
+    fun saveViewState_roundTrip_returnsBackgroundFields() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_view_bg")
+            val pdfPath = dir.resolve("doc.pdf").toString()
+            repo.saveViewState(
+                pdfPath,
+                AnnotationViewState(
+                    scale = 100,
+                    backgroundStyle = "linen",
+                    replaceWhiteBackground = true,
+                ),
+            )
+
+            val view = repo.loadViewState(pdfPath).getOrThrow()
+
+            assertEquals("linen", view?.backgroundStyle)
+            assertEquals(true, view?.replaceWhiteBackground)
+        }
+
+    @Test
+    fun loadViewState_legacySidecarWithoutBackground_returnsDefaults() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_view_bg_legacy")
+            val pdfPath = dir.resolve("legacy.pdf").toString()
+            // Легаси-сайдкар вида без полей фона: должен дать "plain"/false (как раньше).
+            java.io.File("$pdfPath.notepen.json.view").writeText("""{"scale":100,"currentPage":0}""")
+
+            val view = repo.loadViewState(pdfPath).getOrThrow()
+
+            assertEquals("plain", view?.backgroundStyle, "missing backgroundStyle must default to plain")
+            assertEquals(false, view?.replaceWhiteBackground, "missing replaceWhiteBackground must default to false")
+        }
+
+    @Test
+    fun save_afterSaveViewState_preservesBackground() =
+        runBlocking {
+            val dir = createTempDirectory("notepen_view_bg_preserve")
+            val pdfPath = dir.resolve("doc.pdf").toString()
+            // Фон выбран через лёгкий saveViewState.
+            repo.saveViewState(
+                pdfPath,
+                AnnotationViewState(scale = 100, backgroundStyle = "linen", replaceWhiteBackground = true),
+            )
+            // Последующий сейв штрихов (save) не передаёт фон — он не должен его затереть.
+            repo.save(pdfPath, emptyMap(), scale = 100, currentPage = 1)
+
+            val view = repo.loadViewState(pdfPath).getOrThrow()
+            assertEquals("linen", view?.backgroundStyle)
+            assertEquals(true, view?.replaceWhiteBackground)
+        }
+
     // TC-19 surrogate: JSON produced by save/load round-trip is valid (same schema across platforms)
     @Test
     fun jsonShape_isCompatibleAcrossPlatforms() =

@@ -136,6 +136,17 @@ public enum class BookCurlMaterialId {
 }
 
 /**
+ * Ориентация экрана ридера, не зависящая от физического поворота устройства.
+ * `AUTO` — следовать системе; `LANDSCAPE`/`PORTRAIT` — залочить (на Android с
+ * разрешённым переворотом на 180°, удобно читать лёжа). На десктопе — no-op.
+ *
+ * Персистится по ИМЕНИ; декодер настроек использует `coerceInputValues`, поэтому
+ * неизвестное значение откатывается к дефолту ([AUTO]) без потери остальных полей.
+ */
+@Serializable
+public enum class ReaderOrientation { AUTO, LANDSCAPE, PORTRAIT }
+
+/**
  * Полный набор пользовательских настроек ридера — сериализуемый, на примитивах
  * (без Compose-типов), чтобы его можно было персистить и переносить между
  * платформами. Слой отображения (`reflow/impl`) маппит это в свою Compose-модель.
@@ -161,6 +172,7 @@ public enum class BookCurlMaterialId {
  * @property twoPageSpread показывать страничный режим разворотом: две текстовые
  *   страницы рядом, как раскрытая книга
  * @property pageTransition стиль перехода между страницами (только в страничном режиме)
+ * @property orientation ориентация экрана ридера независимо от поворота устройства
  * @property bookCurlMaterial материал листа при книжном перелистывании (физический пресет)
  * @property pageTurnSound короткий звук перелистывания при смене страницы/разворота
  * @property tapToTurn перелистывание тапом по краям (тап-зоны лево/право); при `false`
@@ -192,6 +204,7 @@ public data class ReaderSettings(
     public val paged: Boolean = true,
     public val twoPageSpread: Boolean = false,
     public val pageTransition: PageTransition = PageTransition.BOOK,
+    public val orientation: ReaderOrientation = ReaderOrientation.AUTO,
     public val bookCurlMaterial: BookCurlMaterialId = BookCurlMaterialId.PAPER,
     public val pageTurnSound: Boolean = true,
     public val tapToTurn: Boolean = true,

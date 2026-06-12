@@ -5,6 +5,13 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- mDNS host discovery (NsdManager): holds a Wi-Fi multicast lock while browsing. -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- VPN detection (ConnectivityManager) for actionable LAN-sync error messages:
+         an always-on VPN routes LAN sockets into the tunnel and breaks sync silently. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Android 17+ (API 37): runtime permission gating ALL local-network traffic
+         (LAN WebSocket sync + mDNS discovery). Unknown to older platforms; requested
+         at runtime from the pairing UI (LocalNetworkPermissionEffect). -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <uses-feature
         android:name="android.hardware.touchscreen.stylus"

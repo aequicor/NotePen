@@ -142,6 +142,9 @@ actual class PdfViewerState internal constructor(
     actual val isVisualTransformActive: Boolean
         get() = gestureScale != 1f || gestureTranslation != Offset.Zero
 
+    actual val contentLayerExtraOffset: Offset
+        get() = overscrollOffset
+
     actual val basePageWidthPx: Float
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 

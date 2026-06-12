@@ -13,7 +13,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.SubcomposeLayout
@@ -126,6 +128,7 @@ actual fun PdfPagesViewer(
     primaryDragPanEnabled: (position: Offset) -> Boolean,
     userRotationQuarters: (pageIndex: Int) -> Int,
     pageSource: (logicalIndex: Int) -> PageSourceSpec,
+    canvasBackground: Brush?,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
@@ -456,6 +459,9 @@ actual fun PdfPagesViewer(
                     }
                 }
                 .clipToBounds()
+                // Бумажная текстура холста: тайлится под страницами (clip уже применён,
+                // красится только видимый вьюпорт). null — холст как раньше.
+                .drawBehind { canvasBackground?.let { drawRect(brush = it) } }
                 // Pinch — Initial pass, перехват до pan-обработчика; жесты <2
                 // пальцев проходят дальше.
                 .pdfAndroidPointerInput(state)

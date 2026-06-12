@@ -6,6 +6,7 @@
     <ID>ComplexCondition:BroadcastPresentation.kt:!centerY.isFinite() || centerY &lt; 0f || viewportHeightPx &lt;= 0f || !scale.isFinite() || scale &lt;= 0f</ID>
     <ID>ComplexCondition:BroadcastPresentation.kt:!panX.isFinite() || viewportWidthPx &lt;= 0f || rowWidthPx &lt;= 0f || !zoom.isFinite() || zoom &lt;= 0f</ID>
     <ID>ComplexCondition:BroadcastPresentation.kt:!panY.isFinite() || viewportHeightPx &lt;= 0f || !zoom.isFinite() || zoom &lt;= 0f</ID>
+    <ID>ComplexCondition:EditorPanel.kt:(toolMode == ToolMode.PEN || toolMode == ToolMode.MARKER) &amp;&amp; !pdfViewerState.isVisualTransformActive &amp;&amp; !magnifierState.enabled &amp;&amp; !quickLoupeArmed.value &amp;&amp; !openTriggerProvider.value</ID>
     <ID>ComplexCondition:EditorPanel.kt:deltaX.isFinite() &amp;&amp; deltaY.isFinite() &amp;&amp; (deltaX &gt; 0.5f || deltaX &lt; -0.5f || deltaY &gt; 0.5f || deltaY &lt; -0.5f)</ID>
     <ID>CyclomaticComplexMethod:BroadcastPresentation.kt:internal fun broadcastViewportCommandForDocument: BroadcastViewportCommand?</ID>
     <ID>CyclomaticComplexMethod:ClientPairingPanel.android.kt:@Composable actual fun CameraScanSlot</ID>
@@ -27,6 +28,7 @@
     <ID>LongMethod:ToolRail.kt:internal fun unifiedToolWheelEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LongMethod:ToolSettingsFloatingPanel.kt:internal fun toolPresetEntries: List&lt;WheelEntry&gt;</ID>
     <ID>LoopWithTooManyJumpStatements:AndroidPdfExporter.kt:AndroidPdfExporter$for</ID>
+    <ID>LoopWithTooManyJumpStatements:EditorPanel.kt:for</ID>
     <ID>LoopWithTooManyJumpStatements:JvmPdfExporter.kt:JvmPdfExporter$for</ID>
     <ID>LoopWithTooManyJumpStatements:PeerCatalogViewModel.kt:PeerCatalogViewModel$for</ID>
     <ID>MatchingDeclarationName:BookFileTypes.kt:BookFormat</ID>

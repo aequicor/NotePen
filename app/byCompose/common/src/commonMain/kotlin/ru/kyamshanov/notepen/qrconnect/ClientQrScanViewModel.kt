@@ -10,6 +10,7 @@ import ru.kyamshanov.notepen.qrconnect.application.ClientQrPairingCoordinator
 import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.qrconnect.domain.port.QrScanner
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.port.LocalNetworkDiagnostics
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 /**
@@ -30,6 +31,8 @@ class ClientQrScanViewModel(
      * one step. Defaults to a no-op (transport-only pairing).
      */
     private val onLibraryPaired: suspend (PairingUri, DeviceInfo) -> Unit = { _, _ -> },
+    /** Optional LAN-gating snapshot (VPN, local-network permission) for actionable errors. */
+    private val localNetworkDiagnostics: LocalNetworkDiagnostics? = null,
 ) {
     private val _state =
         MutableStateFlow<ClientQrPairingCoordinator.State>(
@@ -53,6 +56,7 @@ class ClientQrScanViewModel(
                 scanner = scanner,
                 selfInfo = selfInfo,
                 onLibraryPaired = onLibraryPaired,
+                localNetworkDiagnostics = localNetworkDiagnostics,
             )
         val job =
             scope.launch {

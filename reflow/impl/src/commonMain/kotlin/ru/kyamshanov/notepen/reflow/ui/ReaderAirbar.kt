@@ -91,6 +91,7 @@ import ru.kyamshanov.notepen.reflow.api.PageTransition
 import ru.kyamshanov.notepen.reflow.api.ProgressFormat
 import ru.kyamshanov.notepen.reflow.api.ReaderAlign
 import ru.kyamshanov.notepen.reflow.api.ReaderFontFamily
+import ru.kyamshanov.notepen.reflow.api.ReaderOrientation
 import ru.kyamshanov.notepen.reflow.api.ReaderPreset
 import ru.kyamshanov.notepen.reflow.api.ReaderSettings
 import ru.kyamshanov.notepen.reflow.api.ReaderSettingsReducer
@@ -132,6 +133,7 @@ internal fun ReaderAirbar(
     autoHideMs: Long,
     maxVerticalMarginDp: Float,
     onRequestHide: () -> Unit,
+    onOpenBackgroundSettings: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -186,6 +188,7 @@ internal fun ReaderAirbar(
                     onChange = ::emit,
                     textColor = textColor,
                     maxVerticalMarginDp = maxVerticalMarginDp,
+                    onOpenBackgroundSettings = onOpenBackgroundSettings,
                 )
             }
             Spacer(Modifier.height(8.dp))
@@ -661,6 +664,7 @@ private fun TuneSheet(
     onChange: (ReaderSettings) -> Unit,
     textColor: Color,
     maxVerticalMarginDp: Float,
+    onOpenBackgroundSettings: (() -> Unit)? = null,
 ) {
     Column(
         modifier =
@@ -776,6 +780,12 @@ private fun TuneSheet(
                 textColor = textColor,
                 onChange = { onChange(settings.copy(sunsetWarm = it)) },
             )
+            // Фон документа («текстурированная бумага») — per-document, поэтому открываем
+            // ОБЩИЙ лист настроек (а не пишем в глобальный stored ридера). Пункт виден,
+            // только когда родитель прокинул колбэк (в редакторе он есть; в тестах нет).
+            if (onOpenBackgroundSettings != null) {
+                ActionRow(label = "Фон документа…", textColor = textColor, onClick = onOpenBackgroundSettings)
+            }
         }
         Group("Поведение", textColor) {
             LabeledChoice(
@@ -802,6 +812,18 @@ private fun TuneSheet(
                 textColor = textColor,
                 onSelect = { onChange(settings.copy(pageTransition = it)) },
             )
+            // Блокировка ориентации осмысленна только там, где экран физически
+            // поворачивается (Android); на десктопе селектор скрыт (no-op).
+            if (SupportsReaderOrientation) {
+                LabeledChoice(
+                    label = "Ориентация",
+                    options = ReaderOrientation.entries,
+                    selected = settings.orientation,
+                    labelOf = ::orientationName,
+                    textColor = textColor,
+                    onSelect = { onChange(settings.copy(orientation = it)) },
+                )
+            }
             if (settings.pageTransition == PageTransition.BOOK) {
                 LabeledChoice(
                     label = "Материал листа",
@@ -1056,6 +1078,28 @@ private fun ToggleRow(
     }
 }
 
+/** Строка-действие (как [ToggleRow], но открывает экран): подпись + шеврон, по тапу [onClick]. */
+@Composable
+private fun ActionRow(
+    label: String,
+    textColor: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { onClick() }
+                .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        BasicText(label, style = TextStyle(color = textColor.copy(alpha = 0.85f), fontSize = 13.sp))
+        BasicText("›", style = TextStyle(color = textColor.copy(alpha = 0.55f), fontSize = 16.sp))
+    }
+}
+
 /** Компактный переключатель на foundation: дорожка + кружок, без Material. */
 @Composable
 private fun ReaderSwitch(
@@ -1154,6 +1198,13 @@ private fun transitionName(transition: PageTransition): String =
         PageTransition.SLIDE -> "Слайд"
         PageTransition.FADE -> "Затухание"
         PageTransition.NONE -> "Нет"
+    }
+
+private fun orientationName(orientation: ReaderOrientation): String =
+    when (orientation) {
+        ReaderOrientation.AUTO -> "Авто"
+        ReaderOrientation.LANDSCAPE -> "Гориз."
+        ReaderOrientation.PORTRAIT -> "Портрет"
     }
 
 private fun bookCurlMaterialName(id: BookCurlMaterialId): String =

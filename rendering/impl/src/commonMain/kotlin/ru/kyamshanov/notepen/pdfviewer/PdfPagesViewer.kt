@@ -3,6 +3,7 @@ package ru.kyamshanov.notepen.pdfviewer
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import ru.kyamshanov.notepen.annotation.domain.model.PageExtent
 import ru.kyamshanov.notepen.pdf.domain.model.PdfDocument
 import ru.kyamshanov.notepen.pdf.domain.model.PdfPageInfo
@@ -72,6 +73,14 @@ expect fun PdfPagesViewer(
      * слотов берётся из «эффективных» [pages] (см. `EditorPanel`).
      */
     pageSource: (logicalIndex: Int) -> PageSourceSpec = { PageSourceSpec(it) },
+    /**
+     * Бумажная текстура фона бесконечного холста (область вокруг/между страницами).
+     * `null` (по умолчанию) — поведение как раньше: холст красится фоном родителя.
+     * Когда задана, тайлится через `drawBehind` под страницами. Кисть строит app-слой
+     * ([ru.kyamshanov.notepen.background.rememberPaperBrush]); вьювер про каталог
+     * текстур не знает.
+     */
+    canvasBackground: Brush? = null,
     pageContent: PdfPageContent,
 )
 
@@ -254,6 +263,14 @@ expect class PdfViewerState {
 
     /** True while the viewer content is visually transformed but not committed to [zoom] / [pan]. */
     val isVisualTransformActive: Boolean
+
+    /**
+     * Extra visual translation applied to the content layer beyond what [effectivePan] captures.
+     * On JVM this equals the spring-back overscroll offset; on Android it is always [Offset.Zero].
+     * Add this to any overlay coordinate derived from [effectivePan] to keep it aligned with the
+     * page during overscroll.
+     */
+    val contentLayerExtraOffset: Offset
 
     /** Starts a drag-pan gesture; platforms may use it to hold overscroll state. */
     fun beginPanGesture()

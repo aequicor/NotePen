@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
@@ -180,6 +181,16 @@ fun DrawablePdfPage(
      * без рекомпозиции и без визуального скачка.
      */
     isZooming: () -> Boolean = { false },
+    /**
+     * Бумажная подложка под PDF-растром для замены белого фона на текстуру
+     * («текстурированная бумага»). `null` (по умолчанию) — поведение как раньше:
+     * белый фон страницы не трогаем. Когда задана, под растр кладётся непрозрачная
+     * белая база + эта кисть, а сам растр рисуется с [BlendMode.Multiply], поэтому
+     * белые пиксели пропускают бумагу, а тёмное содержимое остаётся тёмным. Кисть
+     * строит app-слой ([ru.kyamshanov.notepen.background.rememberPaperBrush]) и
+     * передаёт сюда только когда пользователь включил замену фона у документа.
+     */
+    pageBackground: Brush? = null,
     /**
      * Диспетчер для растеризации кэша завершённых штрихов вне main-потока.
      * CPU-bound работа → [Dispatchers.Default] (в commonMain нет `IO`).
@@ -375,6 +386,7 @@ fun DrawablePdfPage(
                 nativeImageDrawCache = nativeImageDrawCache,
                 pdfDstOffset = pdfDstOffset,
                 pdfDstSize = pdfDstSize,
+                pageBackground = pageBackground,
             )
             drawRect(
                 color = indicatorColor.copy(alpha = 0.35f),
@@ -647,24 +659,36 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPdfLayer(
     nativeImageDrawCache: NativeImageDrawCache,
     pdfDstOffset: IntOffset,
     pdfDstSize: IntSize,
+    pageBackground: Brush?,
 ) {
+    val topLeft = Offset(pdfDstOffset.x.toFloat(), pdfDstOffset.y.toFloat())
+    val rectSize = Size(pdfDstSize.width.toFloat(), pdfDstSize.height.toFloat())
+    // Замена белого фона на текстуру: кладём непрозрачную белую базу + бумагу, а растр
+    // умножаем (white×paper=paper → бумага видна, тёмное содержимое остаётся тёмным).
+    // Multiply требует непрозрачной базы — поэтому всегда сначала белый прямоугольник.
+    val rasterBlend = if (pageBackground != null) BlendMode.Multiply else BlendMode.SrcOver
+    if (pageBackground != null) {
+        drawRect(color = Color.White, topLeft = topLeft, size = rectSize)
+        drawRect(brush = pageBackground, topLeft = topLeft, size = rectSize)
+    }
     when (layer) {
-        is PdfPageLayer.FullBitmap -> drawFullBitmap(nativeImageDrawCache, layer.bitmap, pdfDstOffset, pdfDstSize)
+        is PdfPageLayer.FullBitmap ->
+            drawFullBitmap(nativeImageDrawCache, layer.bitmap, pdfDstOffset, pdfDstSize, rasterBlend)
         is PdfPageLayer.Tiles -> {
-            drawRect(
-                color = Color.White,
-                topLeft = Offset(pdfDstOffset.x.toFloat(), pdfDstOffset.y.toFloat()),
-                size = Size(pdfDstSize.width.toFloat(), pdfDstSize.height.toFloat()),
-            )
+            // Без замены фона — обычная непрозрачная белая подложка (как раньше). При
+            // замене бело-бумажная база уже нарисована выше, второй раз не красим.
+            if (pageBackground == null) {
+                drawRect(color = Color.White, topLeft = topLeft, size = rectSize)
+            }
             if (layer.tiles.isEmpty()) {
-                drawFullBitmap(nativeImageDrawCache, layer.lowResPreview, pdfDstOffset, pdfDstSize)
+                drawFullBitmap(nativeImageDrawCache, layer.lowResPreview, pdfDstOffset, pdfDstSize, rasterBlend)
             } else if (layer.tiles.isNotEmpty()) {
                 for (tile in layer.missingTiles) {
-                    drawPreviewTile(nativeImageDrawCache, layer.lowResPreview, tile, pdfDstOffset, pdfDstSize)
+                    drawPreviewTile(nativeImageDrawCache, layer.lowResPreview, tile, pdfDstOffset, pdfDstSize, rasterBlend)
                 }
             }
             for (tile in layer.tiles) {
-                drawPdfTile(nativeImageDrawCache, tile, pdfDstOffset, pdfDstSize)
+                drawPdfTile(nativeImageDrawCache, tile, pdfDstOffset, pdfDstSize, rasterBlend)
             }
         }
     }
@@ -675,6 +699,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFullBitmap(
     bitmap: ImageBitmap?,
     pdfDstOffset: IntOffset,
     pdfDstSize: IntSize,
+    blendMode: BlendMode = BlendMode.SrcOver,
 ) {
     if (bitmap == null) return
     drawNativeCachedImage(
@@ -684,7 +709,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawFullBitmap(
         srcSize = IntSize(bitmap.width, bitmap.height),
         dstOffset = pdfDstOffset,
         dstSize = pdfDstSize,
-        blendMode = BlendMode.SrcOver,
+        blendMode = blendMode,
         filterQuality = FilterQuality.High,
     )
 }
@@ -695,6 +720,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPreviewTile(
     tile: PdfTilePlaceholder,
     pdfDstOffset: IntOffset,
     pdfDstSize: IntSize,
+    blendMode: BlendMode = BlendMode.SrcOver,
 ) {
     val previewBitmap = bitmap ?: return
     val invalidBitmap = previewBitmap.width <= 0 || previewBitmap.height <= 0
@@ -724,7 +750,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPreviewTile(
         srcSize = IntSize(srcRight - srcLeft, srcBottom - srcTop),
         dstOffset = IntOffset(bounds.left, bounds.top),
         dstSize = IntSize((bounds.right - bounds.left).coerceAtLeast(1), (bounds.bottom - bounds.top).coerceAtLeast(1)),
-        blendMode = BlendMode.SrcOver,
+        blendMode = blendMode,
         filterQuality = FilterQuality.Low,
     )
 }
@@ -734,6 +760,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPdfTile(
     tile: PdfTile,
     pdfDstOffset: IntOffset,
     pdfDstSize: IntSize,
+    blendMode: BlendMode = BlendMode.SrcOver,
 ) {
     val bounds = tileDestinationBounds(tile, pdfDstOffset, pdfDstSize)
     drawNativeCachedImage(
@@ -743,7 +770,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPdfTile(
         srcSize = IntSize(tile.bitmap.width, tile.bitmap.height),
         dstOffset = IntOffset(bounds.left, bounds.top),
         dstSize = IntSize((bounds.right - bounds.left).coerceAtLeast(1), (bounds.bottom - bounds.top).coerceAtLeast(1)),
-        blendMode = BlendMode.SrcOver,
+        blendMode = blendMode,
         filterQuality = FilterQuality.High,
     )
 }

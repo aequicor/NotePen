@@ -122,6 +122,8 @@ import ru.kyamshanov.notepen.annotation.domain.model.MarkerSettings
 import ru.kyamshanov.notepen.annotation.domain.model.PenSettings
 import ru.kyamshanov.notepen.annotation.domain.model.StoredToolPresets
 import ru.kyamshanov.notepen.annotation.domain.model.applyStrokeWidth
+import ru.kyamshanov.notepen.appsettings.defaultAppSettingsRepository
+import ru.kyamshanov.notepen.appsettings.domain.model.ScreenOrientationMode
 import ru.kyamshanov.notepen.blur.GlassBackdropProvider
 import ru.kyamshanov.notepen.blur.GlassSurface
 import ru.kyamshanov.notepen.book.DocumentOutlineProvider
@@ -569,6 +571,21 @@ fun DetailsContent(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val annotationRepository = remember { createAnnotationRepository() }
+
+    // Глобальная ориентация экрана редактора (кнопка-циклер в тулбаре, см.
+    // ToolRail.orientationButton). Тот же процесс-синглтон репозитория, что
+    // EditorPanel читает для применения через ApplyScreenOrientation.
+    val appSettingsRepository = remember { defaultAppSettingsRepository() }
+    val appSettings by appSettingsRepository.settings.collectAsState()
+    val cycleEditorOrientation: () -> Unit = {
+        val next =
+            when (appSettings.orientation) {
+                ScreenOrientationMode.AUTO -> ScreenOrientationMode.LANDSCAPE
+                ScreenOrientationMode.LANDSCAPE -> ScreenOrientationMode.PORTRAIT
+                ScreenOrientationMode.PORTRAIT -> ScreenOrientationMode.AUTO
+            }
+        coroutineScope.launch { appSettingsRepository.save(appSettings.copy(orientation = next)) }
+    }
 
     // The workspace as it was when this editor session began — including an
     // autosave that survived a crash. Loaded once, before the autosave below
@@ -1319,11 +1336,14 @@ fun DetailsContent(
                                         liveSyncEnabled = liveSyncEnabled,
                                         onToggleLiveSync = { controls?.toggleLiveSync?.invoke() },
                                         onOpenShortcutsSettings = { showShortcutsDialog = true },
+                                        onOpenBackgroundSettings = { controls?.onOpenBackgroundSettings?.invoke() },
                                         onRotatePage = { controls?.rotateCurrentPage?.invoke() },
                                         spreadSplitEnabled = controls?.spreadSplitEnabled == true,
                                         onToggleSpreadSplit = { controls?.toggleSpreadSplit?.invoke() },
                                         bookSpreadEnabled = controls?.bookSpreadEnabled == true,
                                         onToggleBookSpread = { controls?.toggleBookSpread?.invoke() },
+                                        editorOrientation = appSettings.orientation,
+                                        onCycleEditorOrientation = cycleEditorOrientation,
                                     ),
                                 readerTheme =
                                     ToolRailReaderTheme(
@@ -1455,11 +1475,14 @@ fun DetailsContent(
                                 liveSyncEnabled = liveSyncEnabled,
                                 onToggleLiveSync = { controls?.toggleLiveSync?.invoke() },
                                 onOpenShortcutsSettings = { showShortcutsDialog = true },
+                                onOpenBackgroundSettings = { controls?.onOpenBackgroundSettings?.invoke() },
                                 onRotatePage = { controls?.rotateCurrentPage?.invoke() },
                                 spreadSplitEnabled = controls?.spreadSplitEnabled == true,
                                 onToggleSpreadSplit = { controls?.toggleSpreadSplit?.invoke() },
                                 bookSpreadEnabled = controls?.bookSpreadEnabled == true,
                                 onToggleBookSpread = { controls?.toggleBookSpread?.invoke() },
+                                editorOrientation = appSettings.orientation,
+                                onCycleEditorOrientation = cycleEditorOrientation,
                                 onBack = onBackOrCloseThumbnails,
                                 readerBackground = readerBackground,
                                 readerContentColor = readerContentColor,

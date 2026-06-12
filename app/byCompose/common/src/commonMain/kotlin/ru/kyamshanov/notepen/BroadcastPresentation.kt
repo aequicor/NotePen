@@ -248,6 +248,7 @@ private fun panYForViewportCenter(
     pageHeightsPx: FloatArray,
     scale: Float,
 ): Float? {
+    if (pageTopsPx.isEmpty()) return null
     if (!centerY.isFinite() || centerY < 0f || viewportHeightPx <= 0f || !scale.isFinite() || scale <= 0f) {
         return null
     }

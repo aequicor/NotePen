@@ -79,9 +79,12 @@ data class PdfPagesLayout(
      * В [SpreadMode.SINGLE] всегда `0f` — единая центрированная колонка (X=0 —
      * её левый край для ВСЕХ страниц, центрирование делает `pan.x`). В
      * [SpreadMode.SPREAD] левая страница пары имеет `0f`, правая —
-     * `basePageWidthPx + `[SPREAD_GUTTER_PX] (ряд центрируется целиком через
-     * `pan.x`, см. [PdfViewerMath.panForPageTop]). Слот страницы со
-     * [PageExtent] сдвигается на `pageLeftsPx[i] + extent.left * basePageWidthPx`.
+     * `ext[leftPage].right * basePageWidthPx + `[SPREAD_GUTTER_PX] (учитывает
+     * реальную ширину слота левой страницы, включая extent-расширения; при
+     * стандартном extent равно `basePageWidthPx + SPREAD_GUTTER_PX`). Ряд
+     * центрируется целиком через `pan.x`, см. [PdfViewerMath.panForPageTop].
+     * Слот страницы со [PageExtent] сдвигается на
+     * `pageLeftsPx[i] + extent.left * basePageWidthPx`.
      */
     val pageLeftsPx: FloatArray,
     /** Режим раскладки (одностраничный / разворот). */
@@ -119,8 +122,11 @@ data class PdfPagesLayout(
          * рендерятся в z-порядке размещения placeables.
          *
          * **Разворот ([SpreadMode.SPREAD]).** Пары `(2k, 2k+1)` кладутся в один
-         * Y-ряд: левая страница на X=0, правая на `basePageWidthPx +`
-         * [SPREAD_GUTTER_PX]; верх обеих — одинаковый, следующий ряд начинается
+         * Y-ряд: левая страница на X=0, правая на
+         * `leftExt.right * basePageWidthPx + `[SPREAD_GUTTER_PX] (учитывает
+         * реальный правый край слота левой страницы, включая extent-расширения;
+         * при стандартном extent равно `basePageWidthPx + SPREAD_GUTTER_PX`);
+         * верх обеих — одинаковый, следующий ряд начинается
          * на `max` высот пары. Висячая нечётная последняя — левая половина одна.
          * Штриховые координаты не меняются (страницы по-прежнему `[0..1]`);
          * разнесение по X делает только раскладка через [pageLeftsPx].
@@ -139,8 +145,6 @@ data class PdfPagesLayout(
             val tops = FloatArray(n)
             val lefts = FloatArray(n)
             val ext = List(n) { i -> extents.getOrNull(i) ?: PageExtent.Pdf }
-            // X правой страницы пары — сразу за левой колонкой + корешок.
-            val rightColumnX = basePageWidthPx + SPREAD_GUTTER_PX
 
             var y = 0f
             var minLeft = 0f
@@ -157,7 +161,14 @@ data class PdfPagesLayout(
                 if (spreadMode == SpreadMode.SPREAD) {
                     // Чётный индекс — левая страница пары (X=0), нечётный — правая.
                     val isRight = i % 2 == 1
-                    lefts[i] = if (isRight) rightColumnX else 0f
+                    if (isRight) {
+                        // X правой страницы — сразу за правым краем СЛОТА левой
+                        // страницы пары (ext.right * base), включая любое расширение.
+                        // При стандартном extent (right = 1) равно basePageWidthPx + GUTTER.
+                        lefts[i] = ext[i - 1].right * basePageWidthPx + SPREAD_GUTTER_PX
+                    } else {
+                        lefts[i] = 0f
+                    }
                     // Y продвигаем только после правой (или единственной висячей
                     // левой) страницы пары: ряд высотой = max высот пары.
                     if (isRight) {
@@ -556,9 +567,17 @@ object PdfViewerMath {
     /**
      * Pan для центрирования **ряда раскладки** по горизонтали и прижатия верха
      * страницы [pageIndex] к верху вьюпорта (используется `fitToWidth` и
-     * `fitToPage`). В развороте центрируется вся пара ([rowWidthPx]); в
-     * одностраничном — PDF-колонка (не слот) — иначе видимая страница «прыгает»
-     * вбок при росте extent.
+     * `fitToPage`). В одностраничном режиме центрируется PDF-колонка (не слот) —
+     * иначе видимая страница «прыгает» вбок при росте extent.
+     *
+     * В развороте ([SpreadMode.SPREAD]):
+     * - Если у левой страницы пары есть вылет влево (`leftExt.left < 0`),
+     *   左边界 ставится точно на `x = 0` вьюпорта: расширенный холст всегда виден
+     *   сразу после переключения режима; пользователь скроллит вправо к парной странице.
+     * - Если у правой страницы пары есть вылет вправо (`rightExt.right > 1`),
+     *   правая граница ставится на `x = viewportWidth`: расширение справа видно с
+     *   места.
+     * - В отсутствие внешних расширений — обычное центрирование ряда `[0, rowWidthPx]`.
      */
     fun panForPageTop(
         layout: PdfPagesLayout,
@@ -566,7 +585,38 @@ object PdfViewerMath {
         zoom: Float,
         viewportWidth: Float,
     ): Offset {
-        val centeringX = (viewportWidth - rowWidthPx(layout) * zoom) / 2f
+        val centeringX =
+            if (layout.spreadMode == SpreadMode.SPREAD) {
+                val leftIdx = spreadLeftPageOf(layout, pageIndex)
+                val leftExt = layout.pageExtents.getOrElse(leftIdx) { PageExtent.Pdf }
+                val rightExt = layout.pageExtents.getOrElse(leftIdx + 1) { PageExtent.Pdf }
+                when {
+                    leftExt.left < 0f ->
+                        // Anchor the outer-left boundary at viewport x=0 so the
+                        // expanded canvas on the left is immediately visible.
+                        -leftExt.left * layout.basePageWidthPx * zoom
+                    leftExt.right > 1f -> {
+                        // Left page extends rightward past its column into the gutter.
+                        // Center the full content span (left col + extension + gutter + right col).
+                        val outerRight =
+                            leftExt.right * layout.basePageWidthPx +
+                                PdfPagesLayout.SPREAD_GUTTER_PX + layout.basePageWidthPx
+                        (viewportWidth - outerRight * zoom) / 2f
+                    }
+                    rightExt.right > 1f -> {
+                        // Anchor the outer-right boundary at the right viewport edge.
+                        val outerRight =
+                            layout.basePageWidthPx + PdfPagesLayout.SPREAD_GUTTER_PX +
+                                rightExt.right * layout.basePageWidthPx
+                        viewportWidth - outerRight * zoom
+                    }
+                    else ->
+                        // No outer extensions — center the row normally.
+                        (viewportWidth - rowWidthPx(layout) * zoom) / 2f
+                }
+            } else {
+                (viewportWidth - rowWidthPx(layout) * zoom) / 2f
+            }
         val panY =
             if (pageIndex in layout.pageHeightsPx.indices) {
                 -layout.pageTopsPx[pageIndex] * zoom

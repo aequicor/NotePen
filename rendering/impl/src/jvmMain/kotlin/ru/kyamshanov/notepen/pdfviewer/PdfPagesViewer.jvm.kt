@@ -24,6 +24,7 @@ import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.awt.awtEventOrNull
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -338,6 +339,7 @@ actual fun PdfPagesViewer(
     primaryDragPanEnabled: (position: Offset) -> Boolean,
     userRotationQuarters: (pageIndex: Int) -> Int,
     pageSource: (logicalIndex: Int) -> PageSourceSpec,
+    canvasBackground: Brush?,
     pageContent: PdfPageContent,
 ) {
     val cache = remember(pdfDocument) { PdfBitmapCache(maxEntries = MAX_CACHE_ENTRIES) }
@@ -848,6 +850,9 @@ actual fun PdfPagesViewer(
                 Modifier
                     .fillMaxSize()
                     .clipToBounds()
+                    // Бумажная текстура холста: тайлится под страницами (clip уже применён,
+                    // так что красится только видимый вьюпорт). null — холст как раньше.
+                    .drawBehind { canvasBackground?.let { drawRect(brush = it) } }
                     .overscrollGlow(overscrollColor) { state.overscrollOffset }
                     .pdfDesktopPointerInput(state, pendingZoom, pendingPanCommit, primaryDragPanEnabled)
                     .then(gestureModifier),

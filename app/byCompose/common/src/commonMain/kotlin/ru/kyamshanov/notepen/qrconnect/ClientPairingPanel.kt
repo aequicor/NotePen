@@ -88,6 +88,10 @@ fun ClientPairingPanel(
     val connectedHosts by peerClient.connectedHosts.collectAsState(emptySet())
     val coroutineScope = rememberCoroutineScope()
 
+    // Android 17+ gates LAN sockets/mDNS behind a runtime permission whose denial
+    // fails silently — ask up front, before discovery or a connect attempt runs.
+    LocalNetworkPermissionEffect()
+
     var screen by remember {
         mutableStateOf(
             when {

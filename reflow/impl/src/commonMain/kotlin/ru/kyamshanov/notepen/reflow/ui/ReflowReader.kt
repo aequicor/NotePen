@@ -74,12 +74,16 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.layer.GraphicsLayer
+import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -99,6 +103,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
@@ -133,6 +138,7 @@ import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlPhysics
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.BookCurlState
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.PageTurnStyle
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.captureReflowTexture
+import ru.kyamshanov.notepen.reflow.ui.bookcurl.snapshotBookCurlLayer
 import ru.kyamshanov.notepen.reflow.ui.bookcurl.isBookCurlNativeRendererSupported
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -229,6 +235,20 @@ public fun ReflowReader(
     onReadingAnchorChange: (TextAnchor) -> Unit = {},
     topInset: Dp = 0.dp,
     startInset: Dp = 0.dp,
+    /**
+     * Бумажная текстура фона страницы чтения («текстурированная бумага»). `null`
+     * (по умолчанию) — сплошной цвет темы, как раньше. Когда задана, тайлится поверх
+     * цвета темы с [BlendMode.Multiply], так что тема (включая `warmShift`/яркость) её
+     * тонирует. Per-document: кисть строит app-слой из [StoredReaderSettings]-независимого
+     * выбора документа и передаёт сюда параметром (не из глобального `stored`).
+     */
+    pageBackground: Brush? = null,
+    /**
+     * Открывает общий лист настроек фона документа из панели ридера («Цвет» → «Фон
+     * документа»). `null` — пункт не показываем (standalone-вызовы/тесты). Лист хостит
+     * `EditorPanel`, поэтому он один и тот же для PDF- и reader-режима.
+     */
+    onOpenBackgroundSettings: (() -> Unit)? = null,
 ) {
     // Высота вьюпорта ридера в px — нужна и для зажима вертикальных полей (ниже), и для
     // шага «листнуть страницу» в скролл-режиме. Меряем корневой Box (см. onSizeChanged).
@@ -421,7 +441,7 @@ public fun ReflowReader(
                 // плавающим хромом. Иначе резерв оставался незакрашенным и сквозь него
                 // просвечивал фон родителя (без тёплого сдвига заката) — это и были «полосы»
                 // сверху и слева на стыке с контентом.
-                .background(effectiveBackground)
+                .paperBackground(effectiveBackground, pageBackground)
                 // Резерв под плавающий хром редактора (верхний бар/чип, боковой tool-rail).
                 // После background/перед onSizeChanged: вьюпорт ридера (LazyColumn/пейджер)
                 // ужимается под резерв и тап-зоны считаются от нового размера, а фон под
@@ -518,7 +538,7 @@ public fun ReflowReader(
                         // panels sample a solid page (like PDF mode) instead of transparent gaps
                         // between text lines — otherwise the reader panels read as effect-less.
                         .glassSource()
-                        .background(effectiveBackground)
+                        .paperBackground(effectiveBackground, pageBackground)
                         .onGloballyPositioned { selectionState.containerCoordinates = it }
                         .reflowSelectionDrag(
                             immediate = selection.immediate,
@@ -555,6 +575,10 @@ public fun ReflowReader(
                         },
                         onPageDeltaReady = setPageDelta,
                         navigateToBlock = navigateToBlock,
+                        // effectiveBackground, а не settings.background: вечерний warmShift обязан
+                        // попасть и в кёрл-текстуры, иначе лист холоднее живой страницы.
+                        paperColor = effectiveBackground,
+                        pageBackground = pageBackground,
                     )
                 } else {
                     ScrollReflowContent(
@@ -651,6 +675,7 @@ public fun ReflowReader(
                 autoHideMs = settings.autoHideMs,
                 maxVerticalMarginDp = maxVerticalMarginDp,
                 onRequestHide = { onBarVisibleChange(false) },
+                onOpenBackgroundSettings = onOpenBackgroundSettings,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -879,6 +904,8 @@ private fun PagedReflowContent(
     onVisibleAnchorChange: (TextAnchor) -> Unit,
     onPageDeltaReady: (((Int) -> Unit)?) -> Unit,
     navigateToBlock: MutableState<Int?>,
+    paperColor: Color,
+    pageBackground: Brush? = null,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
@@ -1346,14 +1373,22 @@ private fun PagedReflowContent(
         var readerPageSizePx by remember(document, measureKey) { mutableStateOf(IntSize.Zero) }
         // Общий кэш растров врезок — пробрасываем в закадровую сцену, чтобы картинки попали в текстуру.
         val figureCache = LocalFigureBitmapCache.current
+        // Через rememberUpdatedState: ensureCurlImage живёт в замыкании pageDeltaHandler'а, который
+        // remember'ится по другим ключам — прямой захват paperColor/pageBackground заморозил бы
+        // значения первой композиции (фон/тёплый сдвиг из прошлого попадал бы в текстуры).
+        val latestPaperColor = rememberUpdatedState(paperColor)
+        val latestPageBrush = rememberUpdatedState(pageBackground)
 
         suspend fun ensureCurlImage(page: Int): ImageBitmap? {
             val cached = pageCurlImages[page]
             val captured =
                 if (cached == null) {
                     pageCaptureLayers[page]
-                        ?.let { layer -> runCatching { layer.toImageBitmap() }.getOrNull() }
-                        ?.also { pageCurlImages[page] = it }
+                        ?.let { layer ->
+                            snapshotBookCurlLayer(layer) {
+                                drawPaperBackground(latestPaperColor.value, latestPageBrush.value)
+                            }
+                        }?.also { pageCurlImages[page] = it }
                 } else {
                     null
                 }
@@ -1418,8 +1453,10 @@ private fun PagedReflowContent(
             val pages = (pagerState.currentPage - 1)..(pagerState.currentPage + 1)
             pages.forEach { page ->
                 if (page < 0 || page > lastPagerPage || pageCurlImages[page] != null) return@forEach
-                // Перекомпонуем страницу закадрово (ImageComposeScene) — GraphicsLayer.toImageBitmap()
-                // на Desktop отдаёт пустой кадр. Локали и фон проставляем, как на экране.
+                // Перекомпонуем страницу закадрово (ImageComposeScene): закадровая сцена даёт
+                // sRGB-тегированную текстуру со свежим (без выделения) состоянием и фоном — это
+                // эталонный путь на Desktop; слой пейджера остаётся фолбэком (см. ниже).
+                // Локали и фон проставляем, как на экране.
                 // Рендерим в 1× (см. PAGE_CURL_TEXTURE_SUPERSAMPLE): завиток только сжимает текстуру, а
                 // супер-сэмплинг с обратным уменьшением в sRGB делал бы текст блёклым/тонким.
                 val ss = PAGE_CURL_TEXTURE_SUPERSAMPLE
@@ -1434,7 +1471,8 @@ private fun PagedReflowContent(
                             LocalFigureBitmapCache provides figureCache,
                         ) {
                             Box(
-                                modifier = Modifier.fillMaxSize().background(settings.background),
+                                modifier =
+                                    Modifier.fillMaxSize().paperBackground(latestPaperColor.value, latestPageBrush.value),
                                 contentAlignment = Alignment.TopCenter,
                             ) {
                                 ReflowSpread(
@@ -1455,9 +1493,11 @@ private fun PagedReflowContent(
                     }
                         ?: pageCaptureLayers[page]?.let { layer ->
                             // Android: закадровый ImageComposeScene недоступен (captureReflowTexture == null) —
-                            // берём кадр со страничного GraphicsLayer. На устройстве toImageBitmap() работает;
-                            // пустой он лишь в headless-тестах Desktop, где этот путь не нужен (там texture != null).
-                            runCatching { layer.toImageBitmap() }.getOrNull()
+                            // снимаем кадр со страничного GraphicsLayer (на Android — софтверная отрисовка
+                            // записанного слоя, см. BookCurlLayerSnapshot.android.kt).
+                            snapshotBookCurlLayer(layer) {
+                                drawPaperBackground(latestPaperColor.value, latestPageBrush.value)
+                            }
                         }
                 if (texture != null) pageCurlImages[page] = texture
             }
@@ -1844,6 +1884,13 @@ private fun Modifier.pageTransitionLayer(
     }
 }
 
+// Строго scoped-перегрузка record (без density/layoutDirection!) + drawLayer, как в документации:
+// сырая member-перегрузка захватывает drawContent() в блок, который НЕЛЬЗЯ переисполнять вне
+// draw-пасса — когда Android (HWUI) сбрасывает display list (trim-memory) и Compose тихо
+// пере-записывает слой, блок бросает, слой навсегда фиксируется ПУСТЫМ, и кёрл получал «матовый
+// лист» без текста. Scoped-перегрузка делает блок законно переисполняемым (и для софтверного
+// снапшота в snapshotBookCurlLayer), а drawLayer вместо второго drawContent() держит RenderNode
+// слоя в дереве рендера окна — иначе он сирота и не синкается.
 private fun Modifier.captureToLayer(layer: GraphicsLayer): Modifier =
     drawWithContent {
         val layerSize =
@@ -1851,14 +1898,10 @@ private fun Modifier.captureToLayer(layer: GraphicsLayer): Modifier =
                 width = size.width.roundToInt().coerceAtLeast(1),
                 height = size.height.roundToInt().coerceAtLeast(1),
             )
-        layer.record(
-            density = this,
-            layoutDirection = layoutDirection,
-            size = layerSize,
-        ) {
+        layer.record(size = layerSize) {
             this@drawWithContent.drawContent()
         }
-        drawContent()
+        drawLayer(layer)
     }
 
 private fun spreadCount(
@@ -1908,6 +1951,7 @@ private fun ReflowBlockView(
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
+                hyphenate = true,
             )
 
         is ReflowBlock.ListItem ->
@@ -1929,6 +1973,7 @@ private fun ReflowBlockView(
                 contentPadding = PaddingValues(start = settings.contentPadding * (block.level + 1)),
                 notes = notes,
                 onNoteTap = onNoteTap,
+                hyphenate = true,
             )
 
         is ReflowBlock.Blockquote ->
@@ -1969,6 +2014,7 @@ private fun ReflowBlockView(
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
+                hyphenate = true,
             )
     }
 }
@@ -2006,6 +2052,7 @@ private fun SelectableReflowText(
     contentPadding: PaddingValues = PaddingValues(),
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
+    hyphenate: Boolean = false,
 ) {
     val selectionState = LocalReflowSelectionState.current
     DisposableEffect(selectionState, blockIndex, occurrenceKey) {
@@ -2014,42 +2061,72 @@ private fun SelectableReflowText(
     val liveAnchor = selectionState.selectionAnchorFor(blockIndex)
     val liveAnchors = if (liveAnchor != null) anchors + liveAnchor else anchors
 
-    // Раскладка текущего блока — нужна, чтобы поставить бейдж заметки напротив строки её
-    // анкера (getCursorRect(charStart).top). Захватываем из того же onTextLayout, что
-    // публикует раскладку в selectionState.
-    var textLayout by remember(blockIndex) { mutableStateOf<TextLayoutResult?>(null) }
+    // Мягкие переносы блока + карта смещений plain↔hyph. Тождество на Android/при выключенном тогле.
+    val initialHyph =
+        remember(content.text, settings.hyphenation, hyphenate) {
+            readerHyphenation(content.text, settings.hyphenation && hyphenate)
+        }
 
-    Box {
+    // Раскладка блока + карта, которой она измерена, — для бейджей заметок ниже. Промоушен может
+    // подменить карту (blacklist сокращает позиции), поэтому храним пару, а не только layout.
+    var laidOut by remember(blockIndex) { mutableStateOf<Pair<ReaderHyphenation, TextLayoutResult>?>(null) }
+
+    // Тело блока: BasicText, размеченный финальной картой. Локальная composable-лямбда, чтобы
+    // identity- и promotion-ветки не дублировали проводку (reportLayout/onLines/координаты).
+    val blockText: @Composable (ReaderHyphenation, Modifier) -> Unit = { hyph, textModifier ->
         BasicText(
-            text = styledText(content.text, content.source, liveAnchors, settings),
+            text = styledText(hyph, content.source, liveAnchors, settings),
             style = style,
             onTextLayout = { layout ->
-                textLayout = layout
-                selectionState.reportLayout(blockIndex, layout, occurrenceKey)
+                laidOut = hyph to layout
+                selectionState.reportLayout(blockIndex, layout, occurrenceKey, hyph)
                 // Нижние границы строк (для построчной раскладки страниц): снимаем только когда
                 // нужно (проход обмера в PagedReflowContent передаёт onLines).
                 onLines?.invoke(List(layout.lineCount) { layout.getLineBottom(it) })
             },
-            // Отступ блока (indent списка / втяжка цитаты) — на самом BasicText и ДО
-            // onGloballyPositioned, чтобы публикуемые координаты совпадали с началом текста.
-            // Раньше отступ давал внешний Box: его координаты включали padding, и хит-тест
-            // выделения мог промахнуться по строке (defect «выделяется не та строка»).
+            // Отступ блока (indent списка / втяжка цитаты) — ДО onGloballyPositioned, чтобы
+            // публикуемые координаты совпадали с началом текста. Раньше отступ давал внешний Box:
+            // его координаты включали padding, и хит-тест выделения мог промахнуться по строке
+            // (defect «выделяется не та строка»).
             modifier =
-                Modifier
-                    .padding(contentPadding)
-                    .onGloballyPositioned { coordinates ->
-                        selectionState.reportCoordinates(blockIndex, coordinates, occurrenceKey)
-                    },
+                textModifier.onGloballyPositioned { coordinates ->
+                    selectionState.reportCoordinates(blockIndex, coordinates, occurrenceKey)
+                },
         )
+    }
+
+    Box {
+        if (!initialHyph.hasSoftHyphens) {
+            // Identity (Android / переносы выключены): один BasicText, нулевая лишняя работа.
+            blockText(initialHyph, Modifier.padding(contentPadding))
+        } else {
+            // Десктоп с переносами: промоушен дефисов (см. ReaderHyphenPromotion) превращает
+            // мягкие переносы на концах строк в видимые дефисы, которые движок меряет и рисует
+            // сам — дефис участвует в выключке и стоит заподлицо с краем, как в Word. Нужна
+            // ТОЧНАЯ ширина текстового узла (±1px от проброшенной формулы дал бы дефис посреди
+            // строки), поэтому BoxWithConstraints; padding на контейнере — constraints.maxWidth
+            // уже за вычетом отступа блока, координатный контракт onGloballyPositioned тот же.
+            BoxWithConstraints(Modifier.padding(contentPadding)) {
+                val measurer = rememberTextMeasurer()
+                val widthPx = constraints.maxWidth
+                val resolved =
+                    remember(initialHyph, content, settings, style, widthPx) {
+                        measurer.resolveHyphenation(initialHyph, content.source, settings, style, widthPx)
+                    }
+                blockText(resolved.hyphenation, Modifier)
+            }
+        }
 
         // Тап-бейджи заметок: цветной кружок на левом поле напротив строки анкера.
         // Подсветка диапазона заметки приходит через общий список [anchors] (вызывающий
         // слой подмешивает note-анкеры), поэтому здесь рисуем только бейдж. Накладывается
         // поверх (x=0) и не сдвигает раскладку текста.
-        val layout = textLayout
-        if (layout != null) {
+        val laid = laidOut
+        if (laid != null) {
+            val (hyph, layout) = laid
             notes.forEach { na ->
-                val charStart = na.anchor.charStart.coerceIn(0, content.text.length)
+                // charStart заметки — в PLAIN; раскладка измерена в HYPH (финальной картой).
+                val charStart = hyph.plainToHyph(na.anchor.charStart.coerceIn(0, content.text.length))
                 val top = layout.getCursorRect(charStart).top
                 Box(
                     modifier =
@@ -2103,6 +2180,7 @@ private fun BlockquoteView(
             contentPadding = PaddingValues(start = settings.contentPadding),
             notes = notes,
             onNoteTap = onNoteTap,
+            hyphenate = true,
         )
     }
 }
@@ -2379,7 +2457,8 @@ private fun TableView(
                                 ).padding(TABLE_CELL_PADDING),
                     ) {
                         BasicText(
-                            text = styledText(cell.text, cell.source, emptyList(), settings),
+                            // Ячейки таблиц не переносим.
+                            text = styledText(readerHyphenation(cell.text, false), cell.source, emptyList(), settings),
                             style = settings.paragraphStyle(),
                         )
                     }
@@ -2603,7 +2682,12 @@ internal fun ReflowReaderSettings.paragraphStyle(): TextStyle =
         lineHeight = (fontSize.value * lineHeightMultiplier).sp,
         letterSpacing = letterSpacing,
         textAlign = if (align == ReaderAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start,
+        // Hyphens.Auto requires HighQuality strategy to take effect; Simple (default) only hyphenates
+        // words longer than a full line — effectively never. Locale for the dictionary comes from the
+        // system locale (localeList unset), so Russian content on a non-Russian-locale device may
+        // hyphenate poorly; per-document language detection is out of scope.
         hyphens = if (hyphenation) Hyphens.Auto else Hyphens.None,
+        lineBreak = if (hyphenation) LineBreak.Paragraph else LineBreak.Unspecified,
         lineHeightStyle = DeterministicLineHeight,
         platformStyle = readerPlatformTextStyle(),
     )
@@ -2627,6 +2711,7 @@ internal fun ReflowReaderSettings.footnoteStyle(): TextStyle {
         letterSpacing = letterSpacing,
         textAlign = if (align == ReaderAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start,
         hyphens = if (hyphenation) Hyphens.Auto else Hyphens.None,
+        lineBreak = if (hyphenation) LineBreak.Paragraph else LineBreak.Unspecified,
         lineHeightStyle = DeterministicLineHeight,
         platformStyle = readerPlatformTextStyle(),
     )
@@ -2670,12 +2755,16 @@ internal fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
  * [anchors]. Подсветка накладывается последней, поэтому перекрывает фон inline-кода.
  */
 internal fun styledText(
-    text: String,
+    hyph: ReaderHyphenation,
     source: List<SourceSpan>,
     anchors: List<TextAnchor>,
     settings: ReflowReaderSettings,
 ): AnnotatedString {
-    val needsWordSpacing = settings.wordSpacing.value > 0f && text.contains(' ')
+    // Текст с мягкими переносами идёт в BasicText/TextMeasurer; все PLAIN-смещения спанов
+    // (source/anchors/bionic/word-spacing) переводим в HYPH-пространство через карту [hyph].
+    val text = hyph.hyphenated
+    val plain = hyph.plain
+    val needsWordSpacing = settings.wordSpacing.value > 0f && plain.contains(' ')
     if (source.isEmpty() && anchors.isEmpty() && !settings.bionic && !needsWordSpacing) {
         return AnnotatedString(text)
     }
@@ -2689,30 +2778,33 @@ internal fun styledText(
     return buildAnnotatedString {
         append(text)
         source.forEach { span ->
-            val start = span.charStart.coerceIn(0, text.length)
-            val end = span.charEnd.coerceIn(start, text.length)
-            if (start >= end) return@forEach
+            val pStart = span.charStart.coerceIn(0, plain.length)
+            val pEnd = span.charEnd.coerceIn(pStart, plain.length)
+            if (pStart >= pEnd) return@forEach
+            val start = hyph.plainToHyph(pStart)
+            val end = hyph.plainToHyph(pEnd)
             if (span.bold) addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, end)
             if (span.monospace) {
                 addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg), start, end)
             }
         }
         if (needsWordSpacing) {
-            var i = text.indexOf(' ')
+            var i = plain.indexOf(' ')
             while (i >= 0) {
-                addStyle(SpanStyle(letterSpacing = settings.wordSpacing), i, i + 1)
-                i = text.indexOf(' ', i + 1)
+                val h = hyph.plainToHyph(i)
+                addStyle(SpanStyle(letterSpacing = settings.wordSpacing), h, h + 1)
+                i = plain.indexOf(' ', i + 1)
             }
         }
         if (settings.bionic) {
-            ReaderBionic.boldRanges(text).forEach { range ->
-                addStyle(SpanStyle(fontWeight = FontWeight.Bold), range.first, range.last + 1)
+            ReaderBionic.boldRanges(plain).forEach { range ->
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold), hyph.plainToHyph(range.first), hyph.plainToHyph(range.last + 1))
             }
         }
         anchors.forEach { anchor ->
-            val start = anchor.charStart.coerceIn(0, text.length)
-            val end = anchor.charEnd.coerceIn(start, text.length)
-            if (start < end) addStyle(SpanStyle(background = highlightBg), start, end)
+            val pStart = anchor.charStart.coerceIn(0, plain.length)
+            val pEnd = anchor.charEnd.coerceIn(pStart, plain.length)
+            if (pStart < pEnd) addStyle(SpanStyle(background = highlightBg), hyph.plainToHyph(pStart), hyph.plainToHyph(pEnd))
         }
     }
 }
@@ -2915,3 +3007,22 @@ internal val BLOCKQUOTE_BAR_WIDTH = 3.dp
 private const val BLOCKQUOTE_BAR_ALPHA = 0.3f
 private const val DIVIDER_LINE_FRACTION = 0.2f
 private const val DIVIDER_LINE_ALPHA = 0.25f
+
+/**
+ * Красит фон страницы чтения: сплошной [color] (как `Modifier.background`), а если задана
+ * [brush] — поверх тайлится бумажная текстура с [BlendMode.Multiply], чтобы цвет темы
+ * (включая `warmShift`/яркость) её тонировал. `null`-кисть эквивалентна прежнему поведению.
+ */
+private fun Modifier.paperBackground(
+    color: Color,
+    brush: Brush?,
+): Modifier = drawBehind { drawPaperBackground(color, brush) }
+
+/** Та же бумага как draw-функция — для подкладки под снимок страничного слоя в кёрл-текстуру. */
+private fun DrawScope.drawPaperBackground(
+    color: Color,
+    brush: Brush?,
+) {
+    drawRect(color = color)
+    brush?.let { drawRect(brush = it, blendMode = BlendMode.Multiply) }
+}

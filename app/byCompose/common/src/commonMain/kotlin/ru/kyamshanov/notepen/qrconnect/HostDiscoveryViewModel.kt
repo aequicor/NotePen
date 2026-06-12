@@ -9,8 +9,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.qrconnect.application.ConnectFailureMessages
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.DiscoveredHost
+import ru.kyamshanov.notepen.sync.domain.port.LocalNetworkDiagnostics
 import ru.kyamshanov.notepen.sync.domain.port.PeerDiscovery
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
@@ -26,6 +28,8 @@ class HostDiscoveryViewModel(
     private val syncClient: SyncClient,
     private val selfInfo: DeviceInfo,
     private val scope: CoroutineScope,
+    /** Optional LAN-gating snapshot (VPN, local-network permission) for actionable errors. */
+    private val localNetworkDiagnostics: LocalNetworkDiagnostics? = null,
 ) {
     /** Outcome of the latest discovered-host connect attempt. */
     sealed class Status {
@@ -77,7 +81,9 @@ class HostDiscoveryViewModel(
                 _status.value =
                     result.fold(
                         onSuccess = { Status.Connected(it) },
-                        onFailure = { e -> Status.Failed(e.message ?: "Не удалось подключиться") },
+                        onFailure = { e ->
+                            Status.Failed(ConnectFailureMessages.describe(e, localNetworkDiagnostics?.snapshot()))
+                        },
                     )
             }
     }

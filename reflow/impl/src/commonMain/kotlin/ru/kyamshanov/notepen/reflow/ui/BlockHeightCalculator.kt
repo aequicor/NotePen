@@ -65,6 +65,7 @@ internal object BlockHeightCalculator {
             is ReflowBlock.Figure -> MeasuredBlock(figureHeights[index] ?: 0)
             ReflowBlock.Divider -> measureDivider(settings, density)
             is ReflowBlock.Heading ->
+                // Заголовки не переносим (типографически нежелательно).
                 measureNonSplittable(
                     block.text,
                     block.source,
@@ -72,23 +73,37 @@ internal object BlockHeightCalculator {
                     w,
                     settings,
                     textMeasurer,
+                    hyphenate = false,
                 )
-            is ReflowBlock.Paragraph -> measureSplittable(block.text, block.source, settings.paragraphStyle(), 0, w, settings, textMeasurer)
+            is ReflowBlock.Paragraph ->
+                measureSplittable(block.text, block.source, settings.paragraphStyle(), 0, w, settings, textMeasurer, hyphenate = true)
             is ReflowBlock.ListItem -> {
                 // Согласовано с UI: ListItemView рендерит padding-start = contentPadding × (level + 1),
                 // обмер должен использовать ту же ширину, иначе lineBottoms/heights разъедутся и
                 // даст drift на границе страниц (defect (b) — см. P0-P5).
                 val indent = with(density) { (settings.contentPadding * (block.level + 1)).roundToPx() }
-                measureSplittable(block.text, block.source, settings.paragraphStyle(), indent, w, settings, textMeasurer)
+                measureSplittable(block.text, block.source, settings.paragraphStyle(), indent, w, settings, textMeasurer, hyphenate = true)
             }
             is ReflowBlock.Blockquote -> {
                 val indent = with(density) { (BLOCKQUOTE_BAR_WIDTH + settings.contentPadding).roundToPx() }
                 val style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic)
-                measureSplittable(block.text, block.source, style, indent, w, settings, textMeasurer)
+                measureSplittable(block.text, block.source, style, indent, w, settings, textMeasurer, hyphenate = true)
             }
             is ReflowBlock.Table -> measureTable(block, w, settings, textMeasurer, density)
-            is ReflowBlock.Code -> measureSplittable(block.text, block.source, settings.codeStyle(), 0, w, settings, textMeasurer)
-            is ReflowBlock.Footnote -> measureSplittable(block.text, block.source, settings.footnoteStyle(), 0, w, settings, textMeasurer)
+            // Код не переносим: разрыв идентификаторов по слогам бессмысленен (codeStyle = Hyphens.None).
+            is ReflowBlock.Code ->
+                measureSplittable(
+                    block.text,
+                    block.source,
+                    settings.codeStyle(),
+                    0,
+                    w,
+                    settings,
+                    textMeasurer,
+                    hyphenate = false,
+                )
+            is ReflowBlock.Footnote ->
+                measureSplittable(block.text, block.source, settings.footnoteStyle(), 0, w, settings, textMeasurer, hyphenate = true)
         }
     }
 
@@ -108,10 +123,13 @@ internal object BlockHeightCalculator {
         contentWidthPx: Int,
         settings: ReflowReaderSettings,
         textMeasurer: TextMeasurer,
+        hyphenate: Boolean,
     ): MeasuredBlock {
-        val annotated = styledText(text, source, emptyList(), settings)
-        val result = textMeasurer.measure(annotated, style, constraints = Constraints(maxWidth = contentWidthPx))
-        return MeasuredBlock(result.size.height)
+        // resolveHyphenation, а не голый measure: промоушен дефисов меняет разбивку строк, обмер
+        // обязан считать ТОТ ЖЕ финальный текст, что рендерит SelectableReflowText (measure==render).
+        val initial = readerHyphenation(text, settings.hyphenation && hyphenate)
+        val resolved = textMeasurer.resolveHyphenation(initial, source, settings, style, contentWidthPx)
+        return MeasuredBlock(resolved.layout.size.height)
     }
 
     private fun measureSplittable(
@@ -122,10 +140,12 @@ internal object BlockHeightCalculator {
         contentWidthPx: Int,
         settings: ReflowReaderSettings,
         textMeasurer: TextMeasurer,
+        hyphenate: Boolean,
     ): MeasuredBlock {
         val width = (contentWidthPx - indentPx).coerceAtLeast(1)
-        val annotated = styledText(text, source, emptyList(), settings)
-        val result = textMeasurer.measure(annotated, style, constraints = Constraints(maxWidth = width))
+        val initial = readerHyphenation(text, settings.hyphenation && hyphenate)
+        val resolved = textMeasurer.resolveHyphenation(initial, source, settings, style, width)
+        val result = resolved.layout
         val lineBottoms = List(result.lineCount) { result.getLineBottom(it) }
         return MeasuredBlock(result.size.height, lineBottoms)
     }
@@ -150,18 +170,17 @@ internal object BlockHeightCalculator {
     ): Int {
         val spec = textSpecFor(block, contentWidthPx, settings, density)
         if (offsetPx <= 0f || spec == null) return 0
-        val result =
-            textMeasurer.measure(
-                text = styledText(spec.text, spec.source, emptyList(), settings),
-                style = spec.style,
-                constraints = Constraints(maxWidth = spec.widthPx),
-            )
+        val initial = readerHyphenation(spec.text, settings.hyphenation && spec.hyphenate)
+        val resolved = textMeasurer.resolveHyphenation(initial, spec.source, settings, spec.style, spec.widthPx)
+        val hyph = resolved.hyphenation
+        val result = resolved.layout
         // Первая строка, чей низ строго больше offsetPx — она «содержит» offsetPx
         // (низ предыдущей ≤ offsetPx < низ этой).
         var line = 0
         while (line < result.lineCount && result.getLineBottom(line) <= offsetPx) line++
         val safeLine = line.coerceAtMost((result.lineCount - 1).coerceAtLeast(0))
-        return if (result.lineCount == 0) 0 else result.getLineStart(safeLine)
+        // getLineStart — в HYPH-пространстве; charStart хранится в PLAIN (стабилен между платформами).
+        return if (result.lineCount == 0) 0 else hyph.hyphToPlain(result.getLineStart(safeLine))
     }
 
     /**
@@ -179,14 +198,13 @@ internal object BlockHeightCalculator {
     ): Int {
         val spec = textSpecFor(block, contentWidthPx, settings, density)
         if (charStart <= 0 || spec == null) return 0
-        val result =
-            textMeasurer.measure(
-                text = styledText(spec.text, spec.source, emptyList(), settings),
-                style = spec.style,
-                constraints = Constraints(maxWidth = spec.widthPx),
-            )
+        val initial = readerHyphenation(spec.text, settings.hyphenation && spec.hyphenate)
+        val resolved = textMeasurer.resolveHyphenation(initial, spec.source, settings, spec.style, spec.widthPx)
+        val hyph = resolved.hyphenation
+        val result = resolved.layout
         val lc = result.lineCount
-        val safeChar = charStart.coerceAtMost(spec.text.length)
+        // charStart приходит в PLAIN — переводим в HYPH для getLineForOffset.
+        val safeChar = hyph.plainToHyph(charStart.coerceAtMost(spec.text.length))
         return if (lc == 0) 0 else result.getLineForOffset(safeChar).coerceIn(0, lc - 1)
     }
 
@@ -201,6 +219,7 @@ internal object BlockHeightCalculator {
         val source: List<SourceSpan>,
         val style: TextStyle,
         val widthPx: Int,
+        val hyphenate: Boolean,
     )
 
     private fun textSpecFor(
@@ -212,19 +231,20 @@ internal object BlockHeightCalculator {
         val w = contentWidthPx.coerceAtLeast(1)
         return when (block) {
             is ReflowBlock.Paragraph ->
-                TextSpec(block.text, block.source, settings.paragraphStyle(), w)
+                TextSpec(block.text, block.source, settings.paragraphStyle(), w, hyphenate = true)
             is ReflowBlock.ListItem -> {
                 // Согласованно с [measure]: учитываем уровень вложенности в indent'е.
                 val indent = with(density) { (settings.contentPadding * (block.level + 1)).roundToPx() }
-                TextSpec(block.text, block.source, settings.paragraphStyle(), (w - indent).coerceAtLeast(1))
+                TextSpec(block.text, block.source, settings.paragraphStyle(), (w - indent).coerceAtLeast(1), hyphenate = true)
             }
             is ReflowBlock.Blockquote -> {
                 val indent = with(density) { (BLOCKQUOTE_BAR_WIDTH + settings.contentPadding).roundToPx() }
                 val style = settings.paragraphStyle().copy(fontStyle = FontStyle.Italic)
-                TextSpec(block.text, block.source, style, (w - indent).coerceAtLeast(1))
+                TextSpec(block.text, block.source, style, (w - indent).coerceAtLeast(1), hyphenate = true)
             }
-            is ReflowBlock.Code -> TextSpec(block.text, block.source, settings.codeStyle(), w)
-            is ReflowBlock.Footnote -> TextSpec(block.text, block.source, settings.footnoteStyle(), w)
+            // Код не переносим (см. measure).
+            is ReflowBlock.Code -> TextSpec(block.text, block.source, settings.codeStyle(), w, hyphenate = false)
+            is ReflowBlock.Footnote -> TextSpec(block.text, block.source, settings.footnoteStyle(), w, hyphenate = true)
             is ReflowBlock.Heading,
             is ReflowBlock.Figure,
             is ReflowBlock.Table,
@@ -264,7 +284,8 @@ internal object BlockHeightCalculator {
                 val colWeight = weights.getOrElse(col) { 1f }.toDouble()
                 val outerWidth = (colWeight / rowWeightSum * contentWidthPx).toInt()
                 val cellInnerWidth = (outerWidth - paddingPx * 2).coerceAtLeast(1)
-                val annotated = styledText(cell.text, cell.source, emptyList(), settings)
+                // Ячейки таблиц не переносим (узкие колонки, идентичная карта).
+                val annotated = styledText(readerHyphenation(cell.text, false), cell.source, emptyList(), settings)
                 val result =
                     textMeasurer.measure(
                         annotated,

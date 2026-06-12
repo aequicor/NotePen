@@ -25,8 +25,15 @@ internal object ReflowLayoutBinaryFormat {
      * v1: только `textHeights` + `textLineBottoms`.
      * v2: добавлена `figureHeights` секция (Map<Int, Int>) — её отсутствие
      *   в v1 вызывало transient repaginate, см. `CachedLayout.figureHeights`.
+     * v3: при hyphenation=true используется LineBreak.Paragraph (HighQuality) —
+     *   кэши, собранные без него, дают drift между обмером и рендером.
+     * v4: десктопный перенос переведён на Кнут-Лиэнг (hyph-ru); точки переноса
+     *   изменились → прежние hyphenation=true кэши дают другой перенос строк.
+     * v5: промоушен дефисов (ReaderHyphenPromotion) — мягкие переносы на концах
+     *   строк резолвятся в видимые дефисы, участвующие в измерении строки;
+     *   переносы строк при hyphenation=true изменились (дефис занимает ширину).
      */
-    private const val VERSION: Int = 2
+    private const val VERSION: Int = 5
     private const val BUFFER_SIZE = 64 * 1024
 
     fun write(
