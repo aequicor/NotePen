@@ -82,8 +82,8 @@ class MultiPageDrawingController(
         val hit = hitTest(viewportPos) ?: return
         val (pageIndex, rawNx, rawNy) = hit
         val ext = extentFor(pageIndex)
-        val nx = rawNx.coerceIn(ext.left, ext.right)
-        val ny = rawNy.coerceIn(ext.top, ext.bottom)
+        val nx = ext.clampX(rawNx)
+        val ny = ext.clampY(rawNy)
         val tool = toolMode()
         lastViewportPos = viewportPos
         val state = drawingStates.getOrPut(pageIndex) { PdfDrawingState() }
@@ -108,8 +108,8 @@ class MultiPageDrawingController(
             return
         }
         val ext = extentFor(pageIndex)
-        val nx = rawNx.coerceIn(ext.left, ext.right)
-        val ny = rawNy.coerceIn(ext.top, ext.bottom)
+        val nx = ext.clampX(rawNx)
+        val ny = ext.clampY(rawNy)
         val state = drawingStates[pageIndex] ?: return
         when (session.activeMode) {
             DrawingGestureMode.DRAW -> session.addPoint(pageIndex, state, nx, ny, pressure, tilt)
@@ -278,8 +278,7 @@ class MultiPageDrawingController(
      */
     fun isInsidePdfPage(viewportPos: Offset): Boolean {
         val (pageIndex, nx, ny) = hitTest(viewportPos) ?: return false
-        val ext = extentFor(pageIndex)
-        return nx in ext.left..ext.right && ny in ext.top..ext.bottom
+        return extentFor(pageIndex).contains(nx, ny)
     }
 
     /**

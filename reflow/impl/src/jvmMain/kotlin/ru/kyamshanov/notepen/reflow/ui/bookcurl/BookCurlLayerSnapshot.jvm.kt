@@ -1,14 +1,9 @@
 package ru.kyamshanov.notepen.reflow.ui.bookcurl
 
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.toPixelMap
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
 
 // На Desktop эталонные текстуры кёрла приходят из captureReflowTexture (ImageComposeScene:
 // фон, sRGB-тег, чистое состояние выделения); слой — страховка для тапа, опередившего
@@ -32,19 +27,11 @@ internal actual suspend fun snapshotBookCurlLayer(
 private fun compositeOverBackground(
     content: ImageBitmap,
     drawBackground: DrawScope.() -> Unit,
-): ImageBitmap {
-    val image = ImageBitmap(content.width, content.height)
-    CanvasDrawScope().draw(
-        density = Density(1f),
-        layoutDirection = LayoutDirection.Ltr,
-        canvas = Canvas(image),
-        size = Size(content.width.toFloat(), content.height.toFloat()),
-    ) {
+): ImageBitmap =
+    renderToImageBitmap(content.width, content.height) {
         drawBackground()
         drawImage(content)
     }
-    return image
-}
 
 private fun ImageBitmap.hasInkContent(): Boolean {
     val buffer = toPixelMap().buffer

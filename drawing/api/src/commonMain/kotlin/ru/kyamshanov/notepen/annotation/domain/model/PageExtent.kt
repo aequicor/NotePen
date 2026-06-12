@@ -36,6 +36,18 @@ data class PageExtent(
     /** Расширяет правую границу на [fraction] от текущей ширины. */
     fun expandedRight(fraction: Float): PageExtent = copy(right = right + width * fraction)
 
+    /** Клампит X-координату точки к горизонтальным границам extent. */
+    fun clampX(x: Float): Float = x.coerceIn(left, right)
+
+    /** Клампит Y-координату точки к вертикальным границам extent. */
+    fun clampY(y: Float): Float = y.coerceIn(top, bottom)
+
+    /** Лежит ли нормализованная точка `(x, y)` внутри extent (границы включительно). */
+    fun contains(
+        x: Float,
+        y: Float,
+    ): Boolean = x in left..right && y in top..bottom
+
     /** Объединение с [other] — берёт минимумы/максимумы по каждой границе. */
     fun union(other: PageExtent): PageExtent {
         val l = minOf(left, other.left)

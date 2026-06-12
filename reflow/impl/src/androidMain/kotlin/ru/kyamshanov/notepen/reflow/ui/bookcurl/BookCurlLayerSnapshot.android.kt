@@ -1,17 +1,12 @@
 package ru.kyamshanov.notepen.reflow.ui.bookcurl
 
 import android.graphics.Bitmap
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Canvas
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.CanvasDrawScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.layer.GraphicsLayer
 import androidx.compose.ui.graphics.layer.drawLayer
-import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.LayoutDirection
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -47,7 +42,7 @@ internal actual suspend fun snapshotBookCurlLayer(
 
 private fun drawLayerToSoftwareBitmap(layer: GraphicsLayer): ImageBitmap? =
     runCatching {
-        renderToBitmap(layer.size.width, layer.size.height) { drawLayer(layer) }
+        renderToImageBitmap(layer.size.width, layer.size.height) { drawLayer(layer) }
     }.onFailure { error ->
         logger.warn(error) { "PdfReflow: book-curl software layer snapshot failed, falling back to toImageBitmap" }
     }.getOrNull()
@@ -71,26 +66,10 @@ private fun opaqueTexture(
     content: ImageBitmap,
     drawBackground: DrawScope.() -> Unit,
 ): ImageBitmap =
-    renderToBitmap(content.width, content.height) {
+    renderToImageBitmap(content.width, content.height) {
         drawBackground()
         drawImage(content)
     }
-
-private fun renderToBitmap(
-    width: Int,
-    height: Int,
-    block: DrawScope.() -> Unit,
-): ImageBitmap {
-    val image = ImageBitmap(width, height)
-    CanvasDrawScope().draw(
-        density = Density(1f),
-        layoutDirection = LayoutDirection.Ltr,
-        canvas = Canvas(image),
-        size = Size(width.toFloat(), height.toFloat()),
-        block = block,
-    )
-    return image
-}
 
 // Проверка ИСЧЕРПЫВАЮЩАЯ (каждый пиксель, с ранним выходом), а не по решётке: разрежённая
 // сетка детерминированно промахивалась мимо страниц с парой строк (хвост документа) — валидная

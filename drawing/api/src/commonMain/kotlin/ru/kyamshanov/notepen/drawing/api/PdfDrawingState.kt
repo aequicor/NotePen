@@ -97,7 +97,10 @@ public class PdfDrawingState {
         historyVersion.value++
     }
 
-    private fun clampX(x: Float): Float = x.coerceIn(extent.value.left, extent.value.right)
+    // Только по X: сшивка штриха через границу страниц ([MultiPageDrawingController.handBoundary])
+    // намеренно кладёт точки с ny<0 / ny>1 за пределы страницы, чтобы их cap'ы прятались под
+    // соседним листом — поэтому Y здесь не клампим.
+    private fun clampX(x: Float): Float = extent.value.clampX(x)
 
     /** Принудительно установить [extent] (загрузка, sync). */
     public fun setExtent(value: PageExtent) {
