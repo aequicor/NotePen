@@ -111,6 +111,7 @@ import ru.kyamshanov.notepen.mainscreen.domain.model.generateUuid
 import ru.kyamshanov.notepen.pdf.domain.port.PdfDocumentLoader
 import ru.kyamshanov.notepen.pdf.domain.port.PdfPageRenderer
 import ru.kyamshanov.notepen.pdf.presentation.toImageBitmap
+import ru.kyamshanov.notepen.pdfviewer.PdfPagesLayout
 import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerMath
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
@@ -2029,13 +2030,12 @@ fun EditorPanel(
             // Page-expansion overlay: border (always) + "+" buttons (pen/marker only)
             if (!pdfState.readingMode && pages.isNotEmpty()) {
                 val layout = pdfViewerState.layout
-                val pan = pdfViewerState.effectivePan
-                val z = pdfViewerState.effectiveZoom
-                val vh = pdfViewerState.viewportHeightPx
                 val base = layout.basePageWidthPx
-                // Active page = the one with the most visible pixels on screen.
-                // derivedStateOf defers recomposition of the buttons/border to page-index
-                // changes only, instead of every pan/zoom snapshot tick.
+                // Pan/zoom/viewport are read in the draw phase (border Canvas) and the layout
+                // phase (button offset lambdas) below — NOT at composable scope — so the overlay
+                // does not recompose on every pan/zoom snapshot tick. The active page likewise
+                // resolves through a derivedStateOf, so the button set changes only when the
+                // active page index changes.
                 val active by remember {
                     derivedStateOf {
                         val lo = pdfViewerState.layout
@@ -2043,11 +2043,7 @@ fun EditorPanel(
                         val zz = pdfViewerState.effectiveZoom
                         val vhh = pdfViewerState.viewportHeightPx
                         lo.pdfHeightsPx.indices.maxByOrNull { i ->
-                            val pdfH = lo.pdfHeightsPx[i]
-                            val pageTop = lo.pageTopsPx[i]
-                            val ext = lo.pageExtents[i]
-                            val topY = p.y + (pageTop + ext.top * pdfH) * zz
-                            val bottomY = p.y + (pageTop + ext.bottom * pdfH) * zz
+                            val (topY, bottomY) = pageExtentScreenTopBottom(lo, i, p.y, zz)
                             maxOf(0f, minOf(bottomY, vhh) - maxOf(topY, 0f))
                         } ?: 0
                     }
@@ -2087,16 +2083,17 @@ fun EditorPanel(
                     val expansionBorderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.6f)
                     val strokeWidthPx = with(localDensity) { 1.dp.toPx() }
                     Canvas(Modifier.fillMaxSize()) {
+                        // Read pan/zoom in the draw phase so border invalidation re-draws
+                        // without recomposing the overlay subtree.
+                        val pan = pdfViewerState.effectivePan
+                        val z = pdfViewerState.effectiveZoom
                         for (pb in pageButtons) {
                             val pi = pb.pageIndex
                             if (pi !in layout.pageExtents.indices) continue
                             val ext = layout.pageExtents[pi]
                             if (ext == PageExtent.Pdf) continue
-                            val pdfH = layout.pdfHeightsPx[pi]
                             val pageLeft = layout.pageLeftsPx[pi]
-                            val pageTop = layout.pageTopsPx[pi]
-                            val rawTopY = pan.y + (pageTop + ext.top * pdfH) * z
-                            val rawBottomY = pan.y + (pageTop + ext.bottom * pdfH) * z
+                            val (rawTopY, rawBottomY) = pageExtentScreenTopBottom(layout, pi, pan.y, z)
                             // In spread mode draw only the outer expansion strip so the frame
                             // doesn't visually crowd the neighbour page (the inner PDF edge is
                             // adjacent to the gutter and must remain visually clear).
@@ -2137,20 +2134,14 @@ fun EditorPanel(
                         for ((pageIndex, showLeft, showRight) in pageButtons) {
                             if (pageIndex !in layout.pageExtents.indices) continue
                             val ext = layout.pageExtents[pageIndex]
-                            val pdfH = layout.pdfHeightsPx[pageIndex]
                             val pageLeft = layout.pageLeftsPx[pageIndex]
-                            val pageTop = layout.pageTopsPx[pageIndex]
 
-                            val topY = pan.y + (pageTop + ext.top * pdfH) * z
-                            val bottomY = pan.y + (pageTop + ext.bottom * pdfH) * z
-                            val visTop = maxOf(topY, 0f)
-                            val visBottom = minOf(bottomY, vh)
-                            if (visTop >= visBottom) continue
-
-                            val centerY = (visTop + visBottom) / 2f
-
+                            // The "+" buttons exist while their page is the active one; their
+                            // on-screen position is resolved in the LAYOUT phase (the offset
+                            // lambda reads pan/zoom/viewport directly), so panning/zooming
+                            // re-places them without recomposing this subtree. A page scrolled
+                            // out of view simply lands its button off-viewport (harmless).
                             if (showLeft) {
-                                val leftEdgeX = pan.x + (pageLeft + ext.left * base) * z
                                 GlassmorphismIconButton(
                                     icon = Icons.Default.Add,
                                     contentDescription = "Расширить влево",
@@ -2158,6 +2149,10 @@ fun EditorPanel(
                                     tint = androidx.compose.ui.graphics.Color(0xFF424242),
                                     modifier =
                                         Modifier.offset {
+                                            val pan = pdfViewerState.effectivePan
+                                            val z = pdfViewerState.effectiveZoom
+                                            val centerY = pageButtonCenterY(layout, pageIndex, pan.y, z, pdfViewerState.viewportHeightPx)
+                                            val leftEdgeX = pan.x + (pageLeft + ext.left * base) * z
                                             IntOffset(
                                                 (leftEdgeX - halfTouch * 2 - buttonPaddingPx).roundToInt(),
                                                 (centerY - halfTouch).roundToInt(),
@@ -2167,7 +2162,6 @@ fun EditorPanel(
                             }
 
                             if (showRight) {
-                                val rightEdgeX = pan.x + (pageLeft + ext.right * base) * z
                                 GlassmorphismIconButton(
                                     icon = Icons.Default.Add,
                                     contentDescription = "Расширить вправо",
@@ -2175,6 +2169,10 @@ fun EditorPanel(
                                     tint = androidx.compose.ui.graphics.Color(0xFF424242),
                                     modifier =
                                         Modifier.offset {
+                                            val pan = pdfViewerState.effectivePan
+                                            val z = pdfViewerState.effectiveZoom
+                                            val centerY = pageButtonCenterY(layout, pageIndex, pan.y, z, pdfViewerState.viewportHeightPx)
+                                            val rightEdgeX = pan.x + (pageLeft + ext.right * base) * z
                                             IntOffset(
                                                 (rightEdgeX + buttonPaddingPx).roundToInt(),
                                                 (centerY - halfTouch).roundToInt(),
@@ -2830,4 +2828,45 @@ private fun handlePanelEraseFinished(
             }
         }
     engine.applyLocalBatch(batch)
+}
+
+/** Кнопка «+» уезжает сюда (далеко над вьюпортом), когда её страница вне видимой области. */
+private const val OFFSCREEN_BUTTON_Y = -100_000f
+
+/**
+ * Верх/низ extent'а страницы [pageIndex] в координатах вьюпорта (px) при панораме [panY] и
+ * зуме [zoom], упакованные в [Offset] (`x` = верх, `y` = низ). [Offset] — value-class, поэтому
+ * на draw/layout-хот-пути нет боксинга (в отличие от `Pair<Float, Float>`). Единая формула
+ * экранной геометрии страницы для выбора активной страницы, рамки расширения и кнопок «+».
+ */
+private fun pageExtentScreenTopBottom(
+    layout: PdfPagesLayout,
+    pageIndex: Int,
+    panY: Float,
+    zoom: Float,
+): Offset {
+    val pdfH = layout.pdfHeightsPx[pageIndex]
+    val pageTop = layout.pageTopsPx[pageIndex]
+    val ext = layout.pageExtents[pageIndex]
+    val top = panY + (pageTop + ext.top * pdfH) * zoom
+    val bottom = panY + (pageTop + ext.bottom * pdfH) * zoom
+    return Offset(top, bottom)
+}
+
+/**
+ * Y-центр кнопки «+» страницы [pageIndex] в видимой части вьюпорта высотой [viewportHeight].
+ * Если страница целиком вне вьюпорта — [OFFSCREEN_BUTTON_Y] (кнопка уезжает за экран): это
+ * воспроизводит прежний cull `visTop >= visBottom`, не возвращая его в фазу композиции.
+ */
+private fun pageButtonCenterY(
+    layout: PdfPagesLayout,
+    pageIndex: Int,
+    panY: Float,
+    zoom: Float,
+    viewportHeight: Float,
+): Float {
+    val tb = pageExtentScreenTopBottom(layout, pageIndex, panY, zoom)
+    val visTop = maxOf(tb.x, 0f)
+    val visBottom = minOf(tb.y, viewportHeight)
+    return if (visTop >= visBottom) OFFSCREEN_BUTTON_Y else (visTop + visBottom) / 2f
 }
