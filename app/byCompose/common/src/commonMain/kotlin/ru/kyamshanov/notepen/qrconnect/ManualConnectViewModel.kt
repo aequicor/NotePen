@@ -10,8 +10,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import ru.kyamshanov.notepen.qrconnect.application.ConnectFailureMessages
 import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.port.LocalNetworkDiagnostics
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 
 private val logger = KotlinLogging.logger {}
@@ -35,6 +37,8 @@ class ManualConnectViewModel(
      * fails the connect.
      */
     private val onLibraryPaired: suspend (PairingUri, DeviceInfo) -> Unit = { _, _ -> },
+    /** Optional LAN-gating snapshot (VPN, local-network permission) for actionable errors. */
+    private val localNetworkDiagnostics: LocalNetworkDiagnostics? = null,
 ) {
     /** Outcome of the latest manual-connect attempt. */
     sealed class Status {
@@ -94,7 +98,12 @@ class ManualConnectViewModel(
                         _payload.value = ""
                         Status.Connected(peer)
                     } else {
-                        Status.Failed(result.exceptionOrNull()?.message ?: "Не удалось подключиться")
+                        Status.Failed(
+                            ConnectFailureMessages.describe(
+                                result.exceptionOrNull(),
+                                localNetworkDiagnostics?.snapshot(),
+                            ),
+                        )
                     }
             }
     }

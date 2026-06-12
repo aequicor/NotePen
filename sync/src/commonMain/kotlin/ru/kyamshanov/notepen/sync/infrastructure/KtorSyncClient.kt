@@ -29,6 +29,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import ru.kyamshanov.notepen.sync.domain.Direction
 import ru.kyamshanov.notepen.sync.domain.SessionCipher
+import ru.kyamshanov.notepen.sync.domain.exception.SyncConnectException
+import ru.kyamshanov.notepen.sync.domain.model.ConnectFailureKind
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.HostMessage
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
@@ -224,6 +226,10 @@ private class HostSession(
 
     @Volatile private var connectedFlag: Boolean = false
 
+    // Last transport-level exception from [runSession]; classifies a first-attempt
+    // failure so callers can tell "host offline" from "LAN blocked by VPN/permission".
+    @Volatile private var lastTransportError: Throwable? = null
+
     fun isConnected(): Boolean = connectedFlag
 
     /**
@@ -246,12 +252,26 @@ private class HostSession(
                         SessionOutcome.RemoteClosed ->
                             firstPairingResult.complete(Result.success(peer ?: server))
                         is SessionOutcome.PairingFailed -> {
-                            firstPairingResult.complete(Result.failure(IllegalStateException(outcome.reason)))
+                            firstPairingResult.complete(
+                                Result.failure(
+                                    SyncConnectException(ConnectFailureKind.PAIRING_REJECTED, outcome.reason),
+                                ),
+                            )
                             return@launch
                         }
                         SessionOutcome.Disconnected -> {
-                            // first attempt never even paired — treat as failure
-                            firstPairingResult.complete(Result.failure(IllegalStateException("connect failed")))
+                            // First attempt never even paired — fail with the classified
+                            // transport error so the UI can suggest VPN / local-network fixes.
+                            val cause = lastTransportError
+                            firstPairingResult.complete(
+                                Result.failure(
+                                    SyncConnectException(
+                                        kind = classifyConnectFailure(cause),
+                                        message = cause?.message ?: "connect failed",
+                                        cause = cause,
+                                    ),
+                                ),
+                            )
                         }
                     }
                 }
@@ -335,6 +355,7 @@ private class HostSession(
             throw e
         } catch (e: Exception) {
             logger.warn { "Session for ${server.id} ended: ${e.message}" }
+            lastTransportError = e
             connectedFlag = false
         }
         return outcome

@@ -1,0 +1,19 @@
+Russian hyphenation patterns (hyph-ru)
+======================================
+
+Files: hyph-ru.pat.txt (Knuth-Liang patterns), hyph-ru.hyp.txt (exception words)
+
+Source: hyph-utf8 package, https://github.com/hyphenation/tex-hyphen
+        patterns/txt/hyph-ru.pat.txt and the \hyphenation{} block of
+        patterns/tex/hyph-ru.tex
+
+Copyright (C) 1999-2003 Alexander I. Lebedev <swan (at) scon155.phys.msu.su>
+
+Licence: LaTeX Project Public License (LPPL) version 1.2 or later
+         https://latex-project.org/lppl/
+
+hyphenmins: left 2, right 2
+
+Only reformatted (whitespace-normalised to one token per line); pattern data
+and exception words are unmodified. Used by LiangHyphenator for desktop reflow
+word-hyphenation. Latin/other scripts are not hyphenated.

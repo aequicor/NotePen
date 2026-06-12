@@ -11,6 +11,7 @@ import ru.kyamshanov.notepen.qrconnect.domain.PairingUri
 import ru.kyamshanov.notepen.qrconnect.domain.QrConnectError
 import ru.kyamshanov.notepen.qrconnect.domain.port.QrScanner
 import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
+import ru.kyamshanov.notepen.sync.domain.port.LocalNetworkDiagnostics
 import ru.kyamshanov.notepen.sync.domain.port.SyncClient
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -44,6 +45,11 @@ class ClientQrPairingCoordinator(
      */
     private val onLibraryPaired: suspend (PairingUri, DeviceInfo) -> Unit = { _, _ -> },
     private val connectTimeout: Duration = DEFAULT_CONNECT_TIMEOUT,
+    /**
+     * Optional platform snapshot of LAN-gating conditions (VPN, local-network
+     * permission) consulted at failure time to make the error actionable.
+     */
+    private val localNetworkDiagnostics: LocalNetworkDiagnostics? = null,
 ) {
     /** UI-facing state machine for the client-side scan flow. */
     sealed class State {
@@ -88,7 +94,8 @@ class ClientQrPairingCoordinator(
                 }
             when {
                 result == null -> {
-                    emit(State.Failed(QrConnectError.ConnectFailed("Таймаут подключения. Проверьте сеть / VPN.")))
+                    val health = localNetworkDiagnostics?.snapshot()
+                    emit(State.Failed(QrConnectError.ConnectFailed(ConnectFailureMessages.timedOut(health))))
                 }
                 result.isSuccess -> {
                     val server = result.getOrThrow()
@@ -100,7 +107,8 @@ class ClientQrPairingCoordinator(
                     emit(State.Connected(server))
                 }
                 else -> {
-                    val msg = result.exceptionOrNull()?.message ?: "Не удалось подключиться"
+                    val health = localNetworkDiagnostics?.snapshot()
+                    val msg = ConnectFailureMessages.describe(result.exceptionOrNull(), health)
                     emit(State.Failed(QrConnectError.ConnectFailed(msg)))
                 }
             }

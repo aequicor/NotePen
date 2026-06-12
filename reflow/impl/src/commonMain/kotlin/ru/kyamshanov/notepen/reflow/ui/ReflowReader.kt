@@ -103,6 +103,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Density
@@ -1950,6 +1951,7 @@ private fun ReflowBlockView(
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
+                hyphenate = true,
             )
 
         is ReflowBlock.ListItem ->
@@ -1971,6 +1973,7 @@ private fun ReflowBlockView(
                 contentPadding = PaddingValues(start = settings.contentPadding * (block.level + 1)),
                 notes = notes,
                 onNoteTap = onNoteTap,
+                hyphenate = true,
             )
 
         is ReflowBlock.Blockquote ->
@@ -2011,6 +2014,7 @@ private fun ReflowBlockView(
                 onLines = onLines,
                 notes = notes,
                 onNoteTap = onNoteTap,
+                hyphenate = true,
             )
     }
 }
@@ -2048,6 +2052,7 @@ private fun SelectableReflowText(
     contentPadding: PaddingValues = PaddingValues(),
     notes: List<NoteAnchor> = emptyList(),
     onNoteTap: (PageNote) -> Unit = {},
+    hyphenate: Boolean = false,
 ) {
     val selectionState = LocalReflowSelectionState.current
     DisposableEffect(selectionState, blockIndex, occurrenceKey) {
@@ -2056,42 +2061,72 @@ private fun SelectableReflowText(
     val liveAnchor = selectionState.selectionAnchorFor(blockIndex)
     val liveAnchors = if (liveAnchor != null) anchors + liveAnchor else anchors
 
-    // Раскладка текущего блока — нужна, чтобы поставить бейдж заметки напротив строки её
-    // анкера (getCursorRect(charStart).top). Захватываем из того же onTextLayout, что
-    // публикует раскладку в selectionState.
-    var textLayout by remember(blockIndex) { mutableStateOf<TextLayoutResult?>(null) }
+    // Мягкие переносы блока + карта смещений plain↔hyph. Тождество на Android/при выключенном тогле.
+    val initialHyph =
+        remember(content.text, settings.hyphenation, hyphenate) {
+            readerHyphenation(content.text, settings.hyphenation && hyphenate)
+        }
 
-    Box {
+    // Раскладка блока + карта, которой она измерена, — для бейджей заметок ниже. Промоушен может
+    // подменить карту (blacklist сокращает позиции), поэтому храним пару, а не только layout.
+    var laidOut by remember(blockIndex) { mutableStateOf<Pair<ReaderHyphenation, TextLayoutResult>?>(null) }
+
+    // Тело блока: BasicText, размеченный финальной картой. Локальная composable-лямбда, чтобы
+    // identity- и promotion-ветки не дублировали проводку (reportLayout/onLines/координаты).
+    val blockText: @Composable (ReaderHyphenation, Modifier) -> Unit = { hyph, textModifier ->
         BasicText(
-            text = styledText(content.text, content.source, liveAnchors, settings),
+            text = styledText(hyph, content.source, liveAnchors, settings),
             style = style,
             onTextLayout = { layout ->
-                textLayout = layout
-                selectionState.reportLayout(blockIndex, layout, occurrenceKey)
+                laidOut = hyph to layout
+                selectionState.reportLayout(blockIndex, layout, occurrenceKey, hyph)
                 // Нижние границы строк (для построчной раскладки страниц): снимаем только когда
                 // нужно (проход обмера в PagedReflowContent передаёт onLines).
                 onLines?.invoke(List(layout.lineCount) { layout.getLineBottom(it) })
             },
-            // Отступ блока (indent списка / втяжка цитаты) — на самом BasicText и ДО
-            // onGloballyPositioned, чтобы публикуемые координаты совпадали с началом текста.
-            // Раньше отступ давал внешний Box: его координаты включали padding, и хит-тест
-            // выделения мог промахнуться по строке (defect «выделяется не та строка»).
+            // Отступ блока (indent списка / втяжка цитаты) — ДО onGloballyPositioned, чтобы
+            // публикуемые координаты совпадали с началом текста. Раньше отступ давал внешний Box:
+            // его координаты включали padding, и хит-тест выделения мог промахнуться по строке
+            // (defect «выделяется не та строка»).
             modifier =
-                Modifier
-                    .padding(contentPadding)
-                    .onGloballyPositioned { coordinates ->
-                        selectionState.reportCoordinates(blockIndex, coordinates, occurrenceKey)
-                    },
+                textModifier.onGloballyPositioned { coordinates ->
+                    selectionState.reportCoordinates(blockIndex, coordinates, occurrenceKey)
+                },
         )
+    }
+
+    Box {
+        if (!initialHyph.hasSoftHyphens) {
+            // Identity (Android / переносы выключены): один BasicText, нулевая лишняя работа.
+            blockText(initialHyph, Modifier.padding(contentPadding))
+        } else {
+            // Десктоп с переносами: промоушен дефисов (см. ReaderHyphenPromotion) превращает
+            // мягкие переносы на концах строк в видимые дефисы, которые движок меряет и рисует
+            // сам — дефис участвует в выключке и стоит заподлицо с краем, как в Word. Нужна
+            // ТОЧНАЯ ширина текстового узла (±1px от проброшенной формулы дал бы дефис посреди
+            // строки), поэтому BoxWithConstraints; padding на контейнере — constraints.maxWidth
+            // уже за вычетом отступа блока, координатный контракт onGloballyPositioned тот же.
+            BoxWithConstraints(Modifier.padding(contentPadding)) {
+                val measurer = rememberTextMeasurer()
+                val widthPx = constraints.maxWidth
+                val resolved =
+                    remember(initialHyph, content, settings, style, widthPx) {
+                        measurer.resolveHyphenation(initialHyph, content.source, settings, style, widthPx)
+                    }
+                blockText(resolved.hyphenation, Modifier)
+            }
+        }
 
         // Тап-бейджи заметок: цветной кружок на левом поле напротив строки анкера.
         // Подсветка диапазона заметки приходит через общий список [anchors] (вызывающий
         // слой подмешивает note-анкеры), поэтому здесь рисуем только бейдж. Накладывается
         // поверх (x=0) и не сдвигает раскладку текста.
-        val layout = textLayout
-        if (layout != null) {
+        val laid = laidOut
+        if (laid != null) {
+            val (hyph, layout) = laid
             notes.forEach { na ->
-                val charStart = na.anchor.charStart.coerceIn(0, content.text.length)
+                // charStart заметки — в PLAIN; раскладка измерена в HYPH (финальной картой).
+                val charStart = hyph.plainToHyph(na.anchor.charStart.coerceIn(0, content.text.length))
                 val top = layout.getCursorRect(charStart).top
                 Box(
                     modifier =
@@ -2145,6 +2180,7 @@ private fun BlockquoteView(
             contentPadding = PaddingValues(start = settings.contentPadding),
             notes = notes,
             onNoteTap = onNoteTap,
+            hyphenate = true,
         )
     }
 }
@@ -2421,7 +2457,8 @@ private fun TableView(
                                 ).padding(TABLE_CELL_PADDING),
                     ) {
                         BasicText(
-                            text = styledText(cell.text, cell.source, emptyList(), settings),
+                            // Ячейки таблиц не переносим.
+                            text = styledText(readerHyphenation(cell.text, false), cell.source, emptyList(), settings),
                             style = settings.paragraphStyle(),
                         )
                     }
@@ -2645,7 +2682,12 @@ internal fun ReflowReaderSettings.paragraphStyle(): TextStyle =
         lineHeight = (fontSize.value * lineHeightMultiplier).sp,
         letterSpacing = letterSpacing,
         textAlign = if (align == ReaderAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start,
+        // Hyphens.Auto requires HighQuality strategy to take effect; Simple (default) only hyphenates
+        // words longer than a full line — effectively never. Locale for the dictionary comes from the
+        // system locale (localeList unset), so Russian content on a non-Russian-locale device may
+        // hyphenate poorly; per-document language detection is out of scope.
         hyphens = if (hyphenation) Hyphens.Auto else Hyphens.None,
+        lineBreak = if (hyphenation) LineBreak.Paragraph else LineBreak.Unspecified,
         lineHeightStyle = DeterministicLineHeight,
         platformStyle = readerPlatformTextStyle(),
     )
@@ -2669,6 +2711,7 @@ internal fun ReflowReaderSettings.footnoteStyle(): TextStyle {
         letterSpacing = letterSpacing,
         textAlign = if (align == ReaderAlign.JUSTIFY) TextAlign.Justify else TextAlign.Start,
         hyphens = if (hyphenation) Hyphens.Auto else Hyphens.None,
+        lineBreak = if (hyphenation) LineBreak.Paragraph else LineBreak.Unspecified,
         lineHeightStyle = DeterministicLineHeight,
         platformStyle = readerPlatformTextStyle(),
     )
@@ -2712,12 +2755,16 @@ internal fun ReflowReaderSettings.headingStyle(level: Int): TextStyle {
  * [anchors]. Подсветка накладывается последней, поэтому перекрывает фон inline-кода.
  */
 internal fun styledText(
-    text: String,
+    hyph: ReaderHyphenation,
     source: List<SourceSpan>,
     anchors: List<TextAnchor>,
     settings: ReflowReaderSettings,
 ): AnnotatedString {
-    val needsWordSpacing = settings.wordSpacing.value > 0f && text.contains(' ')
+    // Текст с мягкими переносами идёт в BasicText/TextMeasurer; все PLAIN-смещения спанов
+    // (source/anchors/bionic/word-spacing) переводим в HYPH-пространство через карту [hyph].
+    val text = hyph.hyphenated
+    val plain = hyph.plain
+    val needsWordSpacing = settings.wordSpacing.value > 0f && plain.contains(' ')
     if (source.isEmpty() && anchors.isEmpty() && !settings.bionic && !needsWordSpacing) {
         return AnnotatedString(text)
     }
@@ -2731,30 +2778,33 @@ internal fun styledText(
     return buildAnnotatedString {
         append(text)
         source.forEach { span ->
-            val start = span.charStart.coerceIn(0, text.length)
-            val end = span.charEnd.coerceIn(start, text.length)
-            if (start >= end) return@forEach
+            val pStart = span.charStart.coerceIn(0, plain.length)
+            val pEnd = span.charEnd.coerceIn(pStart, plain.length)
+            if (pStart >= pEnd) return@forEach
+            val start = hyph.plainToHyph(pStart)
+            val end = hyph.plainToHyph(pEnd)
             if (span.bold) addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, end)
             if (span.monospace) {
                 addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg), start, end)
             }
         }
         if (needsWordSpacing) {
-            var i = text.indexOf(' ')
+            var i = plain.indexOf(' ')
             while (i >= 0) {
-                addStyle(SpanStyle(letterSpacing = settings.wordSpacing), i, i + 1)
-                i = text.indexOf(' ', i + 1)
+                val h = hyph.plainToHyph(i)
+                addStyle(SpanStyle(letterSpacing = settings.wordSpacing), h, h + 1)
+                i = plain.indexOf(' ', i + 1)
             }
         }
         if (settings.bionic) {
-            ReaderBionic.boldRanges(text).forEach { range ->
-                addStyle(SpanStyle(fontWeight = FontWeight.Bold), range.first, range.last + 1)
+            ReaderBionic.boldRanges(plain).forEach { range ->
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold), hyph.plainToHyph(range.first), hyph.plainToHyph(range.last + 1))
             }
         }
         anchors.forEach { anchor ->
-            val start = anchor.charStart.coerceIn(0, text.length)
-            val end = anchor.charEnd.coerceIn(start, text.length)
-            if (start < end) addStyle(SpanStyle(background = highlightBg), start, end)
+            val pStart = anchor.charStart.coerceIn(0, plain.length)
+            val pEnd = anchor.charEnd.coerceIn(pStart, plain.length)
+            if (pStart < pEnd) addStyle(SpanStyle(background = highlightBg), hyph.plainToHyph(pStart), hyph.plainToHyph(pEnd))
         }
     }
 }

@@ -48,6 +48,13 @@ internal class ReflowSelectionState {
     private val blockCoordinates = mutableStateMapOf<BlockOccurrence, LayoutCoordinates>()
 
     /**
+     * Карта мягких переносов блока. [TextLayoutResult] измеряет hyph-текст и отдаёт HYPH-смещения,
+     * тогда как [SelPoint]/[TextAnchor] хранятся в PLAIN. Карта конвертирует на стыке. Без записи —
+     * тождество (Android/выключенный перенос).
+     */
+    private val hyphenations = mutableStateMapOf<BlockOccurrence, ReaderHyphenation>()
+
+    /**
      * Раскладка корневого контейнера контента: относительно неё считаются границы блоков
      * (`localBoundingBoxOf`), а жест приходит в той же системе координат.
      */
@@ -91,13 +98,19 @@ internal class ReflowSelectionState {
         blockCoordinates[BlockOccurrence(index, occurrenceKey)] = coordinates
     }
 
-    /** Блок [index] публикует свою раскладку текста (для перевода позиции в смещение). */
+    /**
+     * Блок [index] публикует свою раскладку текста (для перевода позиции в смещение) и карту мягких
+     * переносов [hyphenation] (для конвертации HYPH↔PLAIN; по умолчанию — тождество).
+     */
     fun reportLayout(
         index: Int,
         layout: TextLayoutResult,
         occurrenceKey: Int = 0,
+        hyphenation: ReaderHyphenation = IDENTITY_HYPHENATION,
     ) {
-        layouts[BlockOccurrence(index, occurrenceKey)] = layout
+        val occurrence = BlockOccurrence(index, occurrenceKey)
+        layouts[occurrence] = layout
+        hyphenations[occurrence] = hyphenation
     }
 
     /** Блок [index] выходит из композиции — убираем его раскладку/координаты. */
@@ -108,6 +121,7 @@ internal class ReflowSelectionState {
         val occurrence = BlockOccurrence(index, occurrenceKey)
         layouts.remove(occurrence)
         blockCoordinates.remove(occurrence)
+        hyphenations.remove(occurrence)
     }
 
     /**
@@ -180,7 +194,13 @@ internal class ReflowSelectionState {
         val lo = minOf(from, to, COMPARATOR)
         val hi = maxOf(from, to, COMPARATOR)
         val inRange = index in lo.blockIndex..hi.blockIndex
-        val length = if (inRange) layoutForBlock(index)?.layoutInput?.text?.length else null
+        // charOffset'ы — в PLAIN, поэтому длину блока тоже берём в PLAIN (а не hyph-длину раскладки).
+        val length =
+            if (inRange) {
+                hyphenations.entries.firstOrNull { it.key.blockIndex == index }?.value?.plain?.length
+            } else {
+                null
+            }
         if (length == null) return null
         val startOffset = if (index == lo.blockIndex) lo.charOffset else 0
         val endOffset = if (index == hi.blockIndex) hi.charOffset else length
@@ -218,18 +238,9 @@ internal class ReflowSelectionState {
         val inside = usable.firstOrNull { (_, rect) -> pos.x in rect.left..rect.right && pos.y in rect.top..rect.bottom }
         val hit =
             inside ?: usable.minByOrNull { (_, rect) ->
-                val dx =
-                    when {
-                        pos.x < rect.left -> rect.left - pos.x
-                        pos.x > rect.right -> pos.x - rect.right
-                        else -> 0f
-                    }
-                val dy =
-                    when {
-                        pos.y < rect.top -> rect.top - pos.y
-                        pos.y > rect.bottom -> pos.y - rect.bottom
-                        else -> 0f
-                    }
+                // Расстояние до прямоугольника по оси: один из членов положителен (снаружи), оба нулевые (внутри).
+                val dx = (rect.left - pos.x).coerceAtLeast(0f) + (pos.x - rect.right).coerceAtLeast(0f)
+                val dy = (rect.top - pos.y).coerceAtLeast(0f) + (pos.y - rect.bottom).coerceAtLeast(0f)
                 dx * dx + dy * dy
             }
         return hit?.let { (occurrence, _) ->
@@ -238,7 +249,10 @@ internal class ReflowSelectionState {
             // pos выражена относительно контейнера; localPositionOf переводит её в
             // собственную систему текстового узла — ровно то, что ждёт getOffsetForPosition.
             val local = coordinates.localPositionOf(container, pos)
-            SelPoint(occurrence.blockIndex, layout.getOffsetForPosition(local), occurrence.occurrenceKey)
+            // getOffsetForPosition — в HYPH-пространстве; храним смещение в PLAIN.
+            val hyph = hyphenations[occurrence] ?: IDENTITY_HYPHENATION
+            val plainOffset = hyph.hyphToPlain(layout.getOffsetForPosition(local))
+            SelPoint(occurrence.blockIndex, plainOffset, occurrence.occurrenceKey)
         }
     }
 
@@ -264,7 +278,10 @@ internal class ReflowSelectionState {
                 coordinates?.let { coords ->
                     layout?.let { l ->
                         val length = l.layoutInput.text.length
-                        val cursor = l.getCursorRect(p.charOffset.coerceIn(0, length))
+                        // p.charOffset — в PLAIN; getCursorRect ждёт HYPH-смещение.
+                        val hyph = hyphenations[BlockOccurrence(p.blockIndex, p.occurrenceKey)] ?: IDENTITY_HYPHENATION
+                        val hyphOffset = hyph.plainToHyph(p.charOffset).coerceIn(0, length)
+                        val cursor = l.getCursorRect(hyphOffset)
                         Rect(
                             c.localPositionOf(coords, cursor.topLeft),
                             c.localPositionOf(coords, cursor.bottomRight),
@@ -283,6 +300,9 @@ internal class ReflowSelectionState {
 
     private fun layoutForBlock(blockIndex: Int): TextLayoutResult? = layouts.entries.firstOrNull { it.key.blockIndex == blockIndex }?.value
 }
+
+/** Тождественная карта переносов (без вставок) — дефолт для блоков без мягких переносов. */
+private val IDENTITY_HYPHENATION = ReaderHyphenation("", IntArray(0))
 
 /**
  * Ambient-доступ к сквозному выделению для блоков ридера. По умолчанию — отдельный

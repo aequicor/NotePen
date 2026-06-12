@@ -104,6 +104,7 @@ import ru.kyamshanov.notepen.sync.domain.model.DeviceInfo
 import ru.kyamshanov.notepen.sync.domain.model.NetworkMessage
 import ru.kyamshanov.notepen.sync.domain.model.OpenDocumentInfo
 import ru.kyamshanov.notepen.sync.domain.port.AnnotationResyncRequester
+import ru.kyamshanov.notepen.sync.infrastructure.AndroidLocalNetworkDiagnostics
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryCatalogChangeNotifier
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentRegistry
 import ru.kyamshanov.notepen.sync.infrastructure.InMemoryOpenDocumentsRegistry
@@ -464,12 +465,16 @@ class MainActivity : ComponentActivity() {
             // Bridge: a camera scan / manual paste that carries a library QR auto-adds that PeerLan
             // library to the shelf in one step (the catalog coordinator then fills in its books).
             val registerPairedLibrary = peerLibraryRegistrar { libraryRegistry }
+            // Explains silent LAN failures (always-on VPN, Android 17 local-network
+            // permission) in the pairing error messages instead of a bare timeout.
+            val localNetworkDiagnostics = AndroidLocalNetworkDiagnostics(context = applicationContext)
             val clientScanViewModel =
                 ClientQrScanViewModel(
                     syncClient = syncClient,
                     selfInfo = selfInfo,
                     scope = appScope,
                     onLibraryPaired = registerPairedLibrary,
+                    localNetworkDiagnostics = localNetworkDiagnostics,
                 )
             val manualConnectViewModel =
                 ManualConnectViewModel(
@@ -477,6 +482,7 @@ class MainActivity : ComponentActivity() {
                     selfInfo = selfInfo,
                     scope = appScope,
                     onLibraryPaired = registerPairedLibrary,
+                    localNetworkDiagnostics = localNetworkDiagnostics,
                 )
             // Direct-dial saved LAN libraries so their transport relinks WITHOUT mDNS — the durability
             // half of connect-by-QR (the address + code came from the scanned QR and were persisted).
@@ -507,6 +513,7 @@ class MainActivity : ComponentActivity() {
                     syncClient = syncClient,
                     selfInfo = selfInfo,
                     scope = appScope,
+                    localNetworkDiagnostics = localNetworkDiagnostics,
                 )
 
             // Feed peer-originated stroke deltas into the right engine so SyncBridge
