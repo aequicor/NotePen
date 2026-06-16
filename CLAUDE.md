@@ -21,6 +21,7 @@ Package root: `ru.kyamshanov.notepen`.
 | Lint + static analysis | `./gradlew detekt` |
 | Format check / autoformat | `./gradlew ktlintCheck` / `./gradlew ktlintFormat` |
 | Format ONE file | `./gradlew ktlintFormatFile -PktlintFile=<absolute path>` |
+| Architecture sandbox check | `./gradlew :app:byCompose:uikit-sandbox:check` |
 | Full verification | `./gradlew check` (build + tests + ktlintCheck + detekt) |
 
 Most logic tests live in `commonTest`/`jvmTest` and run on the JVM. The Android entry point is `app/byCompose/android/.../replacementPlace/MainActivity.kt`; the desktop entry is `app/byCompose/desktop/src/desktopMain/kotlin/main.kt` (`mainClass = "MainKt"`), which also does the desktop DI wiring (server, mDNS, ViewModels).
@@ -36,7 +37,7 @@ Most logic tests live in `commonTest`/`jvmTest` and run on the JVM. The Android 
 
 ## Module map
 
-`settings.gradle.kts` is the source of truth. Modules follow an **api/impl split**: `:*:api` holds interfaces + models (often `explicitApi()`), `:*:impl` holds concrete implementations and platform actuals.
+`settings.gradle.kts` is the source of truth. The repository currently mixes older api/impl modules and newer feature modules. The target architecture for new/refactored code is **feature-based modules** with Clean Architecture packages inside the module: `domain/`, `data/`, `presentation/`, `utils/`, `di/`.
 
 - **`:shared`** — domain core + navigation contracts. Decompose components (`RootComponent`/`DefaultRootComponent`, `DetailsComponent`, `MainComponent`, etc.) and the `mainscreen`/`pdf`/`shortcuts` domains (ports, models, use cases). Almost everything depends on this.
 - **`:drawing:api` / `:drawing:impl`** — stroke model (`DrawingPath`, `DrawingPoint`), `PdfDrawingState` (Compose snapshot state for live strokes), shape recognition/simplification ports; impl has the multi-page gesture controller + magnifier.
@@ -49,16 +50,27 @@ Most logic tests live in `commonTest`/`jvmTest` and run on the JVM. The Android 
 - **`:app:byCompose:common`** — shared Compose UI and app glue: screen components, ViewModels, dialogs, the `book`/`epub` document-conversion layer, PDF loader actuals. Depends on every feature module.
 - **`:app:byCompose:android` / `:app:byCompose:desktop`** — platform application modules (entry points, DI wiring, packaging).
 - **`:app:byCompose:theme` / `:app:byCompose:uikit`** — design-system modules (theming, reusable Compose components).
+- **`:app:byCompose:uikit-sandbox`** — living architecture sample for a normal feature module. It demonstrates the public root facade plus `domain/data/presentation/utils/di`, Decompose + MVIKotlin component/store wiring, Koin factory wiring, Ktor-shaped remote data source, Room-shaped local data source contract, and tests.
 
-**Dependency direction:** `app:*` → feature `:*:impl` → `:*:api` / `:shared`. Feature modules never depend back on `app`; `domain` packages never import `infrastructure` or platform/SDK types.
+**Dependency direction:** app entry points and app glue compose feature factories; feature modules depend on shared/domain/design-system contracts; `data` implements `domain` ports; `presentation` depends on `domain` use cases, not on data sources. Feature modules never depend on another feature directly unless an explicit public API module exists and the dependency is architectural, not incidental.
 
 ## Architecture conventions
 
-- **Clean-architecture layering inside modules**, by package, consistently: `domain/{model,port,usecase,exception}` (pure Kotlin — no Android/Ktor/SQLDelight/coroutine-dispatcher imports) ← `infrastructure/` (port implementations, DTO mapping) and `presentation`/`ui` (Compose + ViewModels). Ports are declared in `domain/port` and implemented in `infrastructure` or in platform source sets (`androidMain`/`jvmMain`).
+- **Default feature shape:** one feature module with `domain/`, `data/`, `presentation/`, `utils/`, `di/`. Keep implementation details `internal`; expose only component interfaces, factories, and deliberate domain contracts.
+- **Feature facade:** every feature module must be readable from the root package first. The root package contains only public API: `<Name>Component.kt`, `<Name>Feature.kt`, `<Name>Dependencies.kt`, `<Name>Result.kt` (or equivalent navigation/result contracts). Put Decompose implementations in `presentation/component/`, stores/reducers/executors in `presentation/store/`, Compose internals in `presentation/ui/`, and repositories/data sources/DTOs/mappers/DI below `data/` or `di/`. Keep implementations `internal`.
+- **External usage:** app modules and other features depend on the root facade only. They create/render through `<Name>Feature` and `<Name>Component`; they do not import `data.*`, `domain.*`, `presentation.*`, `di.*`, `utils.*`, or `impl.*` from another feature. UI code talks to `<Name>Component`, never to a MVIKotlin Store.
+- **api/impl split is exceptional.** Use `:feature:api` / `:feature:impl` only when the feature is fully isolated from other features, owns a complete user journey, is large enough that module boundaries pay off (roughly 50+ classes), and consumers need only contracts/factories while implementation must be physically hidden. Do not split merely because `internal` would also work.
+- **Domain:** `domain/{model,repository,usecase,exception}` is pure Kotlin. No Android SDK, Compose, Decompose, MVIKotlin, Ktor, Room/SQLDelight, DI, logging frameworks, platform file APIs, or hardcoded `Dispatchers.*`. Use cases are small classes with `operator fun invoke`; repository interfaces live in domain and are implemented in data.
+- **Data:** `data/` contains repository implementations, local/remote data sources, DTO/entities, and mappers. Room/SQLDelight DAOs and Ktor clients stay behind data-source interfaces. DTO/entity types never cross into domain or presentation state.
+- **Presentation:** `presentation/component/` contains Decompose component implementations only; `presentation/store/` contains MVIKotlin stores, reducers, executors, intents, messages, and labels; `presentation/ui/` contains Compose content; `presentation/utils/` contains presentation-local adapters and mappers. UI talks only to component interfaces and never imports MVIKotlin stores/intents/messages directly.
+- **DI:** Koin modules live in `di/` and provide repositories, use cases, long-lived clients, dispatchers, and component factories. Stores are not Koin singletons; each component owns its store via `instanceKeeper.getStore { ... }`.
 - **expect/actual** is the only mechanism for platform differences — no `if (platform)` branching. Key actual pairs: PDF rasterization & document loading, tablet/stylus input (`WinTab` on Windows, Cocoa on macOS, Android stylus), low-latency overlay, and small utilities (UUID, unicode normalization).
-- **Navigation** is Decompose: a `StackNavigation<Config>` in `DefaultRootComponent` switches between Main (library/recents/folders/peers), Details (the PDF editor), PeerCatalog, and FolderContents. Component *interfaces* live in `:shared`; UI + some impls live in `:app:byCompose:common`.
+- **Navigation** is Decompose. Parent components own `StackNavigation`/`SlotNavigation`; child components communicate upward through callbacks. `Config` objects are `@Serializable`, data-only, and contain no lambdas, stores, components, or platform objects.
+- **MVIKotlin:** stores live in presentation, reducers are pure, executors call use cases, labels represent one-off effects, and `runCatching` in suspend code must rethrow `CancellationException` or use a safe wrapper.
 - **Coroutines:** inject `CoroutineDispatcher`/`CoroutineScope` rather than referencing `Dispatchers.*` or `GlobalScope` directly (testability + KMP portability). Keep `suspend` chains main-safe.
 - `:*:api` and other library modules favor `explicitApi()` and KDoc on public declarations.
+- **KDoc:** project documentation language is Russian. Every public Kotlin interface, class, method, property, variable, and constant must have Russian KDoc. KDoc for public data classes must list all `@property` entries; public functions must document every `@param`, `@return` when non-`Unit`, inputs, outputs, and possible exceptions or explicitly say that exceptions are not thrown outward. Complex internal methods should also have KDoc or concise code comments explaining the algorithm, invariants, side effects, and failure modes. Put KDoc before annotations.
+- Before creating a new feature, inspect `:app:byCompose:uikit-sandbox` and follow its structure unless there is a documented reason not to.
 
 ## Core runtime flow (stroke → render → sync)
 

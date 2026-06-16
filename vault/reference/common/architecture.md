@@ -22,6 +22,7 @@ Kotlin Multiplatform (KMP) приложение для просмотра и а�
 :app:byCompose:common           — UI (Compose) + платформенная инфраструктура
 :app:byCompose:theme            — Material 3 тема
 :app:byCompose:uikit            — переиспользуемые UI-компоненты
+:app:byCompose:uikit-sandbox    — эталон feature-модуля с фасадом и слоями
 :app:byCompose:android          — Android точка входа (Application/MainActivity)
 :app:byCompose:desktop          — Desktop точка входа (main fun)
 ```
@@ -37,6 +38,41 @@ Kotlin Multiplatform (KMP) приложение для просмотра и а�
 ```
 
 `:shared` не зависит ни от одного другого модуля проекта — он чистый.
+
+---
+
+## Целевой стандарт feature-модуля
+
+Новые и постепенно мигрируемые фичи оформляются как feature-based Gradle-модули. Снаружи модуль читается через корневой публичный фасад; внутренние слои скрыты `internal`.
+
+```text
+feature/<name>/
+  src/commonMain/kotlin/.../<name>/
+    <Name>Component.kt
+    <Name>Feature.kt
+    <Name>Dependencies.kt
+    <Name>Result.kt
+
+    domain/
+    data/
+    presentation/
+      component/
+      store/
+      ui/
+      utils/
+    di/
+    utils/
+```
+
+Корневой пакет содержит только публичный API: component interface, фабрику/feature entrypoint, dependencies contract, navigation/result contracts. `Default<Name>Component` лежит в `presentation/component/`, stores/reducers/executors — в `presentation/store/`, Compose internals — в `presentation/ui/`, presentation-local adapters/mappers — в `presentation/utils/`. Repositories, data sources, DTO, mappers и DI wiring лежат внутри `data/` и `di/`. Реализации по умолчанию `internal`.
+
+Включайте `explicitApi()` для feature-модуля, чтобы публичный API был намеренным. UI работает только с `<Name>Component`; app-модули и другие фичи не импортируют `data.*`, `domain.*`, `presentation.*`, `di.*`, `utils.*` или `impl.*` чужой фичи.
+
+Язык проектной Kotlin-документации — русский. Все публичные interface/class/method/property/variable/constant получают KDoc. Для публичных data class перечисляйте все `@property`, для публичных функций — все `@param`, `@return` при не-`Unit`, входные/выходные данные и возможные исключения либо явную отметку, что исключения наружу не выбрасываются. Сложные internal-методы документируются KDoc или короткими комментариями по алгоритму, инвариантам, side effects и failure modes.
+
+Отдельные `:feature:api` / `:feature:impl` Gradle-модули используются только для крупных изолированных фич: цельный пользовательский путь, высокая автономность, примерно 50+ классов и реальная необходимость зависеть от контракта без реализации. Не вводите `api/impl` только ради замены `internal`.
+
+Эталон: `:app:byCompose:uikit-sandbox`.
 
 ---
 
@@ -176,6 +212,7 @@ presentation/ui  →  use cases  →  domain (entities, ports)
 1. `:shared` не импортирует ничего из `:app:*` — только stdlib и kotlinx.
 2. `domain/` не содержит Android SDK, Ktor, БД и диспетчеров (`Dispatchers.*`).
 3. Диспетчеры инжектируются через конструктор — не хардкодятся.
-4. `infrastructure/` живёт в `androidMain`/`jvmMain`, а не в `commonMain` — иначе платформенный код утекает в общую часть.
-5. ViewModel не содержит бизнес-логики — только сборку use cases и маппинг в UiState.
-6. Порты объявлены в `:shared`, реализации — в `:app:byCompose:common`.
+4. Публичный контракт фичи находится в корне пакета; реализации по умолчанию `internal` и лежат ниже слоёв.
+5. `api/impl` split применяется только для крупных автономных фич, где `internal` внутри одного модуля недостаточен.
+6. `infrastructure/`/`data/` не протекает в presentation API: DTO/entity не появляются в component model или store state.
+7. ViewModel/Component не содержит бизнес-логики — только orchestration, вызов use cases и маппинг в UiState/model.
