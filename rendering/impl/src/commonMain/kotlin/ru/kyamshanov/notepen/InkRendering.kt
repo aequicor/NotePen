@@ -395,17 +395,11 @@ fun DrawScope.drawLiveStroke(
     fromSegmentIndex: Int = 0,
     toSegmentIndexExclusive: Int = points.size - 1,
 ) {
-    if (points.isEmpty()) return
+    if (points.size < 2) return
     val color = Color(colorArgb.toInt())
     val baseWidth = normalizedStrokeWidth * pdfWidth
     val offX = -extent.left
     val offY = -extent.top
-    if (points.size == 1) {
-        val point = points.first()
-        drawStartDot(point, color, baseWidth, point.pressure, point.tilt, pdfWidth, pdfHeight, offX, offY)
-        return
-    }
-    if (points.size < 2) return
     val segFrom = fromSegmentIndex.coerceAtLeast(0)
     val segTo = toSegmentIndexExclusive.coerceAtMost(points.size - 1)
     if (segFrom >= segTo) return
@@ -421,7 +415,7 @@ fun DrawScope.drawLiveStroke(
         scratch = scratch,
         fromSegmentIndex = segFrom,
         toSegmentIndexExclusive = segTo,
-        drawStartDots = segFrom == 0,
+        drawStartDots = false,
     )
 }
 

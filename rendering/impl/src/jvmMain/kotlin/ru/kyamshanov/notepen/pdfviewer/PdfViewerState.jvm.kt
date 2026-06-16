@@ -145,6 +145,15 @@ actual class PdfViewerState internal constructor(
     actual val contentLayerExtraOffset: Offset
         get() = overscrollOffset
 
+    actual fun clearTransientViewportEffects() {
+        overscrollHeld = false
+        overscrollOffset = Offset.Zero
+        pendingWheelOverscroll = Offset.Zero
+        springVelX = 0f
+        springVelY = 0f
+        dragRawPan = pan
+    }
+
     actual val basePageWidthPx: Float
         get() = viewportSize.width * BASE_PAGE_WIDTH_FRACTION
 
@@ -774,7 +783,7 @@ actual class PdfViewerState internal constructor(
         val vp = FloatSize(viewportSize.width.toFloat(), viewportSize.height.toFloat())
         val centered = PdfViewerMath.centeringClamp(p, layout, zoom, vp)
         val clampedPan = PdfViewerMath.clampPan(centered, layout, zoom, vp)
-        val pdfFitsWidth = layout.basePageWidthPx * zoom <= vp.width
+        val pdfFitsWidth = PdfViewerMath.rowWidthPx(layout) * zoom <= vp.width
         val pdfFitsHeight = layout.totalHeightPx * zoom <= vp.height
         return Offset(
             x = if (pdfFitsWidth) centered.x else clampedPan.x,

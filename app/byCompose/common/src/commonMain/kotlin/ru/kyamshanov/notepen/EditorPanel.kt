@@ -74,6 +74,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -116,6 +117,7 @@ import ru.kyamshanov.notepen.pdfviewer.PdfPagesViewer
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerMath
 import ru.kyamshanov.notepen.pdfviewer.PdfViewerState
 import ru.kyamshanov.notepen.pdfviewer.ScrollMode
+import ru.kyamshanov.notepen.pdfviewer.SpreadMode
 import ru.kyamshanov.notepen.pdfviewer.asPageLayoutGeometry
 import ru.kyamshanov.notepen.reflow.BuildReflowReadingUseCase
 import ru.kyamshanov.notepen.reflow.ReflowPageLocator
@@ -160,6 +162,7 @@ import ru.kyamshanov.notepen.tabs.TabSession
 import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 private val panelLogger = KotlinLogging.logger {}
 
@@ -199,7 +202,17 @@ private data class DocumentBroadcastSnapshot(
     val toolMode: ToolMode,
 )
 
+private data class BroadcastViewportReadiness(
+    val viewportWidthPx: Float,
+    val viewportHeightPx: Float,
+    val rowWidthPx: Float,
+    val pageCount: Int,
+    val totalHeightPx: Float,
+    val spreadMode: SpreadMode,
+)
+
 private fun PdfViewerState.applyBroadcastViewportCommand(command: BroadcastViewportCommand) {
+    clearTransientViewportEffects()
     command.targetScalePercent?.let { scalePercent ->
         setScalePercent(scalePercent)
     }
@@ -218,6 +231,7 @@ private fun PdfViewerState.applyBroadcastViewportCommand(command: BroadcastViewp
             panGestureBy(Offset(deltaX, deltaY))
         } finally {
             endPanGesture()
+            clearTransientViewportEffects()
         }
     }
 }
@@ -817,7 +831,21 @@ fun EditorPanel(
             return@LaunchedEffect
         }
         var previousFrame: NetworkMessage.ProjectionFrame? = null
-        controller.currentFrame.collectLatest { frame ->
+        var pendingScalePercent: Int? = null
+        var pendingScaleStartedAt = TimeSource.Monotonic.markNow()
+        val layoutReadiness =
+            snapshotFlow {
+                val layout = pdfViewerState.layout
+                BroadcastViewportReadiness(
+                    viewportWidthPx = pdfViewerState.viewportWidthPx,
+                    viewportHeightPx = pdfViewerState.viewportHeightPx,
+                    rowWidthPx = PdfViewerMath.rowWidthPx(layout),
+                    pageCount = layout.pageHeightsPx.size,
+                    totalHeightPx = layout.totalHeightPx,
+                    spreadMode = layout.spreadMode,
+                )
+            }.distinctUntilChanged()
+        controller.currentFrame.combine(layoutReadiness) { frame, _ -> frame }.collectLatest { frame ->
             val matchingPreviousFrame = previousFrame?.takeIf { it.documentId == frame?.documentId }
             previousFrame = frame?.takeIf { it.documentId == documentId }
             val command =
@@ -837,7 +865,15 @@ fun EditorPanel(
                     currentPageHeightsPx = pdfViewerState.layout.pageHeightsPx,
                 ) ?: return@collectLatest
             if (command.targetScalePercent != null) {
-                delay(BROADCAST_ZOOM_SETTLE_DELAY_MS)
+                if (pendingScalePercent != command.targetScalePercent) {
+                    pendingScalePercent = command.targetScalePercent
+                    pendingScaleStartedAt = TimeSource.Monotonic.markNow()
+                }
+                val remainingSettleMs =
+                    BROADCAST_ZOOM_SETTLE_DELAY_MS - pendingScaleStartedAt.elapsedNow().inWholeMilliseconds
+                if (remainingSettleMs > 0L) {
+                    delay(remainingSettleMs)
+                }
                 val settledCommand =
                     broadcastViewportCommandForDocument(
                         frame = frame,
@@ -856,7 +892,9 @@ fun EditorPanel(
                         applyPanDuringScaleChange = true,
                     ) ?: return@collectLatest
                 pdfViewerState.applyBroadcastViewportCommand(settledCommand)
+                pendingScalePercent = null
             } else {
+                pendingScalePercent = null
                 pdfViewerState.applyBroadcastViewportCommand(command)
             }
         }
@@ -1141,13 +1179,19 @@ fun EditorPanel(
 
     // ---- Annotation load --------------------------------------------------
     LaunchedEffect(pdfState) {
+        val skipSavedViewportRestore =
+            shouldApplyBroadcastFrame(
+                hasPeerServer = peerServer != null,
+                isFocused = isFocused,
+                hasBroadcastConnection = anyPeerConnected,
+            )
         // Session restore positions a tab via [PdfDocumentState.pendingViewOverride].
         // Applied first and independently of the shared annotation load, so even a
         // second tab of the same file (whose annotations are already loaded by its
         // sibling) still gets its own restored scroll / zoom.
         val viewOverride = pdfState.pendingViewOverride
         pdfState.pendingViewOverride = null
-        if (viewOverride != null) {
+        if (viewOverride != null && !skipSavedViewportRestore) {
             pdfViewerState.applyInitialState(
                 scalePercent = viewOverride.scalePercent,
                 pageIndex = viewOverride.pageIndex,
@@ -1159,7 +1203,7 @@ fun EditorPanel(
         pdfState.annotationsLoaded = true
         val restoredView =
             annotationRepository.loadViewState(filePath).getOrNull()?.also { view ->
-                if (viewOverride == null) {
+                if (viewOverride == null && !skipSavedViewportRestore) {
                     pdfViewerState.applyInitialState(
                         scalePercent = view.scale,
                         pageIndex = if (pdfState.skipPageRestore) 0 else view.currentPage,
@@ -1169,12 +1213,13 @@ fun EditorPanel(
                 }
                 // Вторичный таб того же файла открываем в обычном (не reading) режиме —
                 // как и позицию, режим чтения для него не восстанавливаем.
-                pdfState.readingMode = if (pdfState.skipPageRestore) false else view.readingMode
+                pdfState.readingMode =
+                    if (pdfState.skipPageRestore || skipSavedViewportRestore) false else view.readingMode
                 // Восстанавливаем reflow-якорь (если был сохранён) — даже если режим
                 // чтения сейчас не активен: при последующем переключении в reader-mode
                 // initialAnchor вернёт пользователя на ту же страницу. На вторичном табе
                 // (skipPageRestore) намеренно стартуем с начала, как и с позицией PDF.
-                if (!pdfState.skipPageRestore) {
+                if (!pdfState.skipPageRestore && !skipSavedViewportRestore) {
                     currentReadingAnchor = TextAnchor.ofBlock(view.reflowAnchorBlockIndex)
                     useRestoredAnchorOnFirstEnter = true
                 }
@@ -1187,7 +1232,9 @@ fun EditorPanel(
                     pdfState.spreadSplit = view.spreadSplit
                     // Книжный разворот (FEATURE #5): восстанавливаем ЯВНЫЙ выбор
                     // пользователя (null = авто-по-ширине). Отдельно от #4 и reflow.
-                    pdfState.spreadViewOverride = view.spreadViewOverride
+                    if (!skipSavedViewportRestore) {
+                        pdfState.spreadViewOverride = view.spreadViewOverride
+                    }
                     // Фон документа («текстурированная бумага») — поле вида, shared между
                     // вкладками одного файла, поэтому заполняем один раз первой вкладкой.
                     pdfState.backgroundStyle = view.backgroundStyle
@@ -1215,7 +1262,7 @@ fun EditorPanel(
                 }.orEmpty()
 
         annotationRepository.load(filePath).getOrNull()?.let { bundle ->
-            if (restoredView == null && viewOverride == null) {
+            if (restoredView == null && viewOverride == null && !skipSavedViewportRestore) {
                 pdfViewerState.applyInitialState(
                     scalePercent = bundle.scale,
                     pageIndex = if (pdfState.skipPageRestore) 0 else bundle.currentPage,
@@ -2049,7 +2096,8 @@ fun EditorPanel(
                     }
                 }
                 val localDensity = androidx.compose.ui.platform.LocalDensity.current
-                val halfTouch = with(localDensity) { AppTheme.spacing.touchTarget.toPx() / 2f }
+                val buttonSizePx = with(localDensity) { AppTheme.spacing.touchTarget.toPx() }
+                val halfTouch = buttonSizePx / 2f
                 val buttonPaddingPx = with(localDensity) { 8.dp.toPx() }
 
                 Box(
@@ -2154,7 +2202,12 @@ fun EditorPanel(
                                             val centerY = pageButtonCenterY(layout, pageIndex, pan.y, z, pdfViewerState.viewportHeightPx)
                                             val leftEdgeX = pan.x + (pageLeft + ext.left * base) * z
                                             IntOffset(
-                                                (leftEdgeX - halfTouch * 2 - buttonPaddingPx).roundToInt(),
+                                                pageExpansionLeftButtonX(
+                                                    leftEdgeX = leftEdgeX,
+                                                    viewportWidth = pdfViewerState.viewportWidthPx,
+                                                    buttonSize = buttonSizePx,
+                                                    padding = buttonPaddingPx,
+                                                ).roundToInt(),
                                                 (centerY - halfTouch).roundToInt(),
                                             )
                                         },
@@ -2174,7 +2227,12 @@ fun EditorPanel(
                                             val centerY = pageButtonCenterY(layout, pageIndex, pan.y, z, pdfViewerState.viewportHeightPx)
                                             val rightEdgeX = pan.x + (pageLeft + ext.right * base) * z
                                             IntOffset(
-                                                (rightEdgeX + buttonPaddingPx).roundToInt(),
+                                                pageExpansionRightButtonX(
+                                                    rightEdgeX = rightEdgeX,
+                                                    viewportWidth = pdfViewerState.viewportWidthPx,
+                                                    buttonSize = buttonSizePx,
+                                                    padding = buttonPaddingPx,
+                                                ).roundToInt(),
                                                 (centerY - halfTouch).roundToInt(),
                                             )
                                         },

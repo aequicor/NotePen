@@ -88,6 +88,7 @@ fun HostQrPairingPanel(
                     encodeCableQr = viewModel::encodeCableQr,
                     onStartCable = { port, serial -> viewModel.startCable(port, serial) },
                     onStopCable = { port, serial -> viewModel.stopCable(port, serial) },
+                    onConnectCableDevice = { payload, serial -> viewModel.connectCableDevice(payload, serial) },
                     onApprove = { peerId -> viewModel.approve(peerId) },
                     onApproveAsLibrarian = { peerId -> viewModel.approveAsLibrarian(peerId) },
                     onReject = { peerId -> viewModel.reject(peerId) },
@@ -123,6 +124,7 @@ private fun ShowingQrContent(
     encodeCableQr: (PairingUri) -> QrMatrix,
     onStartCable: (Int, String?) -> Unit,
     onStopCable: (Int, String?) -> Unit,
+    onConnectCableDevice: (String, String?) -> Unit,
     onApprove: (String) -> Unit,
     onApproveAsLibrarian: (String) -> Unit,
     onReject: (String) -> Unit,
@@ -148,6 +150,7 @@ private fun ShowingQrContent(
             encodeCableQr = encodeCableQr,
             onStart = onStartCable,
             onStop = onStopCable,
+            onConnectDevice = onConnectCableDevice,
         )
     }
 
@@ -245,6 +248,7 @@ private fun CablePairingSection(
     encodeCableQr: (PairingUri) -> QrMatrix,
     onStart: (Int, String?) -> Unit,
     onStop: (Int, String?) -> Unit,
+    onConnectDevice: (String, String?) -> Unit,
 ) {
     val cableUri = remember(uri) { uri.copy(host = "127.0.0.1") }
     Column(
@@ -292,6 +296,7 @@ private fun CablePairingSection(
                 CableReadyContent(
                     cableUri = cableUri,
                     encodeCableQr = encodeCableQr,
+                    onConnectDevice = { onConnectDevice(cableUri.encode(), cableState.serial) },
                     onStop = { onStop(cableState.port, cableState.serial) },
                 )
 
@@ -312,14 +317,18 @@ private fun CablePairingSection(
 private fun CableReadyContent(
     cableUri: PairingUri,
     encodeCableQr: (PairingUri) -> QrMatrix,
+    onConnectDevice: () -> Unit,
     onStop: () -> Unit,
 ) {
-    QrCodeImage(matrix = remember(cableUri) { encodeCableQr(cableUri) }, sizeDp = 200.dp)
+    Button(onClick = onConnectDevice, modifier = Modifier.fillMaxWidth()) {
+        Text("Подключить планшет (без сканирования)")
+    }
     Text(
-        text = "Отсканируйте этот QR на планшете, подключённом по USB.",
+        text = "…или отсканируйте этот QR на планшете, подключённом по USB.",
         style = MaterialTheme.typography.bodySmall,
         textAlign = TextAlign.Center,
     )
+    QrCodeImage(matrix = remember(cableUri) { encodeCableQr(cableUri) }, sizeDp = 200.dp)
     ManualConnectionDetails(payload = cableUri.encode())
     TextButton(onClick = onStop) { Text("Отключить кабель") }
 }

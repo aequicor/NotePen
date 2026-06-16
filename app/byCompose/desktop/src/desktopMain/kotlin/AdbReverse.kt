@@ -97,6 +97,36 @@ class AdbReverse(
         }
     }
 
+    override suspend fun connectDevice(
+        payload: String,
+        serial: String?,
+    ) {
+        withContext(ioDispatcher) {
+            val adb = locator() ?: return@withContext
+            // Prefer the device the reverse tunnel was installed for; the button that
+            // triggers this is only shown in CableState.Ready, so a serial is known.
+            val target = serial ?: (_state.value as? CableState.Ready)?.serial ?: return@withContext
+            // Single-quote the URI so the device-side shell passes `&`/`?` to `am`
+            // literally instead of tokenising the query string.
+            val result =
+                runCatching {
+                    runProcess(
+                        listOf(
+                            adb, "-s", target, "shell", "am", "start",
+                            "-a", "android.intent.action.VIEW",
+                            "-d", "'$payload'",
+                        ),
+                    )
+                }.getOrNull()
+            when {
+                result == null -> logger.warn { "adb am start threw for $target" }
+                result.exitCode == 0 && !result.output.contains("Error:") ->
+                    logger.info { "Launched pairing deep link on $target" }
+                else -> logger.warn { "am start did not launch on $target: ${result.output.trim()}" }
+            }
+        }
+    }
+
     private fun listDevices(adb: String): List<CableDevice> {
         val result = runCatching { runProcess(listOf(adb, "devices")) }.getOrNull() ?: return emptyList()
         return result.output

@@ -369,21 +369,13 @@ private fun drawSegment(
     val x = (curr.x + offX) * pdfW
     val y = (curr.y + offY) * pdfH
 
+    if (prev == null) return
+
     if (segment.toolKind == ToolKind.MARKER) {
         markerPaint.color = segment.colorArgb
         // Constant nib breadth, independent of pressure/tilt — like the renderer.
         val halfWidthPx = segment.widthPx * 0.5f
         if (halfWidthPx <= 0f) return
-        if (prev == null) {
-            canvas.drawOval(
-                x - halfWidthPx,
-                y - halfWidthPx,
-                x + halfWidthPx,
-                y + halfWidthPx,
-                markerPaint,
-            )
-            return
-        }
         val nibX = cos(MARKER_NIB_ANGLE_RADIANS) * halfWidthPx
         val nibY = sin(MARKER_NIB_ANGLE_RADIANS) * halfWidthPx
         val x1 = (prev.x + offX) * pdfW
@@ -400,9 +392,5 @@ private fun drawSegment(
 
     penPaint.color = segment.colorArgb
     penPaint.strokeWidth = computeSegmentWidth(segment.widthPx, curr.pressure, curr.tilt)
-    if (prev == null) {
-        canvas.drawCircle(x, y, penPaint.strokeWidth * 0.5f, penPaint)
-    } else {
-        canvas.drawLine((prev.x + offX) * pdfW, (prev.y + offY) * pdfH, x, y, penPaint)
-    }
+    canvas.drawLine((prev.x + offX) * pdfW, (prev.y + offY) * pdfH, x, y, penPaint)
 }

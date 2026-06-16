@@ -40,6 +40,7 @@
     <ID>ReturnCount:BroadcastPresentation.kt:internal fun viewportCenterY: Float?</ID>
     <ID>ReturnCount:BroadcastPresentation.kt:private fun NetworkMessage.ProjectionFrame.remoteHorizontalChangeFrom: Boolean?</ID>
     <ID>ReturnCount:BroadcastPresentation.kt:private fun panYForViewportCenter: Float?</ID>
+    <ID>ReturnCount:BroadcastPresentation.kt:private fun viewportRowForPageIndex: VerticalViewportRow?</ID>
     <ID>ReturnCount:EditorPanel.kt:fun bindingActive: Boolean</ID>
     <ID>ReturnCount:EditorPanel.kt:fun routedOnDown</ID>
     <ID>ReturnCount:FilePicker.jvm.kt:private fun pickDocumentWithAwtDialog: String?</ID>

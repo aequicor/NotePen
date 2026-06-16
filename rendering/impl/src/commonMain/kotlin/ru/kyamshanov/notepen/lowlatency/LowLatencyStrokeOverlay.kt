@@ -17,11 +17,13 @@ internal val LocalLowLatencyOverlayBounds =
  * Platform-specific low-latency overlay for the in-flight pen stroke.
  *
  * On Android (API 29+) this is backed by `CanvasFrontBufferedRenderer` on a
- * `SurfaceView` placed above the Compose `Canvas`. Each new sample appended
+ * `SurfaceView` placed above the Compose `Canvas`. Each new segment appended
  * to [PdfDrawingState.livePoints] is drawn directly to the front buffer that
  * is already on-screen, in a special render thread that bypasses Compose's
- * back-buffered compositor. End-to-end pen latency drops from ~30 ms (two
- * compose frames + one composite) to ~5–10 ms (one front-buffer render).
+ * back-buffered compositor. The first contact sample is kept as the segment
+ * start but not painted as a standalone dot. End-to-end pen latency drops from
+ * ~30 ms (two compose frames + one composite) to ~5–10 ms (one front-buffer
+ * render).
  *
  * On JVM / desktop this is a Compose `Canvas` overlay inside the same page
  * tree. It does not create a separate native window, so live-stroke coordinates

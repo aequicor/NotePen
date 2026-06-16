@@ -70,4 +70,19 @@ interface CablePairing {
         port: Int,
         serial: String? = null,
     )
+
+    /**
+     * Launches the NotePen client on the cabled device straight into pairing by
+     * firing the `notepen://pair` deep link [payload] via `adb shell am start`.
+     * Lets the tablet connect over the cable **without scanning the QR** — the host
+     * already knows host/port/code, so it pushes them to the device. [serial]
+     * selects the device; null uses the one currently in [CableState.Ready].
+     *
+     * Default no-op so platforms without a cable bridge need not implement it.
+     */
+    suspend fun connectDevice(
+        payload: String,
+        serial: String? = null,
+    ) {
+    }
 }

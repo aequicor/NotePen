@@ -272,6 +272,9 @@ expect class PdfViewerState {
      */
     val contentLayerExtraOffset: Offset
 
+    /** Clears transient visual offsets that should not survive an external viewport command. */
+    fun clearTransientViewportEffects()
+
     /** Starts a drag-pan gesture; platforms may use it to hold overscroll state. */
     fun beginPanGesture()
 

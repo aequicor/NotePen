@@ -94,30 +94,28 @@ private const val HOVER_INDICATOR_ALPHA = 0.5f
 private const val HOVER_INDICATOR_MIN_RADIUS_PX = 6f
 
 /**
- * Hard ceiling on either dimension of the page Box at which the Android
- * low-latency `SurfaceView` overlay is allowed to mount. Above this, the
- * `CanvasFrontBufferedRenderer` would allocate a HardwareBuffer the full
- * size of the page (~ width × height × 4 bytes) for front + multi-buffered
- * layers PER visible page — at 6× zoom on a typical A4 (≈ 2700×3800 px)
- * this is ~40 MB × ~3 buffers × ~3 visible pages = > 350 MB of graphics
- * memory, which trips `dequeueBuffer: createGraphicBuffer failed` on most
- * mid-range devices.
- *
- * Beyond this threshold we drop the overlay; Compose's own `Canvas`-based
- * live-stroke renderer takes over (see `if (!lowLatencyOverlayActive)`
- * below) at frame-bound latency (~ 16 ms) instead of sub-frame (~ 3 ms) —
- * acceptable degradation only at extreme zoom, where the user is rarely
- * drawing.
+ * Caps either dimension of the Android low-latency `SurfaceView` overlay.
+ * `CanvasFrontBufferedRenderer` allocates HardwareBuffers for front +
+ * multi-buffered layers, so using the full page size at max zoom can consume
+ * hundreds of MB. Instead of disabling the overlay at that point, render into a
+ * smaller same-aspect buffer and scale it with the page. That keeps stylus ink
+ * low-latency even at max zoom, with only temporary softness during the live
+ * stroke; the committed Compose/cached ink is still rendered at page size.
  */
-private fun cappedLowLatencyOverlaySize(
+internal fun cappedLowLatencyOverlaySize(
     pageSize: IntSize,
     maxDimensionPx: Int,
 ): IntSize {
     val w = pageSize.width
     val h = pageSize.height
-    if (w <= 0 || h <= 0) return IntSize.Zero
+    if (w <= 0 || h <= 0 || maxDimensionPx <= 0) return IntSize.Zero
     val longest = maxOf(w, h)
-    return if (longest <= maxDimensionPx) pageSize else IntSize.Zero
+    if (longest <= maxDimensionPx) return pageSize
+    val scale = maxDimensionPx.toFloat() / longest
+    return IntSize(
+        width = (w * scale).roundToInt().coerceAtLeast(1),
+        height = (h * scale).roundToInt().coerceAtLeast(1),
+    )
 }
 
 @Composable
@@ -222,9 +220,9 @@ fun DrawablePdfPage(
     val lowLatencyOverlaySupported = rememberLowLatencyOverlayAvailable()
     val lowLatencyOverlayMaxDimensionPx = rememberLowLatencyOverlayMaxDimensionPx()
     // derivedStateOf — критически: иначе ЛЮБОЕ изменение canvasSize
-    // (каждый pinch-тик) триггерит рекомпозицию всего DrawablePdfPage,
-    // даже если порог не пересечён. С derivedStateOf рекомпозиция только
-    // когда сам Boolean меняет значение (пересечение 2400px).
+    // (каждый pinch-тик) триггерит рекомпозицию всего DrawablePdfPage.
+    // С derivedStateOf рекомпозиция происходит только когда capped-размер
+    // действительно меняется.
     // While the page is in magnifier-mode (`magnifierState != null`), the user
     // is writing inside the floating panel; running the Android SurfaceView
     // low-latency overlay on this page is pure waste — its output is mostly

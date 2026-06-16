@@ -69,6 +69,34 @@ class PdfViewerStateHighZoomPanTest {
         assertWithin(delta, state.pan - initialPan)
     }
 
+    @Test
+    fun `clearing transient viewport effects resets desktop overscroll layer`() {
+        val state = lowZoomState()
+
+        state.beginPanGesture()
+        state.panGestureBy(Offset(x = 10_000f, y = 0f))
+
+        assertNotEquals(Offset.Zero, state.contentLayerExtraOffset)
+
+        state.clearTransientViewportEffects()
+
+        assertEquals(Offset.Zero, state.contentLayerExtraOffset)
+    }
+
+    @Test
+    fun `first layout clamps horizontal pan against spread row width`() {
+        val state =
+            PdfViewerState(initialPanX = 5_000f).apply {
+                viewportSize = IntSize(width = 1_000, height = 800)
+                spreadMode = SpreadMode.SPREAD
+                pages = listOf(squarePage(pageIndex = 0), squarePage(pageIndex = 1))
+            }
+
+        state.applyPendingInitialScrollIfNeeded()
+
+        assertTrue(state.pan.x < state.viewportSize.width.toFloat())
+    }
+
     private fun highZoomState(): PdfViewerState =
         stateAtScale(scalePercent = 400).also {
             assertTrue(it.renderScalePercent >= 300)
@@ -87,7 +115,7 @@ class PdfViewerStateHighZoomPanTest {
             setScalePercent(scalePercent)
         }
 
-    private fun squarePage(): PdfPageInfo = PdfPageInfo(pageIndex = 0, widthPt = 1000f, heightPt = 1000f)
+    private fun squarePage(pageIndex: Int = 0): PdfPageInfo = PdfPageInfo(pageIndex = pageIndex, widthPt = 1000f, heightPt = 1000f)
 
     private fun assertWithin(
         expected: Offset,

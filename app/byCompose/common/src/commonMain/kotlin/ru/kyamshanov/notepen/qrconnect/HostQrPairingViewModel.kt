@@ -118,6 +118,19 @@ class HostQrPairingViewModel(
         scope.launch { cablePairing?.stop(port, serial) }
     }
 
+    /**
+     * Pushes the cable pairing [payload] (a `127.0.0.1` `notepen://pair` URI) to the
+     * tethered device via `adb shell am start`, so it connects over USB **without
+     * scanning the QR**. [serial] selects the device (the one in [CableState.Ready]
+     * when null).
+     */
+    fun connectCableDevice(
+        payload: String,
+        serial: String? = null,
+    ) {
+        scope.launch { cablePairing?.connectDevice(payload, serial) }
+    }
+
     /** Approves the pending peer as a read-only reader; no-op if none. */
     fun approve(peerId: String) {
         scope.launch { peerServerProvider().approve(peerId) }

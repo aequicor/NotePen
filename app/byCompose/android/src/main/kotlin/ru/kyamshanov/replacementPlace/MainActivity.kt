@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -36,6 +37,8 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -199,6 +202,11 @@ private suspend fun materializeOpenDocumentForTransfer(
 class MainActivity : ComponentActivity() {
     private lateinit var rootComponent: DefaultRootComponent
     private var recordExternalOpenInHistory: (String) -> Unit = {}
+
+    // Connects from a `notepen://pair` deep link pushed over the USB cable by the
+    // desktop host (`adb shell am start`). Wired in onCreate once the registry +
+    // self info exist; waits for the heavy sync stack before dialing.
+    private var connectByPairingPayload: (String) -> Unit = {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -412,6 +420,22 @@ class MainActivity : ComponentActivity() {
                 libraryRegistry.savedConnections().forEach { spec ->
                     libraryRegistry.connect(spec)
                 }
+            }
+        }
+
+        // Cable-without-QR: the desktop host pushes a `notepen://pair?h=127.0.0.1…`
+        // deep link over USB (adb am start). We parse the same payload the manual /
+        // camera path uses, connect, and register the PeerLan library — identical to
+        // `connectLibraryByQr` below. The deep link can arrive on a cold start, so we
+        // wait for the heavy sync stack to finish wiring before dialing.
+        connectByPairingPayload = { payload ->
+            appScope.launch {
+                runCatching {
+                    val uri = PairingUri.parse(payload.trim()) ?: error("malformed pairing uri: $payload")
+                    val deps = heavyDepsFlow.filterNotNull().first()
+                    val server = deps.syncClient.connect(uri.toServerDeviceInfo(), uri.code, selfInfo).getOrThrow()
+                    libraryRegistry.connect(peerLanConnectionFor(uri, server)).getOrThrow()
+                }.onFailure { Log.w("NotePen", "Cable deep-link connect failed", it) }
             }
         }
 
@@ -847,6 +871,16 @@ class MainActivity : ComponentActivity() {
      * гранта чтения из самого интента.
      */
     private fun handleIncomingIntent(intent: Intent) {
+        // Pairing deep link pushed over the cable (notepen://pair) — connect instead
+        // of treating it as a document to open. Must be checked before incomingUri().
+        val data = intent.data
+        if (intent.action == Intent.ACTION_VIEW &&
+            data?.scheme == PairingUri.SCHEME &&
+            data.host == PairingUri.HOST
+        ) {
+            connectByPairingPayload(data.toString())
+            return
+        }
         val uri = incomingUri(intent) ?: return
         if (uri.scheme == "content") {
             runCatching {

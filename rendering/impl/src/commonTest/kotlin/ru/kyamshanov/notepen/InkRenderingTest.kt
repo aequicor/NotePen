@@ -54,6 +54,19 @@ class InkRenderingTest {
     }
 
     @Test
+    fun `low latency overlay keeps active capped buffer above platform cap`() {
+        assertEquals(IntSize(1200, 1800), cappedLowLatencyOverlaySize(IntSize(1200, 1800), maxDimensionPx = 2400))
+        assertEquals(IntSize(1600, 2400), cappedLowLatencyOverlaySize(IntSize(4000, 6000), maxDimensionPx = 2400))
+        assertEquals(IntSize(2400, 1200), cappedLowLatencyOverlaySize(IntSize(6000, 3000), maxDimensionPx = 2400))
+    }
+
+    @Test
+    fun `low latency overlay rejects invalid sizes`() {
+        assertEquals(IntSize.Zero, cappedLowLatencyOverlaySize(IntSize.Zero, maxDimensionPx = 2400))
+        assertEquals(IntSize.Zero, cappedLowLatencyOverlaySize(IntSize(1200, 1800), maxDimensionPx = 0))
+    }
+
+    @Test
     fun `tail start preserves all ink while cache is cold or catching up`() {
         assertEquals(0, completedInkTailStart(pathCount = 10, cachedStrokeCount = null))
         assertEquals(0, completedInkTailStart(pathCount = 60, cachedStrokeCount = null))

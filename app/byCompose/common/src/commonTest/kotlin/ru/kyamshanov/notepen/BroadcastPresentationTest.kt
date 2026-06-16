@@ -152,7 +152,8 @@ class BroadcastPresentationTest {
             )
 
         assertNotNull(command)
-        assertNull(command.targetPanY) // no center-Y pan; falls back to scroll
+        assertNull(command.targetPanY) // no center-Y pan until local layout is ready
+        assertFalse(command.shouldScroll)
     }
 
     @Test
@@ -567,6 +568,54 @@ class BroadcastPresentationTest {
                 pageTopsPx = testPageTops,
                 pageHeightsPx = testPageHeights,
                 zoom = 1f,
+            ),
+        )
+    }
+
+    @Test
+    fun `viewport center y uses spread row height for paired pages with unequal heights`() {
+        val spreadPageTops = floatArrayOf(0f, 0f, 200f)
+        val spreadPageHeights = floatArrayOf(200f, 100f, 100f)
+
+        val centerY =
+            viewportCenterY(
+                panY = -100f,
+                viewportHeightPx = 100f,
+                pageTopsPx = spreadPageTops,
+                pageHeightsPx = spreadPageHeights,
+                zoom = 1f,
+            )
+
+        assertEquals(0.75f, centerY)
+        assertEquals(
+            BroadcastViewportCommand(
+                page = 0,
+                pageOffsetPx = 0,
+                shouldScroll = false,
+                targetScalePercent = null,
+                targetPanX = null,
+                targetPanY = -100f,
+            ),
+            broadcastViewportCommandForDocument(
+                frame =
+                    NetworkMessage.ProjectionFrame(
+                        documentId = "doc-1",
+                        page = 0,
+                        viewportOffsetY = 0f,
+                        viewportScale = 1f,
+                        viewportCenterY = centerY,
+                    ),
+                documentId = "doc-1",
+                currentPage = 0,
+                currentPageOffsetPx = 0,
+                currentScalePercent = 100,
+                currentPanX = 0f,
+                currentPanY = 0f,
+                currentViewportWidthPx = 1600f,
+                currentViewportHeightPx = 100f,
+                currentRowWidthPx = 800f,
+                currentPageTopsPx = spreadPageTops,
+                currentPageHeightsPx = spreadPageHeights,
             ),
         )
     }

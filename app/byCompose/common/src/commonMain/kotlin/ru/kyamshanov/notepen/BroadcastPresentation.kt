@@ -14,6 +14,12 @@ import kotlin.math.roundToInt
 private const val VIEWPORT_OFFSET_EPSILON_PX = 8
 private const val VIEWPORT_CENTER_X_EPSILON = 0.002f
 
+private data class VerticalViewportRow(
+    val startIndex: Int,
+    val topPx: Float,
+    val heightPx: Float,
+)
+
 internal data class BroadcastViewportCommand(
     val page: Int,
     val pageOffsetPx: Int,
@@ -156,6 +162,7 @@ internal fun broadcastViewportCommandForDocument(
                     scale = commandScale,
                 )
             }
+    val hasResolvableCenterY = target.viewportCenterY?.let { it.isFinite() && it >= 0f } == true
     val targetPanX =
         when {
             normalizedTargetPanX != null ->
@@ -180,7 +187,7 @@ internal fun broadcastViewportCommandForDocument(
     return BroadcastViewportCommand(
         page = target.page.coerceAtLeast(0),
         pageOffsetPx = pageOffsetPx,
-        shouldScroll = normalizedTargetPanY == null && (verticalChange || scaleChange),
+        shouldScroll = !hasResolvableCenterY && normalizedTargetPanY == null && (verticalChange || scaleChange),
         targetScalePercent =
             targetScalePercent?.takeIf { it != currentScalePercent },
         targetPanX = targetPanX,
@@ -222,11 +229,9 @@ internal fun viewportCenterY(
         return null
     }
     val docY = ((viewportHeightPx / 2f - panY) / zoom).coerceAtLeast(0f)
-    val pageIndex = pageIndexForDocY(pageTopsPx, docY) ?: return null
-    val pageTop = pageTopsPx[pageIndex]
-    val pageHeight = pageHeightsPx.getOrNull(pageIndex)?.takeIf { it > 0f } ?: return null
-    val normalizedY = ((docY - pageTop) / pageHeight).coerceIn(0f, 1f)
-    return pageIndex + normalizedY
+    val row = viewportRowForDocY(pageTopsPx, pageHeightsPx, docY) ?: return null
+    val normalizedY = ((docY - row.topPx) / row.heightPx).coerceIn(0f, 1f)
+    return row.startIndex + normalizedY
 }
 
 private fun panXForViewportCenter(
@@ -253,19 +258,19 @@ private fun panYForViewportCenter(
         return null
     }
     val pageIndex = centerY.toInt().coerceIn(0, pageTopsPx.lastIndex)
-    val pageTop = pageTopsPx.getOrNull(pageIndex) ?: return null
-    val pageHeight = pageHeightsPx.getOrNull(pageIndex)?.takeIf { it > 0f } ?: return null
+    val row = viewportRowForPageIndex(pageTopsPx, pageHeightsPx, pageIndex) ?: return null
     val normalizedY = (centerY - pageIndex).coerceIn(0f, 1f)
-    val docY = pageTop + normalizedY * pageHeight
+    val docY = row.topPx + normalizedY * row.heightPx
     return viewportHeightPx / 2f - docY * scale
 }
 
 private fun Float.hasMeaningfulDeltaFrom(other: Float): Boolean = !other.isFinite() || this - other > 0.5f || other - this > 0.5f
 
-private fun pageIndexForDocY(
+private fun viewportRowForDocY(
     pageTopsPx: FloatArray,
+    pageHeightsPx: FloatArray,
     docY: Float,
-): Int? {
+): VerticalViewportRow? {
     if (pageTopsPx.isEmpty()) return null
     var lo = 0
     var hi = pageTopsPx.lastIndex
@@ -277,7 +282,33 @@ private fun pageIndexForDocY(
             hi = mid - 1
         }
     }
-    return hi.coerceIn(0, pageTopsPx.lastIndex)
+    return viewportRowForPageIndex(pageTopsPx, pageHeightsPx, hi.coerceIn(0, pageTopsPx.lastIndex))
+}
+
+private fun viewportRowForPageIndex(
+    pageTopsPx: FloatArray,
+    pageHeightsPx: FloatArray,
+    pageIndex: Int,
+): VerticalViewportRow? {
+    val top = pageTopsPx.getOrNull(pageIndex) ?: return null
+    var start = pageIndex
+    while (start > 0 && pageTopsPx[start - 1] == top) {
+        start--
+    }
+    var end = pageIndex
+    while (end < pageTopsPx.lastIndex && pageTopsPx[end + 1] == top) {
+        end++
+    }
+    var height = 0f
+    for (index in start..end) {
+        height = maxOf(height, pageHeightsPx.getOrNull(index) ?: 0f)
+    }
+    if (height <= 0f) return null
+    return VerticalViewportRow(
+        startIndex = start,
+        topPx = top,
+        heightPx = height,
+    )
 }
 
 internal fun broadcastDocumentOpenAction(

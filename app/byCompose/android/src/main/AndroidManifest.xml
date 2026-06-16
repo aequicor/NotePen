@@ -140,6 +140,18 @@
                 <data android:pathPattern=".*\\.cbz" />
                 <data android:pathPattern=".*\\.cbr" />
             </intent-filter>
+
+            <!-- Кабельное подключение без сканирования: ПК шлёт notepen://pair через
+                 `adb shell am start`, активити ловит deep-link и идёт в пейринг
+                 (тот же payload, что и QR/ручной ввод). -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+
+                <data android:scheme="notepen" android:host="pair" />
+            </intent-filter>
         </activity>
     </application>
 
